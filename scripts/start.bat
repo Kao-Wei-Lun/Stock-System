@@ -59,15 +59,15 @@ if errorlevel 1 (
 
 echo.
 echo [INFO] Starting backend API...
-echo        Backend: http://localhost:8000
-echo        Frontend: open frontend\index.html in your browser
-echo        API docs: http://localhost:8000/docs
+echo        Backend: http://localhost:8001
+echo        Frontend: http://localhost:8001/app
+echo        API docs: http://localhost:8001/docs
 echo.
 echo [INFO] First startup will download Yahoo Finance history data.
 echo        Press Ctrl+C to stop the server.
 echo ======================================
 
 cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 
 pause

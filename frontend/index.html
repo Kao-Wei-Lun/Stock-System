@@ -360,7 +360,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
     </div>
     <button class="sync-btn" id="syncAllBtn" onclick="syncAll()">↻ 同步所有股票最新資料</button>
     <div style="margin-top:10px;font-size:10px;color:var(--text3);line-height:1.8">
-      資料存放：<span style="color:var(--text2)">./quantvision.db</span><br>
+      資料庫：<span style="color:var(--text2)">MySQL / quantvision</span><br>
       資料來源：<span style="color:var(--text2)">Yahoo Finance</span><br>
       更新頻率：<span style="color:var(--text2)">每 15 秒輪詢</span><br>
       歷史資料：<span style="color:var(--text2)">最多 2 年</span>
@@ -373,7 +373,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 <!-- STATUSBAR -->
 <div class="statusbar">
   <div style="display:flex;align-items:center;gap:5px"><div class="sb-dot live" id="sbDot"></div><span id="sbStatus">連線中</span></div>
-  <div>後端：<span id="sbBackend" style="color:var(--green)">http://localhost:8000</span></div>
+  <div>後端：<span id="sbBackend" style="color:var(--green)">http://localhost:8001</span></div>
   <div>延遲：<span id="sbLatency" style="color:var(--green)">—</span></div>
   <div style="margin-left:auto">更新：<span id="sbUpdate">—</span></div>
   <div id="sbTime">—</div>
@@ -401,8 +401,12 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 // ═══════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════
-const API = 'http://localhost:8000';
-const WS_URL = 'ws://localhost:8000/ws';
+const IS_FILE_ORIGIN = window.location.protocol === 'file:';
+const API = IS_FILE_ORIGIN ? 'http://localhost:8001' : window.location.origin;
+const WS_URL = (IS_FILE_ORIGIN
+  ? 'ws://localhost:8001'
+  : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`) + '/ws';
+document.getElementById('sbBackend').textContent = API;
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -419,6 +423,13 @@ let activeTool = 'cursor';
 let ws = null;
 let wsReconnectTimer = null;
 
+function normalizeTicker(ticker) {
+  const raw = (ticker || '').trim().toUpperCase();
+  if (!raw || raw.startsWith('^') || raw.includes('.') || raw.includes('-')) return raw;
+  if (!/^[A-Z]+$/.test(raw)) return `${raw}.TW`;
+  return raw;
+}
+
 // Canvas contexts
 let mainCtx, volCtx, rsiCtx, macdCtx, stochCtx;
 const PAD = { top:20, right:70, bottom:22, left:10 };
@@ -434,7 +445,7 @@ function connectWS() {
     clearTimeout(wsReconnectTimer);
     setWsStatus(true);
     // 訂閱當前股票
-    wsSend({ action: 'subscribe', ticker: currentTicker });
+    wsSend({ action: 'subscribe', ticker: normalizeTicker(currentTicker) });
     showNotif('📡', 'WebSocket 已連線', '即時推送已啟動', 'success');
   };
 
@@ -470,7 +481,7 @@ function setWsStatus(ok) {
 
 function handleRealtimeQuote(msg) {
   const q = msg.data;
-  if (q.ticker !== currentTicker) return;
+  if (q.ticker !== currentTicker && q.ticker !== normalizeTicker(currentTicker)) return;
 
   // 更新 header
   const priceEl = document.getElementById('chPrice');
@@ -529,12 +540,12 @@ async function loadWatchlist() {
 async function loadKline(ticker, period, interval) {
   showChartLoading(true, `載入 ${ticker} K 線...`);
   try {
-    const data = await apiFetch(`/api/kline/${ticker}?period=${period}&interval=${interval}`);
+    const data = await apiFetch(`/api/kline/${normalizeTicker(ticker)}?period=${period}&interval=${interval}`);
     ohlcData = data.data || [];
     hideChartLoading();
     renderAll();
     updateIndValues();
-    loadQuote(ticker);
+    if (ohlcData.length > 0) loadQuote(ticker);
   } catch (e) {
     showChartLoading(false);
     showNotif('⚠️', '載入失敗', `無法取得 ${ticker} 資料`, 'error');
@@ -543,7 +554,7 @@ async function loadKline(ticker, period, interval) {
 
 async function loadQuote(ticker) {
   try {
-    const q = await apiFetch(`/api/quote/${ticker}`);
+    const q = await apiFetch(`/api/quote/${normalizeTicker(ticker)}`);
     if (!q) return;
     const isUp = q.change_pct >= 0;
     document.getElementById('chPrice').textContent = '$' + fmtPrice(q.price);
@@ -579,7 +590,7 @@ async function syncCurrentTicker() {
   btn.textContent = '↻ 同步中...';
   btn.disabled = true;
   try {
-    const r = await apiFetch(`/api/sync/${currentTicker}`, { method: 'POST' });
+    const r = await apiFetch(`/api/sync/${normalizeTicker(currentTicker)}`, { method: 'POST' });
     showNotif('✅', '同步完成', `${currentTicker} 已同步 ${r.synced} 筆`, 'success');
     await loadKline(currentTicker, currentPeriod, currentInterval);
   } catch {
@@ -629,9 +640,9 @@ function renderWatchlist(items) {
 
 async function selectTicker(ticker, name) {
   // unsubscribe old
-  wsSend({ action: 'unsubscribe', ticker: currentTicker });
+  wsSend({ action: 'unsubscribe', ticker: normalizeTicker(currentTicker) });
 
-  currentTicker = ticker;
+  currentTicker = normalizeTicker(ticker);
   document.getElementById('chTicker').textContent = ticker;
   document.getElementById('chName').textContent = name || ticker;
 
@@ -1150,7 +1161,7 @@ function showAlertModal() {
 function closeAlertModal() { document.getElementById('alertOverlay').classList.remove('open'); }
 function saveAlert() {
   const a = {
-    ticker: (document.getElementById('al-ticker').value || currentTicker).toUpperCase(),
+    ticker: normalizeTicker(document.getElementById('al-ticker').value || currentTicker),
     type: document.getElementById('al-type').value,
     cond: document.getElementById('al-cond').value,
     value: +document.getElementById('al-value').value,
