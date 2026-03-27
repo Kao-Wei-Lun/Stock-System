@@ -1,44 +1,76 @@
 #!/bin/bash
-# QuantVision Pro — 一鍵啟動腳本 (Mac / Linux)
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "   QuantVision Pro 啟動中..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+BACKEND_URL="http://localhost:8001"
+FRONTEND_URL="http://localhost:5173"
+export FRONTEND_DEV_URL="$FRONTEND_URL"
 
-# 檢查 Python
-if ! command -v python3 &>/dev/null; then
-  echo "❌ 找不到 python3，請先安裝 Python 3.10+"
+echo "======================================"
+echo "   QuantVision Pro starting..."
+echo "======================================"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "[ERROR] python3 was not found."
+  echo "        Install Python 3.10+ first."
   exit 1
 fi
 
-# 建立虛擬環境（若不存在）
+if ! command -v node >/dev/null 2>&1; then
+  echo "[ERROR] Node.js 18+ was not found."
+  echo "        Download: https://nodejs.org/"
+  exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[ERROR] npm was not found."
+  echo "        Reinstall Node.js from: https://nodejs.org/"
+  exit 1
+fi
+
 if [ ! -d "venv" ]; then
-  echo "📦 建立虛擬環境..."
+  echo "[INFO] Creating virtual environment..."
   python3 -m venv venv
 fi
 
-# 啟動虛擬環境
 source venv/bin/activate
 
-# 安裝依賴
-echo "📥 安裝依賴套件..."
-pip install -r backend/requirements.txt -q
+echo "[INFO] Installing backend dependencies..."
+python3 -m pip install --upgrade pip -q
+python3 -m pip install -r backend/requirements.txt -q
 
-# 啟動後端
-echo ""
-echo "🚀 啟動後端 API 服務..."
-echo "   後端：http://localhost:8000"
-echo "   前端：用瀏覽器開啟 frontend/index.html"
-echo "   API文件：http://localhost:8000/docs"
-echo ""
-echo "📡 系統啟動後將自動從 Yahoo Finance 下載歷史資料"
-echo "   首次啟動需要 1~3 分鐘完成初始化"
-echo ""
-echo "按 Ctrl+C 停止服務"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "[INFO] Installing frontend dependencies..."
+(
+  cd frontend
+  npm install
+)
+
+echo
+echo "[INFO] Starting frontend service..."
+echo "       Frontend: ${FRONTEND_URL}"
+(
+  cd frontend
+  npm run dev -- --host 0.0.0.0 --port 5173
+) &
+FRONTEND_PID=$!
+
+cleanup() {
+  if kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
+    kill "$FRONTEND_PID" >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup EXIT INT TERM
+
+echo
+echo "[INFO] Starting backend API..."
+echo "       Backend: ${BACKEND_URL}"
+echo "       Frontend dev server: ${FRONTEND_URL}"
+echo "       API docs: ${BACKEND_URL}/docs"
+echo
+echo "[INFO] Press Ctrl+C to stop the backend."
+echo "======================================"
 
 cd backend
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload

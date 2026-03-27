@@ -9,12 +9,13 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from data_fetcher import DataFetcher, normalize_ticker
@@ -31,12 +32,14 @@ ws_manager = ConnectionManager()
 
 STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
 APP_PORT = int(os.getenv("APP_PORT", "8001"))
+FRONTEND_DEV_URL = os.getenv("FRONTEND_DEV_URL", "http://localhost:5173").rstrip("/")
 STARTUP_DOWNLOAD_ENABLED = os.getenv("STARTUP_DOWNLOAD_ENABLED", "false").strip().lower() in {
     "1",
     "true",
     "yes",
     "on",
 }
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCHLIST = [
     "AAPL",
@@ -86,18 +89,36 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="QuantVision Pro API", version="1.0.0", lifespan=lifespan)
 
+local_dev_origin_regex = (
+    rf"^https?://("
+    rf"localhost|127\.0\.0\.1|0\.0\.0\.0|"
+    rf"192\.168\.\d{{1,3}}\.\d{{1,3}}|"
+    rf"10\.\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}|"
+    rf"172\.(1[6-9]|2\d|3[0-1])\.\d{{1,3}}\.\d{{1,3}}"
+    rf"):(5173|{APP_PORT})$"
+)
+
+allowed_origins = sorted(
+    {
+        FRONTEND_DEV_URL,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        f"http://localhost:{APP_PORT}",
+        f"http://127.0.0.1:{APP_PORT}",
+    }
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=local_dev_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-try:
-    app.mount("/app", StaticFiles(directory="../frontend", html=True), name="frontend")
-except Exception:
-    pass
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
 
 
 async def startup_download():
@@ -263,7 +284,16 @@ def categorize(ticker: str) -> str:
 
 @app.get("/")
 async def root():
-    return FileResponse("../frontend/index.html")
+    if FRONTEND_DIST_DIR.exists():
+        return RedirectResponse(url="/app/", status_code=307)
+    return RedirectResponse(url=FRONTEND_DEV_URL, status_code=307)
+
+
+@app.get("/app")
+async def frontend_entry():
+    if FRONTEND_DIST_DIR.exists():
+        return RedirectResponse(url="/app/", status_code=307)
+    return RedirectResponse(url=FRONTEND_DEV_URL, status_code=307)
 
 
 if __name__ == "__main__":
