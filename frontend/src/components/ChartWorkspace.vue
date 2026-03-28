@@ -272,9 +272,13 @@
     </div>
     <div class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">{{ rsiLabel }}</div><canvas ref="rsiCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.aroon }"><div class="ind-label-tag">{{ aroonLabel }}</div><canvas ref="aroonCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.trix }"><div class="ind-label-tag">{{ trixLabel }}</div><canvas ref="trixCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.williamsr }"><div class="ind-label-tag">{{ williamsrLabel }}</div><canvas ref="williamsrCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.mfi }"><div class="ind-label-tag">{{ mfiLabel }}</div><canvas ref="mfiCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.roc }"><div class="ind-label-tag">{{ rocLabel }}</div><canvas ref="rocCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.bbPercent }"><div class="ind-label-tag">{{ bbPercentLabel }}</div><canvas ref="bbPercentCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.bbWidth }"><div class="ind-label-tag">{{ bbWidthLabel }}</div><canvas ref="bbWidthCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">{{ macdLabel }}</div><canvas ref="macdCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">{{ stochLabel }}</div><canvas ref="stochCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">{{ atrLabel }}</div><canvas ref="atrCanvas"></canvas></div>
@@ -344,9 +348,13 @@ const mainCanvas = ref(null);
 const volumeCanvas = ref(null);
 const compareCanvas = ref(null);
 const rsiCanvas = ref(null);
+const aroonCanvas = ref(null);
+const trixCanvas = ref(null);
 const williamsrCanvas = ref(null);
 const mfiCanvas = ref(null);
 const rocCanvas = ref(null);
+const bbPercentCanvas = ref(null);
+const bbWidthCanvas = ref(null);
 const macdCanvas = ref(null);
 const stochCanvas = ref(null);
 const atrCanvas = ref(null);
@@ -407,9 +415,13 @@ const {
   volumeCanvas,
   compareCanvas,
   rsiCanvas,
+  aroonCanvas,
+  trixCanvas,
   williamsrCanvas,
   mfiCanvas,
   rocCanvas,
+  bbPercentCanvas,
+  bbWidthCanvas,
   macdCanvas,
   stochCanvas,
   atrCanvas,
@@ -433,9 +445,13 @@ const displayChange = computed(() => {
 });
 
 const rsiLabel = computed(() => `RSI(${props.indicatorSettings.rsiPeriod})`);
+const aroonLabel = computed(() => `Aroon(${props.indicatorSettings.aroonPeriod})`);
+const trixLabel = computed(() => `TRIX(${props.indicatorSettings.trixPeriod},${props.indicatorSettings.trixSignal})`);
 const williamsrLabel = computed(() => `Williams %R(${props.indicatorSettings.williamsrPeriod})`);
 const mfiLabel = computed(() => `MFI(${props.indicatorSettings.mfiPeriod})`);
 const rocLabel = computed(() => `ROC(${props.indicatorSettings.rocPeriod})`);
+const bbPercentLabel = computed(() => `Bollinger %B(${props.indicatorSettings.bbPeriod})`);
+const bbWidthLabel = computed(() => `Bollinger Width(${props.indicatorSettings.bbPeriod})`);
 const macdLabel = computed(
   () => `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`,
 );

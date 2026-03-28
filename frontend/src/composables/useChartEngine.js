@@ -3,7 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import {
   calcATRSeries,
   calcADX,
+  calcAroon,
   calcBB,
+  calcBBPercent,
+  calcBBWidth,
   calcCCIValues,
   calcCMF,
   calcDonchianChannels,
@@ -13,10 +16,12 @@ import {
   calcMA,
   calcMFI,
   calcOBV,
+  calcParabolicSAR,
   calcROC,
   calcRSI,
   calcStoch,
   calcSuperTrend,
+  calcTrix,
   calcVWAP,
   calcKeltnerChannels,
   calcWilliamsR,
@@ -160,9 +165,13 @@ export function useChartEngine({
   volumeCanvas,
   compareCanvas,
   rsiCanvas,
+  aroonCanvas,
+  trixCanvas,
   williamsrCanvas,
   mfiCanvas,
   rocCanvas,
+  bbPercentCanvas,
+  bbWidthCanvas,
   macdCanvas,
   stochCanvas,
   atrCanvas,
@@ -1426,6 +1435,9 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const fullBb = props.activeInd.bb
       ? calcBB(fullData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier)
       : [];
+    const fullPsar = props.activeInd.psar
+      ? calcParabolicSAR(fullData, props.indicatorSettings.psarStep, props.indicatorSettings.psarMax)
+      : [];
     const fullKeltner = props.activeInd.keltner
       ? calcKeltnerChannels(fullData, props.indicatorSettings.kcPeriod, props.indicatorSettings.kcMultiplier)
       : [];
@@ -1451,6 +1463,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const ema12 = sliceSeries(fullEma12);
     const vwap = sliceSeries(fullVwap);
     const bbSlice = fullBb.slice(viewport.startIndex, viewport.startIndex + count);
+    const psarSlice = sliceSeries(fullPsar);
     const keltnerSlice = fullKeltner.slice(viewport.startIndex, viewport.startIndex + count);
     const donchianSlice = fullDonchian.slice(viewport.startIndex, viewport.startIndex + count);
     const ichimokuConversion = fullIchimoku ? sliceSeries(fullIchimoku.conversion) : [];
@@ -1480,6 +1493,9 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       overlayValues.push(bbSlice.map((item) => item.u));
       overlayValues.push(bbSlice.map((item) => item.l));
       overlayValues.push(bbSlice.map((item) => item.m));
+    }
+    if (psarSlice.length) {
+      overlayValues.push(psarSlice);
     }
     if (keltnerSlice.length) {
       overlayValues.push(keltnerSlice.map((item) => item.u));
@@ -1552,6 +1568,20 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       drawLine(ctx, bbSlice.map((item) => item.u), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.l), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.m), layout.barX, scale, "rgba(255,209,102,0.65)", 0.6, [4, 4]);
+    }
+
+    if (props.activeInd.psar && psarSlice.length) {
+      psarSlice.forEach((value, index) => {
+        if (value == null) return;
+        const color = data[index].close >= value ? "#00d9a3" : "#ff6b6b";
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.95;
+        ctx.beginPath();
+        ctx.arc(layout.barX(index), scale(value), 2.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
     }
 
     if (props.activeInd.keltner && keltnerSlice.length) {
@@ -2073,6 +2103,49 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
   };
 
+  const renderAroon = () => {
+    if (!aroonCanvas.value || !visibleData.value.length || !props.activePanels.aroon) return;
+    const { up, down } = calcAroon(props.ohlcData, props.indicatorSettings.aroonPeriod).reduce(
+      (accumulator, item) => {
+        accumulator.up.push(item?.up ?? null);
+        accumulator.down.push(item?.down ?? null);
+        return accumulator;
+      },
+      { up: [], down: [] },
+    );
+    renderBoundedOscillatorPanel(aroonCanvas.value, sliceSeries(up), {
+      min: 0,
+      max: 100,
+      levels: [
+        { value: 70 },
+        { value: 50, dash: [4, 4] },
+        { value: 30 },
+      ],
+      lines: [
+        { values: sliceSeries(up), color: "#00d9a3", lineWidth: 1.4 },
+        { values: sliceSeries(down), color: "#ff4d6a", lineWidth: 1.4 },
+      ],
+    });
+  };
+
+  const renderTrix = () => {
+    if (!trixCanvas.value || !visibleData.value.length || !props.activePanels.trix) return;
+    const { trix, signal } = calcTrix(
+      props.ohlcData,
+      props.indicatorSettings.trixPeriod,
+      props.indicatorSettings.trixSignal,
+    );
+    renderRangePanel(trixCanvas.value, sliceSeries(trix), {
+      zeroLine: true,
+      minPad: 0.02,
+      paddingRatio: 0.14,
+      lines: [
+        { values: sliceSeries(trix), color: "#8dc1ff", lineWidth: 1.5 },
+        { values: sliceSeries(signal), color: "#ffd166", lineWidth: 1.1 },
+      ],
+    });
+  };
+
   const renderWilliamsR = () => {
     if (!williamsrCanvas.value || !visibleData.value.length || !props.activePanels.williamsr) return;
     const values = sliceSeries(calcWilliamsR(props.ohlcData, props.indicatorSettings.williamsrPeriod));
@@ -2119,6 +2192,43 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       minPad: 1,
       paddingRatio: 0.12,
       lines: [{ values, color: "#00d4ff", lineWidth: 1.45 }],
+    });
+  };
+
+  const renderBbPercent = () => {
+    if (!bbPercentCanvas.value || !visibleData.value.length || !props.activePanels.bbPercent) return;
+    const values = sliceSeries(
+      calcBBPercent(props.ohlcData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier),
+    );
+    renderRangePanel(bbPercentCanvas.value, values, {
+      min: -20,
+      max: 120,
+      ensureLevels: [0, 50, 100],
+      bands: [
+        { from: 120, to: 100, color: "rgba(255,77,106,0.05)" },
+        { from: 0, to: -20, color: "rgba(0,217,163,0.05)" },
+      ],
+      levels: [
+        { value: 100 },
+        { value: 50, dash: [4, 4] },
+        { value: 0 },
+      ],
+      lines: [{ values, color: "#ffd166", lineWidth: 1.45 }],
+    });
+  };
+
+  const renderBbWidth = () => {
+    if (!bbWidthCanvas.value || !visibleData.value.length || !props.activePanels.bbWidth) return;
+    const values = sliceSeries(
+      calcBBWidth(props.ohlcData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier),
+    );
+    renderRangePanel(bbWidthCanvas.value, values, {
+      minPad: 0.5,
+      paddingRatio: 0.16,
+      area: {
+        strokeColor: "#f5a623",
+        fillColor: "rgba(245,166,35,0.12)",
+      },
     });
   };
 
@@ -2460,9 +2570,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       compareCanvas.value,
       volumeCanvas.value,
       rsiCanvas.value,
+      aroonCanvas.value,
+      trixCanvas.value,
       williamsrCanvas.value,
       mfiCanvas.value,
       rocCanvas.value,
+      bbPercentCanvas.value,
+      bbWidthCanvas.value,
       macdCanvas.value,
       stochCanvas.value,
       atrCanvas.value,
@@ -2496,9 +2610,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     renderCompare();
     renderVolume();
     renderRsi();
+    renderAroon();
+    renderTrix();
     renderWilliamsR();
     renderMfi();
     renderRoc();
+    renderBbPercent();
+    renderBbWidth();
     renderMacd();
     renderStoch();
     renderAtr();
@@ -2522,9 +2640,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     resizeCanvas(compareCanvas.value, compareCanvas.value?.parentElement);
     resizeCanvas(volumeCanvas.value, volumeCanvas.value?.parentElement);
     resizeCanvas(rsiCanvas.value, rsiCanvas.value?.parentElement);
+    resizeCanvas(aroonCanvas.value, aroonCanvas.value?.parentElement);
+    resizeCanvas(trixCanvas.value, trixCanvas.value?.parentElement);
     resizeCanvas(williamsrCanvas.value, williamsrCanvas.value?.parentElement);
     resizeCanvas(mfiCanvas.value, mfiCanvas.value?.parentElement);
     resizeCanvas(rocCanvas.value, rocCanvas.value?.parentElement);
+    resizeCanvas(bbPercentCanvas.value, bbPercentCanvas.value?.parentElement);
+    resizeCanvas(bbWidthCanvas.value, bbWidthCanvas.value?.parentElement);
     resizeCanvas(macdCanvas.value, macdCanvas.value?.parentElement);
     resizeCanvas(stochCanvas.value, stochCanvas.value?.parentElement);
     resizeCanvas(atrCanvas.value, atrCanvas.value?.parentElement);
@@ -3073,9 +3195,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   watch(
     () => [
       props.activePanels.rsi,
+      props.activePanels.aroon,
+      props.activePanels.trix,
       props.activePanels.williamsr,
       props.activePanels.mfi,
       props.activePanels.roc,
+      props.activePanels.bbPercent,
+      props.activePanels.bbWidth,
       props.activePanels.macd,
       props.activePanels.stoch,
       props.activePanels.atr,

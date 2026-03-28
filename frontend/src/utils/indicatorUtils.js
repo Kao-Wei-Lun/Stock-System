@@ -7,6 +7,8 @@ export const DEFAULT_INDICATOR_SETTINGS = {
   emaPeriod: 12,
   bbPeriod: 20,
   bbMultiplier: 2,
+  psarStep: 0.02,
+  psarMax: 0.2,
   kcPeriod: 20,
   kcMultiplier: 2,
   donchianPeriod: 20,
@@ -14,6 +16,9 @@ export const DEFAULT_INDICATOR_SETTINGS = {
   williamsrPeriod: 14,
   mfiPeriod: 14,
   rocPeriod: 12,
+  aroonPeriod: 25,
+  trixPeriod: 15,
+  trixSignal: 9,
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
@@ -53,6 +58,8 @@ export function normalizeIndicatorSettings(input = {}) {
     emaPeriod: clampInteger(merged.emaPeriod, 2, 400, DEFAULT_INDICATOR_SETTINGS.emaPeriod),
     bbPeriod: clampInteger(merged.bbPeriod, 5, 300, DEFAULT_INDICATOR_SETTINGS.bbPeriod),
     bbMultiplier: clampNumber(merged.bbMultiplier, 0.5, 6, DEFAULT_INDICATOR_SETTINGS.bbMultiplier),
+    psarStep: clampNumber(merged.psarStep, 0.005, 0.2, DEFAULT_INDICATOR_SETTINGS.psarStep),
+    psarMax: clampNumber(merged.psarMax, 0.02, 1, DEFAULT_INDICATOR_SETTINGS.psarMax),
     kcPeriod: clampInteger(merged.kcPeriod, 2, 300, DEFAULT_INDICATOR_SETTINGS.kcPeriod),
     kcMultiplier: clampNumber(merged.kcMultiplier, 0.5, 6, DEFAULT_INDICATOR_SETTINGS.kcMultiplier),
     donchianPeriod: clampInteger(merged.donchianPeriod, 2, 300, DEFAULT_INDICATOR_SETTINGS.donchianPeriod),
@@ -60,6 +67,9 @@ export function normalizeIndicatorSettings(input = {}) {
     williamsrPeriod: clampInteger(merged.williamsrPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.williamsrPeriod),
     mfiPeriod: clampInteger(merged.mfiPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.mfiPeriod),
     rocPeriod: clampInteger(merged.rocPeriod, 1, 120, DEFAULT_INDICATOR_SETTINGS.rocPeriod),
+    aroonPeriod: clampInteger(merged.aroonPeriod, 2, 150, DEFAULT_INDICATOR_SETTINGS.aroonPeriod),
+    trixPeriod: clampInteger(merged.trixPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.trixPeriod),
+    trixSignal: clampInteger(merged.trixSignal, 2, 60, DEFAULT_INDICATOR_SETTINGS.trixSignal),
     macdFast: clampInteger(merged.macdFast, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdFast),
     macdSlow: clampInteger(merged.macdSlow, 3, 120, DEFAULT_INDICATOR_SETTINGS.macdSlow),
     macdSignal: clampInteger(merged.macdSignal, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdSignal),
@@ -80,6 +90,9 @@ export function normalizeIndicatorSettings(input = {}) {
 
   if (normalized.macdSlow <= normalized.macdFast) {
     normalized.macdSlow = Math.min(normalized.macdFast + 1, 120);
+  }
+  if (normalized.psarMax < normalized.psarStep) {
+    normalized.psarMax = normalized.psarStep;
   }
   if (normalized.ichimokuBase <= normalized.ichimokuConversion) {
     normalized.ichimokuBase = Math.min(normalized.ichimokuConversion + 1, 120);
@@ -193,6 +206,52 @@ export const calcDonchianChannels = (data, n = 20) =>
     };
   });
 
+export const calcParabolicSAR = (data, step = 0.02, maxStep = 0.2) => {
+  if (!data.length) return [];
+  if (data.length === 1) return [null];
+
+  const sar = Array(data.length).fill(null);
+  let isUptrend = data[1].close >= data[0].close;
+  let extremePoint = isUptrend
+    ? Math.max(data[0].high, data[1].high)
+    : Math.min(data[0].low, data[1].low);
+  let accelerationFactor = step;
+  sar[1] = isUptrend ? Math.min(data[0].low, data[1].low) : Math.max(data[0].high, data[1].high);
+
+  for (let index = 2; index < data.length; index += 1) {
+    const previousSar = sar[index - 1] ?? (isUptrend ? data[index - 1].low : data[index - 1].high);
+    let nextSar = previousSar + accelerationFactor * (extremePoint - previousSar);
+
+    if (isUptrend) {
+      nextSar = Math.min(nextSar, data[index - 1].low, data[index - 2].low);
+      if (data[index].low < nextSar) {
+        isUptrend = false;
+        nextSar = extremePoint;
+        extremePoint = data[index].low;
+        accelerationFactor = step;
+      } else if (data[index].high > extremePoint) {
+        extremePoint = data[index].high;
+        accelerationFactor = Math.min(accelerationFactor + step, maxStep);
+      }
+    } else {
+      nextSar = Math.max(nextSar, data[index - 1].high, data[index - 2].high);
+      if (data[index].high > nextSar) {
+        isUptrend = true;
+        nextSar = extremePoint;
+        extremePoint = data[index].high;
+        accelerationFactor = step;
+      } else if (data[index].low < extremePoint) {
+        extremePoint = data[index].low;
+        accelerationFactor = Math.min(accelerationFactor + step, maxStep);
+      }
+    }
+
+    sar[index] = Number(nextSar.toFixed(4));
+  }
+
+  return sar;
+};
+
 export const calcStoch = (data, kPeriod = 14, dPeriod = 3) => {
   const kValues = [];
   const dValues = [];
@@ -285,6 +344,45 @@ export const calcROC = (data, n = 12) =>
     return Number((((row.close - base) / base) * 100).toFixed(2));
   });
 
+export const calcAroon = (data, n = 25) =>
+  data.map((_, index) => {
+    if (index < n - 1) {
+      return { up: null, down: null, osc: null };
+    }
+
+    const slice = data.slice(index - n + 1, index + 1);
+    const highs = slice.map((item) => item.high);
+    const lows = slice.map((item) => item.low);
+    const highestHigh = Math.max(...highs);
+    const lowestLow = Math.min(...lows);
+    const periodsSinceHigh = n - 1 - highs.lastIndexOf(highestHigh);
+    const periodsSinceLow = n - 1 - lows.lastIndexOf(lowestLow);
+    const up = Number((((n - periodsSinceHigh) / n) * 100).toFixed(2));
+    const down = Number((((n - periodsSinceLow) / n) * 100).toFixed(2));
+    return {
+      up,
+      down,
+      osc: Number((up - down).toFixed(2)),
+    };
+  });
+
+export const calcTrix = (data, n = 15, signalPeriod = 9) => {
+  const ema1 = calcEMA(data, n);
+  const ema2 = calcEMA(ema1.map((value) => ({ close: value ?? 0 })), n);
+  const ema3 = calcEMA(ema2.map((value) => ({ close: value ?? 0 })), n);
+  const trix = ema3.map((value, index) => {
+    if (index === 0 || value == null || ema3[index - 1] == null || ema3[index - 1] === 0) {
+      return null;
+    }
+    return Number((((value - ema3[index - 1]) / ema3[index - 1]) * 100).toFixed(4));
+  });
+  const signal = calcEMA(trix.map((value) => ({ close: value ?? 0 })), signalPeriod)
+    .map((value, index) => (trix[index] == null ? null : value));
+  const hist = trix.map((value, index) =>
+    value != null && signal[index] != null ? Number((value - signal[index]).toFixed(4)) : null);
+  return { trix, signal, hist };
+};
+
 export const calcATRSeries = (data, n = 14) => {
   const atr = [];
   let rollingTrSum = 0;
@@ -352,6 +450,18 @@ export const calcCMF = (data, n = 20) =>
     }, 0);
     const totalVolume = slice.reduce((sum, item) => sum + Number(item.volume || 0), 0);
     return totalVolume ? Number((moneyFlowVolume / totalVolume).toFixed(4)) : null;
+  });
+
+export const calcBBPercent = (data, n = 20, multiplier = 2) =>
+  calcBB(data, n, multiplier).map((band, index) => {
+    if (band.u == null || band.l == null || band.u === band.l) return null;
+    return Number((((data[index].close - band.l) / (band.u - band.l)) * 100).toFixed(2));
+  });
+
+export const calcBBWidth = (data, n = 20, multiplier = 2) =>
+  calcBB(data, n, multiplier).map((band) => {
+    if (band.u == null || band.l == null || !band.m) return null;
+    return Number((((band.u - band.l) / band.m) * 100).toFixed(2));
   });
 
 export const calcADX = (data, n = 14) => {
@@ -537,15 +647,21 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
       ma200: EMPTY,
       ema12: EMPTY,
       bb: EMPTY,
+      psar: EMPTY,
       keltner: EMPTY,
       donchian: EMPTY,
       ichimoku: EMPTY,
       supertrend: EMPTY,
       rsi: EMPTY,
       rsiClass: "",
+      aroon: EMPTY,
+      trix: EMPTY,
+      trixSignal: `Signal(${settings.trixSignal}): ${EMPTY}`,
       williamsr: EMPTY,
       mfi: EMPTY,
       roc: EMPTY,
+      bbPercent: EMPTY,
+      bbWidth: EMPTY,
       macd: EMPTY,
       macdSignal: `Signal(${settings.macdSignal}): ${EMPTY}`,
       stoch: EMPTY,
@@ -564,12 +680,17 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
   const ma200 = calcMA(data, settings.ma200Period);
   const ema12 = calcEMA(data, settings.emaPeriod);
   const bb = calcBB(data, settings.bbPeriod, settings.bbMultiplier);
+  const psar = calcParabolicSAR(data, settings.psarStep, settings.psarMax);
   const keltner = calcKeltnerChannels(data, settings.kcPeriod, settings.kcMultiplier);
   const donchian = calcDonchianChannels(data, settings.donchianPeriod);
   const rsi = calcRSI(data, settings.rsiPeriod);
+  const aroon = calcAroon(data, settings.aroonPeriod);
+  const { trix, signal: trixSignal } = calcTrix(data, settings.trixPeriod, settings.trixSignal);
   const williamsr = calcWilliamsR(data, settings.williamsrPeriod);
   const mfi = calcMFI(data, settings.mfiPeriod);
   const roc = calcROC(data, settings.rocPeriod);
+  const bbPercent = calcBBPercent(data, settings.bbPeriod, settings.bbMultiplier);
+  const bbWidth = calcBBWidth(data, settings.bbPeriod, settings.bbMultiplier);
   const { macd, signal } = calcMACD(data, settings.macdFast, settings.macdSlow, settings.macdSignal);
   const { k, d } = calcStoch(data, settings.stochK, settings.stochD);
   const obv = calcOBV(data);
@@ -585,12 +706,18 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
   const superTrend = calcSuperTrend(data, settings.supertrendPeriod, settings.supertrendMultiplier);
 
   const latestBb = bb[bb.length - 1];
+  const latestPsar = findLastDefinedValue(psar);
   const latestKeltner = keltner[keltner.length - 1];
   const latestDonchian = donchian[donchian.length - 1];
   const latestRsi = rsi[rsi.length - 1];
+  const latestAroon = aroon[aroon.length - 1];
+  const latestTrix = trix[trix.length - 1];
+  const latestTrixSignal = trixSignal[trixSignal.length - 1];
   const latestWilliamsR = williamsr[williamsr.length - 1];
   const latestMfi = mfi[mfi.length - 1];
   const latestRoc = roc[roc.length - 1];
+  const latestBbPercent = bbPercent[bbPercent.length - 1];
+  const latestBbWidth = bbWidth[bbWidth.length - 1];
   const latestMacd = macd[macd.length - 1];
   const latestSignal = signal[signal.length - 1];
   const latestK = k[k.length - 1];
@@ -710,6 +837,46 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     else bear += 1;
   }
 
+  if (latestPsar != null) {
+    if (price > latestPsar) {
+      summaryParts.push(`<span class="up">Parabolic SAR 多頭支撐 @ ${latestPsar.toFixed(2)}</span>`);
+      bull += 1;
+    } else {
+      summaryParts.push(`<span class="dn">Parabolic SAR 空頭壓力 @ ${latestPsar.toFixed(2)}</span>`);
+      bear += 1;
+    }
+  }
+
+  if (latestAroon?.up != null && latestAroon?.down != null) {
+    if (latestAroon.up >= 70 && latestAroon.down <= 30) {
+      summaryParts.push(`<span class="up">Aroon(${settings.aroonPeriod}) 趨勢走強</span>`);
+      bull += 1;
+    } else if (latestAroon.down >= 70 && latestAroon.up <= 30) {
+      summaryParts.push(`<span class="dn">Aroon(${settings.aroonPeriod}) 轉弱警訊</span>`);
+      bear += 1;
+    }
+  }
+
+  if (latestTrix != null && latestTrixSignal != null) {
+    if (latestTrix >= latestTrixSignal) {
+      summaryParts.push(`<span class="up">TRIX(${settings.trixPeriod}) 動能偏多</span>`);
+      bull += 1;
+    } else {
+      summaryParts.push(`<span class="dn">TRIX(${settings.trixPeriod}) 動能轉弱</span>`);
+      bear += 1;
+    }
+  }
+
+  if (latestBbPercent != null) {
+    if (latestBbPercent >= 100) {
+      summaryParts.push(`<span class="up">Bollinger %B 突破上軌</span>`);
+      bull += 1;
+    } else if (latestBbPercent <= 0) {
+      summaryParts.push(`<span class="dn">Bollinger %B 跌破下軌</span>`);
+      bear += 1;
+    }
+  }
+
   const total = bull + bear;
   const score = total ? Math.round((bull / total) * 100) : 50;
   const verdict =
@@ -725,6 +892,7 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     ma200: ma200[ma200.length - 1]?.toFixed(2) ?? EMPTY,
     ema12: ema12[ema12.length - 1]?.toFixed(2) ?? EMPTY,
     bb: latestBb?.u ? `${latestBb.u.toFixed(2)} / ${latestBb.l.toFixed(2)}` : EMPTY,
+    psar: latestPsar?.toFixed(2) ?? EMPTY,
     keltner: latestKeltner?.u ? `${latestKeltner.u.toFixed(2)} / ${latestKeltner.l.toFixed(2)}` : EMPTY,
     donchian: latestDonchian?.u ? `${latestDonchian.u.toFixed(2)} / ${latestDonchian.l.toFixed(2)}` : EMPTY,
     ichimoku:
@@ -737,9 +905,14 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
         : EMPTY,
     rsi: latestRsi?.toFixed(1) ?? EMPTY,
     rsiClass: latestRsi > 70 ? "dn" : latestRsi < 30 ? "up" : "",
+    aroon: latestAroon?.up != null ? `Up:${latestAroon.up.toFixed(1)} Down:${latestAroon.down.toFixed(1)}` : EMPTY,
+    trix: latestTrix?.toFixed(3) ?? EMPTY,
+    trixSignal: `Signal(${settings.trixSignal}): ${latestTrixSignal?.toFixed(3) ?? EMPTY}`,
     williamsr: latestWilliamsR?.toFixed(1) ?? EMPTY,
     mfi: latestMfi?.toFixed(1) ?? EMPTY,
     roc: latestRoc?.toFixed(2) ?? EMPTY,
+    bbPercent: latestBbPercent?.toFixed(1) ?? EMPTY,
+    bbWidth: latestBbWidth?.toFixed(2) ?? EMPTY,
     macd: latestMacd?.toFixed(3) ?? EMPTY,
     macdSignal: `Signal(${settings.macdSignal}): ${latestSignal?.toFixed(3) ?? EMPTY}`,
     stoch: latestK != null ? `K:${latestK.toFixed(1)} D:${(latestD ?? 0).toFixed(1)}` : EMPTY,
