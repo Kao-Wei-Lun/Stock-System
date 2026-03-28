@@ -93,6 +93,7 @@
         @set-right-tab="setRightTab"
         @toggle-indicator="toggleIndicator"
         @toggle-panel="togglePanel"
+        @apply-indicator-preset="applyIndicatorPreset"
         @open-alert-modal="openAlertModal"
         @update-backtest-field="handleBacktestField"
         @run-backtest="runBacktest"
@@ -198,6 +199,7 @@ const {
   selectTicker,
   toggleIndicator,
   togglePanel,
+  applyIndicatorPreset,
   setTool,
   addSignal,
   clearDrawings,

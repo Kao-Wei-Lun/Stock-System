@@ -216,6 +216,8 @@
     <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">KD Stoch(14,3)</div><canvas ref="stochCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">ATR(14)</div><canvas ref="atrCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">CCI(20)</div><canvas ref="cciCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.obv }"><div class="ind-label-tag">OBV</div><canvas ref="obvCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.adx }"><div class="ind-label-tag">ADX(14)</div><canvas ref="adxCanvas"></canvas></div>
   </div>
 </template>
 
@@ -279,6 +281,8 @@ const macdCanvas = ref(null);
 const stochCanvas = ref(null);
 const atrCanvas = ref(null);
 const cciCanvas = ref(null);
+const obvCanvas = ref(null);
+const adxCanvas = ref(null);
 const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
@@ -332,6 +336,8 @@ const {
   stochCanvas,
   atrCanvas,
   cciCanvas,
+  obvCanvas,
+  adxCanvas,
   chartAreaRef,
   props,
   emit,

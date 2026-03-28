@@ -2,13 +2,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 
 import {
   calcATRSeries,
+  calcADX,
   calcBB,
   calcCCIValues,
   calcEMA,
+  calcIchimoku,
   calcMACD,
   calcMA,
+  calcOBV,
   calcRSI,
   calcStoch,
+  calcSuperTrend,
   calcVWAP,
 } from "../utils/indicatorUtils";
 import { fmtPrice, fmtVol } from "../utils/formatters";
@@ -92,6 +96,52 @@ const drawArea = (ctx, values, xAt, scale, baseY, strokeColor, fillColor) => {
   drawLine(ctx, values, xAt, scale, strokeColor, 1.8);
 };
 
+const fillBetweenSeries = (ctx, upperValues, lowerValues, xAt, scale, fillAbove, fillBelow) => {
+  const flushSegment = (segment, isAbove) => {
+    if (segment.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(xAt(segment[0].index), scale(segment[0].upper));
+    segment.forEach((point, pointIndex) => {
+      if (pointIndex === 0) return;
+      ctx.lineTo(xAt(point.index), scale(point.upper));
+    });
+    for (let index = segment.length - 1; index >= 0; index -= 1) {
+      const point = segment[index];
+      ctx.lineTo(xAt(point.index), scale(point.lower));
+    }
+    ctx.closePath();
+    ctx.fillStyle = isAbove ? fillAbove : fillBelow;
+    ctx.fill();
+  };
+
+  let segment = [];
+  let currentAbove = null;
+
+  upperValues.forEach((upper, index) => {
+    const lower = lowerValues[index];
+    if (upper == null || lower == null) {
+      flushSegment(segment, currentAbove);
+      segment = [];
+      currentAbove = null;
+      return;
+    }
+
+    const isAbove = upper >= lower;
+    if (!segment.length || currentAbove === isAbove) {
+      currentAbove = isAbove;
+      segment.push({ index, upper, lower });
+      return;
+    }
+
+    flushSegment(segment, currentAbove);
+    segment = [{ index: Math.max(index - 1, 0), upper: upperValues[Math.max(index - 1, 0)], lower: lowerValues[Math.max(index - 1, 0)] }];
+    currentAbove = isAbove;
+    segment.push({ index, upper, lower });
+  });
+
+  flushSegment(segment, currentAbove);
+};
+
 const volumeMa = (data, period = 20) => calcMA(data.map((row) => ({ close: row.volume })), period);
 
 export function useChartEngine({
@@ -103,6 +153,8 @@ export function useChartEngine({
   stochCanvas,
   atrCanvas,
   cciCanvas,
+  obvCanvas,
+  adxCanvas,
   chartAreaRef,
   props,
   emit,
@@ -937,6 +989,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const fullEma12 = props.activeInd.ema12 ? calcEMA(fullData, 12) : [];
     const fullVwap = props.activeInd.vwap ? calcVWAP(fullData) : [];
     const fullBb = props.activeInd.bb ? calcBB(fullData) : [];
+    const fullIchimoku = props.activeInd.ichimoku ? calcIchimoku(fullData) : null;
+    const fullSuperTrend = props.activeInd.supertrend ? calcSuperTrend(fullData) : null;
 
     const ma20 = sliceSeries(fullMa20);
     const ma50 = sliceSeries(fullMa50);
@@ -944,12 +998,29 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ema12 = sliceSeries(fullEma12);
     const vwap = sliceSeries(fullVwap);
     const bbSlice = fullBb.slice(viewport.startIndex, viewport.startIndex + count);
+    const ichimokuConversion = fullIchimoku ? sliceSeries(fullIchimoku.conversion) : [];
+    const ichimokuBase = fullIchimoku ? sliceSeries(fullIchimoku.base) : [];
+    const ichimokuSpanA = fullIchimoku ? sliceSeries(fullIchimoku.spanA) : [];
+    const ichimokuSpanB = fullIchimoku ? sliceSeries(fullIchimoku.spanB) : [];
+    const superTrendLine = fullSuperTrend ? sliceSeries(fullSuperTrend.line) : [];
+    const superTrendUp = fullSuperTrend
+      ? sliceSeries(fullSuperTrend.line.map((value, index) => (fullSuperTrend.trend[index] === 1 ? value : null)))
+      : [];
+    const superTrendDown = fullSuperTrend
+      ? sliceSeries(fullSuperTrend.line.map((value, index) => (fullSuperTrend.trend[index] === -1 ? value : null)))
+      : [];
     const overlayValues = [];
     if (props.activeInd.ma20) overlayValues.push(ma20);
     if (props.activeInd.ma50) overlayValues.push(ma50);
     if (props.activeInd.ma200) overlayValues.push(ma200);
     if (props.activeInd.ema12) overlayValues.push(ema12);
     if (props.activeInd.vwap) overlayValues.push(vwap);
+    if (props.activeInd.ichimoku) {
+      overlayValues.push(ichimokuConversion, ichimokuBase, ichimokuSpanA, ichimokuSpanB);
+    }
+    if (props.activeInd.supertrend) {
+      overlayValues.push(superTrendLine);
+    }
     if (bbSlice.length) {
       overlayValues.push(bbSlice.map((item) => item.u));
       overlayValues.push(bbSlice.map((item) => item.l));
@@ -1016,6 +1087,27 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       drawLine(ctx, bbSlice.map((item) => item.u), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.l), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.m), layout.barX, scale, "rgba(255,209,102,0.65)", 0.6, [4, 4]);
+    }
+
+    if (props.activeInd.ichimoku) {
+      fillBetweenSeries(
+        ctx,
+        ichimokuSpanA,
+        ichimokuSpanB,
+        layout.barX,
+        scale,
+        "rgba(0,217,163,0.08)",
+        "rgba(255,77,106,0.08)",
+      );
+      drawLine(ctx, ichimokuConversion, layout.barX, scale, "#7be7ff", 1);
+      drawLine(ctx, ichimokuBase, layout.barX, scale, "#9b6dff", 1);
+      drawLine(ctx, ichimokuSpanA, layout.barX, scale, "rgba(0,217,163,0.8)", 0.9);
+      drawLine(ctx, ichimokuSpanB, layout.barX, scale, "rgba(255,77,106,0.8)", 0.9);
+    }
+
+    if (props.activeInd.supertrend) {
+      drawLine(ctx, superTrendUp, layout.barX, scale, "#00d9a3", 1.7);
+      drawLine(ctx, superTrendDown, layout.barX, scale, "#ff4d6a", 1.7);
     }
 
     props.drawings.forEach((drawing) => {
@@ -1541,8 +1633,96 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     drawLine(ctx, visibleCci, layout.barX, scale, "#9b6dff", 1.5);
   };
 
+  const renderObv = () => {
+    if (!obvCanvas.value || !visibleData.value.length || !props.activePanels.obv) return;
+    const canvas = obvCanvas.value;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+    const visibleObv = sliceSeries(calcOBV(props.ohlcData));
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    const values = visibleObv.filter((value) => value != null);
+    if (!values.length) return;
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === max) {
+      min -= 1;
+      max += 1;
+    } else {
+      const pad = (max - min) * 0.08;
+      min -= pad;
+      max += pad;
+    }
+
+    const chartHeight = height - 8;
+    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    [0, 0.5, 1].forEach((ratio) => {
+      const level = min + (max - min) * ratio;
+      const y = scale(level);
+      ctx.strokeStyle = "rgba(77,102,128,0.35)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, y);
+      ctx.lineTo(width - PAD.right, y);
+      ctx.stroke();
+    });
+
+    drawArea(
+      ctx,
+      visibleObv,
+      layout.barX,
+      scale,
+      height - 2,
+      "#00d4ff",
+      "rgba(0,212,255,0.10)",
+    );
+  };
+
+  const renderAdx = () => {
+    if (!adxCanvas.value || !visibleData.value.length || !props.activePanels.adx) return;
+    const canvas = adxCanvas.value;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+    const { plusDI, minusDI, adx } = calcADX(props.ohlcData);
+    const visiblePlus = sliceSeries(plusDI);
+    const visibleMinus = sliceSeries(minusDI);
+    const visibleAdx = sliceSeries(adx);
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    const chartHeight = height - 8;
+    const scale = (value) => 4 + (1 - value / 100) * chartHeight;
+
+    [50, 25, 0].forEach((level) => {
+      ctx.strokeStyle = "rgba(77,102,128,0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash(level === 25 ? [4, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, scale(level));
+      ctx.lineTo(width - PAD.right, scale(level));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(77,102,128,0.65)";
+      ctx.font = "8px JetBrains Mono";
+      ctx.fillText(level, width - PAD.right + 2, scale(level) + 3);
+    });
+
+    drawLine(ctx, visibleAdx, layout.barX, scale, "#ffd166", 1.4);
+    drawLine(ctx, visiblePlus, layout.barX, scale, "#00d9a3", 1.1);
+    drawLine(ctx, visibleMinus, layout.barX, scale, "#ff4d6a", 1.1);
+  };
+
   const clearAll = () => {
-    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value, atrCanvas.value, cciCanvas.value]
+    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value, atrCanvas.value, cciCanvas.value, obvCanvas.value, adxCanvas.value]
       .filter(Boolean)
       .forEach((canvas) => {
         const ctx = canvas.getContext("2d");
@@ -1572,6 +1752,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     renderStoch();
     renderAtr();
     renderCci();
+    renderObv();
+    renderAdx();
   };
 
   const resizeCanvas = (canvas, element) => {
@@ -1592,6 +1774,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     resizeCanvas(stochCanvas.value, stochCanvas.value?.parentElement);
     resizeCanvas(atrCanvas.value, atrCanvas.value?.parentElement);
     resizeCanvas(cciCanvas.value, cciCanvas.value?.parentElement);
+    resizeCanvas(obvCanvas.value, obvCanvas.value?.parentElement);
+    resizeCanvas(adxCanvas.value, adxCanvas.value?.parentElement);
     scheduleRender();
   };
 
@@ -2119,6 +2303,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       props.activePanels.stoch,
       props.activePanels.atr,
       props.activePanels.cci,
+      props.activePanels.obv,
+      props.activePanels.adx,
       props.compareSeries.length,
     ],
     () => nextTick(() => resizeAll()),

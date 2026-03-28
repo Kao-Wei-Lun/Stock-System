@@ -15,8 +15,25 @@ const TIMEFRAME_OPTIONS = [
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
-const DEFAULT_ACTIVE_IND = { ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false };
-const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false, atr: false, cci: false };
+const DEFAULT_ACTIVE_IND = {
+  ma20: true,
+  ma50: true,
+  ma200: false,
+  ema12: true,
+  bb: false,
+  vwap: false,
+  ichimoku: false,
+  supertrend: false,
+};
+const DEFAULT_ACTIVE_PANELS = {
+  rsi: true,
+  macd: false,
+  stoch: false,
+  atr: false,
+  cci: false,
+  obv: false,
+  adx: false,
+};
 const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
 let drawingIdSeed = 1;
 let workspacePresetSeed = 1;
@@ -655,6 +672,99 @@ export function useDashboard() {
     activePanels[name] = !activePanels[name];
   }
 
+  function applyIndicatorPreset(presetName) {
+    const presets = {
+      trend: {
+        label: "趨勢模板",
+        indicators: {
+          ma20: true,
+          ma50: true,
+          ma200: true,
+          ema12: false,
+          bb: false,
+          vwap: false,
+          ichimoku: true,
+          supertrend: true,
+        },
+        panels: {
+          rsi: false,
+          macd: false,
+          stoch: false,
+          atr: true,
+          cci: false,
+          obv: false,
+          adx: true,
+        },
+      },
+      swing: {
+        label: "擺盪模板",
+        indicators: {
+          ma20: true,
+          ma50: false,
+          ma200: false,
+          ema12: true,
+          bb: true,
+          vwap: false,
+          ichimoku: false,
+          supertrend: false,
+        },
+        panels: {
+          rsi: true,
+          macd: true,
+          stoch: true,
+          atr: false,
+          cci: true,
+          obv: false,
+          adx: true,
+        },
+      },
+      volume: {
+        label: "量價模板",
+        indicators: {
+          ma20: true,
+          ma50: false,
+          ma200: false,
+          ema12: false,
+          bb: false,
+          vwap: true,
+          ichimoku: false,
+          supertrend: true,
+        },
+        panels: {
+          rsi: false,
+          macd: false,
+          stoch: false,
+          atr: true,
+          cci: false,
+          obv: true,
+          adx: false,
+        },
+      },
+      clean: {
+        label: "清爽模板",
+        indicators: { ...DEFAULT_ACTIVE_IND },
+        panels: { ...DEFAULT_ACTIVE_PANELS },
+      },
+    };
+
+    const preset = presets[presetName];
+    if (!preset) return;
+
+    Object.entries(DEFAULT_ACTIVE_IND).forEach(([key, defaultValue]) => {
+      activeInd[key] = preset.indicators?.[key] ?? defaultValue;
+    });
+    Object.entries(DEFAULT_ACTIVE_PANELS).forEach(([key, defaultValue]) => {
+      activePanels[key] = preset.panels?.[key] ?? defaultValue;
+    });
+
+    pushNotification({
+      icon: "🧩",
+      title: "指標模板已套用",
+      msg: preset.label,
+      type: "success",
+    });
+  }
+
   function setTool(tool) {
     activeTool.value = tool;
   }
@@ -1104,6 +1214,7 @@ export function useDashboard() {
     selectTicker,
     toggleIndicator,
     togglePanel,
+    applyIndicatorPreset,
     setTool,
     addSignal,
     clearDrawings,

@@ -9,13 +9,25 @@
 
     <div v-show="rightTab === 'indicators'" class="rp-content">
       <div class="ind-group">
-        <div class="ind-group-title">趨勢 (疊加圖)</div>
+        <div class="ind-group-title">指標模板</div>
+        <div class="preset-grid">
+          <button class="preset-chip" @click="$emit('apply-indicator-preset', 'trend')">趨勢模板</button>
+          <button class="preset-chip" @click="$emit('apply-indicator-preset', 'swing')">擺盪模板</button>
+          <button class="preset-chip" @click="$emit('apply-indicator-preset', 'volume')">量價模板</button>
+          <button class="preset-chip" @click="$emit('apply-indicator-preset', 'clean')">清爽模板</button>
+        </div>
+      </div>
+
+      <div class="ind-group">
+        <div class="ind-group-title">趨勢 (疊加主圖)</div>
         <div class="ind-row"><div class="ind-name">MA 20</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#3b8bff">{{ indicatorSnapshot.ma20 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma20 }" @click="$emit('toggle-indicator','ma20')"></div></div></div>
         <div class="ind-row"><div class="ind-name">MA 50</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#f5a623">{{ indicatorSnapshot.ma50 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma50 }" @click="$emit('toggle-indicator','ma50')"></div></div></div>
         <div class="ind-row"><div class="ind-name">MA 200</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#9b6dff">{{ indicatorSnapshot.ma200 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma200 }" @click="$emit('toggle-indicator','ma200')"></div></div></div>
         <div class="ind-row"><div class="ind-name">EMA 12</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#00d4ff">{{ indicatorSnapshot.ema12 }}</div><div class="ind-toggle" :class="{ on: activeInd.ema12 }" @click="$emit('toggle-indicator','ema12')"></div></div></div>
         <div class="ind-row"><div class="ind-name">布林通道</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#ffd166">{{ indicatorSnapshot.bb }}</div><div class="ind-toggle" :class="{ on: activeInd.bb }" @click="$emit('toggle-indicator','bb')"></div></div></div>
         <div class="ind-row"><div class="ind-name">VWAP</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#ff8c42">ON</div><div class="ind-toggle" :class="{ on: activeInd.vwap }" @click="$emit('toggle-indicator','vwap')"></div></div></div>
+        <div class="ind-row"><div><div class="ind-name">Ichimoku 雲圖</div><div style="font-size:9px;color:var(--text3)">Tenkan / Kijun / Cloud</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#8dc1ff">{{ indicatorSnapshot.ichimoku }}</div><div class="ind-toggle" :class="{ on: activeInd.ichimoku }" @click="$emit('toggle-indicator','ichimoku')"></div></div></div>
+        <div class="ind-row"><div><div class="ind-name">SuperTrend(10,3)</div><div style="font-size:9px;color:var(--text3)">多空切換支撐線</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#7be7ff">{{ indicatorSnapshot.supertrend }}</div><div class="ind-toggle" :class="{ on: activeInd.supertrend }" @click="$emit('toggle-indicator','supertrend')"></div></div></div>
       </div>
 
       <div class="ind-group">
@@ -25,6 +37,8 @@
         <div class="ind-row"><div><div class="ind-name">KD Stoch(14,3)</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.stoch }}</div><div class="ind-toggle" :class="{ on: activePanels.stoch }" @click="$emit('toggle-panel','stoch')"></div></div></div>
         <div class="ind-row"><div><div class="ind-name">ATR(14)</div><div style="font-size:9px;color:var(--text3)">波動幅度 / 停損參考</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.atr }}</div><div class="ind-toggle" :class="{ on: activePanels.atr }" @click="$emit('toggle-panel','atr')"></div></div></div>
         <div class="ind-row"><div><div class="ind-name">CCI(20)</div><div style="font-size:9px;color:var(--text3)">±100 強弱區間</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.cci }}</div><div class="ind-toggle" :class="{ on: activePanels.cci }" @click="$emit('toggle-panel','cci')"></div></div></div>
+        <div class="ind-row"><div><div class="ind-name">OBV</div><div style="font-size:9px;color:var(--text3)">量能趨勢累積</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.obv }}</div><div class="ind-toggle" :class="{ on: activePanels.obv }" @click="$emit('toggle-panel','obv')"></div></div></div>
+        <div class="ind-row"><div><div class="ind-name">ADX(14)</div><div style="font-size:9px;color:var(--text3)">{{ indicatorSnapshot.adxSignal }}</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.adx }}</div><div class="ind-toggle" :class="{ on: activePanels.adx }" @click="$emit('toggle-panel','adx')"></div></div></div>
       </div>
 
       <div class="ind-group">
@@ -108,6 +122,7 @@ defineEmits([
   "set-right-tab",
   "toggle-indicator",
   "toggle-panel",
+  "apply-indicator-preset",
   "open-alert-modal",
   "update-backtest-field",
   "run-backtest",

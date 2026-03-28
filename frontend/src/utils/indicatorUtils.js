@@ -1,3 +1,5 @@
+const EMPTY = "—";
+
 export const calcMA = (data, n) =>
   data.map((_, index) =>
     index < n - 1
@@ -147,22 +149,208 @@ export const calcATR = (data, n = 14) => calcATRSeries(data, n).at(-1) ?? 0;
 
 export const calcCCI = (data, n = 20) => calcCCIValues(data, n).at(-1) ?? null;
 
+export const calcOBV = (data) => {
+  if (!data.length) return [];
+  const obv = [0];
+  for (let index = 1; index < data.length; index += 1) {
+    const previous = obv[index - 1];
+    const volume = Number(data[index].volume || 0);
+    if (data[index].close > data[index - 1].close) obv.push(previous + volume);
+    else if (data[index].close < data[index - 1].close) obv.push(previous - volume);
+    else obv.push(previous);
+  }
+  return obv;
+};
+
+export const calcADX = (data, n = 14) => {
+  const plusDI = Array(data.length).fill(null);
+  const minusDI = Array(data.length).fill(null);
+  const adx = Array(data.length).fill(null);
+  const dx = Array(data.length).fill(null);
+
+  if (data.length < 2) return { plusDI, minusDI, adx };
+
+  let smoothedTr = 0;
+  let smoothedPlusDm = 0;
+  let smoothedMinusDm = 0;
+  let previousAdx = null;
+
+  for (let index = 1; index < data.length; index += 1) {
+    const current = data[index];
+    const previous = data[index - 1];
+    const highMove = current.high - previous.high;
+    const lowMove = previous.low - current.low;
+    const plusDm = highMove > lowMove && highMove > 0 ? highMove : 0;
+    const minusDm = lowMove > highMove && lowMove > 0 ? lowMove : 0;
+    const trueRange = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close),
+    );
+
+    if (index <= n) {
+      smoothedTr += trueRange;
+      smoothedPlusDm += plusDm;
+      smoothedMinusDm += minusDm;
+    } else {
+      smoothedTr = smoothedTr - (smoothedTr / n) + trueRange;
+      smoothedPlusDm = smoothedPlusDm - (smoothedPlusDm / n) + plusDm;
+      smoothedMinusDm = smoothedMinusDm - (smoothedMinusDm / n) + minusDm;
+    }
+
+    if (index < n) continue;
+
+    const currentPlusDi = smoothedTr ? (smoothedPlusDm / smoothedTr) * 100 : 0;
+    const currentMinusDi = smoothedTr ? (smoothedMinusDm / smoothedTr) * 100 : 0;
+    plusDI[index] = Number(currentPlusDi.toFixed(2));
+    minusDI[index] = Number(currentMinusDi.toFixed(2));
+
+    const denominator = currentPlusDi + currentMinusDi;
+    const currentDx = denominator ? (Math.abs(currentPlusDi - currentMinusDi) / denominator) * 100 : 0;
+    dx[index] = currentDx;
+
+    if (index === n * 2 - 2) {
+      const seed = dx.slice(n, index + 1).filter((value) => value != null);
+      previousAdx = seed.length ? seed.reduce((sum, value) => sum + value, 0) / seed.length : currentDx;
+      adx[index] = Number(previousAdx.toFixed(2));
+      continue;
+    }
+
+    if (index > n * 2 - 2) {
+      previousAdx = previousAdx == null ? currentDx : ((previousAdx * (n - 1)) + currentDx) / n;
+      adx[index] = Number(previousAdx.toFixed(2));
+    }
+  }
+
+  return { plusDI, minusDI, adx };
+};
+
+export const calcIchimoku = (data) => {
+  const conversion = Array(data.length).fill(null);
+  const base = Array(data.length).fill(null);
+  const spanA = Array(data.length).fill(null);
+  const spanB = Array(data.length).fill(null);
+  const lagging = Array(data.length).fill(null);
+
+  data.forEach((row, index) => {
+    if (index >= 8) {
+      const slice = data.slice(index - 8, index + 1);
+      const high = Math.max(...slice.map((item) => item.high));
+      const low = Math.min(...slice.map((item) => item.low));
+      conversion[index] = Number(((high + low) / 2).toFixed(4));
+    }
+
+    if (index >= 25) {
+      const slice = data.slice(index - 25, index + 1);
+      const high = Math.max(...slice.map((item) => item.high));
+      const low = Math.min(...slice.map((item) => item.low));
+      base[index] = Number(((high + low) / 2).toFixed(4));
+    }
+
+    if (conversion[index] != null && base[index] != null && index + 26 < data.length) {
+      spanA[index + 26] = Number(((conversion[index] + base[index]) / 2).toFixed(4));
+    }
+
+    if (index >= 51 && index + 26 < data.length) {
+      const slice = data.slice(index - 51, index + 1);
+      const high = Math.max(...slice.map((item) => item.high));
+      const low = Math.min(...slice.map((item) => item.low));
+      spanB[index + 26] = Number(((high + low) / 2).toFixed(4));
+    }
+
+    if (index - 26 >= 0) {
+      lagging[index - 26] = row.close;
+    }
+  });
+
+  return { conversion, base, spanA, spanB, lagging };
+};
+
+export const calcSuperTrend = (data, period = 10, multiplier = 3) => {
+  const atr = calcATRSeries(data, period);
+  const upperBand = Array(data.length).fill(null);
+  const lowerBand = Array(data.length).fill(null);
+  const line = Array(data.length).fill(null);
+  const trend = Array(data.length).fill(null);
+
+  let finalUpper = null;
+  let finalLower = null;
+  let previousLine = null;
+
+  data.forEach((row, index) => {
+    const atrValue = atr[index];
+    if (atrValue == null) return;
+
+    const hl2 = (row.high + row.low) / 2;
+    const basicUpper = hl2 + multiplier * atrValue;
+    const basicLower = hl2 - multiplier * atrValue;
+
+    if (index === 0 || finalUpper == null || finalLower == null) {
+      finalUpper = basicUpper;
+      finalLower = basicLower;
+      line[index] = row.close >= basicLower ? basicLower : basicUpper;
+      trend[index] = row.close >= basicLower ? 1 : -1;
+      upperBand[index] = Number(finalUpper.toFixed(4));
+      lowerBand[index] = Number(finalLower.toFixed(4));
+      previousLine = line[index];
+      return;
+    }
+
+    finalUpper = basicUpper < finalUpper || data[index - 1].close > finalUpper ? basicUpper : finalUpper;
+    finalLower = basicLower > finalLower || data[index - 1].close < finalLower ? basicLower : finalLower;
+
+    const nextTrend =
+      previousLine === finalUpper
+        ? (row.close > finalUpper ? 1 : -1)
+        : (row.close < finalLower ? -1 : 1);
+
+    line[index] = nextTrend === 1 ? finalLower : finalUpper;
+    trend[index] = nextTrend;
+    upperBand[index] = Number(finalUpper.toFixed(4));
+    lowerBand[index] = Number(finalLower.toFixed(4));
+    previousLine = line[index];
+  });
+
+  return { upperBand, lowerBand, line, trend };
+};
+
+const findLastDefinedValue = (series) => {
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    if (series[index] != null) return series[index];
+  }
+  return null;
+};
+
+const formatCompactNumber = (value) => {
+  if (value == null) return EMPTY;
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
+  return Number(value).toFixed(0);
+};
+
 export function buildIndicatorSnapshot(data) {
   if (!data.length) {
     return {
-      ma20: "—",
-      ma50: "—",
-      ma200: "—",
-      ema12: "—",
-      bb: "—",
-      rsi: "—",
+      ma20: EMPTY,
+      ma50: EMPTY,
+      ma200: EMPTY,
+      ema12: EMPTY,
+      bb: EMPTY,
+      ichimoku: EMPTY,
+      supertrend: EMPTY,
+      rsi: EMPTY,
       rsiClass: "",
-      macd: "—",
-      macdSignal: "Signal: —",
-      stoch: "—",
-      atr: "—",
-      cci: "—",
-      techSummaryHtml: "—",
+      macd: EMPTY,
+      macdSignal: `Signal: ${EMPTY}`,
+      stoch: EMPTY,
+      atr: EMPTY,
+      cci: EMPTY,
+      obv: EMPTY,
+      adx: EMPTY,
+      adxSignal: `+DI ${EMPTY} / -DI ${EMPTY}`,
+      techSummaryHtml: EMPTY,
     };
   }
 
@@ -174,6 +362,10 @@ export function buildIndicatorSnapshot(data) {
   const rsi = calcRSI(data);
   const { macd, signal } = calcMACD(data);
   const { k, d } = calcStoch(data);
+  const obv = calcOBV(data);
+  const { plusDI, minusDI, adx } = calcADX(data);
+  const ichimoku = calcIchimoku(data);
+  const superTrend = calcSuperTrend(data);
 
   const latestBb = bb[bb.length - 1];
   const latestRsi = rsi[rsi.length - 1];
@@ -181,6 +373,14 @@ export function buildIndicatorSnapshot(data) {
   const latestSignal = signal[signal.length - 1];
   const latestK = k[k.length - 1];
   const latestD = d[d.length - 1];
+  const latestObv = obv[obv.length - 1];
+  const latestAdx = findLastDefinedValue(adx);
+  const latestPlusDi = findLastDefinedValue(plusDI);
+  const latestMinusDi = findLastDefinedValue(minusDI);
+  const latestSpanA = findLastDefinedValue(ichimoku.spanA);
+  const latestSpanB = findLastDefinedValue(ichimoku.spanB);
+  const latestSuperTrend = findLastDefinedValue(superTrend.line);
+  const latestSuperTrendDirection = findLastDefinedValue(superTrend.trend);
 
   const summaryParts = [];
   let bull = 0;
@@ -196,7 +396,7 @@ export function buildIndicatorSnapshot(data) {
     summaryParts.push(`<span class="up">RSI 超賣 (${latestRsi.toFixed(1)})</span>`);
     bull += 1;
   } else {
-    summaryParts.push(`<span>RSI 中性 (${latestRsi?.toFixed(1) ?? "—"})</span>`);
+    summaryParts.push(`<span>RSI 中性 (${latestRsi?.toFixed(1) ?? EMPTY})</span>`);
   }
 
   if (latestMacd != null && latestSignal != null) {
@@ -219,6 +419,38 @@ export function buildIndicatorSnapshot(data) {
     }
   }
 
+  if (latestSpanA != null && latestSpanB != null) {
+    const cloudTop = Math.max(latestSpanA, latestSpanB);
+    const cloudBottom = Math.min(latestSpanA, latestSpanB);
+    if (price > cloudTop) {
+      summaryParts.push('<span class="up">Ichimoku 雲層之上</span>');
+      bull += 1;
+    } else if (price < cloudBottom) {
+      summaryParts.push('<span class="dn">Ichimoku 雲層之下</span>');
+      bear += 1;
+    } else {
+      summaryParts.push('<span style="color:var(--amber)">Ichimoku 雲層內整理</span>');
+    }
+  }
+
+  if (latestSuperTrend != null && latestSuperTrendDirection != null) {
+    if (latestSuperTrendDirection > 0 && price >= latestSuperTrend) {
+      summaryParts.push('<span class="up">SuperTrend 多頭支撐</span>');
+      bull += 1;
+    } else if (latestSuperTrendDirection < 0 && price <= latestSuperTrend) {
+      summaryParts.push('<span class="dn">SuperTrend 空頭壓制</span>');
+      bear += 1;
+    }
+  }
+
+  if (latestAdx != null) {
+    if (latestAdx >= 25) {
+      summaryParts.push(`<span>${latestPlusDi > latestMinusDi ? "趨勢偏多" : "趨勢偏空"} / ADX ${latestAdx.toFixed(1)}</span>`);
+    } else {
+      summaryParts.push(`<span style="color:var(--text2)">ADX ${latestAdx.toFixed(1)}，趨勢強度普通</span>`);
+    }
+  }
+
   const total = bull + bear;
   const score = total ? Math.round((bull / total) * 100) : 50;
   const verdict =
@@ -229,18 +461,29 @@ export function buildIndicatorSnapshot(data) {
         : `<span style="color:var(--amber)">◆ 中性 (${score}分)</span>`;
 
   return {
-    ma20: ma20[ma20.length - 1]?.toFixed(2) ?? "—",
-    ma50: ma50[ma50.length - 1]?.toFixed(2) ?? "—",
-    ma200: ma200[ma200.length - 1]?.toFixed(2) ?? "—",
-    ema12: ema12[ema12.length - 1]?.toFixed(2) ?? "—",
-    bb: latestBb?.u ? `${latestBb.u.toFixed(2)} / ${latestBb.l.toFixed(2)}` : "—",
-    rsi: latestRsi?.toFixed(1) ?? "—",
+    ma20: ma20[ma20.length - 1]?.toFixed(2) ?? EMPTY,
+    ma50: ma50[ma50.length - 1]?.toFixed(2) ?? EMPTY,
+    ma200: ma200[ma200.length - 1]?.toFixed(2) ?? EMPTY,
+    ema12: ema12[ema12.length - 1]?.toFixed(2) ?? EMPTY,
+    bb: latestBb?.u ? `${latestBb.u.toFixed(2)} / ${latestBb.l.toFixed(2)}` : EMPTY,
+    ichimoku:
+      latestSpanA != null && latestSpanB != null
+        ? `${price > Math.max(latestSpanA, latestSpanB) ? "雲上" : price < Math.min(latestSpanA, latestSpanB) ? "雲下" : "雲中"}`
+        : EMPTY,
+    supertrend:
+      latestSuperTrend != null
+        ? `${latestSuperTrendDirection > 0 ? "多頭" : "空頭"} @ ${latestSuperTrend.toFixed(2)}`
+        : EMPTY,
+    rsi: latestRsi?.toFixed(1) ?? EMPTY,
     rsiClass: latestRsi > 70 ? "dn" : latestRsi < 30 ? "up" : "",
-    macd: latestMacd?.toFixed(3) ?? "—",
-    macdSignal: `Signal: ${latestSignal?.toFixed(3) ?? "—"}`,
-    stoch: latestK != null ? `K:${latestK.toFixed(1)} D:${(latestD ?? 0).toFixed(1)}` : "—",
+    macd: latestMacd?.toFixed(3) ?? EMPTY,
+    macdSignal: `Signal: ${latestSignal?.toFixed(3) ?? EMPTY}`,
+    stoch: latestK != null ? `K:${latestK.toFixed(1)} D:${(latestD ?? 0).toFixed(1)}` : EMPTY,
     atr: calcATR(data).toFixed(3),
-    cci: (calcCCI(data) ?? "—").toString(),
+    cci: (calcCCI(data) ?? EMPTY).toString(),
+    obv: formatCompactNumber(latestObv),
+    adx: latestAdx?.toFixed(1) ?? EMPTY,
+    adxSignal: `+DI ${latestPlusDi?.toFixed(1) ?? EMPTY} / -DI ${latestMinusDi?.toFixed(1) ?? EMPTY}`,
     techSummaryHtml: `${summaryParts.join("<br>")}<br><br>綜合評分：${verdict}`,
   };
 }
@@ -338,13 +581,9 @@ export function calcMaxDrawdown(equity) {
   let peak = equity[0];
   let maxDrawdown = 0;
   equity.forEach((value) => {
-    if (value > peak) {
-      peak = value;
-    }
+    if (value > peak) peak = value;
     const drawdown = ((peak - value) / peak) * 100;
-    if (drawdown > maxDrawdown) {
-      maxDrawdown = drawdown;
-    }
+    if (drawdown > maxDrawdown) maxDrawdown = drawdown;
   });
   return maxDrawdown;
 }
@@ -354,9 +593,7 @@ export function calcSharpe(equity) {
   for (let index = 1; index < equity.length; index += 1) {
     returns.push((equity[index] - equity[index - 1]) / equity[index - 1]);
   }
-  if (!returns.length) {
-    return 0;
-  }
+  if (!returns.length) return 0;
   const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
   const std = Math.sqrt(returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / returns.length);
   return std ? mean / std * Math.sqrt(252) : 0;
