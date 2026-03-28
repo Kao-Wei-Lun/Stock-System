@@ -14,10 +14,12 @@ const TIMEFRAME_OPTIONS = [
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
+const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const DEFAULT_ACTIVE_IND = { ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false };
 const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false };
 const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
 let drawingIdSeed = 1;
+let workspacePresetSeed = 1;
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -35,6 +37,21 @@ function readDashboardPrefs() {
 function writeDashboardPrefs(value) {
   if (!isBrowser()) return;
   window.localStorage.setItem(DASHBOARD_PREFS_KEY, JSON.stringify(value));
+}
+
+function readWorkspacePresets() {
+  if (!isBrowser()) return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WORKSPACE_PRESETS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeWorkspacePresets(value) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(WORKSPACE_PRESETS_KEY, JSON.stringify(value));
 }
 
 function createDrawingEntry(drawing) {
@@ -80,6 +97,7 @@ export function useDashboard() {
   );
   const initialTool = TOOL_OPTIONS.includes(storedPrefs.activeTool) ? storedPrefs.activeTool : "cursor";
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
+  const storedWorkspacePresets = readWorkspacePresets();
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
   const searchQuery = ref("");
@@ -116,6 +134,8 @@ export function useDashboard() {
   const ohlcData = ref([]);
   const drawings = ref([]);
   const selectedDrawingId = ref(null);
+  const workspacePresets = ref(storedWorkspacePresets);
+  const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
   const alerts = ref([]);
   const notifications = ref([]);
   const wsConnected = ref(false);
@@ -168,6 +188,9 @@ export function useDashboard() {
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value));
   const activeWatchGroup = computed(
     () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
+  );
+  const activeWorkspacePreset = computed(
+    () => workspacePresets.value.find((item) => item.id === activeWorkspacePresetId.value) || null,
   );
 
   if (storedPrefs.currentName) {
@@ -711,6 +734,98 @@ export function useDashboard() {
     pushNotification({ icon: "✕", title: "已移除繪圖", msg: `已刪除 ${target.type}` });
   }
 
+  function updateDrawing(drawingId, patch) {
+    if (!drawingId) return;
+    drawings.value = drawings.value.map((item) => {
+      if (item.id !== drawingId) return item;
+      return {
+        ...item,
+        ...(typeof patch === "function" ? patch(item) : patch),
+      };
+    });
+    selectedDrawingId.value = drawingId;
+  }
+
+  function buildWorkspaceSnapshot(name) {
+    return {
+      id: `workspace-${Date.now()}-${workspacePresetSeed++}`,
+      name,
+      savedAt: new Date().toISOString(),
+      currentTicker: currentTicker.value,
+      currentName: currentName.value,
+      currentPeriod: currentPeriod.value,
+      currentInterval: currentInterval.value,
+      compareTickers: [...compareTickers.value],
+      comparisonMode: comparisonMode.value,
+      activeTool: activeTool.value,
+      leftTab: leftTab.value,
+      rightTab: rightTab.value,
+      activeInd: { ...activeInd },
+      activePanels: { ...activePanels },
+      drawings: drawings.value.map(({ id, ...drawing }) => ({ ...drawing })),
+    };
+  }
+
+  async function saveWorkspacePreset(name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    const existing = workspacePresets.value.find((item) => item.name.toLowerCase() === trimmed.toLowerCase());
+    const snapshot = buildWorkspaceSnapshot(trimmed);
+    if (existing) snapshot.id = existing.id;
+    workspacePresets.value = existing
+      ? workspacePresets.value.map((item) => (item.id === existing.id ? snapshot : item))
+      : [snapshot, ...workspacePresets.value].slice(0, 24);
+    activeWorkspacePresetId.value = snapshot.id;
+    pushNotification({
+      icon: existing ? "↻" : "💾",
+      title: existing ? "工作區已更新" : "工作區已儲存",
+      msg: trimmed,
+      type: "success",
+    });
+  }
+
+  async function loadWorkspacePreset(presetId) {
+    const preset = workspacePresets.value.find((item) => item.id === presetId);
+    if (!preset) return;
+    const normalizedTicker = normalizeTicker(preset.currentTicker || currentTicker.value);
+    wsSend({ action: "unsubscribe", ticker: normalizeTicker(currentTicker.value) });
+    currentTicker.value = normalizedTicker;
+    currentName.value = preset.currentName || normalizedTicker;
+    currentPeriod.value = preset.currentPeriod || currentPeriod.value;
+    currentInterval.value = preset.currentInterval || currentInterval.value;
+    comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
+    activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
+    leftTab.value = preset.leftTab === "market" ? "market" : "watch";
+    rightTab.value = ["indicators", "alerts", "backtest", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
+    compareTickers.value = (preset.compareTickers || [])
+      .map((ticker) => normalizeTicker(ticker))
+      .filter((ticker) => ticker && ticker !== normalizedTicker);
+    Object.keys(DEFAULT_ACTIVE_IND).forEach((key) => {
+      activeInd[key] = preset.activeInd?.[key] ?? DEFAULT_ACTIVE_IND[key];
+    });
+    Object.keys(DEFAULT_ACTIVE_PANELS).forEach((key) => {
+      activePanels[key] = preset.activePanels?.[key] ?? DEFAULT_ACTIVE_PANELS[key];
+    });
+    drawings.value = (preset.drawings || []).map((drawing) => createDrawingEntry(drawing));
+    selectedDrawingId.value = null;
+    activeWorkspacePresetId.value = preset.id;
+    ohlcData.value = [];
+    crosshair.visible = false;
+    wsSend({ action: "subscribe", ticker: normalizedTicker });
+    await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
+    pushNotification({ icon: "📂", title: "工作區已載入", msg: preset.name, type: "success" });
+  }
+
+  function deleteWorkspacePreset(presetId) {
+    const target = workspacePresets.value.find((item) => item.id === presetId);
+    if (!target) return;
+    workspacePresets.value = workspacePresets.value.filter((item) => item.id !== presetId);
+    if (activeWorkspacePresetId.value === presetId) {
+      activeWorkspacePresetId.value = null;
+    }
+    pushNotification({ icon: "🗑", title: "工作區已刪除", msg: target.name, type: "success" });
+  }
+
   function updateCrosshair(payload) {
     Object.assign(crosshair, payload);
   }
@@ -858,6 +973,7 @@ export function useDashboard() {
     currentPeriod: currentPeriod.value,
     currentInterval: currentInterval.value,
     activeWatchGroupId: activeWatchGroupId.value,
+    activeWorkspacePresetId: activeWorkspacePresetId.value,
     compareTickers: compareTickers.value,
     comparisonMode: comparisonMode.value,
     leftTab: leftTab.value,
@@ -870,6 +986,12 @@ export function useDashboard() {
   watch(
     persistedDashboardState,
     (value) => writeDashboardPrefs(value),
+    { deep: true },
+  );
+
+  watch(
+    workspacePresets,
+    (value) => writeWorkspacePresets(value),
     { deep: true },
   );
 
@@ -897,6 +1019,9 @@ export function useDashboard() {
     watchlistGroups,
     activeWatchGroup,
     activeWatchGroupId,
+    workspacePresets,
+    activeWorkspacePreset,
+    activeWorkspacePresetId,
     compareTickers,
     compareSeries,
     comparisonMode,
@@ -965,6 +1090,10 @@ export function useDashboard() {
     removeLastDrawing,
     selectDrawing,
     removeDrawing,
+    updateDrawing,
+    saveWorkspacePreset,
+    loadWorkspacePreset,
+    deleteWorkspacePreset,
     updateCrosshair,
     hideCrosshair,
     syncCurrentTicker,

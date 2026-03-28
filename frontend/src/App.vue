@@ -51,6 +51,8 @@
         :active-ind="activeInd"
         :drawings="drawings"
         :selected-drawing-id="selectedDrawingId"
+        :workspace-presets="workspacePresets"
+        :active-workspace-preset-id="activeWorkspacePresetId"
         :syncing-current="syncingCurrent"
         :compare-series="compareSeries"
         :comparison-mode="comparisonMode"
@@ -63,6 +65,10 @@
         @add-drawing="addDrawing"
         @select-drawing="selectDrawing"
         @remove-drawing="removeDrawing"
+        @update-drawing="updateDrawing"
+        @save-workspace="saveWorkspacePreset"
+        @load-workspace="loadWorkspacePreset"
+        @delete-workspace="deleteWorkspacePreset"
         @update-crosshair="updateCrosshair"
         @hide-crosshair="hideCrosshair"
         @add-compare="addCompareTicker"
@@ -129,6 +135,8 @@ const {
   searchOpen,
   watchlistGroups,
   activeWatchGroupId,
+  workspacePresets,
+  activeWorkspacePresetId,
   compareSeries,
   comparisonMode,
   watchlist,
@@ -196,6 +204,10 @@ const {
   removeLastDrawing,
   selectDrawing,
   removeDrawing,
+  updateDrawing,
+  saveWorkspacePreset,
+  loadWorkspacePreset,
+  deleteWorkspacePreset,
   updateCrosshair,
   hideCrosshair,
   syncCurrentTicker,

@@ -82,6 +82,30 @@
       <div class="meta-chip is-hint">{{ interactionHint }}</div>
     </div>
 
+    <div class="workspace-toolbar">
+      <span class="tool-label">工作區：</span>
+      <input
+        v-model.trim="workspacePresetName"
+        class="compare-input workspace-input"
+        type="text"
+        placeholder="輸入名稱後儲存目前分析版面"
+        @keydown.enter.prevent="saveWorkspace"
+      />
+      <button class="tool-btn" @click="saveWorkspace">儲存</button>
+      <select v-model="workspaceSelection" class="workspace-select">
+        <option value="">選擇已儲存工作區</option>
+        <option
+          v-for="preset in workspacePresets"
+          :key="preset.id"
+          :value="preset.id"
+        >
+          {{ preset.name }}
+        </option>
+      </select>
+      <button class="tool-btn" :disabled="!workspaceSelection" @click="loadWorkspace">載入</button>
+      <button class="tool-btn" :disabled="!workspaceSelection" @click="deleteWorkspace">刪除</button>
+    </div>
+
     <div class="compare-toolbar">
       <span class="tool-label">比較：</span>
       <input
@@ -178,7 +202,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useChartEngine } from "../composables/useChartEngine";
@@ -197,6 +221,8 @@ const props = defineProps({
   activeInd: { type: Object, required: true },
   drawings: { type: Array, required: true },
   selectedDrawingId: { type: String, default: null },
+  workspacePresets: { type: Array, default: () => [] },
+  activeWorkspacePresetId: { type: String, default: null },
   syncingCurrent: { type: Boolean, required: true },
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
@@ -212,6 +238,10 @@ const emit = defineEmits([
   "add-drawing",
   "select-drawing",
   "remove-drawing",
+  "update-drawing",
+  "save-workspace",
+  "load-workspace",
+  "delete-workspace",
   "update-crosshair",
   "hide-crosshair",
   "add-compare",
@@ -228,6 +258,8 @@ const rsiCanvas = ref(null);
 const macdCanvas = ref(null);
 const stochCanvas = ref(null);
 const compareInput = ref("");
+const workspacePresetName = ref("");
+const workspaceSelection = ref(props.activeWorkspacePresetId || "");
 
 const {
   chartMode,
@@ -324,6 +356,23 @@ function submitCompare() {
   emit("add-compare", ticker);
 }
 
+function saveWorkspace() {
+  if (!workspacePresetName.value) return;
+  emit("save-workspace", workspacePresetName.value);
+  workspacePresetName.value = "";
+}
+
+function loadWorkspace() {
+  if (!workspaceSelection.value) return;
+  emit("load-workspace", workspaceSelection.value);
+}
+
+function deleteWorkspace() {
+  if (!workspaceSelection.value) return;
+  emit("delete-workspace", workspaceSelection.value);
+  workspaceSelection.value = "";
+}
+
 function removeSelectedDrawing() {
   if (!props.selectedDrawingId) return;
   emit("remove-drawing", props.selectedDrawingId);
@@ -370,6 +419,13 @@ function handleKeydown(event) {
     emit("select-drawing", null);
   }
 }
+
+watch(
+  () => props.activeWorkspacePresetId,
+  (value) => {
+    workspaceSelection.value = value || "";
+  },
+);
 
 onMounted(() => {
   window.addEventListener("keydown", handleKeydown);

@@ -147,6 +147,13 @@ export function useChartEngine({
     startMin: 0,
     startMax: 1,
   });
+  const drawingDragState = reactive({
+    drawingId: null,
+    mode: null,
+    startAbsoluteIndex: 0,
+    startPrice: 0,
+    originDrawing: null,
+  });
 
   const visibleCountFloor = computed(() => Math.min(MIN_VISIBLE_BARS, Math.max(1, props.ohlcData.length)));
   const visibleData = computed(() => {
@@ -778,6 +785,103 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     }
 
     return null;
+  };
+
+  const clampAbsoluteIndex = (value) =>
+    clamp(value, 0, Math.max(props.ohlcData.length - 1, 0));
+
+  const normalizeIndexPair = (startIndex, endIndex) => {
+    const maxIndex = Math.max(props.ohlcData.length - 1, 0);
+    const lower = Math.min(startIndex, endIndex);
+    const upper = Math.max(startIndex, endIndex);
+    let adjust = 0;
+
+    if (lower < 0) adjust = -lower;
+    if (upper + adjust > maxIndex) adjust += maxIndex - (upper + adjust);
+
+    return {
+      startIndex: clampAbsoluteIndex(startIndex + adjust),
+      endIndex: clampAbsoluteIndex(endIndex + adjust),
+    };
+  };
+
+  const getDrawingEditMode = (drawing, info) => {
+    if (!drawing || !info) return null;
+
+    if (drawing.type === "hline") return "price";
+    if (drawing.type === "vline" || drawing.type === "buy" || drawing.type === "sell") return "index";
+    if (!["trendline", "fib", "rect", "measure"].includes(drawing.type)) return null;
+
+    const startX = xAtAbsoluteIndex(drawing.startIndex);
+    const endX = xAtAbsoluteIndex(drawing.endIndex);
+    const startY = scalePriceAtPoint(drawing.startPrice);
+    const endY = scalePriceAtPoint(drawing.endPrice);
+
+    if (Math.hypot(info.x - startX, info.y - startY) <= DRAWING_HIT_TOLERANCE + 4) return "start";
+    if (Math.hypot(info.x - endX, info.y - endY) <= DRAWING_HIT_TOLERANCE + 4) return "end";
+    return "move";
+  };
+
+  const resetDrawingDragState = () => {
+    drawingDragState.drawingId = null;
+    drawingDragState.mode = null;
+    drawingDragState.startAbsoluteIndex = 0;
+    drawingDragState.startPrice = 0;
+    drawingDragState.originDrawing = null;
+  };
+
+  const startDrawingDrag = (drawing, info) => {
+    if (!drawing || !info) return false;
+    drawingDragState.drawingId = drawing.id;
+    drawingDragState.mode = getDrawingEditMode(drawing, info);
+    drawingDragState.startAbsoluteIndex = info.absoluteIndex;
+    drawingDragState.startPrice = info.price;
+    drawingDragState.originDrawing = { ...drawing };
+    if (!drawingDragState.mode) {
+      resetDrawingDragState();
+      return false;
+    }
+    emit("select-drawing", drawing.id);
+    isDragging.value = true;
+    dragMode.value = "edit-drawing";
+    emit("hide-crosshair");
+    return true;
+  };
+
+  const updateDraggedDrawing = (info) => {
+    const origin = drawingDragState.originDrawing;
+    if (!origin || !drawingDragState.drawingId || !drawingDragState.mode) return;
+
+    const deltaBars = info.absoluteIndex - drawingDragState.startAbsoluteIndex;
+    const deltaPrice = info.price - drawingDragState.startPrice;
+    let nextPatch = null;
+
+    if (drawingDragState.mode === "price") {
+      nextPatch = { price: info.price };
+    } else if (drawingDragState.mode === "index") {
+      nextPatch = { index: clampAbsoluteIndex(origin.index + deltaBars) };
+    } else if (drawingDragState.mode === "start") {
+      nextPatch = {
+        startIndex: clampAbsoluteIndex(info.absoluteIndex),
+        startPrice: info.price,
+      };
+    } else if (drawingDragState.mode === "end") {
+      nextPatch = {
+        endIndex: clampAbsoluteIndex(info.absoluteIndex),
+        endPrice: info.price,
+      };
+    } else if (drawingDragState.mode === "move") {
+      const shifted = normalizeIndexPair(origin.startIndex + deltaBars, origin.endIndex + deltaBars);
+      nextPatch = {
+        startIndex: shifted.startIndex,
+        endIndex: shifted.endIndex,
+        startPrice: origin.startPrice + deltaPrice,
+        endPrice: origin.endPrice + deltaPrice,
+      };
+    }
+
+    if (!nextPatch) return;
+    emit("update-drawing", drawingDragState.drawingId, nextPatch);
   };
 
   const getDrawingPriceValues = (drawing) => {
@@ -1545,6 +1649,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const info = getPointerData(event);
     if (!info) return;
 
+    if (props.activeTool === "cursor") {
+      const hitDrawing = findDrawingAtPoint(info);
+      if (hitDrawing) {
+        interactionStartView.value = createViewSnapshot();
+        if (startDrawingDrag(hitDrawing, info)) return;
+      }
+    }
+
     if (props.activeTool === "boxzoom") {
       interactionStartView.value = createViewSnapshot();
       selectionBox.active = true;
@@ -1611,6 +1723,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       return;
     }
 
+    if (isDragging.value && dragMode.value === "edit-drawing") {
+      updateDraggedDrawing(info);
+      emit("hide-crosshair");
+      return;
+    }
+
     emit("update-crosshair", {
       visible: true,
       date: info.row.date,
@@ -1632,14 +1750,16 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const hadSelection = selectionBox.active;
     const changed = hadSelection ? finishSelectionZoom() : false;
     const startSnapshot = interactionStartView.value;
+    const wasEditingDrawing = dragMode.value === "edit-drawing";
     dragMode.value = "none";
     isDragging.value = false;
     interactionStartView.value = null;
+    resetDrawingDragState();
     emit("hide-crosshair");
     if (startSnapshot && !sameViewSnapshot(startSnapshot, createViewSnapshot())) {
       rememberViewState();
     }
-    if (changed || hadSelection) scheduleRender();
+    if (changed || hadSelection || wasEditingDrawing) scheduleRender();
   };
 
   const onWheel = (event) => {
@@ -1761,6 +1881,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       selectionBox.active = false;
       dragMode.value = "none";
       isDragging.value = false;
+      resetDrawingDragState();
       viewHistory.value = [];
       viewHistoryIndex.value = -1;
       resetYScale({ render: false, commit: false });
@@ -1843,6 +1964,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       }
       dragMode.value = "none";
       isDragging.value = false;
+      resetDrawingDragState();
       scheduleRender();
     },
   );
