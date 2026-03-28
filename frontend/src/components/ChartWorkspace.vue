@@ -211,13 +211,13 @@
       <canvas ref="compareCanvas"></canvas>
     </div>
     <div class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">RSI(14)</div><canvas ref="rsiCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">MACD(12,26,9)</div><canvas ref="macdCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">KD Stoch(14,3)</div><canvas ref="stochCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">ATR(14)</div><canvas ref="atrCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">CCI(20)</div><canvas ref="cciCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">{{ rsiLabel }}</div><canvas ref="rsiCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">{{ macdLabel }}</div><canvas ref="macdCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">{{ stochLabel }}</div><canvas ref="stochCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">{{ atrLabel }}</div><canvas ref="atrCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">{{ cciLabel }}</div><canvas ref="cciCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.obv }"><div class="ind-label-tag">OBV</div><canvas ref="obvCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.adx }"><div class="ind-label-tag">ADX(14)</div><canvas ref="adxCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.adx }"><div class="ind-label-tag">{{ adxLabel }}</div><canvas ref="adxCanvas"></canvas></div>
   </div>
 </template>
 
@@ -239,6 +239,7 @@ const props = defineProps({
   crosshair: { type: Object, required: true },
   ohlcData: { type: Array, required: true },
   activeInd: { type: Object, required: true },
+  indicatorSettings: { type: Object, required: true },
   drawings: { type: Array, required: true },
   selectedDrawingId: { type: String, default: null },
   workspacePresets: { type: Array, default: () => [] },
@@ -352,6 +353,17 @@ const displayChange = computed(() => {
   const sign = props.quote.change_pct >= 0 ? "+" : "";
   return `${sign}${(props.quote.change || 0).toFixed(2)} (${sign}${(props.quote.change_pct || 0).toFixed(2)}%)`;
 });
+
+const rsiLabel = computed(() => `RSI(${props.indicatorSettings.rsiPeriod})`);
+const macdLabel = computed(
+  () => `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`,
+);
+const stochLabel = computed(
+  () => `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`,
+);
+const atrLabel = computed(() => `ATR(${props.indicatorSettings.atrPeriod})`);
+const cciLabel = computed(() => `CCI(${props.indicatorSettings.cciPeriod})`);
+const adxLabel = computed(() => `ADX(${props.indicatorSettings.adxPeriod})`);
 
 function drawingTypeLabel(type) {
   const labels = {

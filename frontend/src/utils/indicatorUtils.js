@@ -1,5 +1,82 @@
 const EMPTY = "—";
 
+export const DEFAULT_INDICATOR_SETTINGS = {
+  ma20Period: 20,
+  ma50Period: 50,
+  ma200Period: 200,
+  emaPeriod: 12,
+  bbPeriod: 20,
+  bbMultiplier: 2,
+  rsiPeriod: 14,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignal: 9,
+  stochK: 14,
+  stochD: 3,
+  volumeMaPeriod: 20,
+  atrPeriod: 14,
+  cciPeriod: 20,
+  adxPeriod: 14,
+  ichimokuConversion: 9,
+  ichimokuBase: 26,
+  ichimokuSpanB: 52,
+  ichimokuDisplacement: 26,
+  supertrendPeriod: 10,
+  supertrendMultiplier: 3,
+};
+
+const clampInteger = (value, min, max, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
+const clampNumber = (value, min, max, fallback) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
+export function normalizeIndicatorSettings(input = {}) {
+  const merged = { ...DEFAULT_INDICATOR_SETTINGS, ...(input || {}) };
+  const normalized = {
+    ma20Period: clampInteger(merged.ma20Period, 2, 400, DEFAULT_INDICATOR_SETTINGS.ma20Period),
+    ma50Period: clampInteger(merged.ma50Period, 2, 600, DEFAULT_INDICATOR_SETTINGS.ma50Period),
+    ma200Period: clampInteger(merged.ma200Period, 2, 1200, DEFAULT_INDICATOR_SETTINGS.ma200Period),
+    emaPeriod: clampInteger(merged.emaPeriod, 2, 400, DEFAULT_INDICATOR_SETTINGS.emaPeriod),
+    bbPeriod: clampInteger(merged.bbPeriod, 5, 300, DEFAULT_INDICATOR_SETTINGS.bbPeriod),
+    bbMultiplier: clampNumber(merged.bbMultiplier, 0.5, 6, DEFAULT_INDICATOR_SETTINGS.bbMultiplier),
+    rsiPeriod: clampInteger(merged.rsiPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.rsiPeriod),
+    macdFast: clampInteger(merged.macdFast, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdFast),
+    macdSlow: clampInteger(merged.macdSlow, 3, 120, DEFAULT_INDICATOR_SETTINGS.macdSlow),
+    macdSignal: clampInteger(merged.macdSignal, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdSignal),
+    stochK: clampInteger(merged.stochK, 3, 100, DEFAULT_INDICATOR_SETTINGS.stochK),
+    stochD: clampInteger(merged.stochD, 2, 20, DEFAULT_INDICATOR_SETTINGS.stochD),
+    volumeMaPeriod: clampInteger(merged.volumeMaPeriod, 2, 200, DEFAULT_INDICATOR_SETTINGS.volumeMaPeriod),
+    atrPeriod: clampInteger(merged.atrPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.atrPeriod),
+    cciPeriod: clampInteger(merged.cciPeriod, 3, 120, DEFAULT_INDICATOR_SETTINGS.cciPeriod),
+    adxPeriod: clampInteger(merged.adxPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.adxPeriod),
+    ichimokuConversion: clampInteger(merged.ichimokuConversion, 2, 60, DEFAULT_INDICATOR_SETTINGS.ichimokuConversion),
+    ichimokuBase: clampInteger(merged.ichimokuBase, 3, 120, DEFAULT_INDICATOR_SETTINGS.ichimokuBase),
+    ichimokuSpanB: clampInteger(merged.ichimokuSpanB, 4, 240, DEFAULT_INDICATOR_SETTINGS.ichimokuSpanB),
+    ichimokuDisplacement: clampInteger(merged.ichimokuDisplacement, 1, 120, DEFAULT_INDICATOR_SETTINGS.ichimokuDisplacement),
+    supertrendPeriod: clampInteger(merged.supertrendPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.supertrendPeriod),
+    supertrendMultiplier: clampNumber(merged.supertrendMultiplier, 0.5, 10, DEFAULT_INDICATOR_SETTINGS.supertrendMultiplier),
+  };
+
+  if (normalized.macdSlow <= normalized.macdFast) {
+    normalized.macdSlow = Math.min(normalized.macdFast + 1, 120);
+  }
+  if (normalized.ichimokuBase <= normalized.ichimokuConversion) {
+    normalized.ichimokuBase = Math.min(normalized.ichimokuConversion + 1, 120);
+  }
+  if (normalized.ichimokuSpanB <= normalized.ichimokuBase) {
+    normalized.ichimokuSpanB = Math.min(normalized.ichimokuBase + 1, 240);
+  }
+
+  return normalized;
+}
+
 export const calcMA = (data, n) =>
   data.map((_, index) =>
     index < n - 1
@@ -46,11 +123,11 @@ export const calcRSI = (data, n = 14) => {
   return rsi;
 };
 
-export const calcMACD = (data) => {
-  const ema12 = calcEMA(data, 12);
-  const ema26 = calcEMA(data, 26);
-  const macd = ema12.map((value, index) => Number((value - ema26[index]).toFixed(4)));
-  const signal = calcEMA(macd.map((value) => ({ close: value || 0 })), 9);
+export const calcMACD = (data, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) => {
+  const emaFast = calcEMA(data, fastPeriod);
+  const emaSlow = calcEMA(data, slowPeriod);
+  const macd = emaFast.map((value, index) => Number((value - emaSlow[index]).toFixed(4)));
+  const signal = calcEMA(macd.map((value) => ({ close: value || 0 })), signalPeriod);
   const hist = macd.map((value, index) => Number((value - signal[index]).toFixed(4)));
   return { macd, signal, hist };
 };
@@ -225,7 +302,13 @@ export const calcADX = (data, n = 14) => {
   return { plusDI, minusDI, adx };
 };
 
-export const calcIchimoku = (data) => {
+export const calcIchimoku = (
+  data,
+  conversionPeriod = 9,
+  basePeriod = 26,
+  spanBPeriod = 52,
+  displacement = 26,
+) => {
   const conversion = Array(data.length).fill(null);
   const base = Array(data.length).fill(null);
   const spanA = Array(data.length).fill(null);
@@ -233,33 +316,33 @@ export const calcIchimoku = (data) => {
   const lagging = Array(data.length).fill(null);
 
   data.forEach((row, index) => {
-    if (index >= 8) {
-      const slice = data.slice(index - 8, index + 1);
+    if (index >= conversionPeriod - 1) {
+      const slice = data.slice(index - conversionPeriod + 1, index + 1);
       const high = Math.max(...slice.map((item) => item.high));
       const low = Math.min(...slice.map((item) => item.low));
       conversion[index] = Number(((high + low) / 2).toFixed(4));
     }
 
-    if (index >= 25) {
-      const slice = data.slice(index - 25, index + 1);
+    if (index >= basePeriod - 1) {
+      const slice = data.slice(index - basePeriod + 1, index + 1);
       const high = Math.max(...slice.map((item) => item.high));
       const low = Math.min(...slice.map((item) => item.low));
       base[index] = Number(((high + low) / 2).toFixed(4));
     }
 
-    if (conversion[index] != null && base[index] != null && index + 26 < data.length) {
-      spanA[index + 26] = Number(((conversion[index] + base[index]) / 2).toFixed(4));
+    if (conversion[index] != null && base[index] != null && index + displacement < data.length) {
+      spanA[index + displacement] = Number(((conversion[index] + base[index]) / 2).toFixed(4));
     }
 
-    if (index >= 51 && index + 26 < data.length) {
-      const slice = data.slice(index - 51, index + 1);
+    if (index >= spanBPeriod - 1 && index + displacement < data.length) {
+      const slice = data.slice(index - spanBPeriod + 1, index + 1);
       const high = Math.max(...slice.map((item) => item.high));
       const low = Math.min(...slice.map((item) => item.low));
-      spanB[index + 26] = Number(((high + low) / 2).toFixed(4));
+      spanB[index + displacement] = Number(((high + low) / 2).toFixed(4));
     }
 
-    if (index - 26 >= 0) {
-      lagging[index - 26] = row.close;
+    if (index - displacement >= 0) {
+      lagging[index - displacement] = row.close;
     }
   });
 
@@ -330,7 +413,8 @@ const formatCompactNumber = (value) => {
   return Number(value).toFixed(0);
 };
 
-export function buildIndicatorSnapshot(data) {
+export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_SETTINGS) {
+  const settings = normalizeIndicatorSettings(inputSettings);
   if (!data.length) {
     return {
       ma20: EMPTY,
@@ -343,7 +427,7 @@ export function buildIndicatorSnapshot(data) {
       rsi: EMPTY,
       rsiClass: "",
       macd: EMPTY,
-      macdSignal: `Signal: ${EMPTY}`,
+      macdSignal: `Signal(${settings.macdSignal}): ${EMPTY}`,
       stoch: EMPTY,
       atr: EMPTY,
       cci: EMPTY,
@@ -354,18 +438,24 @@ export function buildIndicatorSnapshot(data) {
     };
   }
 
-  const ma20 = calcMA(data, 20);
-  const ma50 = calcMA(data, 50);
-  const ma200 = calcMA(data, 200);
-  const ema12 = calcEMA(data, 12);
-  const bb = calcBB(data);
-  const rsi = calcRSI(data);
-  const { macd, signal } = calcMACD(data);
-  const { k, d } = calcStoch(data);
+  const ma20 = calcMA(data, settings.ma20Period);
+  const ma50 = calcMA(data, settings.ma50Period);
+  const ma200 = calcMA(data, settings.ma200Period);
+  const ema12 = calcEMA(data, settings.emaPeriod);
+  const bb = calcBB(data, settings.bbPeriod, settings.bbMultiplier);
+  const rsi = calcRSI(data, settings.rsiPeriod);
+  const { macd, signal } = calcMACD(data, settings.macdFast, settings.macdSlow, settings.macdSignal);
+  const { k, d } = calcStoch(data, settings.stochK, settings.stochD);
   const obv = calcOBV(data);
-  const { plusDI, minusDI, adx } = calcADX(data);
-  const ichimoku = calcIchimoku(data);
-  const superTrend = calcSuperTrend(data);
+  const { plusDI, minusDI, adx } = calcADX(data, settings.adxPeriod);
+  const ichimoku = calcIchimoku(
+    data,
+    settings.ichimokuConversion,
+    settings.ichimokuBase,
+    settings.ichimokuSpanB,
+    settings.ichimokuDisplacement,
+  );
+  const superTrend = calcSuperTrend(data, settings.supertrendPeriod, settings.supertrendMultiplier);
 
   const latestBb = bb[bb.length - 1];
   const latestRsi = rsi[rsi.length - 1];
@@ -390,13 +480,13 @@ export function buildIndicatorSnapshot(data) {
   const latestMa50 = ma50[ma50.length - 1];
 
   if (latestRsi > 70) {
-    summaryParts.push(`<span class="dn">RSI 超買 (${latestRsi.toFixed(1)})</span>`);
+    summaryParts.push(`<span class="dn">RSI(${settings.rsiPeriod}) 超買 (${latestRsi.toFixed(1)})</span>`);
     bear += 1;
   } else if (latestRsi < 30) {
-    summaryParts.push(`<span class="up">RSI 超賣 (${latestRsi.toFixed(1)})</span>`);
+    summaryParts.push(`<span class="up">RSI(${settings.rsiPeriod}) 超賣 (${latestRsi.toFixed(1)})</span>`);
     bull += 1;
   } else {
-    summaryParts.push(`<span>RSI 中性 (${latestRsi?.toFixed(1) ?? EMPTY})</span>`);
+    summaryParts.push(`<span>RSI(${settings.rsiPeriod}) 中性 (${latestRsi?.toFixed(1) ?? EMPTY})</span>`);
   }
 
   if (latestMacd != null && latestSignal != null) {
@@ -411,10 +501,10 @@ export function buildIndicatorSnapshot(data) {
 
   if (latestMa20 && latestMa50) {
     if (price > latestMa20 && price > latestMa50) {
-      summaryParts.push('<span class="up">站上 MA20/MA50</span>');
+      summaryParts.push(`<span class="up">站上 MA${settings.ma20Period}/MA${settings.ma50Period}</span>`);
       bull += 2;
     } else if (price < latestMa20 && price < latestMa50) {
-      summaryParts.push('<span class="dn">跌破 MA20/MA50</span>');
+      summaryParts.push(`<span class="dn">跌破 MA${settings.ma20Period}/MA${settings.ma50Period}</span>`);
       bear += 2;
     }
   }
@@ -435,10 +525,10 @@ export function buildIndicatorSnapshot(data) {
 
   if (latestSuperTrend != null && latestSuperTrendDirection != null) {
     if (latestSuperTrendDirection > 0 && price >= latestSuperTrend) {
-      summaryParts.push('<span class="up">SuperTrend 多頭支撐</span>');
+      summaryParts.push(`<span class="up">SuperTrend(${settings.supertrendPeriod},${settings.supertrendMultiplier}) 多頭支撐</span>`);
       bull += 1;
     } else if (latestSuperTrendDirection < 0 && price <= latestSuperTrend) {
-      summaryParts.push('<span class="dn">SuperTrend 空頭壓制</span>');
+      summaryParts.push(`<span class="dn">SuperTrend(${settings.supertrendPeriod},${settings.supertrendMultiplier}) 空頭壓制</span>`);
       bear += 1;
     }
   }
@@ -477,10 +567,10 @@ export function buildIndicatorSnapshot(data) {
     rsi: latestRsi?.toFixed(1) ?? EMPTY,
     rsiClass: latestRsi > 70 ? "dn" : latestRsi < 30 ? "up" : "",
     macd: latestMacd?.toFixed(3) ?? EMPTY,
-    macdSignal: `Signal: ${latestSignal?.toFixed(3) ?? EMPTY}`,
+    macdSignal: `Signal(${settings.macdSignal}): ${latestSignal?.toFixed(3) ?? EMPTY}`,
     stoch: latestK != null ? `K:${latestK.toFixed(1)} D:${(latestD ?? 0).toFixed(1)}` : EMPTY,
-    atr: calcATR(data).toFixed(3),
-    cci: (calcCCI(data) ?? EMPTY).toString(),
+    atr: calcATR(data, settings.atrPeriod).toFixed(3),
+    cci: (calcCCI(data, settings.cciPeriod) ?? EMPTY).toString(),
     obv: formatCompactNumber(latestObv),
     adx: latestAdx?.toFixed(1) ?? EMPTY,
     adxSignal: `+DI ${latestPlusDi?.toFixed(1) ?? EMPTY} / -DI ${latestMinusDi?.toFixed(1) ?? EMPTY}`,

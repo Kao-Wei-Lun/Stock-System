@@ -983,14 +983,26 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     const chartHeight = height - PAD.top - PAD.bottom;
     const layout = getBarLayout(canvas, count);
-    const fullMa20 = props.activeInd.ma20 ? calcMA(fullData, 20) : [];
-    const fullMa50 = props.activeInd.ma50 ? calcMA(fullData, 50) : [];
-    const fullMa200 = props.activeInd.ma200 ? calcMA(fullData, 200) : [];
-    const fullEma12 = props.activeInd.ema12 ? calcEMA(fullData, 12) : [];
+    const fullMa20 = props.activeInd.ma20 ? calcMA(fullData, props.indicatorSettings.ma20Period) : [];
+    const fullMa50 = props.activeInd.ma50 ? calcMA(fullData, props.indicatorSettings.ma50Period) : [];
+    const fullMa200 = props.activeInd.ma200 ? calcMA(fullData, props.indicatorSettings.ma200Period) : [];
+    const fullEma12 = props.activeInd.ema12 ? calcEMA(fullData, props.indicatorSettings.emaPeriod) : [];
     const fullVwap = props.activeInd.vwap ? calcVWAP(fullData) : [];
-    const fullBb = props.activeInd.bb ? calcBB(fullData) : [];
-    const fullIchimoku = props.activeInd.ichimoku ? calcIchimoku(fullData) : null;
-    const fullSuperTrend = props.activeInd.supertrend ? calcSuperTrend(fullData) : null;
+    const fullBb = props.activeInd.bb
+      ? calcBB(fullData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier)
+      : [];
+    const fullIchimoku = props.activeInd.ichimoku
+      ? calcIchimoku(
+        fullData,
+        props.indicatorSettings.ichimokuConversion,
+        props.indicatorSettings.ichimokuBase,
+        props.indicatorSettings.ichimokuSpanB,
+        props.indicatorSettings.ichimokuDisplacement,
+      )
+      : null;
+    const fullSuperTrend = props.activeInd.supertrend
+      ? calcSuperTrend(fullData, props.indicatorSettings.supertrendPeriod, props.indicatorSettings.supertrendMultiplier)
+      : null;
 
     const ma20 = sliceSeries(fullMa20);
     const ma50 = sliceSeries(fullMa50);
@@ -1400,7 +1412,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const maxVolume = Math.max(...data.map((row) => row.volume || 0), 1);
     const chartHeight = height - 4;
     const scale = (value) => chartHeight - (value / maxVolume) * chartHeight + 2;
-    const visibleVolumeMa = sliceSeries(volumeMa(props.ohlcData, 20));
+    const visibleVolumeMa = sliceSeries(volumeMa(props.ohlcData, props.indicatorSettings.volumeMaPeriod));
 
     data.forEach((row, index) => {
       const barHeight = (row.volume / maxVolume) * chartHeight;
@@ -1417,7 +1429,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     ctx.fillStyle = "rgba(77,102,128,0.6)";
     ctx.font = "9px JetBrains Mono";
-    ctx.fillText("VOL / MA20", 2, 12);
+    ctx.fillText(`VOL / MA${props.indicatorSettings.volumeMaPeriod}`, 2, 12);
   };
 
   const renderRsi = () => {
@@ -1426,7 +1438,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const values = sliceSeries(calcRSI(props.ohlcData));
+    const values = sliceSeries(calcRSI(props.ohlcData, props.indicatorSettings.rsiPeriod));
 
     setupCtx(ctx);
     ctx.clearRect(0, 0, width, height);
@@ -1463,7 +1475,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const { macd, signal, hist } = calcMACD(props.ohlcData);
+    const { macd, signal, hist } = calcMACD(
+      props.ohlcData,
+      props.indicatorSettings.macdFast,
+      props.indicatorSettings.macdSlow,
+      props.indicatorSettings.macdSignal,
+    );
     const visibleMacd = sliceSeries(macd);
     const visibleSignal = sliceSeries(signal);
     const visibleHist = sliceSeries(hist);
@@ -1503,7 +1520,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const { k, d } = calcStoch(props.ohlcData);
+    const { k, d } = calcStoch(props.ohlcData, props.indicatorSettings.stochK, props.indicatorSettings.stochD);
     const visibleK = sliceSeries(k);
     const visibleD = sliceSeries(d);
 
@@ -1533,7 +1550,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const atrSeries = calcATRSeries(props.ohlcData);
+    const atrSeries = calcATRSeries(props.ohlcData, props.indicatorSettings.atrPeriod);
     const visibleAtr = sliceSeries(atrSeries);
     const values = visibleAtr.filter((value) => value != null);
 
@@ -1588,7 +1605,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const visibleCci = sliceSeries(calcCCIValues(props.ohlcData));
+    const visibleCci = sliceSeries(calcCCIValues(props.ohlcData, props.indicatorSettings.cciPeriod));
 
     setupCtx(ctx);
     ctx.clearRect(0, 0, width, height);
@@ -1690,7 +1707,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
-    const { plusDI, minusDI, adx } = calcADX(props.ohlcData);
+    const { plusDI, minusDI, adx } = calcADX(props.ohlcData, props.indicatorSettings.adxPeriod);
     const visiblePlus = sliceSeries(plusDI);
     const visibleMinus = sliceSeries(minusDI);
     const visibleAdx = sliceSeries(adx);
@@ -2236,6 +2253,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   watch(
     () => props.activeInd,
+    () => scheduleRender(),
+    { deep: true },
+  );
+
+  watch(
+    () => props.indicatorSettings,
     () => scheduleRender(),
     { deep: true },
   );

@@ -1,6 +1,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import { buildIndicatorSnapshot, runBacktestSimulation } from "../utils/indicatorUtils";
+import {
+  DEFAULT_INDICATOR_SETTINGS,
+  buildIndicatorSnapshot,
+  normalizeIndicatorSettings,
+  runBacktestSimulation,
+} from "../utils/indicatorUtils";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
 
 const TIMEFRAME_OPTIONS = [
@@ -184,6 +189,7 @@ export function useDashboard() {
   const marketStatus = reactive({ tseOpen: false, hkOpen: false });
   const activeInd = reactive({ ...DEFAULT_ACTIVE_IND, ...(storedPrefs.activeInd || {}) });
   const activePanels = reactive({ ...DEFAULT_ACTIVE_PANELS, ...(storedPrefs.activePanels || {}) });
+  const indicatorSettings = reactive(normalizeIndicatorSettings(storedPrefs.indicatorSettings || {}));
   const crosshair = reactive({
     visible: false,
     date: "—",
@@ -204,7 +210,7 @@ export function useDashboard() {
     tp: 10,
   });
 
-  const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value));
+  const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
     () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
   );
@@ -672,6 +678,16 @@ export function useDashboard() {
     activePanels[name] = !activePanels[name];
   }
 
+  function updateIndicatorSetting(key, value) {
+    if (!(key in DEFAULT_INDICATOR_SETTINGS)) return;
+    const rawValue = typeof value === "string" ? value.trim() : value;
+    const nextSettings = normalizeIndicatorSettings({
+      ...indicatorSettings,
+      [key]: rawValue === "" ? DEFAULT_INDICATOR_SETTINGS[key] : Number(rawValue),
+    });
+    Object.assign(indicatorSettings, nextSettings);
+  }
+
   function applyIndicatorPreset(presetName) {
     const presets = {
       trend: {
@@ -695,6 +711,20 @@ export function useDashboard() {
           obv: false,
           adx: true,
         },
+        settings: {
+          ma20Period: 20,
+          ma50Period: 60,
+          ma200Period: 200,
+          emaPeriod: 21,
+          atrPeriod: 14,
+          adxPeriod: 14,
+          ichimokuConversion: 9,
+          ichimokuBase: 26,
+          ichimokuSpanB: 52,
+          ichimokuDisplacement: 26,
+          supertrendPeriod: 10,
+          supertrendMultiplier: 3,
+        },
       },
       swing: {
         label: "擺盪模板",
@@ -716,6 +746,21 @@ export function useDashboard() {
           cci: true,
           obv: false,
           adx: true,
+        },
+        settings: {
+          ma20Period: 10,
+          ma50Period: 30,
+          emaPeriod: 12,
+          bbPeriod: 20,
+          bbMultiplier: 2,
+          rsiPeriod: 14,
+          macdFast: 12,
+          macdSlow: 26,
+          macdSignal: 9,
+          stochK: 14,
+          stochD: 3,
+          cciPeriod: 20,
+          adxPeriod: 14,
         },
       },
       volume: {
@@ -739,11 +784,20 @@ export function useDashboard() {
           obv: true,
           adx: false,
         },
+        settings: {
+          ma20Period: 20,
+          emaPeriod: 21,
+          volumeMaPeriod: 20,
+          atrPeriod: 14,
+          supertrendPeriod: 10,
+          supertrendMultiplier: 2.5,
+        },
       },
       clean: {
         label: "清爽模板",
         indicators: { ...DEFAULT_ACTIVE_IND },
         panels: { ...DEFAULT_ACTIVE_PANELS },
+        settings: { ...DEFAULT_INDICATOR_SETTINGS },
       },
     };
 
@@ -756,11 +810,18 @@ export function useDashboard() {
     Object.entries(DEFAULT_ACTIVE_PANELS).forEach(([key, defaultValue]) => {
       activePanels[key] = preset.panels?.[key] ?? defaultValue;
     });
+    Object.assign(
+      indicatorSettings,
+      normalizeIndicatorSettings({
+        ...indicatorSettings,
+        ...(preset.settings || {}),
+      }),
+    );
 
     pushNotification({
       icon: "🧩",
       title: "指標模板已套用",
-      msg: preset.label,
+      msg: `${preset.label} / 參數已更新`,
       type: "success",
     });
   }
@@ -894,6 +955,7 @@ export function useDashboard() {
       rightTab: rightTab.value,
       activeInd: { ...activeInd },
       activePanels: { ...activePanels },
+      indicatorSettings: { ...indicatorSettings },
       drawings: drawings.value.map(({ id, ...drawing }) => ({ ...drawing })),
     };
   }
@@ -938,6 +1000,10 @@ export function useDashboard() {
     Object.keys(DEFAULT_ACTIVE_PANELS).forEach((key) => {
       activePanels[key] = preset.activePanels?.[key] ?? DEFAULT_ACTIVE_PANELS[key];
     });
+    Object.assign(
+      indicatorSettings,
+      normalizeIndicatorSettings(preset.indicatorSettings || indicatorSettings),
+    );
     drawings.value = (preset.drawings || []).map((drawing) => createDrawingEntry(drawing));
     selectedDrawingId.value = null;
     activeWorkspacePresetId.value = preset.id;
@@ -1113,6 +1179,7 @@ export function useDashboard() {
     activeTool: activeTool.value,
     activeInd: { ...activeInd },
     activePanels: { ...activePanels },
+    indicatorSettings: { ...indicatorSettings },
   }));
 
   watch(
@@ -1185,6 +1252,7 @@ export function useDashboard() {
     marketStatus,
     activeInd,
     activePanels,
+    indicatorSettings,
     activeTool,
     crosshair,
     alertModalOpen,
@@ -1214,6 +1282,7 @@ export function useDashboard() {
     selectTicker,
     toggleIndicator,
     togglePanel,
+    updateIndicatorSetting,
     applyIndicatorPreset,
     setTool,
     addSignal,

@@ -20,30 +20,57 @@
 
       <div class="ind-group">
         <div class="ind-group-title">趨勢 (疊加主圖)</div>
-        <div class="ind-row"><div class="ind-name">MA 20</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#3b8bff">{{ indicatorSnapshot.ma20 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma20 }" @click="$emit('toggle-indicator','ma20')"></div></div></div>
-        <div class="ind-row"><div class="ind-name">MA 50</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#f5a623">{{ indicatorSnapshot.ma50 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma50 }" @click="$emit('toggle-indicator','ma50')"></div></div></div>
-        <div class="ind-row"><div class="ind-name">MA 200</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#9b6dff">{{ indicatorSnapshot.ma200 }}</div><div class="ind-toggle" :class="{ on: activeInd.ma200 }" @click="$emit('toggle-indicator','ma200')"></div></div></div>
-        <div class="ind-row"><div class="ind-name">EMA 12</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#00d4ff">{{ indicatorSnapshot.ema12 }}</div><div class="ind-toggle" :class="{ on: activeInd.ema12 }" @click="$emit('toggle-indicator','ema12')"></div></div></div>
-        <div class="ind-row"><div class="ind-name">布林通道</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#ffd166">{{ indicatorSnapshot.bb }}</div><div class="ind-toggle" :class="{ on: activeInd.bb }" @click="$emit('toggle-indicator','bb')"></div></div></div>
-        <div class="ind-row"><div class="ind-name">VWAP</div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#ff8c42">ON</div><div class="ind-toggle" :class="{ on: activeInd.vwap }" @click="$emit('toggle-indicator','vwap')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">Ichimoku 雲圖</div><div style="font-size:9px;color:var(--text3)">Tenkan / Kijun / Cloud</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#8dc1ff">{{ indicatorSnapshot.ichimoku }}</div><div class="ind-toggle" :class="{ on: activeInd.ichimoku }" @click="$emit('toggle-indicator','ichimoku')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">SuperTrend(10,3)</div><div style="font-size:9px;color:var(--text3)">多空切換支撐線</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" style="color:#7be7ff">{{ indicatorSnapshot.supertrend }}</div><div class="ind-toggle" :class="{ on: activeInd.supertrend }" @click="$emit('toggle-indicator','supertrend')"></div></div></div>
+        <div v-for="row in overlayRows" :key="row.key" class="ind-row">
+          <div>
+            <div class="ind-name">{{ row.label }}</div>
+            <div v-if="row.hint" class="ind-hint">{{ row.hint }}</div>
+          </div>
+          <div class="ind-row-actions">
+            <div class="ind-val" :style="{ color: row.color }">{{ row.value }}</div>
+            <div class="ind-toggle" :class="{ on: activeInd[row.key] }" @click="$emit('toggle-indicator', row.key)"></div>
+          </div>
+        </div>
       </div>
 
       <div class="ind-group">
         <div class="ind-group-title">震盪 (副圖)</div>
-        <div class="ind-row"><div><div class="ind-name">RSI(14)</div><div style="font-size:9px;color:var(--text3)">70超買 / 30超賣</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val" :class="indicatorSnapshot.rsiClass">{{ indicatorSnapshot.rsi }}</div><div class="ind-toggle" :class="{ on: activePanels.rsi }" @click="$emit('toggle-panel','rsi')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">MACD(12,26,9)</div><div style="font-size:9px;color:var(--text3)">{{ indicatorSnapshot.macdSignal }}</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.macd }}</div><div class="ind-toggle" :class="{ on: activePanels.macd }" @click="$emit('toggle-panel','macd')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">KD Stoch(14,3)</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.stoch }}</div><div class="ind-toggle" :class="{ on: activePanels.stoch }" @click="$emit('toggle-panel','stoch')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">ATR(14)</div><div style="font-size:9px;color:var(--text3)">波動幅度 / 停損參考</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.atr }}</div><div class="ind-toggle" :class="{ on: activePanels.atr }" @click="$emit('toggle-panel','atr')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">CCI(20)</div><div style="font-size:9px;color:var(--text3)">±100 強弱區間</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.cci }}</div><div class="ind-toggle" :class="{ on: activePanels.cci }" @click="$emit('toggle-panel','cci')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">OBV</div><div style="font-size:9px;color:var(--text3)">量能趨勢累積</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.obv }}</div><div class="ind-toggle" :class="{ on: activePanels.obv }" @click="$emit('toggle-panel','obv')"></div></div></div>
-        <div class="ind-row"><div><div class="ind-name">ADX(14)</div><div style="font-size:9px;color:var(--text3)">{{ indicatorSnapshot.adxSignal }}</div></div><div style="display:flex;align-items:center;gap:8px"><div class="ind-val">{{ indicatorSnapshot.adx }}</div><div class="ind-toggle" :class="{ on: activePanels.adx }" @click="$emit('toggle-panel','adx')"></div></div></div>
+        <div v-for="row in panelRows" :key="row.key" class="ind-row">
+          <div>
+            <div class="ind-name">{{ row.label }}</div>
+            <div v-if="row.hint" class="ind-hint">{{ row.hint }}</div>
+          </div>
+          <div class="ind-row-actions">
+            <div class="ind-val" :class="row.valueClass">{{ row.value }}</div>
+            <div class="ind-toggle" :class="{ on: activePanels[row.key] }" @click="$emit('toggle-panel', row.key)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ind-group">
+        <div class="ind-group-title">指標參數</div>
+        <div v-for="section in settingSections" :key="section.title" class="setting-section">
+          <div class="setting-section-title">{{ section.title }}</div>
+          <div class="setting-grid">
+            <label v-for="setting in section.items" :key="setting.key" class="setting-row">
+              <span class="setting-label">{{ setting.label }}</span>
+              <input
+                class="setting-input"
+                type="number"
+                :step="setting.step"
+                :min="setting.min"
+                :max="setting.max"
+                :value="indicatorSettings[setting.key]"
+                @input="$emit('update-indicator-setting', { key: setting.key, value: $event.target.value })"
+              />
+              <span class="setting-range">{{ setting.range }}</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div class="ind-group">
         <div class="ind-group-title">技術面總結</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.8" v-html="indicatorSnapshot.techSummaryHtml"></div>
+        <div class="tech-summary" v-html="indicatorSnapshot.techSummaryHtml"></div>
       </div>
     </div>
 
@@ -105,11 +132,14 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from "vue";
+
+const props = defineProps({
   rightTab: { type: String, required: true },
   indicatorSnapshot: { type: Object, required: true },
   activeInd: { type: Object, required: true },
   activePanels: { type: Object, required: true },
+  indicatorSettings: { type: Object, required: true },
   alerts: { type: Array, required: true },
   backtestForm: { type: Object, required: true },
   backtestResult: { type: Object, default: null },
@@ -122,10 +152,126 @@ defineEmits([
   "set-right-tab",
   "toggle-indicator",
   "toggle-panel",
+  "update-indicator-setting",
   "apply-indicator-preset",
   "open-alert-modal",
   "update-backtest-field",
   "run-backtest",
   "sync-all",
+]);
+
+const overlayRows = computed(() => [
+  { key: "ma20", label: `MA ${props.indicatorSettings.ma20Period}`, value: props.indicatorSnapshot.ma20, color: "#3b8bff" },
+  { key: "ma50", label: `MA ${props.indicatorSettings.ma50Period}`, value: props.indicatorSnapshot.ma50, color: "#f5a623" },
+  { key: "ma200", label: `MA ${props.indicatorSettings.ma200Period}`, value: props.indicatorSnapshot.ma200, color: "#9b6dff" },
+  { key: "ema12", label: `EMA ${props.indicatorSettings.emaPeriod}`, value: props.indicatorSnapshot.ema12, color: "#00d4ff" },
+  {
+    key: "bb",
+    label: `布林通道 (${props.indicatorSettings.bbPeriod}, ${props.indicatorSettings.bbMultiplier})`,
+    value: props.indicatorSnapshot.bb,
+    color: "#ffd166",
+  },
+  { key: "vwap", label: "VWAP", value: "ON", color: "#ff8c42", hint: "盤中量價基準線" },
+  {
+    key: "ichimoku",
+    label: `Ichimoku (${props.indicatorSettings.ichimokuConversion}, ${props.indicatorSettings.ichimokuBase}, ${props.indicatorSettings.ichimokuSpanB})`,
+    value: props.indicatorSnapshot.ichimoku,
+    color: "#8dc1ff",
+    hint: `位移 ${props.indicatorSettings.ichimokuDisplacement}`,
+  },
+  {
+    key: "supertrend",
+    label: `SuperTrend (${props.indicatorSettings.supertrendPeriod}, ${props.indicatorSettings.supertrendMultiplier})`,
+    value: props.indicatorSnapshot.supertrend,
+    color: "#7be7ff",
+    hint: "多空切換支撐線",
+  },
+]);
+
+const panelRows = computed(() => [
+  {
+    key: "rsi",
+    label: `RSI(${props.indicatorSettings.rsiPeriod})`,
+    hint: "70 超買 / 30 超賣",
+    value: props.indicatorSnapshot.rsi,
+    valueClass: props.indicatorSnapshot.rsiClass,
+  },
+  {
+    key: "macd",
+    label: `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`,
+    hint: props.indicatorSnapshot.macdSignal,
+    value: props.indicatorSnapshot.macd,
+    valueClass: "",
+  },
+  {
+    key: "stoch",
+    label: `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`,
+    hint: "擺盪強弱",
+    value: props.indicatorSnapshot.stoch,
+    valueClass: "",
+  },
+  {
+    key: "atr",
+    label: `ATR(${props.indicatorSettings.atrPeriod})`,
+    hint: "波動幅度 / 停損參考",
+    value: props.indicatorSnapshot.atr,
+    valueClass: "",
+  },
+  {
+    key: "cci",
+    label: `CCI(${props.indicatorSettings.cciPeriod})`,
+    hint: "±100 強弱區間",
+    value: props.indicatorSnapshot.cci,
+    valueClass: "",
+  },
+  {
+    key: "obv",
+    label: "OBV",
+    hint: "量能趨勢累積",
+    value: props.indicatorSnapshot.obv,
+    valueClass: "",
+  },
+  {
+    key: "adx",
+    label: `ADX(${props.indicatorSettings.adxPeriod})`,
+    hint: props.indicatorSnapshot.adxSignal,
+    value: props.indicatorSnapshot.adx,
+    valueClass: "",
+  },
+]);
+
+const settingSections = computed(() => [
+  {
+    title: "主圖參數",
+    items: [
+      { key: "ma20Period", label: "MA 快線", step: 1, min: 2, max: 400, range: "2-400" },
+      { key: "ma50Period", label: "MA 中線", step: 1, min: 2, max: 600, range: "2-600" },
+      { key: "ma200Period", label: "MA 長線", step: 1, min: 2, max: 1200, range: "2-1200" },
+      { key: "emaPeriod", label: "EMA", step: 1, min: 2, max: 400, range: "2-400" },
+      { key: "bbPeriod", label: "BB 週期", step: 1, min: 5, max: 300, range: "5-300" },
+      { key: "bbMultiplier", label: "BB 倍數", step: 0.1, min: 0.5, max: 6, range: "0.5-6" },
+      { key: "volumeMaPeriod", label: "量均線", step: 1, min: 2, max: 200, range: "2-200" },
+      { key: "ichimokuConversion", label: "轉換線", step: 1, min: 2, max: 60, range: "2-60" },
+      { key: "ichimokuBase", label: "基準線", step: 1, min: 3, max: 120, range: "3-120" },
+      { key: "ichimokuSpanB", label: "先行 B", step: 1, min: 4, max: 240, range: "4-240" },
+      { key: "ichimokuDisplacement", label: "雲圖位移", step: 1, min: 1, max: 120, range: "1-120" },
+      { key: "supertrendPeriod", label: "SuperTrend 週期", step: 1, min: 2, max: 120, range: "2-120" },
+      { key: "supertrendMultiplier", label: "SuperTrend 倍數", step: 0.1, min: 0.5, max: 10, range: "0.5-10" },
+    ],
+  },
+  {
+    title: "副圖參數",
+    items: [
+      { key: "rsiPeriod", label: "RSI", step: 1, min: 2, max: 100, range: "2-100" },
+      { key: "macdFast", label: "MACD 快線", step: 1, min: 2, max: 60, range: "2-60" },
+      { key: "macdSlow", label: "MACD 慢線", step: 1, min: 3, max: 120, range: "3-120" },
+      { key: "macdSignal", label: "MACD 訊號", step: 1, min: 2, max: 60, range: "2-60" },
+      { key: "stochK", label: "KD K", step: 1, min: 3, max: 100, range: "3-100" },
+      { key: "stochD", label: "KD D", step: 1, min: 2, max: 20, range: "2-20" },
+      { key: "atrPeriod", label: "ATR", step: 1, min: 2, max: 120, range: "2-120" },
+      { key: "cciPeriod", label: "CCI", step: 1, min: 3, max: 120, range: "3-120" },
+      { key: "adxPeriod", label: "ADX", step: 1, min: 2, max: 120, range: "2-120" },
+    ],
+  },
 ]);
 </script>

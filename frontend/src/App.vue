@@ -49,6 +49,7 @@
         :crosshair="crosshair"
         :ohlc-data="ohlcData"
         :active-ind="activeInd"
+        :indicator-settings="indicatorSettings"
         :drawings="drawings"
         :selected-drawing-id="selectedDrawingId"
         :workspace-presets="workspacePresets"
@@ -84,6 +85,7 @@
         :indicator-snapshot="indicatorSnapshot"
         :active-ind="activeInd"
         :active-panels="activePanels"
+        :indicator-settings="indicatorSettings"
         :alerts="alerts"
         :backtest-form="backtestForm"
         :backtest-result="backtestResult"
@@ -93,6 +95,7 @@
         @set-right-tab="setRightTab"
         @toggle-indicator="toggleIndicator"
         @toggle-panel="togglePanel"
+        @update-indicator-setting="updateIndicatorSetting"
         @apply-indicator-preset="applyIndicatorPreset"
         @open-alert-modal="openAlertModal"
         @update-backtest-field="handleBacktestField"
@@ -170,6 +173,7 @@ const {
   marketStatus,
   activeInd,
   activePanels,
+  indicatorSettings,
   activeTool,
   crosshair,
   alertModalOpen,
@@ -199,6 +203,7 @@ const {
   selectTicker,
   toggleIndicator,
   togglePanel,
+  updateIndicatorSetting,
   applyIndicatorPreset,
   setTool,
   addSignal,
