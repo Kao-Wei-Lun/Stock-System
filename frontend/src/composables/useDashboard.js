@@ -47,7 +47,17 @@ export function useDashboard() {
   const searchQuery = ref("");
   const searchResults = ref([]);
   const searchOpen = ref(false);
-  const watchlist = ref([]);
+  const watchlistGroups = ref([]);
+  const activeWatchGroupId = ref(null);
+  const watchlist = computed(() =>
+    watchlistGroups.value.flatMap((group) =>
+      (group.items || []).map((item) => ({
+        ...item,
+        group_id: item.group_id ?? group.id,
+        group_name: item.group_name ?? group.name,
+      })),
+    ),
+  );
   const watchlistLoading = ref(true);
   const watchlistError = ref(false);
   const leftTab = ref("watch");
@@ -110,6 +120,9 @@ export function useDashboard() {
   });
 
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value));
+  const activeWatchGroup = computed(
+    () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
+  );
 
   let ws = null;
   let wsReconnectTimer = null;
@@ -244,13 +257,73 @@ export function useDashboard() {
     watchlistLoading.value = true;
     watchlistError.value = false;
     try {
-      watchlist.value = await apiFetch("/api/watchlist");
+      const payload = await apiFetch("/api/watchlist");
+      watchlistGroups.value = payload.groups || [];
+      if (
+        !activeWatchGroupId.value
+        || !watchlistGroups.value.some((group) => group.id === activeWatchGroupId.value)
+      ) {
+        activeWatchGroupId.value = watchlistGroups.value[0]?.id ?? null;
+      }
       const current = watchlist.value.find((item) => item.ticker === currentTicker.value);
       if (current) currentName.value = current.name || current.ticker;
     } catch (error) {
       watchlistError.value = true;
     } finally {
       watchlistLoading.value = false;
+    }
+  }
+
+  async function createWatchGroup(name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    try {
+      const group = await apiFetch("/api/watchlist/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      await loadWatchlist();
+      activeWatchGroupId.value = group.id;
+      pushNotification({
+        icon: "🗂",
+        title: "觀察群組已建立",
+        msg: trimmed,
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "建立群組失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    }
+  }
+
+  async function addTickerToWatchlist(ticker, groupId = activeWatchGroupId.value) {
+    const normalized = normalizeTicker(ticker);
+    if (!normalized || !groupId) return;
+    try {
+      const added = await apiFetch("/api/watchlist/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: groupId, ticker: normalized }),
+      });
+      await loadWatchlist();
+      pushNotification({
+        icon: "⭐",
+        title: "已加入自選股",
+        msg: `${added.ticker} → ${added.group_name}`,
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "加入自選股失敗",
+        msg: error.message || "請確認群組與代號是否正確",
+        type: "error",
+      });
     }
   }
 
@@ -310,6 +383,10 @@ export function useDashboard() {
 
   function setLeftTab(tab) {
     leftTab.value = tab;
+  }
+
+  function setActiveWatchGroup(groupId) {
+    activeWatchGroupId.value = groupId;
   }
 
   async function setRightTab(tab) {
@@ -530,6 +607,9 @@ export function useDashboard() {
     searchQuery,
     searchResults,
     searchOpen,
+    watchlistGroups,
+    activeWatchGroup,
+    activeWatchGroupId,
     watchlist,
     watchlistLoading,
     watchlistError,
@@ -569,8 +649,11 @@ export function useDashboard() {
     closeSearch,
     submitSearch,
     selectSearchResult,
+    createWatchGroup,
+    addTickerToWatchlist,
     setTimeframe,
     setLeftTab,
+    setActiveWatchGroup,
     setRightTab,
     selectTicker,
     toggleIndicator,

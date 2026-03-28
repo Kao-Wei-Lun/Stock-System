@@ -490,15 +490,7 @@ export function useChartEngine({
     const vwap = sliceSeries(fullVwap);
     const bbSlice = fullBb.slice(viewport.startIndex, viewport.startIndex + count);
 
-    const extras = [];
-    if (bbSlice.length) {
-      extras.push(
-        bbSlice.map((item) => item.u),
-        bbSlice.map((item) => item.l),
-      );
-    }
-
-    const { min: autoMin, max: autoMax } = getVisiblePriceScale(data, extras);
+    const { min: autoMin, max: autoMax } = getVisiblePriceScale(data);
     const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : autoMin;
     const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : autoMax;
     const scale = (value) => scaleY(value, min, max, PAD.top, chartHeight);

@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from data_fetcher import DataFetcher, normalize_ticker
 from database import db, init_db
@@ -70,10 +71,20 @@ DEFAULT_WATCHLIST = [
 ]
 
 
+class WatchlistGroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class WatchlistItemCreate(BaseModel):
+    group_id: int
+    ticker: str = Field(..., min_length=1, max_length=32)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
     await init_db()
+    await db.ensure_default_watchlist(DEFAULT_WATCHLIST)
     if STARTUP_DOWNLOAD_ENABLED:
         asyncio.create_task(startup_download())
     else:
@@ -164,6 +175,28 @@ async def realtime_polling_loop():
         await asyncio.sleep(15)
 
 
+async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
+    row = await db.get_latest_ohlcv(ticker)
+    info = await db.get_stock_info(ticker)
+    prev = await db.get_prev_close(ticker) if row else None
+    chg_pct = ((row["close"] - prev) / prev * 100) if row and prev else 0
+
+    return {
+        "ticker": ticker,
+        "name": info.get("name", ticker) if info else ticker,
+        "close": row["close"] if row else None,
+        "open": row["open"] if row else None,
+        "high": row["high"] if row else None,
+        "low": row["low"] if row else None,
+        "volume": row["volume"] if row else None,
+        "change_pct": round(chg_pct, 2) if row else 0,
+        "date": row["date"] if row else None,
+        "category": categorize(ticker),
+        "group_id": group["id"],
+        "group_name": group["name"],
+    }
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
@@ -171,28 +204,54 @@ async def health():
 
 @app.get("/api/watchlist")
 async def get_watchlist():
-    results = []
-    for ticker in DEFAULT_WATCHLIST:
-        row = await db.get_latest_ohlcv(ticker)
-        info = await db.get_stock_info(ticker)
-        if row:
-            prev = await db.get_prev_close(ticker)
-            chg_pct = ((row["close"] - prev) / prev * 100) if prev else 0
-            results.append(
-                {
-                    "ticker": ticker,
-                    "name": info.get("name", ticker) if info else ticker,
-                    "close": row["close"],
-                    "open": row["open"],
-                    "high": row["high"],
-                    "low": row["low"],
-                    "volume": row["volume"],
-                    "change_pct": round(chg_pct, 2),
-                    "date": row["date"],
-                    "category": categorize(ticker),
-                }
-            )
-    return results
+    groups = await db.get_watchlist_groups()
+    flat_items = []
+
+    for group in groups:
+        hydrated_items = []
+        for item in group.get("items", []):
+            hydrated = await hydrate_watchlist_item(item["ticker"], group)
+            hydrated["id"] = item["id"]
+            hydrated["sort_order"] = item["sort_order"]
+            hydrated_items.append(hydrated)
+            flat_items.append(hydrated)
+        group["items"] = hydrated_items
+
+    return {"groups": groups, "items": flat_items}
+
+
+@app.post("/api/watchlist/groups")
+async def create_watchlist_group(payload: WatchlistGroupCreate):
+    try:
+        group = await db.create_watchlist_group(payload.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**group, "items": []}
+
+
+@app.post("/api/watchlist/items")
+async def add_watchlist_item(payload: WatchlistItemCreate):
+    group = await db.get_watchlist_group(payload.group_id)
+    if not group:
+        raise HTTPException(404, "Watchlist group not found")
+
+    ticker = normalize_ticker(payload.ticker)
+    item = await db.add_watchlist_item(payload.group_id, ticker)
+
+    try:
+        await fetcher.fetch_and_store(ticker, period="3mo", include_info=False)
+    except Exception as exc:
+        log.warning("watchlist sync %s failed: %s", ticker, exc)
+
+    try:
+        await fetcher.fetch_and_store_info(ticker)
+    except Exception as exc:
+        log.warning("watchlist info %s failed: %s", ticker, exc)
+
+    hydrated = await hydrate_watchlist_item(ticker, group)
+    hydrated["id"] = item["id"]
+    hydrated["sort_order"] = item["sort_order"]
+    return hydrated
 
 
 @app.get("/api/kline/{ticker}")

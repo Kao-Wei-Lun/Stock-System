@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import aiomysql
 from dotenv import load_dotenv
@@ -45,11 +45,21 @@ class Database:
             raise RuntimeError(_build_mysql_error_message(exc)) from exc
         try:
             async with server_pool.acquire() as conn:
-                async with conn.cursor() as cur:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
                     await cur.execute(
-                        f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DATABASE}` "
-                        f"CHARACTER SET {MYSQL_CHARSET} COLLATE {MYSQL_CHARSET}_unicode_ci"
+                        """
+                        SELECT `SCHEMA_NAME` AS `schema_name`
+                        FROM `INFORMATION_SCHEMA`.`SCHEMATA`
+                        WHERE `SCHEMA_NAME`=%s
+                        """,
+                        (MYSQL_DATABASE,),
                     )
+                    database_exists = await cur.fetchone()
+                    if not database_exists:
+                        await cur.execute(
+                            f"CREATE DATABASE `{_escape_identifier(MYSQL_DATABASE)}` "
+                            f"CHARACTER SET {MYSQL_CHARSET} COLLATE {MYSQL_CHARSET}_unicode_ci"
+                        )
         finally:
             server_pool.close()
             await server_pool.wait_closed()
@@ -72,9 +82,9 @@ class Database:
             await self._pool.wait_closed()
 
     async def create_tables(self):
-        statements = [
-            """
-            CREATE TABLE IF NOT EXISTS `ohlcv` (
+        statements = {
+            "ohlcv": """
+            CREATE TABLE `ohlcv` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT,
                 `ticker` VARCHAR(32) NOT NULL,
                 `date` VARCHAR(32) NOT NULL,
@@ -91,8 +101,8 @@ class Database:
                 KEY `idx_ohlcv_ticker_date` (`ticker`, `interval`, `date`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            """
-            CREATE TABLE IF NOT EXISTS `stock_info` (
+            "stock_info": """
+            CREATE TABLE `stock_info` (
                 `ticker` VARCHAR(32) NOT NULL,
                 `name` VARCHAR(255) NULL,
                 `sector` VARCHAR(255) NULL,
@@ -111,8 +121,8 @@ class Database:
                 PRIMARY KEY (`ticker`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            """
-            CREATE TABLE IF NOT EXISTS `sync_log` (
+            "sync_log": """
+            CREATE TABLE `sync_log` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT,
                 `ticker` VARCHAR(32) NOT NULL,
                 `status` VARCHAR(32) NOT NULL,
@@ -123,26 +133,63 @@ class Database:
                 KEY `idx_sync_log_ticker_synced_at` (`ticker`, `synced_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            """
-            CREATE TABLE IF NOT EXISTS `alerts` (
+            "alerts": """
+            CREATE TABLE `alerts` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT,
                 `ticker` VARCHAR(32) NOT NULL,
                 `type` VARCHAR(32) NOT NULL,
                 `condition` VARCHAR(32) NOT NULL,
                 `value` DOUBLE NULL,
                 `value2` DOUBLE NULL,
-                `active` TINYINT(1) NOT NULL DEFAULT 1,
-                `triggered` TINYINT(1) NOT NULL DEFAULT 0,
+                `active` TINYINT NOT NULL DEFAULT 1,
+                `triggered` TINYINT NOT NULL DEFAULT 0,
                 `triggered_at` DATETIME NULL,
                 `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (`id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-        ]
+            "watchlist_groups": """
+            CREATE TABLE `watchlist_groups` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT,
+                `name` VARCHAR(128) NOT NULL,
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_watchlist_groups_name` (`name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            "watchlist_items": """
+            CREATE TABLE `watchlist_items` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT,
+                `group_id` BIGINT NOT NULL,
+                `ticker` VARCHAR(32) NOT NULL,
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_watchlist_items_group_ticker` (`group_id`, `ticker`),
+                KEY `idx_watchlist_items_group_order` (`group_id`, `sort_order`, `id`),
+                CONSTRAINT `fk_watchlist_items_group`
+                    FOREIGN KEY (`group_id`) REFERENCES `watchlist_groups` (`id`)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+        }
 
         async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT `TABLE_NAME` AS `table_name`
+                    FROM `INFORMATION_SCHEMA`.`TABLES`
+                    WHERE `TABLE_SCHEMA`=%s
+                    """,
+                    (MYSQL_DATABASE,),
+                )
+                existing_tables: Set[str] = {row["table_name"] for row in await cur.fetchall()}
             async with conn.cursor() as cur:
-                for statement in statements:
+                for table_name, statement in statements.items():
+                    if table_name in existing_tables:
+                        continue
                     await cur.execute(statement)
 
     async def upsert_ohlcv_batch(self, ticker: str, rows: List[Dict], interval: str = "1d") -> int:
@@ -273,6 +320,135 @@ class Database:
                 await cur.execute("SELECT * FROM `stock_info` WHERE `ticker`=%s", (ticker,))
                 return await cur.fetchone()
 
+    async def ensure_default_watchlist(self, tickers: List[str], group_name: str = "我的自選") -> None:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute("SELECT COUNT(*) AS `c` FROM `watchlist_groups`")
+                    existing = (await cur.fetchone())["c"]
+                    if existing:
+                        return
+
+                    await cur.execute(
+                        """
+                        INSERT INTO `watchlist_groups` (`name`, `sort_order`)
+                        VALUES (%s, %s)
+                        """,
+                        (group_name, 0),
+                    )
+                    group_id = cur.lastrowid
+
+                    for sort_order, ticker in enumerate(tickers):
+                        await cur.execute(
+                            """
+                            INSERT INTO `watchlist_items` (`group_id`, `ticker`, `sort_order`)
+                            VALUES (%s, %s, %s)
+                            """,
+                            (group_id, ticker, sort_order),
+                        )
+
+    async def get_watchlist_group(self, group_id: int) -> Optional[Dict]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT `id`, `name`, `sort_order`, `created_at`
+                    FROM `watchlist_groups`
+                    WHERE `id`=%s
+                    """,
+                    (group_id,),
+                )
+                return await cur.fetchone()
+
+    async def get_watchlist_groups(self) -> List[Dict]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT `id`, `name`, `sort_order`, `created_at`
+                    FROM `watchlist_groups`
+                    ORDER BY `sort_order` ASC, `id` ASC
+                    """
+                )
+                groups = list(await cur.fetchall())
+
+                await cur.execute(
+                    """
+                    SELECT `id`, `group_id`, `ticker`, `sort_order`, `created_at`
+                    FROM `watchlist_items`
+                    ORDER BY `group_id` ASC, `sort_order` ASC, `id` ASC
+                    """
+                )
+                items = list(await cur.fetchall())
+
+        grouped_items: Dict[int, List[Dict]] = {}
+        for item in items:
+            grouped_items.setdefault(item["group_id"], []).append(item)
+
+        return [
+            {
+                **group,
+                "items": grouped_items.get(group["id"], []),
+            }
+            for group in groups
+        ]
+
+    async def create_watchlist_group(self, name: str) -> Dict:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("Group name is required")
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute("SELECT COALESCE(MAX(`sort_order`), -1) + 1 AS `next_sort` FROM `watchlist_groups`")
+                    next_sort = (await cur.fetchone())["next_sort"]
+
+                    await cur.execute(
+                        """
+                        INSERT INTO `watchlist_groups` (`name`, `sort_order`)
+                        VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            `id` = LAST_INSERT_ID(`id`)
+                        """,
+                        (clean_name, next_sort),
+                    )
+                    group_id = cur.lastrowid
+
+        group = await self.get_watchlist_group(group_id)
+        return group or {"id": group_id, "name": clean_name, "sort_order": next_sort, "items": []}
+
+    async def add_watchlist_item(self, group_id: int, ticker: str) -> Dict:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        "SELECT COALESCE(MAX(`sort_order`), -1) + 1 AS `next_sort` FROM `watchlist_items` WHERE `group_id`=%s",
+                        (group_id,),
+                    )
+                    next_sort = (await cur.fetchone())["next_sort"]
+
+                    await cur.execute(
+                        """
+                        INSERT INTO `watchlist_items` (`group_id`, `ticker`, `sort_order`)
+                        VALUES (%s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            `id` = LAST_INSERT_ID(`id`)
+                        """,
+                        (group_id, ticker, next_sort),
+                    )
+                    item_id = cur.lastrowid
+
+                    await cur.execute(
+                        """
+                        SELECT `id`, `group_id`, `ticker`, `sort_order`, `created_at`
+                        FROM `watchlist_items`
+                        WHERE `id`=%s
+                        """,
+                        (item_id,),
+                    )
+                    return await cur.fetchone()
+
     async def search_tickers(self, q: str) -> List[Dict]:
         pattern = f"%{q}%"
         sql = """
@@ -372,3 +548,7 @@ def _build_mysql_error_message(exc: Exception) -> str:
         "你可以直接複製 `.env.example` 成 `.env` 再修改。\n"
         f"原始錯誤: {exc}"
     )
+
+
+def _escape_identifier(value: str) -> str:
+    return value.replace("`", "``")

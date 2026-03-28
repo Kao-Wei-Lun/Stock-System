@@ -20,12 +20,17 @@
 
     <div class="main">
       <WatchlistPanel
+        :groups="watchlistGroups"
+        :active-group-id="activeWatchGroupId"
         :items="watchlist"
         :left-tab="leftTab"
         :active-ticker="currentTicker"
         :loading="watchlistLoading"
         :error="watchlistError"
         @set-left-tab="setLeftTab"
+        @select-group="setActiveWatchGroup"
+        @create-group="createWatchGroup"
+        @add-to-watchlist="addTickerToWatchlist"
         @select-ticker="handleSelectTicker"
       />
 
@@ -109,6 +114,8 @@ const {
   searchQuery,
   searchResults,
   searchOpen,
+  watchlistGroups,
+  activeWatchGroupId,
   watchlist,
   watchlistLoading,
   watchlistError,
@@ -148,8 +155,11 @@ const {
   closeSearch,
   submitSearch,
   selectSearchResult,
+  createWatchGroup,
+  addTickerToWatchlist,
   setTimeframe,
   setLeftTab,
+  setActiveWatchGroup,
   setRightTab,
   selectTicker,
   toggleIndicator,

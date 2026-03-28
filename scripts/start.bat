@@ -1,20 +1,114 @@
 @echo off
+setlocal EnableExtensions
 chcp 65001 >nul
-title QuantVision Pro
+
+for %%I in ("%~f0") do set "SCRIPT_PATH=%%~fI"
+cd /d "%~dp0.."
+set "PROJECT_ROOT=%CD%"
+set "BACKEND_PORT=8001"
+set "FRONTEND_PORT=5173"
+set "BACKEND_URL=http://localhost:%BACKEND_PORT%"
+set "FRONTEND_URL=http://localhost:%FRONTEND_PORT%"
+set "FRONTEND_DEV_URL=%FRONTEND_URL%"
+set "CMD_EXE=%SystemRoot%\System32\cmd.exe"
+set "PYTHON_CMD="
+set "NODE_EXE="
+set "NODE_DIR="
+set "NPM_EXE="
+set "VENV_PYTHON=%PROJECT_ROOT%\venv\Scripts\python.exe"
+
+if /i "%~1"=="frontend" goto frontend
+if /i "%~1"=="backend" goto backend
+
+title QuantVision Service Launcher
+
+net session >nul 2>&1
+if errorlevel 1 (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:ComSpec -ArgumentList '/c call ""%SCRIPT_PATH%""' -Verb RunAs"
+    exit /b
+)
 
 echo ======================================
 echo    QuantVision Pro starting...
 echo ======================================
 
-cd /d "%~dp0.."
-set "PYTHON_CMD="
-set "NODE_EXE="
-set "NODE_DIR="
-set "NPM_EXE="
-set "BACKEND_URL=http://localhost:8001"
-set "FRONTEND_URL=http://localhost:5173"
-set "FRONTEND_DEV_URL=%FRONTEND_URL%"
+call :stop_port %FRONTEND_PORT% Frontend
+call :stop_port %BACKEND_PORT% Backend
+call :resolve_python || exit /b 1
+call :resolve_node || exit /b 1
+call :ensure_venv || exit /b 1
 
+echo.
+echo [INFO] Launching frontend service in a new admin cmd window...
+start "QuantVision Frontend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" frontend
+
+echo [INFO] Launching backend service in a new admin cmd window...
+start "QuantVision Backend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" backend
+
+echo.
+echo [INFO] Frontend window: QuantVision Frontend
+echo        URL: %FRONTEND_URL%
+echo [INFO] Backend window: QuantVision Backend
+echo        URL: %BACKEND_URL%
+echo        Docs: %BACKEND_URL%/docs
+echo.
+echo [INFO] Both services are running in separate elevated cmd windows.
+echo        Close each cmd window to stop its service.
+exit /b 0
+
+:frontend
+title QuantVision Frontend
+call :resolve_node || exit /b 1
+if defined NODE_DIR set "PATH=%NODE_DIR%;%PATH%"
+
+echo ======================================
+echo    QuantVision Frontend
+echo ======================================
+cd /d "%PROJECT_ROOT%\frontend"
+
+echo [INFO] Installing frontend dependencies...
+call "%NPM_EXE%" install
+if errorlevel 1 (
+    echo [ERROR] Failed to install frontend dependencies.
+    exit /b 1
+)
+
+echo [INFO] Starting frontend dev server on port %FRONTEND_PORT%...
+call "%NPM_EXE%" run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%
+exit /b %errorlevel%
+
+:backend
+title QuantVision Backend
+call :resolve_python || exit /b 1
+call :ensure_venv || exit /b 1
+
+echo ======================================
+echo    QuantVision Backend
+echo ======================================
+cd /d "%PROJECT_ROOT%"
+call "%PROJECT_ROOT%\venv\Scripts\activate.bat"
+set "FRONTEND_DEV_URL=%FRONTEND_DEV_URL%"
+
+echo [INFO] Installing backend dependencies...
+"%VENV_PYTHON%" -m pip install --upgrade pip -q
+if errorlevel 1 (
+    echo [ERROR] Failed to upgrade pip.
+    exit /b 1
+)
+
+"%VENV_PYTHON%" -m pip install -r "%PROJECT_ROOT%\backend\requirements.txt" -q
+if errorlevel 1 (
+    echo [ERROR] Failed to install backend dependencies.
+    exit /b 1
+)
+
+echo [INFO] Starting backend API on port %BACKEND_PORT%...
+cd /d "%PROJECT_ROOT%\backend"
+"%VENV_PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload
+exit /b %errorlevel%
+
+:resolve_python
+set "PYTHON_CMD="
 python --version >nul 2>&1
 if not errorlevel 1 set "PYTHON_CMD=python"
 
@@ -31,20 +125,22 @@ if not defined PYTHON_CMD (
 if not defined PYTHON_CMD (
     echo [ERROR] Python 3.10+ was not found.
     echo         Download: https://www.python.org/downloads/
-    pause
     exit /b 1
 )
+exit /b 0
 
-where node >nul 2>&1
+:resolve_node
+set "NODE_EXE="
+set "NODE_DIR="
+set "NPM_EXE="
+
 for /f "delims=" %%I in ('where node 2^>nul') do if not defined NODE_EXE set "NODE_EXE=%%I"
-
 if not defined NODE_EXE if exist "%ProgramFiles%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles%\nodejs\node.exe"
 if not defined NODE_EXE if exist "%ProgramFiles(x86)%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles(x86)%\nodejs\node.exe"
 
 if not defined NODE_EXE (
     echo [ERROR] Node.js 18+ was not found.
     echo         Download: https://nodejs.org/
-    pause
     exit /b 1
 )
 
@@ -52,99 +148,43 @@ for %%I in ("%NODE_EXE%") do set "NODE_DIR=%%~dpI"
 if defined NODE_DIR set "PATH=%NODE_DIR%;%PATH%"
 
 for /f "delims=" %%I in ('where npm 2^>nul') do if not defined NPM_EXE set "NPM_EXE=%%I"
-
 if not defined NPM_EXE if exist "%ProgramFiles%\nodejs\npm.cmd" set "NPM_EXE=%ProgramFiles%\nodejs\npm.cmd"
 if not defined NPM_EXE if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" set "NPM_EXE=%ProgramFiles(x86)%\nodejs\npm.cmd"
 
 if not defined NPM_EXE (
     echo [ERROR] npm was not found.
     echo         Reinstall Node.js from: https://nodejs.org/
-    pause
     exit /b 1
 )
+exit /b 0
 
-if not exist "venv" (
+:ensure_venv
+if not exist "%PROJECT_ROOT%\venv" (
     echo [INFO] Creating virtual environment...
-    %PYTHON_CMD% -m venv venv
+    %PYTHON_CMD% -m venv "%PROJECT_ROOT%\venv"
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
-        pause
         exit /b 1
     )
 )
 
-call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment.
-    pause
-    exit /b 1
-)
-
-set "VENV_PYTHON=%CD%\venv\Scripts\python.exe"
 if not exist "%VENV_PYTHON%" (
     echo [ERROR] Virtual environment Python was not found.
-    pause
     exit /b 1
 )
+exit /b 0
 
-echo [INFO] Installing backend dependencies...
-"%VENV_PYTHON%" -m pip install --upgrade pip -q
-"%VENV_PYTHON%" -m pip install -r backend\requirements.txt -q
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Backend dependency installation failed.
-    pause
-    exit /b 1
-)
-
-echo [INFO] Installing frontend dependencies...
-pushd frontend
-call "%NPM_EXE%" install
-if errorlevel 1 (
-    popd
-    echo.
-    echo [ERROR] Frontend dependency installation failed.
-    pause
-    exit /b 1
-)
-popd
-
-if /i "%QV_VALIDATE_ONLY%"=="1" (
-    echo [INFO] Validation completed.
-    exit /b 0
-)
-
-set "FRONTEND_ALREADY_RUNNING="
-for /f "tokens=5" %%I in ('netstat -ano ^| findstr /R /C:":5173 .*LISTENING" 2^>nul') do if not defined FRONTEND_ALREADY_RUNNING set "FRONTEND_ALREADY_RUNNING=1"
-
-echo.
-if defined FRONTEND_ALREADY_RUNNING (
-    echo [INFO] Frontend service already running.
-    echo        Frontend: %FRONTEND_URL%
-) else (
-    echo [INFO] Starting frontend service...
-    echo        Frontend: %FRONTEND_URL%
-    start "QuantVision Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:Path='%NODE_DIR%;' + $env:Path; Set-Location -LiteralPath '%CD%\frontend'; & '%NPM_EXE%' run dev -- --host 0.0.0.0 --port 5173"
-    powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(15); while((Get-Date) -lt $deadline){ try { $r=Invoke-WebRequest -UseBasicParsing 'http://localhost:5173' -TimeoutSec 2; if($r.StatusCode -ge 200){ exit 0 } } catch {}; Start-Sleep -Milliseconds 500 }; exit 1" >nul 2>&1
-    if errorlevel 1 (
-        echo [WARNING] Frontend service did not respond on %FRONTEND_URL%.
-        echo           Check the "QuantVision Frontend" window for the exact error.
+:stop_port
+setlocal
+set "PORT=%~1"
+set "LABEL=%~2"
+set "FOUND="
+for /f "tokens=5" %%I in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING" 2^>nul') do (
+    if not defined FOUND (
+        echo [INFO] Stopping existing %LABEL% service on port %PORT%...
+        set "FOUND=1"
     )
+    taskkill /PID %%I /T /F >nul 2>&1
 )
-
-timeout /t 2 /nobreak >nul
-
-echo.
-echo [INFO] Starting backend API...
-echo        Backend: %BACKEND_URL%
-echo        Frontend dev server: %FRONTEND_URL%
-echo        API docs: %BACKEND_URL%/docs
-echo.
-echo [INFO] Press Ctrl+C to stop the backend.
-echo        Close the "QuantVision Frontend" window to stop Vite.
-echo ======================================
-
-cd backend
-"%VENV_PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-
-pause
+endlocal
+exit /b 0
