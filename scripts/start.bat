@@ -39,11 +39,18 @@ call :resolve_node || exit /b 1
 call :ensure_venv || exit /b 1
 
 echo.
-echo [INFO] Launching frontend service in a new admin cmd window...
-start "QuantVision Frontend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" frontend
-
 echo [INFO] Launching backend service in a new admin cmd window...
 start "QuantVision Backend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" backend
+
+echo [INFO] Waiting for backend health check...
+call :wait_for_http "%BACKEND_URL%/api/health" "Backend API" 90 || (
+    echo [ERROR] Backend did not become ready in time.
+    echo         Please check the "QuantVision Backend" window for details.
+    exit /b 1
+)
+
+echo [INFO] Launching frontend service in a new admin cmd window...
+start "QuantVision Frontend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" frontend
 
 echo.
 echo [INFO] Frontend window: QuantVision Frontend
@@ -188,3 +195,28 @@ for /f "tokens=5" %%I in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING" 2
 )
 endlocal
 exit /b 0
+
+:wait_for_http
+setlocal
+set "TARGET_URL=%~1"
+set "LABEL=%~2"
+set "MAX_WAIT=%~3"
+if not defined MAX_WAIT set "MAX_WAIT=60"
+set /a "ELAPSED=0"
+
+:wait_for_http_loop
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "try { $response = Invoke-WebRequest -Uri '%TARGET_URL%' -UseBasicParsing -TimeoutSec 3; if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 (
+    endlocal
+    exit /b 0
+)
+
+if %ELAPSED% GEQ %MAX_WAIT% (
+    endlocal
+    exit /b 1
+)
+
+timeout /t 1 /nobreak >nul
+set /a "ELAPSED+=1"
+goto wait_for_http_loop

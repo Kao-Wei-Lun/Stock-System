@@ -153,6 +153,10 @@ function getWsBase() {
   return `${protocol}//${window.location.host}`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function normalizeKlineDisplayMode(mode) {
   return ["day", "week", "month", "quarter"].includes(mode) ? mode : "day";
 }
@@ -488,15 +492,39 @@ export function useDashboard() {
   }
 
   async function apiFetch(path, options = {}) {
-    const start = Date.now();
-    const response = await fetch(`${apiBase}${path}`, options);
-    const contentType = response.headers.get("content-type") || "";
-    const payload = contentType.includes("application/json") ? await response.json() : null;
-    latency.value = `${Date.now() - start}ms`;
-    if (!response.ok) {
-      throw new Error(payload?.detail || `HTTP ${response.status}`);
+    const {
+      retries = 0,
+      retryDelayMs = 1200,
+      ...fetchOptions
+    } = options;
+
+    let attempt = 0;
+    let lastError = null;
+    while (attempt <= retries) {
+      const start = Date.now();
+      try {
+        const response = await fetch(`${apiBase}${path}`, fetchOptions);
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json") ? await response.json() : null;
+        latency.value = `${Date.now() - start}ms`;
+        if (!response.ok) {
+          const error = new Error(payload?.detail || `HTTP ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+        return payload;
+      } catch (error) {
+        lastError = error;
+        const isNetworkError = error instanceof TypeError;
+        const isRetryableHttp = [502, 503, 504].includes(error?.status);
+        if (attempt >= retries || (!isNetworkError && !isRetryableHttp)) {
+          throw error;
+        }
+        await sleep(retryDelayMs);
+      }
+      attempt += 1;
     }
-    return payload;
+    throw lastError;
   }
 
   function applyQuote(data) {
@@ -602,7 +630,7 @@ export function useDashboard() {
     watchlistLoading.value = true;
     watchlistError.value = false;
     try {
-      const payload = await apiFetch("/api/watchlist");
+      const payload = await apiFetch("/api/watchlist", { retries: 12, retryDelayMs: 1500 });
       watchlistGroups.value = payload.groups || [];
       if (
         !activeWatchGroupId.value
@@ -851,7 +879,7 @@ export function useDashboard() {
 
   async function loadQuote(ticker = currentTicker.value) {
     try {
-      const data = await apiFetch(`/api/quote/${normalizeTicker(ticker)}`);
+      const data = await apiFetch(`/api/quote/${normalizeTicker(ticker)}`, { retries: 6, retryDelayMs: 1200 });
       if (data) applyQuote(data);
     } catch (error) {
       console.error(error);
@@ -868,7 +896,10 @@ export function useDashboard() {
     chartLoading.value = true;
     loadingMessage.value = `載入 ${normalized} K 線...`;
     try {
-      const data = await apiFetch(`/api/kline/${normalized}?period=${fetchPeriod}&interval=${resolvedInterval}`);
+      const data = await apiFetch(`/api/kline/${normalized}?period=${fetchPeriod}&interval=${resolvedInterval}`, {
+        retries: 12,
+        retryDelayMs: 1500,
+      });
       rawOhlcData.value = data.data || [];
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
