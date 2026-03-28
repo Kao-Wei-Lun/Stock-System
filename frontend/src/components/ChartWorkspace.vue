@@ -67,6 +67,10 @@
       <button class="tool-btn" :class="{ active: chartMode === 'line' }" @click="setChartMode('line')">折線</button>
       <button class="tool-btn" :class="{ active: chartMode === 'area' }" @click="setChartMode('area')">面積</button>
 
+      <button class="tool-btn" :class="{ active: isFullscreen }" @click="$emit('toggle-fullscreen')">
+        {{ isFullscreen ? "退出全螢幕" : "K線全螢幕" }}
+      </button>
+
       <div class="tool-sep"></div>
 
       <span class="tool-label">版面：</span>
@@ -318,6 +322,7 @@ const props = defineProps({
   syncingCurrent: { type: Boolean, required: true },
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
+  isFullscreen: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -343,6 +348,7 @@ const emit = defineEmits([
   "clear-compare",
   "set-compare-mode",
   "set-chart-layout",
+  "toggle-fullscreen",
 ]);
 
 const chartAreaRef = ref(null);

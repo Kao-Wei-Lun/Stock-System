@@ -38,72 +38,80 @@
         @select-ticker="handleSelectTicker"
       />
 
-      <ChartWorkspace
-        :current-ticker="currentTicker"
-        :current-name="currentName"
-        :quote="quote"
-        :active-tool="activeTool"
-        :active-panels="activePanels"
-        :chart-layout="chartLayout"
-        :loading="chartLoading"
-        :loading-message="loadingMessage"
-        :crosshair="crosshair"
-        :ohlc-data="ohlcData"
-        :active-ind="activeInd"
-        :indicator-settings="indicatorSettings"
-        :drawings="drawings"
-        :selected-drawing-id="selectedDrawingId"
-        :workspace-presets="workspacePresets"
-        :active-workspace-preset-id="activeWorkspacePresetId"
-        :syncing-current="syncingCurrent"
-        :compare-series="compareSeries"
-        :comparison-mode="comparisonMode"
-        @set-tool="setTool"
-        @add-signal="addSignal"
-        @clear-drawings="clearDrawings"
-        @remove-last-drawing="removeLastDrawing"
-        @sync-current="syncCurrentTicker"
-        @add-horizontal-line="addHorizontalLine"
-        @add-drawing="addDrawing"
-        @select-drawing="selectDrawing"
-        @remove-drawing="removeDrawing"
-        @update-drawing="updateDrawing"
-        @toggle-drawing-visibility="toggleDrawingVisibility"
-        @toggle-drawing-lock="toggleDrawingLock"
-        @save-workspace="saveWorkspacePreset"
-        @load-workspace="loadWorkspacePreset"
-        @delete-workspace="deleteWorkspacePreset"
-        @update-crosshair="updateCrosshair"
-        @hide-crosshair="hideCrosshair"
-        @add-compare="addCompareTicker"
-        @remove-compare="removeCompareTicker"
-        @clear-compare="clearCompareTickers"
-        @set-compare-mode="setComparisonMode"
-        @set-chart-layout="setChartLayout"
-      />
+      <div
+        ref="workspaceStageRef"
+        class="workspace-stage"
+        :class="{ 'is-pseudo-fullscreen': pseudoFullscreen }"
+      >
+        <ChartWorkspace
+          :current-ticker="currentTicker"
+          :current-name="currentName"
+          :quote="quote"
+          :active-tool="activeTool"
+          :active-panels="activePanels"
+          :chart-layout="chartLayout"
+          :loading="chartLoading"
+          :loading-message="loadingMessage"
+          :crosshair="crosshair"
+          :ohlc-data="ohlcData"
+          :active-ind="activeInd"
+          :indicator-settings="indicatorSettings"
+          :drawings="drawings"
+          :selected-drawing-id="selectedDrawingId"
+          :workspace-presets="workspacePresets"
+          :active-workspace-preset-id="activeWorkspacePresetId"
+          :syncing-current="syncingCurrent"
+          :compare-series="compareSeries"
+          :comparison-mode="comparisonMode"
+          :is-fullscreen="chartFullscreen"
+          @set-tool="setTool"
+          @add-signal="addSignal"
+          @clear-drawings="clearDrawings"
+          @remove-last-drawing="removeLastDrawing"
+          @sync-current="syncCurrentTicker"
+          @add-horizontal-line="addHorizontalLine"
+          @add-drawing="addDrawing"
+          @select-drawing="selectDrawing"
+          @remove-drawing="removeDrawing"
+          @update-drawing="updateDrawing"
+          @toggle-drawing-visibility="toggleDrawingVisibility"
+          @toggle-drawing-lock="toggleDrawingLock"
+          @save-workspace="saveWorkspacePreset"
+          @load-workspace="loadWorkspacePreset"
+          @delete-workspace="deleteWorkspacePreset"
+          @update-crosshair="updateCrosshair"
+          @hide-crosshair="hideCrosshair"
+          @add-compare="addCompareTicker"
+          @remove-compare="removeCompareTicker"
+          @clear-compare="clearCompareTickers"
+          @set-compare-mode="setComparisonMode"
+          @set-chart-layout="setChartLayout"
+          @toggle-fullscreen="toggleChartFullscreen"
+        />
 
-      <RightSidebar
-        :right-tab="rightTab"
-        :indicator-snapshot="indicatorSnapshot"
-        :active-ind="activeInd"
-        :active-panels="activePanels"
-        :indicator-settings="indicatorSettings"
-        :alerts="alerts"
-        :backtest-form="backtestForm"
-        :backtest-result="backtestResult"
-        :db-stats="dbStats"
-        :db-stats-error="dbStatsError"
-        :syncing-all="syncingAll"
-        @set-right-tab="setRightTab"
-        @toggle-indicator="toggleIndicator"
-        @toggle-panel="togglePanel"
-        @update-indicator-setting="updateIndicatorSetting"
-        @apply-indicator-preset="applyIndicatorPreset"
-        @open-alert-modal="openAlertModal"
-        @update-backtest-field="handleBacktestField"
-        @run-backtest="runBacktest"
-        @sync-all="syncAll"
-      />
+        <RightSidebar
+          :right-tab="rightTab"
+          :indicator-snapshot="indicatorSnapshot"
+          :active-ind="activeInd"
+          :active-panels="activePanels"
+          :indicator-settings="indicatorSettings"
+          :alerts="alerts"
+          :backtest-form="backtestForm"
+          :backtest-result="backtestResult"
+          :db-stats="dbStats"
+          :db-stats-error="dbStatsError"
+          :syncing-all="syncingAll"
+          @set-right-tab="setRightTab"
+          @toggle-indicator="toggleIndicator"
+          @toggle-panel="togglePanel"
+          @update-indicator-setting="updateIndicatorSetting"
+          @apply-indicator-preset="applyIndicatorPreset"
+          @open-alert-modal="openAlertModal"
+          @update-backtest-field="handleBacktestField"
+          @run-backtest="runBacktest"
+          @sync-all="syncAll"
+        />
+      </div>
     </div>
 
     <StatusBar
@@ -127,6 +135,8 @@
 </template>
 
 <script setup>
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+
 import AlertModal from "./components/AlertModal.vue";
 import ChartWorkspace from "./components/ChartWorkspace.vue";
 import DashboardTopbar from "./components/DashboardTopbar.vue";
@@ -135,6 +145,10 @@ import RightSidebar from "./components/RightSidebar.vue";
 import StatusBar from "./components/StatusBar.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
 import { useDashboard } from "./composables/useDashboard";
+
+const workspaceStageRef = ref(null);
+const chartFullscreen = ref(false);
+const pseudoFullscreen = ref(false);
 
 const {
   timeframeOptions,
@@ -236,6 +250,48 @@ const {
   runBacktest,
 } = useDashboard();
 
+function syncChartFullscreenState() {
+  chartFullscreen.value = pseudoFullscreen.value || document.fullscreenElement === workspaceStageRef.value;
+  nextTick(() => {
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
+async function toggleChartFullscreen() {
+  const stage = workspaceStageRef.value;
+  if (!stage) return;
+
+  if (document.fullscreenEnabled && typeof stage.requestFullscreen === "function") {
+    try {
+      if (document.fullscreenElement === stage) {
+        await document.exitFullscreen();
+      } else {
+        pseudoFullscreen.value = false;
+        await stage.requestFullscreen();
+      }
+      return;
+    } catch (error) {
+      pseudoFullscreen.value = !pseudoFullscreen.value;
+      syncChartFullscreenState();
+    }
+  }
+
+  pseudoFullscreen.value = !pseudoFullscreen.value;
+  syncChartFullscreenState();
+}
+
+function handleFullscreenChange() {
+  if (pseudoFullscreen.value) return;
+  syncChartFullscreenState();
+}
+
+function handleWindowKeydown(event) {
+  if (event.key === "Escape" && pseudoFullscreen.value) {
+    pseudoFullscreen.value = false;
+    syncChartFullscreenState();
+  }
+}
+
 function handleSelectTicker(item) {
   if (!item) return;
   selectTicker(item.ticker, item.name || item.ticker);
@@ -254,6 +310,16 @@ function handleBacktestField(payload) {
   if (!payload?.key) return;
   updateBacktestField(payload.key, payload.value);
 }
+
+onMounted(() => {
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+  window.addEventListener("keydown", handleWindowKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  window.removeEventListener("keydown", handleWindowKeydown);
+});
 </script>
 
 <style>

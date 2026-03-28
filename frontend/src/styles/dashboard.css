@@ -42,6 +42,15 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 
 /* ─ MAIN ─ */
 .main{display:flex;flex:1;overflow:hidden;}
+.workspace-stage{display:flex;flex:1;min-width:0;overflow:hidden;background:var(--bg);}
+.workspace-stage:fullscreen{width:100vw;height:100vh;}
+.workspace-stage:fullscreen,
+.workspace-stage.is-pseudo-fullscreen{display:flex;overflow:hidden;background:var(--bg);}
+.workspace-stage.is-pseudo-fullscreen{position:fixed;inset:0;z-index:1400;}
+.workspace-stage:fullscreen .center,
+.workspace-stage:fullscreen .right-panel,
+.workspace-stage.is-pseudo-fullscreen .center,
+.workspace-stage.is-pseudo-fullscreen .right-panel{height:100%;max-height:none;}
 
 /* ─ LEFT ─ */
 .left-panel{width:280px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
