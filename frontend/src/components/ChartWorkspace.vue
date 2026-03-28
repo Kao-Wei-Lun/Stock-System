@@ -40,6 +40,8 @@
       <div class="tool-sep"></div>
 
       <span class="tool-label">檢視：</span>
+      <button class="tool-btn" :disabled="!canGoBackHistory" @click="goHistoryBack">↶ 返回</button>
+      <button class="tool-btn" :disabled="!canGoForwardHistory" @click="goHistoryForward">↷ 前進</button>
       <button class="tool-btn" :disabled="!canPanLeft" @click="panLeft">← 左移</button>
       <button class="tool-btn" :disabled="!canPanRight" @click="panRight">→ 右移</button>
       <button class="tool-btn" :disabled="!canZoomIn" @click="zoomIn">＋ 放大</button>
@@ -53,6 +55,8 @@
       <button class="tool-btn" @click="zoomYIn">Y＋</button>
       <button class="tool-btn" @click="zoomYOut">Y－</button>
       <button class="tool-btn" :disabled="!canResetYScale" @click="resetYScale">Y 自動</button>
+      <button class="tool-btn" :class="{ active: priceScaleMode === 'linear' }" @click="setPriceScaleMode('linear')">線性</button>
+      <button class="tool-btn" :class="{ active: priceScaleMode === 'log' }" :disabled="!canUseLogScale" @click="setPriceScaleMode('log')">對數</button>
 
       <div class="tool-sep"></div>
 
@@ -74,6 +78,7 @@
       <div class="meta-chip" :class="visibleChangeClass">{{ visibleChangeLabel }}</div>
       <div class="meta-chip">{{ zoomLabel }}</div>
       <div class="meta-chip">{{ yScaleLabel }}</div>
+      <div class="meta-chip">{{ priceScaleModeLabel }}</div>
       <div class="meta-chip is-hint">{{ interactionHint }}</div>
     </div>
 
@@ -153,7 +158,6 @@
 import { computed, ref } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
-
 import { useChartEngine } from "../composables/useChartEngine";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
 
@@ -201,6 +205,7 @@ const compareInput = ref("");
 
 const {
   chartMode,
+  priceScaleMode,
   canvasClass,
   visibleRangeLabel,
   visibleBarsLabel,
@@ -208,19 +213,26 @@ const {
   visibleChangeClass,
   zoomLabel,
   yScaleLabel,
+  priceScaleModeLabel,
   interactionHint,
   canPanLeft,
   canPanRight,
   canZoomIn,
   canZoomOut,
+  canUseLogScale,
+  canGoBackHistory,
+  canGoForwardHistory,
   canResetYScale,
   setChartMode,
+  setPriceScaleMode,
   zoomIn,
   zoomOut,
   zoomYIn,
   zoomYOut,
   panLeft,
   panRight,
+  goHistoryBack,
+  goHistoryForward,
   jumpToLatest,
   resetView,
   resetYScale,

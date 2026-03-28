@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { buildIndicatorSnapshot, runBacktestSimulation } from "../utils/indicatorUtils";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
@@ -13,6 +13,28 @@ const TIMEFRAME_OPTIONS = [
 ];
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
+const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
+const DEFAULT_ACTIVE_IND = { ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false };
+const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false };
+const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
+
+function isBrowser() {
+  return typeof window !== "undefined";
+}
+
+function readDashboardPrefs() {
+  if (!isBrowser()) return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(DASHBOARD_PREFS_KEY) || "{}");
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeDashboardPrefs(value) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(DASHBOARD_PREFS_KEY, JSON.stringify(value));
+}
 
 function getBackendTarget() {
   return (import.meta.env.VITE_BACKEND_TARGET || "http://127.0.0.1:8001").replace(/\/$/, "");
@@ -44,16 +66,26 @@ export function useDashboard() {
   const apiBase = getApiBase();
   const wsUrl = `${getWsBase()}/ws`;
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
+  const storedPrefs = readDashboardPrefs();
+  const storedTimeframe = TIMEFRAME_OPTIONS.find(
+    (option) => option.tf === storedPrefs.currentPeriod && option.iv === storedPrefs.currentInterval,
+  );
+  const initialTool = TOOL_OPTIONS.includes(storedPrefs.activeTool) ? storedPrefs.activeTool : "cursor";
+  const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
   const searchQuery = ref("");
   const searchResults = ref([]);
   const searchOpen = ref(false);
   const watchlistGroups = ref([]);
-  const activeWatchGroupId = ref(null);
-  const compareTickers = ref([]);
+  const activeWatchGroupId = ref(Number.isFinite(storedPrefs.activeWatchGroupId) ? storedPrefs.activeWatchGroupId : null);
+  const compareTickers = ref(
+    Array.isArray(storedPrefs.compareTickers)
+      ? storedPrefs.compareTickers.map((ticker) => normalizeTicker(ticker)).filter(Boolean)
+      : [],
+  );
   const compareSeries = ref([]);
-  const comparisonMode = ref("percent");
+  const comparisonMode = ref(initialComparisonMode);
   const watchlist = computed(() =>
     watchlistGroups.value.flatMap((group) =>
       (group.items || []).map((item) => ({
@@ -65,12 +97,12 @@ export function useDashboard() {
   );
   const watchlistLoading = ref(true);
   const watchlistError = ref(false);
-  const leftTab = ref("watch");
-  const rightTab = ref("indicators");
-  const currentTicker = ref("AAPL");
+  const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
+  const rightTab = ref(["indicators", "alerts", "backtest", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
+  const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
-  const currentPeriod = ref("1y");
-  const currentInterval = ref("1d");
+  const currentPeriod = ref(storedTimeframe?.tf || "1y");
+  const currentInterval = ref(storedTimeframe?.iv || "1d");
   const chartLoading = ref(true);
   const loadingMessage = ref("正在載入資料...");
   const ohlcData = ref([]);
@@ -86,7 +118,7 @@ export function useDashboard() {
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
   const alertModalOpen = ref(false);
-  const activeTool = ref("cursor");
+  const activeTool = ref(initialTool);
   const backtestResult = ref(null);
 
   const quote = reactive({
@@ -102,8 +134,8 @@ export function useDashboard() {
   });
 
   const marketStatus = reactive({ tseOpen: false, hkOpen: false });
-  const activeInd = reactive({ ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false });
-  const activePanels = reactive({ rsi: true, macd: false, stoch: false });
+  const activeInd = reactive({ ...DEFAULT_ACTIVE_IND, ...(storedPrefs.activeInd || {}) });
+  const activePanels = reactive({ ...DEFAULT_ACTIVE_PANELS, ...(storedPrefs.activePanels || {}) });
   const crosshair = reactive({
     visible: false,
     date: "—",
@@ -128,6 +160,10 @@ export function useDashboard() {
   const activeWatchGroup = computed(
     () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
   );
+
+  if (storedPrefs.currentName) {
+    currentName.value = storedPrefs.currentName;
+  }
 
   let ws = null;
   let wsReconnectTimer = null;
@@ -782,6 +818,27 @@ export function useDashboard() {
     marketStatus.tseOpen = minutesOfDay >= 9 * 60 && minutesOfDay < 13 * 60 + 30 && weekday >= 1 && weekday <= 5;
     marketStatus.hkOpen = minutesOfDay >= 9 * 60 + 30 && minutesOfDay < 16 * 60 && weekday >= 1 && weekday <= 5;
   }
+
+  const persistedDashboardState = computed(() => ({
+    currentTicker: currentTicker.value,
+    currentName: currentName.value,
+    currentPeriod: currentPeriod.value,
+    currentInterval: currentInterval.value,
+    activeWatchGroupId: activeWatchGroupId.value,
+    compareTickers: compareTickers.value,
+    comparisonMode: comparisonMode.value,
+    leftTab: leftTab.value,
+    rightTab: rightTab.value,
+    activeTool: activeTool.value,
+    activeInd: { ...activeInd },
+    activePanels: { ...activePanels },
+  }));
+
+  watch(
+    persistedDashboardState,
+    (value) => writeDashboardPrefs(value),
+    { deep: true },
+  );
 
   onMounted(async () => {
     updateClock();

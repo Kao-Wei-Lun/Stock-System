@@ -16,13 +16,32 @@ const DEFAULT_VISIBLE_BARS = 90;
 const MIN_VISIBLE_BARS = 20;
 const PAN_STEP_RATIO = 0.18;
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+const AUTO_Y_PADDING_RATIO = 0.08;
+const AUTO_Y_MIN_PADDING_RATIO = 0.02;
+const VIEW_HISTORY_LIMIT = 80;
+const CHART_PREFS_KEY = "quantvision.chart.prefs.v1";
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const clampPositive = (value) => Math.max(value, Number.EPSILON);
 
 const getDpr = () => window.devicePixelRatio || 1;
 const canvasWidth = (canvas) => canvas.width / getDpr();
 const canvasHeight = (canvas) => canvas.height / getDpr();
 const setupCtx = (ctx) => ctx.setTransform(getDpr(), 0, 0, getDpr(), 0, 0);
+
+const readChartPrefs = () => {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(CHART_PREFS_KEY) || "{}");
+  } catch (error) {
+    return {};
+  }
+};
+
+const writeChartPrefs = (value) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CHART_PREFS_KEY, JSON.stringify(value));
+};
 
 const drawLine = (ctx, values, xAt, scale, color, lineWidth = 1.5, dash = []) => {
   ctx.strokeStyle = color;
@@ -83,8 +102,11 @@ export function useChartEngine({
   props,
   emit,
 }) {
-  const chartMode = ref("candles");
+  const storedChartPrefs = readChartPrefs();
+  const chartMode = ref(["candles", "line", "area"].includes(storedChartPrefs.chartMode) ? storedChartPrefs.chartMode : "candles");
+  const priceScaleMode = ref(storedChartPrefs.priceScaleMode === "log" ? "log" : "linear");
   let renderFrame = 0;
+  let historyCommitTimer = 0;
   const dragMode = ref("none");
   const viewport = reactive({
     startIndex: 0,
@@ -106,6 +128,10 @@ export function useChartEngine({
   });
   const draftDrawing = ref(null);
   const isDragging = ref(false);
+  const viewHistory = ref([]);
+  const viewHistoryIndex = ref(-1);
+  const interactionStartView = ref(null);
+  const applyingHistory = ref(false);
   const selectionBox = reactive({
     active: false,
     startX: 0,
@@ -183,6 +209,13 @@ export function useChartEngine({
   const canZoomOut = computed(
     () => visibleData.value.length < props.ohlcData.length,
   );
+  const canUseLogScale = computed(() =>
+    visibleData.value.every((row) => Number(row.low ?? row.close ?? 0) > 0),
+  );
+  const canGoBackHistory = computed(() => viewHistoryIndex.value > 0);
+  const canGoForwardHistory = computed(
+    () => viewHistoryIndex.value >= 0 && viewHistoryIndex.value < viewHistory.value.length - 1,
+  );
   const yScaleLabel = computed(() => {
     if (!visibleData.value.length) return "Y 軸 自動";
     const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
@@ -190,6 +223,9 @@ export function useChartEngine({
     const modeLabel = yAxis.mode === "manual" ? "Y 軸 手動" : "Y 軸 自動";
     return `${modeLabel} ${fmtPrice(min)} - ${fmtPrice(max)}`;
   });
+  const priceScaleModeLabel = computed(
+    () => `價格尺度 ${priceScaleMode.value === "log" ? "對數" : "線性"}`,
+  );
   const canResetYScale = computed(() => yAxis.mode === "manual");
   const interactionHintText = computed(() => {
     if (selectionBox.active) return "框選中：放開滑鼠後縮放到所選區間";
@@ -245,7 +281,7 @@ export function useChartEngine({
     };
   };
 
-  const getVisiblePriceScale = (data, extras = []) => {
+  const getVisiblePriceScale = (data, extras = [], scaleMode = "linear") => {
     const pricePoints = data.flatMap((row) => [row.high, row.low]);
     extras.forEach((value) => {
       if (Array.isArray(value)) {
@@ -261,21 +297,49 @@ export function useChartEngine({
       return { min: 0, max: 1 };
     }
 
-    let min = Math.min(...pricePoints);
-    let max = Math.max(...pricePoints);
-    if (min === max) {
-      min *= 0.995;
-      max *= 1.005;
+    const rawMin = Math.min(...pricePoints);
+    const rawMax = Math.max(...pricePoints);
+    let min = rawMin;
+    let max = rawMax;
+
+    if (rawMin === rawMax) {
+      const singlePad = Math.max(Math.abs(rawMin) * 0.06, 0.5);
+      min = rawMin - singlePad;
+      max = rawMax + singlePad;
     } else {
-      min *= 0.998;
-      max *= 1.002;
+      const range = rawMax - rawMin;
+      const padding = Math.max(range * AUTO_Y_PADDING_RATIO, Math.abs(rawMax) * AUTO_Y_MIN_PADDING_RATIO, 0.02);
+      min = rawMin - padding;
+      max = rawMax + padding;
+    }
+
+    if (scaleMode === "log" && rawMin > 0) {
+      min = Math.max(min, rawMin * 0.55);
+      max = Math.max(max, clampPositive(rawMax));
     }
 
     return { min, max };
   };
 
-  const scaleY = (value, min, max, topPad, chartHeight) =>
-    topPad + (1 - (value - min) / (max - min || 1)) * chartHeight;
+  const scaleY = (value, min, max, topPad, chartHeight, scaleMode = "linear") => {
+    if (scaleMode === "log" && min > 0 && max > 0 && value > 0) {
+      const logMin = Math.log(clampPositive(min));
+      const logMax = Math.log(clampPositive(max));
+      const logValue = Math.log(clampPositive(value));
+      return topPad + (1 - (logValue - logMin) / (logMax - logMin || 1)) * chartHeight;
+    }
+    return topPad + (1 - (value - min) / (max - min || 1)) * chartHeight;
+  };
+
+  const invertY = (pixelY, min, max, topPad, chartHeight, scaleMode = "linear") => {
+    const ratio = 1 - (pixelY - topPad) / (chartHeight || 1);
+    if (scaleMode === "log" && min > 0 && max > 0) {
+      const logMin = Math.log(clampPositive(min));
+      const logMax = Math.log(clampPositive(max));
+      return Math.exp(logMin + ratio * (logMax - logMin));
+    }
+    return min + ratio * (max - min);
+  };
 
   const getCurrentYRange = () => {
     const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
@@ -303,20 +367,22 @@ export function useChartEngine({
     if (render) scheduleRender();
   };
 
-  const resetYScale = ({ render = true } = {}) => {
+  const resetYScale = ({ render = true, commit = true } = {}) => {
     yAxis.mode = "auto";
     yAxis.min = null;
     yAxis.max = null;
     if (render) scheduleRender();
+    if (commit) rememberViewState();
   };
 
-  const zoomY = (factor, anchorPrice = null) => {
+  const zoomY = (factor, anchorPrice = null, { commit = true } = {}) => {
     const { min, max } = getCurrentYRange();
     if (!Number.isFinite(min) || !Number.isFinite(max)) return;
     const safeAnchor = Number.isFinite(anchorPrice) ? anchorPrice : (min + max) / 2;
     const nextMin = safeAnchor - (safeAnchor - min) * factor;
     const nextMax = safeAnchor + (max - safeAnchor) * factor;
     setManualYRange(nextMin, nextMax);
+    if (commit) rememberViewState();
   };
 
   const zoomYIn = () => zoomY(0.84);
@@ -326,6 +392,15 @@ export function useChartEngine({
     const { min, max } = getCurrentYRange();
     if (!Number.isFinite(min) || !Number.isFinite(max)) return;
     setManualYRange(min + deltaPrice, max + deltaPrice, { render });
+  };
+
+  const setPriceScaleMode = (mode, { commit = true } = {}) => {
+    const nextMode = mode === "log" && canUseLogScale.value ? "log" : "linear";
+    if (nextMode === priceScaleMode.value) return;
+    priceScaleMode.value = nextMode;
+    resetYScale({ render: false, commit: false });
+    scheduleRender();
+    if (commit) rememberViewState();
   };
 
   const syncViewport = ({ anchorLatest = false } = {}) => {
@@ -353,13 +428,86 @@ export function useChartEngine({
     );
   };
 
+  const createViewSnapshot = () => ({
+    startIndex: viewport.startIndex,
+    visibleCount: viewport.visibleCount,
+    yMode: yAxis.mode,
+    yMin: yAxis.min,
+    yMax: yAxis.max,
+    priceScaleMode: priceScaleMode.value,
+  });
+
+  const sameViewSnapshot = (left, right) =>
+    !!left
+    && !!right
+    && left.startIndex === right.startIndex
+    && left.visibleCount === right.visibleCount
+    && left.yMode === right.yMode
+    && left.yMin === right.yMin
+    && left.yMax === right.yMax
+    && left.priceScaleMode === right.priceScaleMode;
+
+  const rememberViewState = () => {
+    if (applyingHistory.value || !props.ohlcData.length) return;
+    const snapshot = createViewSnapshot();
+    const currentSnapshot = viewHistory.value[viewHistoryIndex.value];
+    if (sameViewSnapshot(snapshot, currentSnapshot)) return;
+
+    const nextHistory = viewHistory.value.slice(0, viewHistoryIndex.value + 1);
+    nextHistory.push(snapshot);
+    if (nextHistory.length > VIEW_HISTORY_LIMIT) {
+      nextHistory.splice(0, nextHistory.length - VIEW_HISTORY_LIMIT);
+    }
+
+    viewHistory.value = nextHistory;
+    viewHistoryIndex.value = nextHistory.length - 1;
+  };
+
+  const queueViewStateCommit = (delay = 220) => {
+    if (historyCommitTimer) window.clearTimeout(historyCommitTimer);
+    historyCommitTimer = window.setTimeout(() => {
+      historyCommitTimer = 0;
+      rememberViewState();
+    }, delay);
+  };
+
+  const applyViewSnapshot = (snapshot) => {
+    if (!snapshot) return;
+    applyingHistory.value = true;
+    viewport.startIndex = snapshot.startIndex;
+    viewport.visibleCount = snapshot.visibleCount;
+    yAxis.mode = snapshot.yMode;
+    yAxis.min = snapshot.yMin;
+    yAxis.max = snapshot.yMax;
+    priceScaleMode.value = snapshot.priceScaleMode === "log" ? "log" : "linear";
+    syncViewport();
+    scheduleRender();
+    window.requestAnimationFrame(() => {
+      applyingHistory.value = false;
+    });
+  };
+
+  const goHistoryBack = () => {
+    if (!canGoBackHistory.value) return;
+    const nextIndex = viewHistoryIndex.value - 1;
+    viewHistoryIndex.value = nextIndex;
+    applyViewSnapshot(viewHistory.value[nextIndex]);
+  };
+
+  const goHistoryForward = () => {
+    if (!canGoForwardHistory.value) return;
+    const nextIndex = viewHistoryIndex.value + 1;
+    viewHistoryIndex.value = nextIndex;
+    applyViewSnapshot(viewHistory.value[nextIndex]);
+  };
+
   const xForAbsoluteIndex = (layout, absoluteIndex) =>
     layout.barX(absoluteIndex - viewport.startIndex);
 
   const sliceSeries = (series) =>
     series.slice(viewport.startIndex, viewport.startIndex + visibleData.value.length);
 
-  const drawGrid = (ctx, canvas, min, max, data) => {
+  const drawGrid = (ctx, canvas, min, max, data, scaleMode = "linear") => {
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
     const chartHeight = height - PAD.top - PAD.bottom;
@@ -375,7 +523,9 @@ export function useChartEngine({
       ctx.moveTo(PAD.left, y);
       ctx.lineTo(width - PAD.right, y);
       ctx.stroke();
-      const price = max - (index * (max - min)) / 5;
+      const price = scaleMode === "log" && min > 0 && max > 0
+        ? Math.exp(Math.log(clampPositive(max)) - (index * (Math.log(clampPositive(max)) - Math.log(clampPositive(min)))) / 5)
+        : max - (index * (max - min)) / 5;
       ctx.fillText(price.toFixed(2), width - PAD.right + 4, y + 3);
     }
 
@@ -515,6 +665,25 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   );
 };
 
+  const getDrawingPriceValues = (drawing) => {
+    if (!drawing) return [];
+    const viewStart = viewport.startIndex;
+    const viewEnd = viewport.startIndex + visibleData.value.length - 1;
+
+    if (drawing.type === "hline") {
+      return drawing.price != null ? [drawing.price] : [];
+    }
+
+    if (drawing.type === "trendline" || drawing.type === "fib" || drawing.type === "rect" || drawing.type === "measure") {
+      const drawingStart = Math.min(drawing.startIndex, drawing.endIndex);
+      const drawingEnd = Math.max(drawing.startIndex, drawing.endIndex);
+      if (drawingEnd < viewStart || drawingStart > viewEnd) return [];
+      return [drawing.startPrice, drawing.endPrice].filter((price) => price != null);
+    }
+
+    return [];
+  };
+
   const renderMain = () => {
     if (!mainCanvas.value || !visibleData.value.length) return;
     const canvas = mainCanvas.value;
@@ -543,11 +712,24 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const ema12 = sliceSeries(fullEma12);
     const vwap = sliceSeries(fullVwap);
     const bbSlice = fullBb.slice(viewport.startIndex, viewport.startIndex + count);
+    const overlayValues = [];
+    if (props.activeInd.ma20) overlayValues.push(ma20);
+    if (props.activeInd.ma50) overlayValues.push(ma50);
+    if (props.activeInd.ma200) overlayValues.push(ma200);
+    if (props.activeInd.ema12) overlayValues.push(ema12);
+    if (props.activeInd.vwap) overlayValues.push(vwap);
+    if (bbSlice.length) {
+      overlayValues.push(bbSlice.map((item) => item.u));
+      overlayValues.push(bbSlice.map((item) => item.l));
+      overlayValues.push(bbSlice.map((item) => item.m));
+    }
+    props.drawings.forEach((drawing) => overlayValues.push(getDrawingPriceValues(drawing)));
+    if (draftDrawing.value) overlayValues.push(getDrawingPriceValues(draftDrawing.value));
 
-    const { min: autoMin, max: autoMax } = getVisiblePriceScale(data);
+    const { min: autoMin, max: autoMax } = getVisiblePriceScale(data, overlayValues, priceScaleMode.value);
     const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : autoMin;
     const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : autoMax;
-    const scale = (value) => scaleY(value, min, max, PAD.top, chartHeight);
+    const scale = (value) => scaleY(value, min, max, PAD.top, chartHeight, priceScaleMode.value);
 
     mainMetrics.autoMin = autoMin;
     mainMetrics.autoMax = autoMax;
@@ -557,7 +739,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     mainMetrics.chartWidth = layout.width;
     mainMetrics.step = layout.step;
 
-    drawGrid(ctx, canvas, min, max, data);
+    drawGrid(ctx, canvas, min, max, data, priceScaleMode.value);
 
     if (chartMode.value === "candles") {
       data.forEach((row, index) => {
@@ -1020,7 +1202,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     );
     const absoluteIndex = viewport.startIndex + localIndex;
     const row = props.ohlcData[absoluteIndex];
-    const price = mainMetrics.max - ((y - PAD.top) / (mainMetrics.chartHeight || 1)) * (mainMetrics.max - mainMetrics.min);
+    const price = invertY(
+      y,
+      mainMetrics.min,
+      mainMetrics.max,
+      PAD.top,
+      mainMetrics.chartHeight,
+      priceScaleMode.value,
+    );
 
     return {
       x,
@@ -1037,7 +1226,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     };
   };
 
-  const panByBars = (delta) => {
+  const panByBars = (delta, { commit = true } = {}) => {
     if (!props.ohlcData.length) return;
     viewport.startIndex = clamp(
       viewport.startIndex + delta,
@@ -1045,9 +1234,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       Math.max(0, props.ohlcData.length - visibleData.value.length),
     );
     scheduleRender();
+    if (commit) rememberViewState();
   };
 
-  const zoomTo = (nextVisibleCount, anchorRatio = 0.5) => {
+  const zoomTo = (nextVisibleCount, anchorRatio = 0.5, { commit = true } = {}) => {
     if (!props.ohlcData.length) return;
     const currentVisibleCount = visibleData.value.length;
     const clampedVisibleCount = clamp(
@@ -1065,6 +1255,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       Math.max(0, props.ohlcData.length - clampedVisibleCount),
     );
     scheduleRender();
+    if (commit) rememberViewState();
   };
 
   const zoomIn = () => zoomTo(Math.round(visibleData.value.length * 0.8));
@@ -1074,6 +1265,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   const jumpToLatest = () => {
     syncViewport({ anchorLatest: true });
     scheduleRender();
+    rememberViewState();
   };
   const resetView = () => {
     viewport.visibleCount = DEFAULT_VISIBLE_BARS;
@@ -1082,8 +1274,9 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     isDragging.value = false;
     selectionBox.active = false;
     syncViewport({ anchorLatest: true });
-    resetYScale({ render: false });
+    resetYScale({ render: false, commit: false });
     scheduleRender();
+    rememberViewState();
   };
   const setChartMode = (mode) => {
     chartMode.value = mode;
@@ -1156,10 +1349,22 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     }
 
     if (boxHeight >= 12) {
-      const max = mainMetrics.max;
-      const min = mainMetrics.min;
-      const priceTop = max - ((topY - PAD.top) / Math.max(mainMetrics.chartHeight, 1)) * (max - min);
-      const priceBottom = max - ((bottomY - PAD.top) / Math.max(mainMetrics.chartHeight, 1)) * (max - min);
+      const priceTop = invertY(
+        topY,
+        mainMetrics.min,
+        mainMetrics.max,
+        PAD.top,
+        mainMetrics.chartHeight,
+        priceScaleMode.value,
+      );
+      const priceBottom = invertY(
+        bottomY,
+        mainMetrics.min,
+        mainMetrics.max,
+        PAD.top,
+        mainMetrics.chartHeight,
+        priceScaleMode.value,
+      );
       setManualYRange(priceBottom, priceTop, { render: false });
       changed = true;
     }
@@ -1174,6 +1379,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     if (!info) return;
 
     if (props.activeTool === "boxzoom") {
+      interactionStartView.value = createViewSnapshot();
       selectionBox.active = true;
       selectionBox.startX = info.x;
       selectionBox.startY = info.y;
@@ -1186,6 +1392,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     if (props.activeTool !== "cursor") return;
 
+    interactionStartView.value = createViewSnapshot();
     isDragging.value = true;
     if (info.isOnPriceAxis) {
       dragMode.value = "pan-y";
@@ -1257,9 +1464,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   const onMouseUp = () => {
     const hadSelection = selectionBox.active;
     const changed = hadSelection ? finishSelectionZoom() : false;
+    const startSnapshot = interactionStartView.value;
     dragMode.value = "none";
     isDragging.value = false;
+    interactionStartView.value = null;
     emit("hide-crosshair");
+    if (startSnapshot && !sameViewSnapshot(startSnapshot, createViewSnapshot())) {
+      rememberViewState();
+    }
     if (changed || hadSelection) scheduleRender();
   };
 
@@ -1268,7 +1480,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const info = getPointerData(event);
     if (!info) return;
     if (info.isOnPriceAxis) {
-      zoomY(event.deltaY < 0 ? 0.88 : 1.14, info.price);
+      zoomY(event.deltaY < 0 ? 0.88 : 1.14, info.price, { commit: false });
+      queueViewStateCommit();
       return;
     }
     const rect = mainCanvas.value.getBoundingClientRect();
@@ -1276,7 +1489,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const localX = clamp(event.clientX - rect.left, PAD.left, rect.width - PAD.right);
     const anchorRatio = clamp((localX - PAD.left) / Math.max(chartWidth, 1), 0, 1);
     const factor = event.deltaY < 0 ? 0.85 : 1.15;
-    zoomTo(Math.round(visibleData.value.length * factor), anchorRatio);
+    zoomTo(Math.round(visibleData.value.length * factor), anchorRatio, { commit: false });
+    queueViewStateCommit();
   };
 
   const onChartClick = (event) => {
@@ -1338,7 +1552,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   onMounted(() => {
     syncViewport({ anchorLatest: true });
-    nextTick(() => resizeAll());
+    nextTick(() => {
+      resizeAll();
+      rememberViewState();
+    });
     window.addEventListener("resize", handleResize);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
@@ -1346,6 +1563,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   onBeforeUnmount(() => {
     if (renderFrame) cancelAnimationFrame(renderFrame);
+    if (historyCommitTimer) window.clearTimeout(historyCommitTimer);
     window.removeEventListener("resize", handleResize);
     window.removeEventListener("mousemove", handleWindowMouseMove);
     window.removeEventListener("mouseup", handleWindowMouseUp);
@@ -1370,8 +1588,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       selectionBox.active = false;
       dragMode.value = "none";
       isDragging.value = false;
-      resetYScale({ render: false });
+      viewHistory.value = [];
+      viewHistoryIndex.value = -1;
+      resetYScale({ render: false, commit: false });
       scheduleRender();
+      nextTick(() => rememberViewState());
     },
   );
 
@@ -1405,8 +1626,27 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   );
 
   watch(
+    () => canUseLogScale.value,
+    (nextValue) => {
+      if (!nextValue && priceScaleMode.value === "log") {
+        setPriceScaleMode("linear");
+      }
+    },
+  );
+
+  watch(
     () => [viewport.startIndex, viewport.visibleCount, chartMode.value],
     () => scheduleRender(),
+  );
+
+  watch(
+    () => [chartMode.value, priceScaleMode.value],
+    () => {
+      writeChartPrefs({
+        chartMode: chartMode.value,
+        priceScaleMode: priceScaleMode.value,
+      });
+    },
   );
 
   watch(
@@ -1436,6 +1676,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   return {
     chartMode,
+    priceScaleMode,
     canvasClass: resolvedCanvasClass,
     visibleRangeLabel,
     visibleBarsLabel,
@@ -1443,19 +1684,26 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     visibleChangeClass,
     zoomLabel,
     yScaleLabel,
+    priceScaleModeLabel,
     interactionHint: interactionHintText,
     canPanLeft,
     canPanRight,
     canZoomIn,
     canZoomOut,
+    canUseLogScale,
+    canGoBackHistory,
+    canGoForwardHistory,
     canResetYScale,
     setChartMode,
+    setPriceScaleMode,
     zoomIn,
     zoomOut,
     zoomYIn,
     zoomYOut,
     panLeft,
     panRight,
+    goHistoryBack,
+    goHistoryForward,
     jumpToLatest,
     resetView,
     resetYScale,
