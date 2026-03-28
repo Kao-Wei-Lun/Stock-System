@@ -13,10 +13,16 @@ const TIMEFRAME_OPTIONS = [
   { tf: "1mo", iv: "1d", label: "1M" },
   { tf: "3mo", iv: "1d", label: "3M" },
   { tf: "1y", iv: "1d", label: "1Y" },
-  { tf: "2y", iv: "1wk", label: "2Y" },
-  { tf: "5y", iv: "1mo", label: "5Y" },
-  { tf: "10y", iv: "1wk", label: "10Y" },
+  { tf: "2y", iv: "1d", label: "2Y" },
+  { tf: "5y", iv: "1d", label: "5Y" },
+  { tf: "10y", iv: "1d", label: "10Y" },
   { tf: "max", iv: "1d", label: "MAX" },
+];
+const KLINE_DISPLAY_OPTIONS = [
+  { key: "day", label: "日K" },
+  { key: "week", label: "週K" },
+  { key: "month", label: "月K" },
+  { key: "quarter", label: "季K" },
 ];
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
@@ -147,6 +153,80 @@ function getWsBase() {
   return `${protocol}//${window.location.host}`;
 }
 
+function normalizeKlineDisplayMode(mode) {
+  return ["day", "week", "month", "quarter"].includes(mode) ? mode : "day";
+}
+
+function resolveTimeframeInterval(period, interval) {
+  return String(period || "").toLowerCase() === "5d" ? "1h" : "1d";
+}
+
+function parseChartDate(value) {
+  if (!value) return null;
+  const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateOnly(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekStart(date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  const weekday = (result.getDay() + 6) % 7;
+  result.setDate(result.getDate() - weekday);
+  return result;
+}
+
+function getBucketStart(date, mode) {
+  if (mode === "week") return getWeekStart(date);
+  if (mode === "month") return new Date(date.getFullYear(), date.getMonth(), 1);
+  if (mode === "quarter") return new Date(date.getFullYear(), Math.floor(date.getMonth() / 3) * 3, 1);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function aggregateOhlcRows(rows, mode) {
+  if (!Array.isArray(rows) || !rows.length || mode === "day") return Array.isArray(rows) ? rows : [];
+
+  const buckets = [];
+  let current = null;
+
+  rows.forEach((row) => {
+    const date = parseChartDate(row.date);
+    if (!date) return;
+    const bucketStart = getBucketStart(date, mode);
+    const bucketKey = formatDateOnly(bucketStart);
+
+    if (!current || current.bucketKey !== bucketKey) {
+      current = {
+        bucketKey,
+        date: bucketKey,
+        open: Number(row.open ?? row.close ?? 0),
+        high: Number(row.high ?? row.close ?? 0),
+        low: Number(row.low ?? row.close ?? 0),
+        close: Number(row.close ?? row.open ?? 0),
+        volume: Number(row.volume ?? 0),
+        adj_close: Number(row.adj_close ?? row.close ?? row.open ?? 0),
+      };
+      buckets.push(current);
+      return;
+    }
+
+    current.high = Math.max(current.high, Number(row.high ?? row.close ?? current.high));
+    current.low = Math.min(current.low, Number(row.low ?? row.close ?? current.low));
+    current.close = Number(row.close ?? current.close);
+    current.adj_close = Number(row.adj_close ?? row.close ?? current.adj_close);
+    current.volume += Number(row.volume ?? 0);
+  });
+
+  return buckets;
+}
+
 export function normalizeTicker(ticker) {
   const raw = (ticker || "").trim().toUpperCase();
   if (!raw || raw.startsWith("^") || raw.includes(".") || raw.includes("-")) return raw;
@@ -160,14 +240,16 @@ export function useDashboard() {
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
   const storedPrefs = readDashboardPrefs();
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
-    (option) => option.tf === storedPrefs.currentPeriod && option.iv === storedPrefs.currentInterval,
+    (option) => option.tf === storedPrefs.currentPeriod,
   );
   const initialTool = TOOL_OPTIONS.includes(storedPrefs.activeTool) ? storedPrefs.activeTool : "cursor";
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
   const initialChartLayout = CHART_LAYOUT_OPTIONS.includes(storedPrefs.chartLayout) ? storedPrefs.chartLayout : "single";
+  const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
   const storedWorkspacePresets = readWorkspacePresets();
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
+  const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
   const searchQuery = ref("");
   const searchResults = ref([]);
   const searchOpen = ref(false);
@@ -178,7 +260,7 @@ export function useDashboard() {
       ? storedPrefs.compareTickers.map((ticker) => normalizeTicker(ticker)).filter(Boolean)
       : [],
   );
-  const compareSeries = ref([]);
+  const rawCompareSeries = ref([]);
   const comparisonMode = ref(initialComparisonMode);
   const watchlist = computed(() =>
     watchlistGroups.value.flatMap((group) =>
@@ -191,16 +273,26 @@ export function useDashboard() {
   );
   const watchlistLoading = ref(true);
   const watchlistError = ref(false);
+  const compareSeries = computed(() =>
+    rawCompareSeries.value
+      .map((series) => ({
+        ...series,
+        data: aggregateOhlcRows(series.data || [], klineDisplayMode.value),
+      }))
+      .filter((series) => (series.data || []).length),
+  );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
   const rightTab = ref(["indicators", "alerts", "backtest", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
   const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
   const currentPeriod = ref(storedTimeframe?.tf || "1y");
-  const currentInterval = ref(storedTimeframe?.iv || "1d");
+  const currentInterval = ref(resolveTimeframeInterval(storedTimeframe?.tf || "1y", storedTimeframe?.iv || "1d"));
+  const klineDisplayMode = ref(initialKlineDisplayMode);
+  const cleanChartMode = ref(Boolean(storedPrefs.cleanChartMode));
   const chartLayout = ref(initialChartLayout);
   const chartLoading = ref(true);
   const loadingMessage = ref("正在載入資料...");
-  const ohlcData = ref([]);
+  const rawOhlcData = ref([]);
   const drawings = ref([]);
   const selectedDrawingId = ref(null);
   const workspacePresets = ref(storedWorkspacePresets);
@@ -261,6 +353,7 @@ export function useDashboard() {
     tp: 10,
   });
 
+  const ohlcData = computed(() => aggregateOhlcRows(rawOhlcData.value, klineDisplayMode.value));
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
     () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
@@ -356,8 +449,8 @@ export function useDashboard() {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
     applyQuote(data);
-    if (ohlcData.value.length > 0) {
-      const last = ohlcData.value[ohlcData.value.length - 1];
+    if (rawOhlcData.value.length > 0) {
+      const last = rawOhlcData.value[rawOhlcData.value.length - 1];
       const today = new Date().toISOString().slice(0, 10);
       if (last.date === today || last.date.startsWith(today)) {
         const updated = {
@@ -366,7 +459,7 @@ export function useDashboard() {
           high: data.high && data.high > last.high ? data.high : last.high,
           low: data.low && data.low < last.low ? data.low : last.low,
         };
-        ohlcData.value = [...ohlcData.value.slice(0, -1), updated];
+        rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
       }
     }
     checkAlerts(data);
@@ -585,14 +678,15 @@ export function useDashboard() {
     compareTickers.value = normalizedTickers;
 
     if (!normalizedTickers.length) {
-      compareSeries.value = [];
+      rawCompareSeries.value = [];
       return;
     }
+    const resolvedInterval = resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
 
     const results = await Promise.allSettled(
       normalizedTickers.map(async (ticker, index) => {
         const payload = await apiFetch(
-          `/api/kline/${ticker}?period=${currentPeriod.value}&interval=${currentInterval.value}`,
+          `/api/kline/${ticker}?period=${currentPeriod.value}&interval=${resolvedInterval}`,
         );
         const data = payload.data || [];
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
@@ -609,7 +703,7 @@ export function useDashboard() {
       }),
     );
 
-    compareSeries.value = results
+    rawCompareSeries.value = results
       .filter((result) => result.status === "fulfilled" && result.value.data.length)
       .map((result) => result.value);
   }
@@ -644,7 +738,7 @@ export function useDashboard() {
 
   function clearCompareTickers() {
     compareTickers.value = [];
-    compareSeries.value = [];
+    rawCompareSeries.value = [];
   }
 
   function setComparisonMode(mode) {
@@ -662,14 +756,18 @@ export function useDashboard() {
 
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
     const normalized = normalizeTicker(ticker);
+    const resolvedPeriod = (period || "1y").toLowerCase();
+    const resolvedInterval = resolveTimeframeInterval(resolvedPeriod, interval);
+    currentPeriod.value = resolvedPeriod;
+    currentInterval.value = resolvedInterval;
     chartLoading.value = true;
     loadingMessage.value = `載入 ${normalized} K 線...`;
     try {
-      const data = await apiFetch(`/api/kline/${normalized}?period=${period}&interval=${interval}`);
-      ohlcData.value = data.data || [];
+      const data = await apiFetch(`/api/kline/${normalized}?period=${resolvedPeriod}&interval=${resolvedInterval}`);
+      rawOhlcData.value = data.data || [];
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
-      if (ohlcData.value.length > 0) await loadQuote(normalized);
+      if (rawOhlcData.value.length > 0) await loadQuote(normalized);
       else resetQuote();
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "載入失敗", msg: `無法取得 ${normalized} 資料`, type: "error" });
@@ -696,7 +794,7 @@ export function useDashboard() {
     compareTickers.value = compareTickers.value.filter((item) => item !== normalized);
     drawings.value = [];
     selectedDrawingId.value = null;
-    ohlcData.value = [];
+    rawOhlcData.value = [];
     crosshair.visible = false;
     wsSend({ action: "subscribe", ticker: normalized });
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
@@ -704,8 +802,12 @@ export function useDashboard() {
 
   function setTimeframe(timeframe) {
     currentPeriod.value = timeframe.tf;
-    currentInterval.value = timeframe.iv;
-    loadKline(currentTicker.value, timeframe.tf, timeframe.iv);
+    currentInterval.value = resolveTimeframeInterval(timeframe.tf, timeframe.iv);
+    loadKline(currentTicker.value, timeframe.tf, currentInterval.value);
+  }
+
+  function setKlineDisplayMode(mode) {
+    klineDisplayMode.value = normalizeKlineDisplayMode(mode);
   }
 
   function setLeftTab(tab) {
@@ -726,10 +828,12 @@ export function useDashboard() {
   }
 
   function toggleIndicator(name) {
+    cleanChartMode.value = false;
     activeInd[name] = !activeInd[name];
   }
 
   function togglePanel(name) {
+    cleanChartMode.value = false;
     activePanels[name] = !activePanels[name];
   }
 
@@ -744,6 +848,7 @@ export function useDashboard() {
   }
 
   function applyIndicatorPreset(presetName) {
+    cleanChartMode.value = false;
     const presets = {
       trend: {
         label: "趨勢模板",
@@ -934,6 +1039,23 @@ export function useDashboard() {
     });
   }
 
+  function clearIndicators() {
+    Object.keys(DEFAULT_ACTIVE_IND).forEach((key) => {
+      activeInd[key] = false;
+    });
+    activeInd.cycleMa = true;
+    Object.keys(DEFAULT_ACTIVE_PANELS).forEach((key) => {
+      activePanels[key] = false;
+    });
+    cleanChartMode.value = true;
+    pushNotification({
+      icon: "🧼",
+      title: "已清除指標",
+      msg: "目前僅保留周線、月線、季線、年線",
+      type: "success",
+    });
+  }
+
   function setTool(tool) {
     activeTool.value = tool;
   }
@@ -1064,6 +1186,8 @@ export function useDashboard() {
       currentName: currentName.value,
       currentPeriod: currentPeriod.value,
       currentInterval: currentInterval.value,
+      klineDisplayMode: klineDisplayMode.value,
+      cleanChartMode: cleanChartMode.value,
       chartLayout: chartLayout.value,
       compareTickers: [...compareTickers.value],
       comparisonMode: comparisonMode.value,
@@ -1103,7 +1227,9 @@ export function useDashboard() {
     currentTicker.value = normalizedTicker;
     currentName.value = preset.currentName || normalizedTicker;
     currentPeriod.value = preset.currentPeriod || currentPeriod.value;
-    currentInterval.value = preset.currentInterval || currentInterval.value;
+    currentInterval.value = resolveTimeframeInterval(currentPeriod.value, preset.currentInterval || currentInterval.value);
+    klineDisplayMode.value = normalizeKlineDisplayMode(preset.klineDisplayMode);
+    cleanChartMode.value = Boolean(preset.cleanChartMode);
     chartLayout.value = CHART_LAYOUT_OPTIONS.includes(preset.chartLayout) ? preset.chartLayout : "single";
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
@@ -1125,7 +1251,7 @@ export function useDashboard() {
     drawings.value = (preset.drawings || []).map((drawing) => createDrawingEntry(drawing));
     selectedDrawingId.value = null;
     activeWorkspacePresetId.value = preset.id;
-    ohlcData.value = [];
+    rawOhlcData.value = [];
     crosshair.visible = false;
     wsSend({ action: "subscribe", ticker: normalizedTicker });
     await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
@@ -1291,6 +1417,8 @@ export function useDashboard() {
     currentName: currentName.value,
     currentPeriod: currentPeriod.value,
     currentInterval: currentInterval.value,
+    klineDisplayMode: klineDisplayMode.value,
+    cleanChartMode: cleanChartMode.value,
     activeWatchGroupId: activeWatchGroupId.value,
     activeWorkspacePresetId: activeWorkspacePresetId.value,
     compareTickers: compareTickers.value,
@@ -1334,6 +1462,7 @@ export function useDashboard() {
 
   return {
     timeframeOptions,
+    klineDisplayOptions,
     searchQuery,
     searchResults,
     searchOpen,
@@ -1355,6 +1484,8 @@ export function useDashboard() {
     currentName,
     currentPeriod,
     currentInterval,
+    klineDisplayMode,
+    cleanChartMode,
     chartLayout,
     chartLoading,
     loadingMessage,
@@ -1399,6 +1530,7 @@ export function useDashboard() {
     clearCompareTickers,
     setComparisonMode,
     setTimeframe,
+    setKlineDisplayMode,
     setLeftTab,
     setActiveWatchGroup,
     setRightTab,
@@ -1408,6 +1540,7 @@ export function useDashboard() {
     togglePanel,
     updateIndicatorSetting,
     applyIndicatorPreset,
+    clearIndicators,
     setTool,
     addSignal,
     clearDrawings,

@@ -705,6 +705,9 @@ export function useChartEngine({
   };
 
   const isAuxPanelVisible = (key) => {
+    if (props.cleanChartMode) {
+      return !!props.activePanels?.[key];
+    }
     if (!props.isFullscreen && (key === "macd" || key === "stoch")) {
       return true;
     }
@@ -2081,7 +2084,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   };
 
   const renderVolume = () => {
-    if (!volumeCanvas.value || !visibleData.value.length) return;
+    if (!volumeCanvas.value || !visibleData.value.length || props.cleanChartMode) return;
     const canvas = volumeCanvas.value;
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
@@ -3295,6 +3298,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       props.activePanels.cmf,
       props.compareSeries.length,
       props.isFullscreen,
+      props.cleanChartMode,
     ],
     () => nextTick(() => resizeAll()),
   );

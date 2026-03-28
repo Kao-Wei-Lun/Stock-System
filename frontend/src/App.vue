@@ -49,6 +49,8 @@
           :quote="quote"
           :active-tool="activeTool"
           :active-panels="activePanels"
+          :kline-display-mode="klineDisplayMode"
+          :clean-chart-mode="cleanChartMode"
           :chart-layout="chartLayout"
           :loading="chartLoading"
           :loading-message="loadingMessage"
@@ -85,7 +87,9 @@
           @remove-compare="removeCompareTicker"
           @clear-compare="clearCompareTickers"
           @set-compare-mode="setComparisonMode"
+          @set-kline-display-mode="setKlineDisplayMode"
           @set-chart-layout="setChartLayout"
+          @clear-indicators="clearIndicators"
           @toggle-fullscreen="toggleChartFullscreen"
         />
 
@@ -170,6 +174,8 @@ const {
   currentName,
   currentPeriod,
   currentInterval,
+  klineDisplayMode,
+  cleanChartMode,
   chartLayout,
   chartLoading,
   loadingMessage,
@@ -214,6 +220,7 @@ const {
   clearCompareTickers,
   setComparisonMode,
   setTimeframe,
+  setKlineDisplayMode,
   setLeftTab,
   setActiveWatchGroup,
   setRightTab,
@@ -223,6 +230,7 @@ const {
   togglePanel,
   updateIndicatorSetting,
   applyIndicatorPreset,
+  clearIndicators,
   setTool,
   addSignal,
   clearDrawings,

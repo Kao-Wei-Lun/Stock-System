@@ -67,6 +67,15 @@
       <button class="tool-btn" :class="{ active: chartMode === 'line' }" @click="setChartMode('line')">折線</button>
       <button class="tool-btn" :class="{ active: chartMode === 'area' }" @click="setChartMode('area')">面積</button>
 
+      <div class="tool-sep"></div>
+
+      <span class="tool-label">K別：</span>
+      <button class="tool-btn" :class="{ active: klineDisplayMode === 'day' }" @click="$emit('set-kline-display-mode', 'day')">日K</button>
+      <button class="tool-btn" :class="{ active: klineDisplayMode === 'week' }" @click="$emit('set-kline-display-mode', 'week')">週K</button>
+      <button class="tool-btn" :class="{ active: klineDisplayMode === 'month' }" @click="$emit('set-kline-display-mode', 'month')">月K</button>
+      <button class="tool-btn" :class="{ active: klineDisplayMode === 'quarter' }" @click="$emit('set-kline-display-mode', 'quarter')">季K</button>
+      <button class="tool-btn" @click="handleClearIndicators">清指標</button>
+
       <button class="tool-btn" :class="{ active: isFullscreen }" @click="$emit('toggle-fullscreen')">
         {{ isFullscreen ? "退出全螢幕" : "K線全螢幕" }}
       </button>
@@ -134,7 +143,7 @@
       <button class="tool-btn" :disabled="!compareSeries.length" @click="$emit('clear-compare')">清空比較</button>
     </div>
 
-    <div v-if="compareSeries.length" class="compare-legend">
+    <div v-if="showComparePanel" class="compare-legend">
       <button
         v-for="series in compareSeries"
         :key="series.ticker"
@@ -272,11 +281,11 @@
       </div>
     </div>
 
-    <div v-if="compareSeries.length" class="ind-panel visible compare-panel">
+    <div v-if="showComparePanel" class="ind-panel visible compare-panel">
       <div class="ind-label-tag">COMPARE ({{ comparisonMode === "percent" ? "%" : "PRICE" }})</div>
       <canvas ref="compareCanvas"></canvas>
     </div>
-    <div class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
+    <div v-if="showVolumePanel" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">{{ rsiLabel }}</div><canvas ref="rsiCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.aroon }"><div class="ind-label-tag">{{ aroonLabel }}</div><canvas ref="aroonCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.trix }"><div class="ind-label-tag">{{ trixLabel }}</div><canvas ref="trixCanvas"></canvas></div>
@@ -308,6 +317,8 @@ const props = defineProps({
   quote: { type: Object, required: true },
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
+  klineDisplayMode: { type: String, default: "day" },
+  cleanChartMode: { type: Boolean, default: false },
   chartLayout: { type: String, default: "single" },
   loading: { type: Boolean, required: true },
   loadingMessage: { type: String, required: true },
@@ -347,7 +358,9 @@ const emit = defineEmits([
   "remove-compare",
   "clear-compare",
   "set-compare-mode",
+  "set-kline-display-mode",
   "set-chart-layout",
+  "clear-indicators",
   "toggle-fullscreen",
 ]);
 
@@ -466,8 +479,13 @@ const macdLabel = computed(
 const stochLabel = computed(
   () => `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`,
 );
-const showMacdPanel = computed(() => props.isFullscreen ? props.activePanels.macd : true);
-const showStochPanel = computed(() => props.isFullscreen ? props.activePanels.stoch : true);
+const showVolumePanel = computed(() => !props.cleanChartMode);
+const showMacdPanel = computed(() => (
+  props.cleanChartMode ? false : (props.isFullscreen ? props.activePanels.macd : true)
+));
+const showStochPanel = computed(() => (
+  props.cleanChartMode ? false : (props.isFullscreen ? props.activePanels.stoch : true)
+));
 const atrLabel = computed(() => `ATR(${props.indicatorSettings.atrPeriod})`);
 const cciLabel = computed(() => `CCI(${props.indicatorSettings.cciPeriod})`);
 const adxLabel = computed(() => `ADX(${props.indicatorSettings.adxPeriod})`);
@@ -485,6 +503,7 @@ const supportsFillOpacity = computed(() =>
   ["rect", "note"].includes(selectedDrawing.value?.type),
 );
 const supportsText = computed(() => selectedDrawing.value?.type === "note");
+const showComparePanel = computed(() => props.compareSeries.length > 0 && !props.cleanChartMode);
 const layoutPanes = computed(() => {
   if (props.chartLayout === "double") {
     return [{ key: "sync-line", title: "同步折線", mode: "line" }];
@@ -532,6 +551,11 @@ function drawingLabel(drawing) {
 function updateSelectedDrawing(patch) {
   if (!selectedDrawing.value) return;
   emit("update-drawing", selectedDrawing.value.id, patch);
+}
+
+function handleClearIndicators() {
+  setChartMode("candles");
+  emit("clear-indicators");
 }
 
 function setSyncPaneRef(key, element) {
