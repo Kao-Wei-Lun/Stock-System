@@ -147,17 +147,33 @@
         </div>
       </div>
       <div class="drawing-list">
-        <button
+        <div
           v-for="drawing in drawings"
           :key="drawing.id || drawingLabel(drawing)"
           class="drawing-chip"
-          :class="{ active: drawing.id === selectedDrawingId }"
+          :class="{ active: drawing.id === selectedDrawingId, muted: drawing.hidden, locked: drawing.locked }"
           @click="$emit('select-drawing', drawing.id)"
         >
           <span class="drawing-chip-type">{{ drawingTypeLabel(drawing.type) }}</span>
           <span class="drawing-chip-label">{{ drawingLabel(drawing) }}</span>
+          <button
+            class="drawing-chip-action"
+            :class="{ active: !drawing.hidden }"
+            :title="drawing.hidden ? '顯示物件' : '隱藏物件'"
+            @click.stop="$emit('toggle-drawing-visibility', drawing.id)"
+          >
+            {{ drawing.hidden ? "隱" : "顯" }}
+          </button>
+          <button
+            class="drawing-chip-action"
+            :class="{ active: drawing.locked }"
+            :title="drawing.locked ? '解除鎖定' : '鎖定物件'"
+            @click.stop="$emit('toggle-drawing-lock', drawing.id)"
+          >
+            {{ drawing.locked ? "鎖" : "編" }}
+          </button>
           <span class="drawing-chip-close" @click.stop="$emit('remove-drawing', drawing.id)">✕</span>
-        </button>
+        </div>
       </div>
     </div>
 
@@ -198,6 +214,8 @@
     <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">RSI(14)</div><canvas ref="rsiCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">MACD(12,26,9)</div><canvas ref="macdCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">KD Stoch(14,3)</div><canvas ref="stochCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">ATR(14)</div><canvas ref="atrCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">CCI(20)</div><canvas ref="cciCanvas"></canvas></div>
   </div>
 </template>
 
@@ -239,6 +257,8 @@ const emit = defineEmits([
   "select-drawing",
   "remove-drawing",
   "update-drawing",
+  "toggle-drawing-visibility",
+  "toggle-drawing-lock",
   "save-workspace",
   "load-workspace",
   "delete-workspace",
@@ -257,6 +277,8 @@ const compareCanvas = ref(null);
 const rsiCanvas = ref(null);
 const macdCanvas = ref(null);
 const stochCanvas = ref(null);
+const atrCanvas = ref(null);
+const cciCanvas = ref(null);
 const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
@@ -308,6 +330,8 @@ const {
   rsiCanvas,
   macdCanvas,
   stochCanvas,
+  atrCanvas,
+  cciCanvas,
   chartAreaRef,
   props,
   emit,

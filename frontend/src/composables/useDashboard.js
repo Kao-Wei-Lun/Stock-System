@@ -16,7 +16,7 @@ const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const DEFAULT_ACTIVE_IND = { ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false };
-const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false };
+const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false, atr: false, cci: false };
 const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
 let drawingIdSeed = 1;
 let workspacePresetSeed = 1;
@@ -58,6 +58,8 @@ function createDrawingEntry(drawing) {
   return {
     ...drawing,
     id: drawing.id || `drawing-${Date.now()}-${drawingIdSeed++}`,
+    hidden: Boolean(drawing.hidden),
+    locked: Boolean(drawing.locked),
   };
 }
 
@@ -746,6 +748,26 @@ export function useDashboard() {
     selectedDrawingId.value = drawingId;
   }
 
+  function toggleDrawingVisibility(drawingId) {
+    if (!drawingId) return;
+    drawings.value = drawings.value.map((item) => (
+      item.id === drawingId
+        ? { ...item, hidden: !item.hidden }
+        : item
+    ));
+    selectedDrawingId.value = drawingId;
+  }
+
+  function toggleDrawingLock(drawingId) {
+    if (!drawingId) return;
+    drawings.value = drawings.value.map((item) => (
+      item.id === drawingId
+        ? { ...item, locked: !item.locked }
+        : item
+    ));
+    selectedDrawingId.value = drawingId;
+  }
+
   function buildWorkspaceSnapshot(name) {
     return {
       id: `workspace-${Date.now()}-${workspacePresetSeed++}`,
@@ -1091,6 +1113,8 @@ export function useDashboard() {
     selectDrawing,
     removeDrawing,
     updateDrawing,
+    toggleDrawingVisibility,
+    toggleDrawingLock,
     saveWorkspacePreset,
     loadWorkspacePreset,
     deleteWorkspacePreset,

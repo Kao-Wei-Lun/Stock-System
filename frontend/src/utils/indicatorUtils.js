@@ -106,35 +106,46 @@ export const calcVWAP = (data) => {
   });
 };
 
-export const calcATR = (data, n = 14) => {
-  if (!data.length) {
-    return 0;
-  }
-  let atr = 0;
-  const start = Math.max(0, data.length - n);
-  for (let index = start; index < data.length; index += 1) {
-    const current = data[index];
-    const previous = data[index - 1] || current;
+export const calcATRSeries = (data, n = 14) => {
+  const atr = [];
+  let rollingTrSum = 0;
+
+  data.forEach((row, index) => {
+    const previous = data[index - 1] || row;
     const trueRange = Math.max(
-      current.high - current.low,
-      Math.abs(current.high - previous.close),
-      Math.abs(current.low - previous.close),
+      row.high - row.low,
+      Math.abs(row.high - previous.close),
+      Math.abs(row.low - previous.close),
     );
-    atr += trueRange / n;
-  }
+
+    if (index < n) {
+      rollingTrSum += trueRange;
+      atr.push(Number((rollingTrSum / (index + 1)).toFixed(4)));
+      return;
+    }
+
+    const previousAtr = atr[index - 1] ?? trueRange;
+    atr.push(Number((((previousAtr * (n - 1)) + trueRange) / n).toFixed(4)));
+  });
+
   return atr;
 };
 
-export const calcCCI = (data, n = 20) => {
-  if (data.length < n) {
-    return null;
-  }
-  const slice = data.slice(-n);
-  const typicalPrices = slice.map((row) => (row.high + row.low + row.close) / 3);
-  const mean = typicalPrices.reduce((sum, value) => sum + value, 0) / n;
-  const meanDeviation = typicalPrices.reduce((sum, value) => sum + Math.abs(value - mean), 0) / n;
-  return meanDeviation ? Number(((typicalPrices[typicalPrices.length - 1] - mean) / (0.015 * meanDeviation)).toFixed(2)) : null;
-};
+export const calcCCIValues = (data, n = 20) =>
+  data.map((_, index) => {
+    if (index < n - 1) return null;
+    const slice = data.slice(index - n + 1, index + 1);
+    const typicalPrices = slice.map((row) => (row.high + row.low + row.close) / 3);
+    const mean = typicalPrices.reduce((sum, value) => sum + value, 0) / n;
+    const meanDeviation = typicalPrices.reduce((sum, value) => sum + Math.abs(value - mean), 0) / n;
+    return meanDeviation
+      ? Number(((typicalPrices[typicalPrices.length - 1] - mean) / (0.015 * meanDeviation)).toFixed(2))
+      : null;
+  });
+
+export const calcATR = (data, n = 14) => calcATRSeries(data, n).at(-1) ?? 0;
+
+export const calcCCI = (data, n = 20) => calcCCIValues(data, n).at(-1) ?? null;
 
 export function buildIndicatorSnapshot(data) {
   if (!data.length) {

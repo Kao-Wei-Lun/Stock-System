@@ -1,7 +1,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
+  calcATRSeries,
   calcBB,
+  calcCCIValues,
   calcEMA,
   calcMACD,
   calcMA,
@@ -99,6 +101,8 @@ export function useChartEngine({
   rsiCanvas,
   macdCanvas,
   stochCanvas,
+  atrCanvas,
+  cciCanvas,
   chartAreaRef,
   props,
   emit,
@@ -681,6 +685,9 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   const isDrawingSelected = (drawing) =>
     !!drawing?.id && drawing.id === props.selectedDrawingId;
 
+  const isDrawingHidden = (drawing) => Boolean(drawing?.hidden);
+  const isDrawingLocked = (drawing) => Boolean(drawing?.locked);
+
   const drawSelectionHandles = (ctx, points, color = "#ffffff") => {
     ctx.save();
     ctx.fillStyle = color;
@@ -717,6 +724,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     for (let index = props.drawings.length - 1; index >= 0; index -= 1) {
       const drawing = props.drawings[index];
+      if (isDrawingHidden(drawing)) continue;
 
       if (drawing.type === "buy" || drawing.type === "sell") {
         if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + visibleData.value.length) continue;
@@ -832,6 +840,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   const startDrawingDrag = (drawing, info) => {
     if (!drawing || !info) return false;
+    if (isDrawingLocked(drawing)) {
+      emit("select-drawing", drawing.id);
+      scheduleRender();
+      return false;
+    }
     drawingDragState.drawingId = drawing.id;
     drawingDragState.mode = getDrawingEditMode(drawing, info);
     drawingDragState.startAbsoluteIndex = info.absoluteIndex;
@@ -885,7 +898,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   };
 
   const getDrawingPriceValues = (drawing) => {
-    if (!drawing) return [];
+    if (!drawing || isDrawingHidden(drawing)) return [];
     const viewStart = viewport.startIndex;
     const viewEnd = viewport.startIndex + visibleData.value.length - 1;
 
@@ -1006,13 +1019,16 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     }
 
     props.drawings.forEach((drawing) => {
+      if (isDrawingHidden(drawing)) return;
       const selected = isDrawingSelected(drawing);
+      const locked = isDrawingLocked(drawing);
       if (drawing.type === "buy" || drawing.type === "sell") {
         if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + count) return;
         const localIndex = drawing.index - viewport.startIndex;
         const x = layout.barX(localIndex);
         const color = drawing.type === "buy" ? "#00d9a3" : "#ff4d6a";
         ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
         if (selected) {
           ctx.shadowColor = color;
           ctx.shadowBlur = 12;
@@ -1030,13 +1046,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
         const color = selected ? "#ffd166" : "#f5a623";
         const y = scale(drawing.price);
         ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
         if (selected) {
           ctx.shadowColor = color;
           ctx.shadowBlur = 10;
         }
         ctx.strokeStyle = color;
         ctx.lineWidth = selected ? 1.8 : 1;
-        ctx.setLineDash(selected ? [7, 3] : [5, 3]);
+        ctx.setLineDash(locked ? [2, 4] : selected ? [7, 3] : [5, 3]);
         ctx.beginPath();
         ctx.moveTo(PAD.left, y);
         ctx.lineTo(width - PAD.right, y);
@@ -1051,38 +1068,49 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
       if (drawing.type === "vline") {
         const color = selected ? "#ffd166" : "#ff8c42";
-        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, color, selected ? [7, 2] : [5, 3]);
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, color, locked ? [2, 4] : selected ? [7, 2] : [5, 3]);
         if (selected) {
           drawSelectionHandles(ctx, [{ x: xForAbsoluteIndex(layout, drawing.index), y: PAD.top + 14 }], color);
         }
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "trendline") {
         const color = selected ? "#7be7ff" : "#00d4ff";
-        drawTrendLine(ctx, layout, drawing, scale, color, selected ? [3, 2] : []);
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        drawTrendLine(ctx, layout, drawing, scale, color, locked ? [2, 4] : selected ? [3, 2] : []);
         if (selected) {
           drawSelectionHandles(ctx, [
             { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
             { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
           ], color);
         }
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "fib") {
         const color = selected ? "#ffe082" : "#ffd166";
-        drawFib(ctx, layout, drawing, scale, width, color, selected ? [4, 2] : [6, 4]);
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        drawFib(ctx, layout, drawing, scale, width, color, locked ? [2, 4] : selected ? [4, 2] : [6, 4]);
         if (selected) {
           drawSelectionHandles(ctx, [
             { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
             { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
           ], color);
         }
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "rect") {
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
         drawRectZone(
           ctx,
           (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
@@ -1098,11 +1126,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
             { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
           ], "#c2a3ff");
         }
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "measure") {
         const color = selected ? "#7be7ff" : "#00d4ff";
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
         drawMeasureTool(
           ctx,
           (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
@@ -1117,6 +1148,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
             { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
           ], color);
         }
+        ctx.restore();
         return;
       }
     });
@@ -1403,8 +1435,114 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     drawLine(ctx, visibleD, layout.barX, scale, "#f5a623", 1);
   };
 
+  const renderAtr = () => {
+    if (!atrCanvas.value || !visibleData.value.length || !props.activePanels.atr) return;
+    const canvas = atrCanvas.value;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+    const atrSeries = calcATRSeries(props.ohlcData);
+    const visibleAtr = sliceSeries(atrSeries);
+    const values = visibleAtr.filter((value) => value != null);
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+    if (!values.length) return;
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === max) {
+      const pad = Math.max(Math.abs(max) * 0.08, 0.5);
+      min = Math.max(0, min - pad);
+      max += pad;
+    } else {
+      const pad = (max - min) * 0.12;
+      min = Math.max(0, min - pad);
+      max += pad;
+    }
+
+    const chartHeight = height - 8;
+    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    [0, 0.33, 0.66, 1].forEach((ratio) => {
+      const level = min + (max - min) * ratio;
+      const y = scale(level);
+      ctx.strokeStyle = "rgba(77,102,128,0.35)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, y);
+      ctx.lineTo(width - PAD.right, y);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(77,102,128,0.65)";
+      ctx.font = "8px JetBrains Mono";
+      ctx.fillText(level.toFixed(2), width - PAD.right + 2, y + 3);
+    });
+
+    drawArea(
+      ctx,
+      visibleAtr,
+      layout.barX,
+      scale,
+      height - 2,
+      "#ff8c42",
+      "rgba(255,140,66,0.12)",
+    );
+  };
+
+  const renderCci = () => {
+    if (!cciCanvas.value || !visibleData.value.length || !props.activePanels.cci) return;
+    const canvas = cciCanvas.value;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+    const visibleCci = sliceSeries(calcCCIValues(props.ohlcData));
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    const values = visibleCci.filter((value) => value != null);
+    if (!values.length) return;
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    let min = Math.min(-200, ...values);
+    let max = Math.max(200, ...values);
+    if (min === max) {
+      min -= 20;
+      max += 20;
+    } else {
+      const pad = (max - min) * 0.08;
+      min -= pad;
+      max += pad;
+    }
+
+    const chartHeight = height - 8;
+    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    ctx.fillStyle = "rgba(255,77,106,0.05)";
+    ctx.fillRect(PAD.left, scale(max), width - PAD.left - PAD.right, scale(100) - scale(max));
+    ctx.fillStyle = "rgba(0,217,163,0.05)";
+    ctx.fillRect(PAD.left, scale(-100), width - PAD.left - PAD.right, scale(min) - scale(-100));
+
+    [200, 100, 0, -100, -200].forEach((level) => {
+      ctx.strokeStyle = "rgba(77,102,128,0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash(level === 0 ? [4, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, scale(level));
+      ctx.lineTo(width - PAD.right, scale(level));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(77,102,128,0.65)";
+      ctx.font = "8px JetBrains Mono";
+      ctx.fillText(level, width - PAD.right + 2, scale(level) + 3);
+    });
+
+    drawLine(ctx, visibleCci, layout.barX, scale, "#9b6dff", 1.5);
+  };
+
   const clearAll = () => {
-    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value]
+    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value, atrCanvas.value, cciCanvas.value]
       .filter(Boolean)
       .forEach((canvas) => {
         const ctx = canvas.getContext("2d");
@@ -1432,6 +1570,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     renderRsi();
     renderMacd();
     renderStoch();
+    renderAtr();
+    renderCci();
   };
 
   const resizeCanvas = (canvas, element) => {
@@ -1450,6 +1590,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     resizeCanvas(rsiCanvas.value, rsiCanvas.value?.parentElement);
     resizeCanvas(macdCanvas.value, macdCanvas.value?.parentElement);
     resizeCanvas(stochCanvas.value, stochCanvas.value?.parentElement);
+    resizeCanvas(atrCanvas.value, atrCanvas.value?.parentElement);
+    resizeCanvas(cciCanvas.value, cciCanvas.value?.parentElement);
     scheduleRender();
   };
 
@@ -1653,7 +1795,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       const hitDrawing = findDrawingAtPoint(info);
       if (hitDrawing) {
         interactionStartView.value = createViewSnapshot();
-        if (startDrawingDrag(hitDrawing, info)) return;
+        startDrawingDrag(hitDrawing, info);
+        return;
       }
     }
 
@@ -1970,7 +2113,14 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   );
 
   watch(
-    () => [props.activePanels.rsi, props.activePanels.macd, props.activePanels.stoch, props.compareSeries.length],
+    () => [
+      props.activePanels.rsi,
+      props.activePanels.macd,
+      props.activePanels.stoch,
+      props.activePanels.atr,
+      props.activePanels.cci,
+      props.compareSeries.length,
+    ],
     () => nextTick(() => resizeAll()),
   );
 

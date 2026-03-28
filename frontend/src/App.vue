@@ -66,6 +66,8 @@
         @select-drawing="selectDrawing"
         @remove-drawing="removeDrawing"
         @update-drawing="updateDrawing"
+        @toggle-drawing-visibility="toggleDrawingVisibility"
+        @toggle-drawing-lock="toggleDrawingLock"
         @save-workspace="saveWorkspacePreset"
         @load-workspace="loadWorkspacePreset"
         @delete-workspace="deleteWorkspacePreset"
@@ -205,6 +207,8 @@ const {
   selectDrawing,
   removeDrawing,
   updateDrawing,
+  toggleDrawingVisibility,
+  toggleDrawingLock,
   saveWorkspacePreset,
   loadWorkspacePreset,
   deleteWorkspacePreset,
