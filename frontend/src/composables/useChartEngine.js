@@ -5,15 +5,21 @@ import {
   calcADX,
   calcBB,
   calcCCIValues,
+  calcCMF,
+  calcDonchianChannels,
   calcEMA,
   calcIchimoku,
   calcMACD,
   calcMA,
+  calcMFI,
   calcOBV,
+  calcROC,
   calcRSI,
   calcStoch,
   calcSuperTrend,
   calcVWAP,
+  calcKeltnerChannels,
+  calcWilliamsR,
 } from "../utils/indicatorUtils";
 import { fmtPrice, fmtVol } from "../utils/formatters";
 
@@ -154,12 +160,16 @@ export function useChartEngine({
   volumeCanvas,
   compareCanvas,
   rsiCanvas,
+  williamsrCanvas,
+  mfiCanvas,
+  rocCanvas,
   macdCanvas,
   stochCanvas,
   atrCanvas,
   cciCanvas,
   obvCanvas,
   adxCanvas,
+  cmfCanvas,
   chartAreaRef,
   props,
   emit,
@@ -774,6 +784,170 @@ export function useChartEngine({
     });
   };
 
+  const renderBoundedOscillatorPanel = (canvas, values, config = {}) => {
+    if (!canvas || !visibleData.value.length) return;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const min = config.min ?? 0;
+    const max = config.max ?? 100;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    (config.bands || []).forEach((band) => {
+      const topValue = Math.max(band.from, band.to);
+      const bottomValue = Math.min(band.from, band.to);
+      const topY = scale(topValue);
+      const bottomY = scale(bottomValue);
+      ctx.fillStyle = band.color;
+      ctx.fillRect(PAD.left, topY, width - PAD.left - PAD.right, bottomY - topY);
+    });
+
+    (config.levels || []).forEach((level) => {
+      ctx.strokeStyle = level.color || "rgba(77,102,128,0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash(level.dash || []);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, scale(level.value));
+      ctx.lineTo(width - PAD.right, scale(level.value));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (level.label !== false) {
+        ctx.fillStyle = level.labelColor || "rgba(77,102,128,0.65)";
+        ctx.font = "8px JetBrains Mono";
+        ctx.fillText(level.text || level.value, width - PAD.right + 2, scale(level.value) + 3);
+      }
+    });
+
+    (config.lines || []).forEach((line) => {
+      drawLine(
+        ctx,
+        line.values,
+        layout.barX,
+        scale,
+        line.color,
+        line.lineWidth ?? 1.4,
+        line.dash || [],
+      );
+    });
+
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
+  };
+
+  const renderRangePanel = (canvas, values, config = {}) => {
+    if (!canvas || !visibleData.value.length) return;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    const filteredValues = values.filter((value) => value != null);
+    if (!filteredValues.length) return;
+
+    const layout = getBarLayout(canvas, visibleData.value.length);
+    let min = config.min ?? Math.min(...filteredValues);
+    let max = config.max ?? Math.max(...filteredValues);
+
+    if (config.ensureLevels?.length) {
+      min = Math.min(min, ...config.ensureLevels);
+      max = Math.max(max, ...config.ensureLevels);
+    }
+
+    if (min === max) {
+      const pad = Math.max(Math.abs(max) * 0.08, config.minPad ?? 1);
+      min -= pad;
+      max += pad;
+    } else {
+      const pad = Math.max((max - min) * (config.paddingRatio ?? 0.1), config.minPad ?? 0);
+      min -= pad;
+      max += pad;
+    }
+
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    (config.bands || []).forEach((band) => {
+      const topValue = Math.max(band.from, band.to);
+      const bottomValue = Math.min(band.from, band.to);
+      const topY = scale(topValue);
+      const bottomY = scale(bottomValue);
+      ctx.fillStyle = band.color;
+      ctx.fillRect(PAD.left, topY, width - PAD.left - PAD.right, bottomY - topY);
+    });
+
+    (config.levels || []).forEach((level) => {
+      ctx.strokeStyle = level.color || "rgba(77,102,128,0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash(level.dash || []);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, scale(level.value));
+      ctx.lineTo(width - PAD.right, scale(level.value));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (level.label !== false) {
+        ctx.fillStyle = level.labelColor || "rgba(77,102,128,0.65)";
+        ctx.font = "8px JetBrains Mono";
+        ctx.fillText(level.text || level.value, width - PAD.right + 2, scale(level.value) + 3);
+      }
+    });
+
+    if (config.zeroLine) {
+      ctx.strokeStyle = "rgba(77,102,128,0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, scale(0));
+      ctx.lineTo(width - PAD.right, scale(0));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (config.area) {
+      drawArea(
+        ctx,
+        values,
+        layout.barX,
+        scale,
+        plotBottom,
+        config.area.strokeColor,
+        config.area.fillColor,
+      );
+    }
+
+    (config.lines || []).forEach((line) => {
+      drawLine(
+        ctx,
+        line.values,
+        layout.barX,
+        scale,
+        line.color,
+        line.lineWidth ?? 1.4,
+        line.dash || [],
+      );
+    });
+
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
+  };
+
   const drawPriceLabel = (ctx, canvas, price, scale, color, prefix = "") => {
     const width = canvasWidth(canvas);
     const y = scale(price);
@@ -1252,6 +1426,12 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const fullBb = props.activeInd.bb
       ? calcBB(fullData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier)
       : [];
+    const fullKeltner = props.activeInd.keltner
+      ? calcKeltnerChannels(fullData, props.indicatorSettings.kcPeriod, props.indicatorSettings.kcMultiplier)
+      : [];
+    const fullDonchian = props.activeInd.donchian
+      ? calcDonchianChannels(fullData, props.indicatorSettings.donchianPeriod)
+      : [];
     const fullIchimoku = props.activeInd.ichimoku
       ? calcIchimoku(
         fullData,
@@ -1271,6 +1451,8 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const ema12 = sliceSeries(fullEma12);
     const vwap = sliceSeries(fullVwap);
     const bbSlice = fullBb.slice(viewport.startIndex, viewport.startIndex + count);
+    const keltnerSlice = fullKeltner.slice(viewport.startIndex, viewport.startIndex + count);
+    const donchianSlice = fullDonchian.slice(viewport.startIndex, viewport.startIndex + count);
     const ichimokuConversion = fullIchimoku ? sliceSeries(fullIchimoku.conversion) : [];
     const ichimokuBase = fullIchimoku ? sliceSeries(fullIchimoku.base) : [];
     const ichimokuSpanA = fullIchimoku ? sliceSeries(fullIchimoku.spanA) : [];
@@ -1298,6 +1480,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       overlayValues.push(bbSlice.map((item) => item.u));
       overlayValues.push(bbSlice.map((item) => item.l));
       overlayValues.push(bbSlice.map((item) => item.m));
+    }
+    if (keltnerSlice.length) {
+      overlayValues.push(keltnerSlice.map((item) => item.u));
+      overlayValues.push(keltnerSlice.map((item) => item.l));
+      overlayValues.push(keltnerSlice.map((item) => item.m));
+    }
+    if (donchianSlice.length) {
+      overlayValues.push(donchianSlice.map((item) => item.u));
+      overlayValues.push(donchianSlice.map((item) => item.l));
+      overlayValues.push(donchianSlice.map((item) => item.m));
     }
     props.drawings.forEach((drawing) => overlayValues.push(getDrawingPriceValues(drawing)));
     if (draftDrawing.value) overlayValues.push(getDrawingPriceValues(draftDrawing.value));
@@ -1360,6 +1552,18 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       drawLine(ctx, bbSlice.map((item) => item.u), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.l), layout.barX, scale, "#ffd166", 0.9);
       drawLine(ctx, bbSlice.map((item) => item.m), layout.barX, scale, "rgba(255,209,102,0.65)", 0.6, [4, 4]);
+    }
+
+    if (props.activeInd.keltner && keltnerSlice.length) {
+      drawLine(ctx, keltnerSlice.map((item) => item.u), layout.barX, scale, "#7be7ff", 1);
+      drawLine(ctx, keltnerSlice.map((item) => item.l), layout.barX, scale, "#7be7ff", 1);
+      drawLine(ctx, keltnerSlice.map((item) => item.m), layout.barX, scale, "rgba(123,231,255,0.68)", 0.7, [5, 4]);
+    }
+
+    if (props.activeInd.donchian && donchianSlice.length) {
+      drawLine(ctx, donchianSlice.map((item) => item.u), layout.barX, scale, "#9b6dff", 1, [6, 3]);
+      drawLine(ctx, donchianSlice.map((item) => item.l), layout.barX, scale, "#9b6dff", 1, [6, 3]);
+      drawLine(ctx, donchianSlice.map((item) => item.m), layout.barX, scale, "rgba(155,109,255,0.6)", 0.7, [2, 4]);
     }
 
     if (props.activeInd.ichimoku) {
@@ -1869,6 +2073,55 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
   };
 
+  const renderWilliamsR = () => {
+    if (!williamsrCanvas.value || !visibleData.value.length || !props.activePanels.williamsr) return;
+    const values = sliceSeries(calcWilliamsR(props.ohlcData, props.indicatorSettings.williamsrPeriod));
+    renderBoundedOscillatorPanel(williamsrCanvas.value, values, {
+      min: -100,
+      max: 0,
+      bands: [
+        { from: 0, to: -20, color: "rgba(255,77,106,0.05)" },
+        { from: -80, to: -100, color: "rgba(0,217,163,0.05)" },
+      ],
+      levels: [
+        { value: -20 },
+        { value: -50, dash: [4, 4] },
+        { value: -80 },
+      ],
+      lines: [{ values, color: "#7be7ff", lineWidth: 1.45 }],
+    });
+  };
+
+  const renderMfi = () => {
+    if (!mfiCanvas.value || !visibleData.value.length || !props.activePanels.mfi) return;
+    const values = sliceSeries(calcMFI(props.ohlcData, props.indicatorSettings.mfiPeriod));
+    renderBoundedOscillatorPanel(mfiCanvas.value, values, {
+      min: 0,
+      max: 100,
+      bands: [
+        { from: 100, to: 80, color: "rgba(255,77,106,0.05)" },
+        { from: 20, to: 0, color: "rgba(0,217,163,0.05)" },
+      ],
+      levels: [
+        { value: 80 },
+        { value: 50, dash: [4, 4] },
+        { value: 20 },
+      ],
+      lines: [{ values, color: "#ffd166", lineWidth: 1.45 }],
+    });
+  };
+
+  const renderRoc = () => {
+    if (!rocCanvas.value || !visibleData.value.length || !props.activePanels.roc) return;
+    const values = sliceSeries(calcROC(props.ohlcData, props.indicatorSettings.rocPeriod));
+    renderRangePanel(rocCanvas.value, values, {
+      zeroLine: true,
+      minPad: 1,
+      paddingRatio: 0.12,
+      lines: [{ values, color: "#00d4ff", lineWidth: 1.45 }],
+    });
+  };
+
   const renderMacd = () => {
     if (!macdCanvas.value || !visibleData.value.length || !props.activePanels.macd) return;
     const canvas = macdCanvas.value;
@@ -2180,8 +2433,44 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
   };
 
+  const renderCmf = () => {
+    if (!cmfCanvas.value || !visibleData.value.length || !props.activePanels.cmf) return;
+    const values = sliceSeries(calcCMF(props.ohlcData, props.indicatorSettings.cmfPeriod));
+    renderRangePanel(cmfCanvas.value, values, {
+      ensureLevels: [-0.2, 0, 0.2],
+      zeroLine: true,
+      minPad: 0.02,
+      paddingRatio: 0.12,
+      bands: [
+        { from: 0.2, to: 0, color: "rgba(0,217,163,0.04)" },
+        { from: 0, to: -0.2, color: "rgba(255,77,106,0.04)" },
+      ],
+      levels: [
+        { value: 0.2 },
+        { value: 0, dash: [4, 4] },
+        { value: -0.2 },
+      ],
+      lines: [{ values, color: "#00d9a3", lineWidth: 1.4 }],
+    });
+  };
+
   const clearAll = () => {
-    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value, atrCanvas.value, cciCanvas.value, obvCanvas.value, adxCanvas.value]
+    [
+      mainCanvas.value,
+      compareCanvas.value,
+      volumeCanvas.value,
+      rsiCanvas.value,
+      williamsrCanvas.value,
+      mfiCanvas.value,
+      rocCanvas.value,
+      macdCanvas.value,
+      stochCanvas.value,
+      atrCanvas.value,
+      cciCanvas.value,
+      obvCanvas.value,
+      adxCanvas.value,
+      cmfCanvas.value,
+    ]
       .filter(Boolean)
       .forEach((canvas) => {
         const ctx = canvas.getContext("2d");
@@ -2207,12 +2496,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     renderCompare();
     renderVolume();
     renderRsi();
+    renderWilliamsR();
+    renderMfi();
+    renderRoc();
     renderMacd();
     renderStoch();
     renderAtr();
     renderCci();
     renderObv();
     renderAdx();
+    renderCmf();
   };
 
   const resizeCanvas = (canvas, element) => {
@@ -2229,12 +2522,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     resizeCanvas(compareCanvas.value, compareCanvas.value?.parentElement);
     resizeCanvas(volumeCanvas.value, volumeCanvas.value?.parentElement);
     resizeCanvas(rsiCanvas.value, rsiCanvas.value?.parentElement);
+    resizeCanvas(williamsrCanvas.value, williamsrCanvas.value?.parentElement);
+    resizeCanvas(mfiCanvas.value, mfiCanvas.value?.parentElement);
+    resizeCanvas(rocCanvas.value, rocCanvas.value?.parentElement);
     resizeCanvas(macdCanvas.value, macdCanvas.value?.parentElement);
     resizeCanvas(stochCanvas.value, stochCanvas.value?.parentElement);
     resizeCanvas(atrCanvas.value, atrCanvas.value?.parentElement);
     resizeCanvas(cciCanvas.value, cciCanvas.value?.parentElement);
     resizeCanvas(obvCanvas.value, obvCanvas.value?.parentElement);
     resizeCanvas(adxCanvas.value, adxCanvas.value?.parentElement);
+    resizeCanvas(cmfCanvas.value, cmfCanvas.value?.parentElement);
     scheduleRender();
   };
 
@@ -2776,12 +3073,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   watch(
     () => [
       props.activePanels.rsi,
+      props.activePanels.williamsr,
+      props.activePanels.mfi,
+      props.activePanels.roc,
       props.activePanels.macd,
       props.activePanels.stoch,
       props.activePanels.atr,
       props.activePanels.cci,
       props.activePanels.obv,
       props.activePanels.adx,
+      props.activePanels.cmf,
       props.compareSeries.length,
     ],
     () => nextTick(() => resizeAll()),

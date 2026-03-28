@@ -272,12 +272,16 @@
     </div>
     <div class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">{{ rsiLabel }}</div><canvas ref="rsiCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.williamsr }"><div class="ind-label-tag">{{ williamsrLabel }}</div><canvas ref="williamsrCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.mfi }"><div class="ind-label-tag">{{ mfiLabel }}</div><canvas ref="mfiCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.roc }"><div class="ind-label-tag">{{ rocLabel }}</div><canvas ref="rocCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">{{ macdLabel }}</div><canvas ref="macdCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">{{ stochLabel }}</div><canvas ref="stochCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">{{ atrLabel }}</div><canvas ref="atrCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">{{ cciLabel }}</div><canvas ref="cciCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.obv }"><div class="ind-label-tag">OBV</div><canvas ref="obvCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.adx }"><div class="ind-label-tag">{{ adxLabel }}</div><canvas ref="adxCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: activePanels.cmf }"><div class="ind-label-tag">{{ cmfLabel }}</div><canvas ref="cmfCanvas"></canvas></div>
   </div>
 </template>
 
@@ -340,12 +344,16 @@ const mainCanvas = ref(null);
 const volumeCanvas = ref(null);
 const compareCanvas = ref(null);
 const rsiCanvas = ref(null);
+const williamsrCanvas = ref(null);
+const mfiCanvas = ref(null);
+const rocCanvas = ref(null);
 const macdCanvas = ref(null);
 const stochCanvas = ref(null);
 const atrCanvas = ref(null);
 const cciCanvas = ref(null);
 const obvCanvas = ref(null);
 const adxCanvas = ref(null);
+const cmfCanvas = ref(null);
 const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
@@ -399,12 +407,16 @@ const {
   volumeCanvas,
   compareCanvas,
   rsiCanvas,
+  williamsrCanvas,
+  mfiCanvas,
+  rocCanvas,
   macdCanvas,
   stochCanvas,
   atrCanvas,
   cciCanvas,
   obvCanvas,
   adxCanvas,
+  cmfCanvas,
   chartAreaRef,
   props,
   emit,
@@ -421,6 +433,9 @@ const displayChange = computed(() => {
 });
 
 const rsiLabel = computed(() => `RSI(${props.indicatorSettings.rsiPeriod})`);
+const williamsrLabel = computed(() => `Williams %R(${props.indicatorSettings.williamsrPeriod})`);
+const mfiLabel = computed(() => `MFI(${props.indicatorSettings.mfiPeriod})`);
+const rocLabel = computed(() => `ROC(${props.indicatorSettings.rocPeriod})`);
 const macdLabel = computed(
   () => `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`,
 );
@@ -430,6 +445,7 @@ const stochLabel = computed(
 const atrLabel = computed(() => `ATR(${props.indicatorSettings.atrPeriod})`);
 const cciLabel = computed(() => `CCI(${props.indicatorSettings.cciPeriod})`);
 const adxLabel = computed(() => `ADX(${props.indicatorSettings.adxPeriod})`);
+const cmfLabel = computed(() => `CMF(${props.indicatorSettings.cmfPeriod})`);
 const selectedDrawing = computed(
   () => props.drawings.find((drawing) => drawing.id === props.selectedDrawingId) || null,
 );

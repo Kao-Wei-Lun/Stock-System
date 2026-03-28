@@ -19,7 +19,7 @@
       </div>
 
       <div class="ind-group">
-        <div class="ind-group-title">趨勢 (疊加主圖)</div>
+        <div class="ind-group-title">趨勢疊加</div>
         <div v-for="row in overlayRows" :key="row.key" class="ind-row">
           <div>
             <div class="ind-name">{{ row.label }}</div>
@@ -33,7 +33,7 @@
       </div>
 
       <div class="ind-group">
-        <div class="ind-group-title">震盪 (副圖)</div>
+        <div class="ind-group-title">副圖面板</div>
         <div v-for="row in panelRows" :key="row.key" class="ind-row">
           <div>
             <div class="ind-name">{{ row.label }}</div>
@@ -76,10 +76,17 @@
 
     <div v-show="rightTab === 'alerts'" class="rp-content">
       <div v-if="alerts.length">
-        <div v-for="(alert, index) in alerts" :key="`${alert.ticker}-${index}`" class="alert-card" :class="{ triggered: alert.triggered }">
+        <div
+          v-for="(alert, index) in alerts"
+          :key="`${alert.ticker}-${index}`"
+          class="alert-card"
+          :class="{ triggered: alert.triggered }"
+        >
           <div class="alert-tk">{{ alert.ticker }}</div>
           <div class="alert-cond">{{ alert.type }} {{ alert.cond }} {{ alert.value }}</div>
-          <div class="alert-badge" :class="alert.triggered ? 'triggered' : 'active'">{{ alert.triggered ? "已觸發" : "監控中" }}</div>
+          <div class="alert-badge" :class="alert.triggered ? 'triggered' : 'active'">
+            {{ alert.triggered ? "已觸發" : "監控中" }}
+          </div>
         </div>
       </div>
       <div v-else style="color:var(--text3);font-size:11px;text-align:center;padding:16px">尚無警報</div>
@@ -87,7 +94,16 @@
     </div>
 
     <div v-show="rightTab === 'backtest'" class="rp-content">
-      <div class="bt-row"><div class="bt-label">策略</div><select class="bt-sel" :value="backtestForm.strategy" @change="$emit('update-backtest-field', { key: 'strategy', value: $event.target.value })"><option>MA 黃金/死亡交叉</option><option>RSI 超買超賣</option><option>MACD 交叉</option><option>布林通道突破</option><option>KD 交叉</option></select></div>
+      <div class="bt-row">
+        <div class="bt-label">策略</div>
+        <select class="bt-sel" :value="backtestForm.strategy" @change="$emit('update-backtest-field', { key: 'strategy', value: $event.target.value })">
+          <option>MA 黃金/死亡交叉</option>
+          <option>RSI 超買超賣</option>
+          <option>MACD 交叉</option>
+          <option>布林通道突破</option>
+          <option>KD 交叉</option>
+        </select>
+      </div>
       <div class="bt-row"><div class="bt-label">開始日期</div><input class="bt-inp" type="date" :value="backtestForm.start" @input="$emit('update-backtest-field', { key: 'start', value: $event.target.value })"></div>
       <div class="bt-row"><div class="bt-label">結束日期</div><input class="bt-inp" type="date" :value="backtestForm.end" @input="$emit('update-backtest-field', { key: 'end', value: $event.target.value })"></div>
       <div class="bt-row"><div class="bt-label">初始資金</div><input class="bt-inp" type="number" :value="backtestForm.capital" @input="$emit('update-backtest-field', { key: 'capital', value: $event.target.value })"></div>
@@ -106,7 +122,9 @@
         <div class="bt-metric"><span>勝率</span><span :class="backtestResult.winRate >= 50 ? 'up' : 'dn'">{{ backtestResult.winRate.toFixed(1) }}%</span></div>
         <div class="bt-metric"><span>最大回撤</span><span class="dn">-{{ backtestResult.maxDrawdown.toFixed(2) }}%</span></div>
         <div class="bt-metric"><span>夏普比率</span><span :class="backtestResult.sharpe >= 1 ? 'up' : ''">{{ backtestResult.sharpe.toFixed(2) }}</span></div>
-        <div style="margin-top:8px;padding:6px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.2);border-radius:4px;font-size:10px;color:var(--text3)">基於 {{ backtestResult.bars }} 根 K 線真實歷史資料 · 回測結果僅供參考</div>
+        <div style="margin-top:8px;padding:6px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.2);border-radius:4px;font-size:10px;color:var(--text3)">
+          基於 {{ backtestResult.bars }} 根 K 線真實歷史資料 · 回測結果僅供參考
+        </div>
       </div>
     </div>
 
@@ -165,79 +183,26 @@ const overlayRows = computed(() => [
   { key: "ma50", label: `MA ${props.indicatorSettings.ma50Period}`, value: props.indicatorSnapshot.ma50, color: "#f5a623" },
   { key: "ma200", label: `MA ${props.indicatorSettings.ma200Period}`, value: props.indicatorSnapshot.ma200, color: "#9b6dff" },
   { key: "ema12", label: `EMA ${props.indicatorSettings.emaPeriod}`, value: props.indicatorSnapshot.ema12, color: "#00d4ff" },
-  {
-    key: "bb",
-    label: `布林通道 (${props.indicatorSettings.bbPeriod}, ${props.indicatorSettings.bbMultiplier})`,
-    value: props.indicatorSnapshot.bb,
-    color: "#ffd166",
-  },
+  { key: "bb", label: `布林通道 (${props.indicatorSettings.bbPeriod}, ${props.indicatorSettings.bbMultiplier})`, value: props.indicatorSnapshot.bb, color: "#ffd166" },
+  { key: "keltner", label: `Keltner (${props.indicatorSettings.kcPeriod}, ${props.indicatorSettings.kcMultiplier})`, value: props.indicatorSnapshot.keltner, color: "#7be7ff", hint: "EMA + ATR 通道" },
+  { key: "donchian", label: `Donchian (${props.indicatorSettings.donchianPeriod})`, value: props.indicatorSnapshot.donchian, color: "#9b6dff", hint: "區間突破通道" },
   { key: "vwap", label: "VWAP", value: "ON", color: "#ff8c42", hint: "盤中量價基準線" },
-  {
-    key: "ichimoku",
-    label: `Ichimoku (${props.indicatorSettings.ichimokuConversion}, ${props.indicatorSettings.ichimokuBase}, ${props.indicatorSettings.ichimokuSpanB})`,
-    value: props.indicatorSnapshot.ichimoku,
-    color: "#8dc1ff",
-    hint: `位移 ${props.indicatorSettings.ichimokuDisplacement}`,
-  },
-  {
-    key: "supertrend",
-    label: `SuperTrend (${props.indicatorSettings.supertrendPeriod}, ${props.indicatorSettings.supertrendMultiplier})`,
-    value: props.indicatorSnapshot.supertrend,
-    color: "#7be7ff",
-    hint: "多空切換支撐線",
-  },
+  { key: "ichimoku", label: `Ichimoku (${props.indicatorSettings.ichimokuConversion}, ${props.indicatorSettings.ichimokuBase}, ${props.indicatorSettings.ichimokuSpanB})`, value: props.indicatorSnapshot.ichimoku, color: "#8dc1ff", hint: `位移 ${props.indicatorSettings.ichimokuDisplacement}` },
+  { key: "supertrend", label: `SuperTrend (${props.indicatorSettings.supertrendPeriod}, ${props.indicatorSettings.supertrendMultiplier})`, value: props.indicatorSnapshot.supertrend, color: "#7be7ff", hint: "多空切換支撐線" },
 ]);
 
 const panelRows = computed(() => [
-  {
-    key: "rsi",
-    label: `RSI(${props.indicatorSettings.rsiPeriod})`,
-    hint: "70 超買 / 30 超賣",
-    value: props.indicatorSnapshot.rsi,
-    valueClass: props.indicatorSnapshot.rsiClass,
-  },
-  {
-    key: "macd",
-    label: `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`,
-    hint: props.indicatorSnapshot.macdSignal,
-    value: props.indicatorSnapshot.macd,
-    valueClass: "",
-  },
-  {
-    key: "stoch",
-    label: `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`,
-    hint: "擺盪強弱",
-    value: props.indicatorSnapshot.stoch,
-    valueClass: "",
-  },
-  {
-    key: "atr",
-    label: `ATR(${props.indicatorSettings.atrPeriod})`,
-    hint: "波動幅度 / 停損參考",
-    value: props.indicatorSnapshot.atr,
-    valueClass: "",
-  },
-  {
-    key: "cci",
-    label: `CCI(${props.indicatorSettings.cciPeriod})`,
-    hint: "±100 強弱區間",
-    value: props.indicatorSnapshot.cci,
-    valueClass: "",
-  },
-  {
-    key: "obv",
-    label: "OBV",
-    hint: "量能趨勢累積",
-    value: props.indicatorSnapshot.obv,
-    valueClass: "",
-  },
-  {
-    key: "adx",
-    label: `ADX(${props.indicatorSettings.adxPeriod})`,
-    hint: props.indicatorSnapshot.adxSignal,
-    value: props.indicatorSnapshot.adx,
-    valueClass: "",
-  },
+  { key: "rsi", label: `RSI(${props.indicatorSettings.rsiPeriod})`, hint: "70 超買 / 30 超賣", value: props.indicatorSnapshot.rsi, valueClass: props.indicatorSnapshot.rsiClass },
+  { key: "williamsr", label: `Williams %R(${props.indicatorSettings.williamsrPeriod})`, hint: "-20 超買 / -80 超賣", value: props.indicatorSnapshot.williamsr, valueClass: "" },
+  { key: "mfi", label: `MFI(${props.indicatorSettings.mfiPeriod})`, hint: "量價資金流", value: props.indicatorSnapshot.mfi, valueClass: "" },
+  { key: "roc", label: `ROC(${props.indicatorSettings.rocPeriod})`, hint: "價格動能百分比", value: props.indicatorSnapshot.roc, valueClass: "" },
+  { key: "macd", label: `MACD(${props.indicatorSettings.macdFast},${props.indicatorSettings.macdSlow},${props.indicatorSettings.macdSignal})`, hint: props.indicatorSnapshot.macdSignal, value: props.indicatorSnapshot.macd, valueClass: "" },
+  { key: "stoch", label: `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`, hint: "擺盪強弱", value: props.indicatorSnapshot.stoch, valueClass: "" },
+  { key: "atr", label: `ATR(${props.indicatorSettings.atrPeriod})`, hint: "波動幅度 / 停損參考", value: props.indicatorSnapshot.atr, valueClass: "" },
+  { key: "cci", label: `CCI(${props.indicatorSettings.cciPeriod})`, hint: "±100 強弱區間", value: props.indicatorSnapshot.cci, valueClass: "" },
+  { key: "obv", label: "OBV", hint: "量能趨勢累積", value: props.indicatorSnapshot.obv, valueClass: "" },
+  { key: "adx", label: `ADX(${props.indicatorSettings.adxPeriod})`, hint: props.indicatorSnapshot.adxSignal, value: props.indicatorSnapshot.adx, valueClass: "" },
+  { key: "cmf", label: `CMF(${props.indicatorSettings.cmfPeriod})`, hint: "Chaikin 資金流", value: props.indicatorSnapshot.cmf, valueClass: "" },
 ]);
 
 const settingSections = computed(() => [
@@ -250,6 +215,9 @@ const settingSections = computed(() => [
       { key: "emaPeriod", label: "EMA", step: 1, min: 2, max: 400, range: "2-400" },
       { key: "bbPeriod", label: "BB 週期", step: 1, min: 5, max: 300, range: "5-300" },
       { key: "bbMultiplier", label: "BB 倍數", step: 0.1, min: 0.5, max: 6, range: "0.5-6" },
+      { key: "kcPeriod", label: "Keltner 週期", step: 1, min: 2, max: 300, range: "2-300" },
+      { key: "kcMultiplier", label: "Keltner 倍數", step: 0.1, min: 0.5, max: 6, range: "0.5-6" },
+      { key: "donchianPeriod", label: "Donchian 週期", step: 1, min: 2, max: 300, range: "2-300" },
       { key: "volumeMaPeriod", label: "量均線", step: 1, min: 2, max: 200, range: "2-200" },
       { key: "ichimokuConversion", label: "轉換線", step: 1, min: 2, max: 60, range: "2-60" },
       { key: "ichimokuBase", label: "基準線", step: 1, min: 3, max: 120, range: "3-120" },
@@ -263,6 +231,9 @@ const settingSections = computed(() => [
     title: "副圖參數",
     items: [
       { key: "rsiPeriod", label: "RSI", step: 1, min: 2, max: 100, range: "2-100" },
+      { key: "williamsrPeriod", label: "Williams %R", step: 1, min: 2, max: 100, range: "2-100" },
+      { key: "mfiPeriod", label: "MFI", step: 1, min: 2, max: 100, range: "2-100" },
+      { key: "rocPeriod", label: "ROC", step: 1, min: 1, max: 120, range: "1-120" },
       { key: "macdFast", label: "MACD 快線", step: 1, min: 2, max: 60, range: "2-60" },
       { key: "macdSlow", label: "MACD 慢線", step: 1, min: 3, max: 120, range: "3-120" },
       { key: "macdSignal", label: "MACD 訊號", step: 1, min: 2, max: 60, range: "2-60" },
@@ -271,6 +242,7 @@ const settingSections = computed(() => [
       { key: "atrPeriod", label: "ATR", step: 1, min: 2, max: 120, range: "2-120" },
       { key: "cciPeriod", label: "CCI", step: 1, min: 3, max: 120, range: "3-120" },
       { key: "adxPeriod", label: "ADX", step: 1, min: 2, max: 120, range: "2-120" },
+      { key: "cmfPeriod", label: "CMF", step: 1, min: 2, max: 120, range: "2-120" },
     ],
   },
 ]);

@@ -7,7 +7,13 @@ export const DEFAULT_INDICATOR_SETTINGS = {
   emaPeriod: 12,
   bbPeriod: 20,
   bbMultiplier: 2,
+  kcPeriod: 20,
+  kcMultiplier: 2,
+  donchianPeriod: 20,
   rsiPeriod: 14,
+  williamsrPeriod: 14,
+  mfiPeriod: 14,
+  rocPeriod: 12,
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
@@ -17,6 +23,7 @@ export const DEFAULT_INDICATOR_SETTINGS = {
   atrPeriod: 14,
   cciPeriod: 20,
   adxPeriod: 14,
+  cmfPeriod: 20,
   ichimokuConversion: 9,
   ichimokuBase: 26,
   ichimokuSpanB: 52,
@@ -46,7 +53,13 @@ export function normalizeIndicatorSettings(input = {}) {
     emaPeriod: clampInteger(merged.emaPeriod, 2, 400, DEFAULT_INDICATOR_SETTINGS.emaPeriod),
     bbPeriod: clampInteger(merged.bbPeriod, 5, 300, DEFAULT_INDICATOR_SETTINGS.bbPeriod),
     bbMultiplier: clampNumber(merged.bbMultiplier, 0.5, 6, DEFAULT_INDICATOR_SETTINGS.bbMultiplier),
+    kcPeriod: clampInteger(merged.kcPeriod, 2, 300, DEFAULT_INDICATOR_SETTINGS.kcPeriod),
+    kcMultiplier: clampNumber(merged.kcMultiplier, 0.5, 6, DEFAULT_INDICATOR_SETTINGS.kcMultiplier),
+    donchianPeriod: clampInteger(merged.donchianPeriod, 2, 300, DEFAULT_INDICATOR_SETTINGS.donchianPeriod),
     rsiPeriod: clampInteger(merged.rsiPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.rsiPeriod),
+    williamsrPeriod: clampInteger(merged.williamsrPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.williamsrPeriod),
+    mfiPeriod: clampInteger(merged.mfiPeriod, 2, 100, DEFAULT_INDICATOR_SETTINGS.mfiPeriod),
+    rocPeriod: clampInteger(merged.rocPeriod, 1, 120, DEFAULT_INDICATOR_SETTINGS.rocPeriod),
     macdFast: clampInteger(merged.macdFast, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdFast),
     macdSlow: clampInteger(merged.macdSlow, 3, 120, DEFAULT_INDICATOR_SETTINGS.macdSlow),
     macdSignal: clampInteger(merged.macdSignal, 2, 60, DEFAULT_INDICATOR_SETTINGS.macdSignal),
@@ -56,6 +69,7 @@ export function normalizeIndicatorSettings(input = {}) {
     atrPeriod: clampInteger(merged.atrPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.atrPeriod),
     cciPeriod: clampInteger(merged.cciPeriod, 3, 120, DEFAULT_INDICATOR_SETTINGS.cciPeriod),
     adxPeriod: clampInteger(merged.adxPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.adxPeriod),
+    cmfPeriod: clampInteger(merged.cmfPeriod, 2, 120, DEFAULT_INDICATOR_SETTINGS.cmfPeriod),
     ichimokuConversion: clampInteger(merged.ichimokuConversion, 2, 60, DEFAULT_INDICATOR_SETTINGS.ichimokuConversion),
     ichimokuBase: clampInteger(merged.ichimokuBase, 3, 120, DEFAULT_INDICATOR_SETTINGS.ichimokuBase),
     ichimokuSpanB: clampInteger(merged.ichimokuSpanB, 4, 240, DEFAULT_INDICATOR_SETTINGS.ichimokuSpanB),
@@ -147,6 +161,38 @@ export const calcBB = (data, n = 20, multiplier = 2) =>
     };
   });
 
+export const calcKeltnerChannels = (data, n = 20, multiplier = 2) => {
+  const basis = calcEMA(data, n);
+  const atr = calcATRSeries(data, n);
+  return data.map((_, index) => {
+    const middle = basis[index];
+    const atrValue = atr[index];
+    if (middle == null || atrValue == null) {
+      return { u: null, m: null, l: null };
+    }
+    return {
+      u: Number((middle + atrValue * multiplier).toFixed(4)),
+      m: Number(middle.toFixed(4)),
+      l: Number((middle - atrValue * multiplier).toFixed(4)),
+    };
+  });
+};
+
+export const calcDonchianChannels = (data, n = 20) =>
+  data.map((_, index) => {
+    if (index < n - 1) {
+      return { u: null, m: null, l: null };
+    }
+    const slice = data.slice(index - n + 1, index + 1);
+    const upper = Math.max(...slice.map((row) => row.high));
+    const lower = Math.min(...slice.map((row) => row.low));
+    return {
+      u: Number(upper.toFixed(4)),
+      m: Number((((upper + lower) / 2)).toFixed(4)),
+      l: Number(lower.toFixed(4)),
+    };
+  });
+
 export const calcStoch = (data, kPeriod = 14, dPeriod = 3) => {
   const kValues = [];
   const dValues = [];
@@ -184,6 +230,60 @@ export const calcVWAP = (data) => {
     return cumulativeVolume ? Number((cumulativeTpv / cumulativeVolume).toFixed(4)) : null;
   });
 };
+
+export const calcWilliamsR = (data, n = 14) =>
+  data.map((row, index) => {
+    if (index < n - 1) return null;
+    const slice = data.slice(index - n + 1, index + 1);
+    const high = Math.max(...slice.map((item) => item.high));
+    const low = Math.min(...slice.map((item) => item.low));
+    if (high === low) return 0;
+    return Number((((high - row.close) / (high - low)) * -100).toFixed(2));
+  });
+
+export const calcMFI = (data, n = 14) => {
+  const positive = Array(data.length).fill(null);
+  const negative = Array(data.length).fill(null);
+  const result = Array(data.length).fill(null);
+
+  for (let index = 1; index < data.length; index += 1) {
+    const typical = (data[index].high + data[index].low + data[index].close) / 3;
+    const previousTypical = (data[index - 1].high + data[index - 1].low + data[index - 1].close) / 3;
+    const rawFlow = typical * Number(data[index].volume || 0);
+    if (typical > previousTypical) {
+      positive[index] = rawFlow;
+      negative[index] = 0;
+    } else if (typical < previousTypical) {
+      positive[index] = 0;
+      negative[index] = rawFlow;
+    } else {
+      positive[index] = 0;
+      negative[index] = 0;
+    }
+  }
+
+  for (let index = 0; index < data.length; index += 1) {
+    if (index < n) continue;
+    const positiveFlow = positive.slice(index - n + 1, index + 1).reduce((sum, value) => sum + (value || 0), 0);
+    const negativeFlow = negative.slice(index - n + 1, index + 1).reduce((sum, value) => sum + (value || 0), 0);
+    if (negativeFlow === 0) {
+      result[index] = 100;
+      continue;
+    }
+    const moneyRatio = positiveFlow / negativeFlow;
+    result[index] = Number((100 - 100 / (1 + moneyRatio)).toFixed(2));
+  }
+
+  return result;
+};
+
+export const calcROC = (data, n = 12) =>
+  data.map((row, index) => {
+    if (index < n) return null;
+    const base = data[index - n].close;
+    if (!base) return null;
+    return Number((((row.close - base) / base) * 100).toFixed(2));
+  });
 
 export const calcATRSeries = (data, n = 14) => {
   const atr = [];
@@ -238,6 +338,21 @@ export const calcOBV = (data) => {
   }
   return obv;
 };
+
+export const calcCMF = (data, n = 20) =>
+  data.map((row, index) => {
+    if (index < n - 1) return null;
+    const slice = data.slice(index - n + 1, index + 1);
+    const moneyFlowVolume = slice.reduce((sum, item) => {
+      const highLowRange = item.high - item.low;
+      const multiplier = highLowRange === 0
+        ? 0
+        : (((item.close - item.low) - (item.high - item.close)) / highLowRange);
+      return sum + multiplier * Number(item.volume || 0);
+    }, 0);
+    const totalVolume = slice.reduce((sum, item) => sum + Number(item.volume || 0), 0);
+    return totalVolume ? Number((moneyFlowVolume / totalVolume).toFixed(4)) : null;
+  });
 
 export const calcADX = (data, n = 14) => {
   const plusDI = Array(data.length).fill(null);
@@ -422,10 +537,15 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
       ma200: EMPTY,
       ema12: EMPTY,
       bb: EMPTY,
+      keltner: EMPTY,
+      donchian: EMPTY,
       ichimoku: EMPTY,
       supertrend: EMPTY,
       rsi: EMPTY,
       rsiClass: "",
+      williamsr: EMPTY,
+      mfi: EMPTY,
+      roc: EMPTY,
       macd: EMPTY,
       macdSignal: `Signal(${settings.macdSignal}): ${EMPTY}`,
       stoch: EMPTY,
@@ -434,6 +554,7 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
       obv: EMPTY,
       adx: EMPTY,
       adxSignal: `+DI ${EMPTY} / -DI ${EMPTY}`,
+      cmf: EMPTY,
       techSummaryHtml: EMPTY,
     };
   }
@@ -443,11 +564,17 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
   const ma200 = calcMA(data, settings.ma200Period);
   const ema12 = calcEMA(data, settings.emaPeriod);
   const bb = calcBB(data, settings.bbPeriod, settings.bbMultiplier);
+  const keltner = calcKeltnerChannels(data, settings.kcPeriod, settings.kcMultiplier);
+  const donchian = calcDonchianChannels(data, settings.donchianPeriod);
   const rsi = calcRSI(data, settings.rsiPeriod);
+  const williamsr = calcWilliamsR(data, settings.williamsrPeriod);
+  const mfi = calcMFI(data, settings.mfiPeriod);
+  const roc = calcROC(data, settings.rocPeriod);
   const { macd, signal } = calcMACD(data, settings.macdFast, settings.macdSlow, settings.macdSignal);
   const { k, d } = calcStoch(data, settings.stochK, settings.stochD);
   const obv = calcOBV(data);
   const { plusDI, minusDI, adx } = calcADX(data, settings.adxPeriod);
+  const cmf = calcCMF(data, settings.cmfPeriod);
   const ichimoku = calcIchimoku(
     data,
     settings.ichimokuConversion,
@@ -458,12 +585,18 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
   const superTrend = calcSuperTrend(data, settings.supertrendPeriod, settings.supertrendMultiplier);
 
   const latestBb = bb[bb.length - 1];
+  const latestKeltner = keltner[keltner.length - 1];
+  const latestDonchian = donchian[donchian.length - 1];
   const latestRsi = rsi[rsi.length - 1];
+  const latestWilliamsR = williamsr[williamsr.length - 1];
+  const latestMfi = mfi[mfi.length - 1];
+  const latestRoc = roc[roc.length - 1];
   const latestMacd = macd[macd.length - 1];
   const latestSignal = signal[signal.length - 1];
   const latestK = k[k.length - 1];
   const latestD = d[d.length - 1];
   const latestObv = obv[obv.length - 1];
+  const latestCmf = cmf[cmf.length - 1];
   const latestAdx = findLastDefinedValue(adx);
   const latestPlusDi = findLastDefinedValue(plusDI);
   const latestMinusDi = findLastDefinedValue(minusDI);
@@ -541,6 +674,42 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     }
   }
 
+  if (latestKeltner?.u != null && latestKeltner?.l != null) {
+    if (price > latestKeltner.u) {
+      summaryParts.push(`<span class="up">Keltner(${settings.kcPeriod},${settings.kcMultiplier}) 上軌突破</span>`);
+      bull += 1;
+    } else if (price < latestKeltner.l) {
+      summaryParts.push(`<span class="dn">Keltner(${settings.kcPeriod},${settings.kcMultiplier}) 下軌跌破</span>`);
+      bear += 1;
+    }
+  }
+
+  if (latestDonchian?.u != null && latestDonchian?.l != null) {
+    if (price >= latestDonchian.u) {
+      summaryParts.push(`<span class="up">Donchian(${settings.donchianPeriod}) 創區間新高</span>`);
+      bull += 1;
+    } else if (price <= latestDonchian.l) {
+      summaryParts.push(`<span class="dn">Donchian(${settings.donchianPeriod}) 跌破區間低點</span>`);
+      bear += 1;
+    }
+  }
+
+  if (latestMfi != null) {
+    if (latestMfi >= 80) {
+      summaryParts.push(`<span class="dn">MFI(${settings.mfiPeriod}) 過熱 (${latestMfi.toFixed(1)})</span>`);
+      bear += 1;
+    } else if (latestMfi <= 20) {
+      summaryParts.push(`<span class="up">MFI(${settings.mfiPeriod}) 超賣 (${latestMfi.toFixed(1)})</span>`);
+      bull += 1;
+    }
+  }
+
+  if (latestCmf != null) {
+    summaryParts.push(`<span>${latestCmf >= 0 ? "資金流入" : "資金流出"} / CMF ${latestCmf.toFixed(3)}</span>`);
+    if (latestCmf >= 0) bull += 1;
+    else bear += 1;
+  }
+
   const total = bull + bear;
   const score = total ? Math.round((bull / total) * 100) : 50;
   const verdict =
@@ -556,6 +725,8 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     ma200: ma200[ma200.length - 1]?.toFixed(2) ?? EMPTY,
     ema12: ema12[ema12.length - 1]?.toFixed(2) ?? EMPTY,
     bb: latestBb?.u ? `${latestBb.u.toFixed(2)} / ${latestBb.l.toFixed(2)}` : EMPTY,
+    keltner: latestKeltner?.u ? `${latestKeltner.u.toFixed(2)} / ${latestKeltner.l.toFixed(2)}` : EMPTY,
+    donchian: latestDonchian?.u ? `${latestDonchian.u.toFixed(2)} / ${latestDonchian.l.toFixed(2)}` : EMPTY,
     ichimoku:
       latestSpanA != null && latestSpanB != null
         ? `${price > Math.max(latestSpanA, latestSpanB) ? "雲上" : price < Math.min(latestSpanA, latestSpanB) ? "雲下" : "雲中"}`
@@ -566,6 +737,9 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
         : EMPTY,
     rsi: latestRsi?.toFixed(1) ?? EMPTY,
     rsiClass: latestRsi > 70 ? "dn" : latestRsi < 30 ? "up" : "",
+    williamsr: latestWilliamsR?.toFixed(1) ?? EMPTY,
+    mfi: latestMfi?.toFixed(1) ?? EMPTY,
+    roc: latestRoc?.toFixed(2) ?? EMPTY,
     macd: latestMacd?.toFixed(3) ?? EMPTY,
     macdSignal: `Signal(${settings.macdSignal}): ${latestSignal?.toFixed(3) ?? EMPTY}`,
     stoch: latestK != null ? `K:${latestK.toFixed(1)} D:${(latestD ?? 0).toFixed(1)}` : EMPTY,
@@ -574,6 +748,7 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     obv: formatCompactNumber(latestObv),
     adx: latestAdx?.toFixed(1) ?? EMPTY,
     adxSignal: `+DI ${latestPlusDi?.toFixed(1) ?? EMPTY} / -DI ${latestMinusDi?.toFixed(1) ?? EMPTY}`,
+    cmf: latestCmf?.toFixed(3) ?? EMPTY,
     techSummaryHtml: `${summaryParts.join("<br>")}<br><br>綜合評分：${verdict}`,
   };
 }
