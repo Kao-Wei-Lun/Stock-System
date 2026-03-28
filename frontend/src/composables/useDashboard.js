@@ -349,6 +349,25 @@ export function useDashboard() {
     pushNotification({ icon: "─", title: "水平線已加", msg: `@${price.toFixed(2)}` });
   }
 
+  function addDrawing(drawing) {
+    drawings.value = [...drawings.value, drawing];
+
+    if (drawing.type === "trendline") {
+      pushNotification({ icon: "╱", title: "趨勢線已加", msg: "已加入分析線段" });
+      return;
+    }
+
+    if (drawing.type === "fib") {
+      pushNotification({ icon: "⋮", title: "費波那契已加", msg: "已加入回撤分析" });
+    }
+  }
+
+  function removeLastDrawing() {
+    if (!drawings.value.length) return;
+    drawings.value = drawings.value.slice(0, -1);
+    pushNotification({ icon: "↶", title: "已復原", msg: "已移除最後一筆繪圖" });
+  }
+
   function updateCrosshair(payload) {
     Object.assign(crosshair, payload);
   }
@@ -560,6 +579,8 @@ export function useDashboard() {
     addSignal,
     clearDrawings,
     addHorizontalLine,
+    addDrawing,
+    removeLastDrawing,
     updateCrosshair,
     hideCrosshair,
     syncCurrentTicker,

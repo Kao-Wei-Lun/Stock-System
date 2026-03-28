@@ -45,8 +45,10 @@
         @set-tool="setTool"
         @add-signal="addSignal"
         @clear-drawings="clearDrawings"
+        @remove-last-drawing="removeLastDrawing"
         @sync-current="syncCurrentTicker"
         @add-horizontal-line="addHorizontalLine"
+        @add-drawing="addDrawing"
         @update-crosshair="updateCrosshair"
         @hide-crosshair="hideCrosshair"
       />
@@ -156,6 +158,8 @@ const {
   addSignal,
   clearDrawings,
   addHorizontalLine,
+  addDrawing,
+  removeLastDrawing,
   updateCrosshair,
   hideCrosshair,
   syncCurrentTicker,
