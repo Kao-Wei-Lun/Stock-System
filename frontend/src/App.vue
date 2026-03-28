@@ -44,6 +44,7 @@
         :quote="quote"
         :active-tool="activeTool"
         :active-panels="activePanels"
+        :chart-layout="chartLayout"
         :loading="chartLoading"
         :loading-message="loadingMessage"
         :crosshair="crosshair"
@@ -78,6 +79,7 @@
         @remove-compare="removeCompareTicker"
         @clear-compare="clearCompareTickers"
         @set-compare-mode="setComparisonMode"
+        @set-chart-layout="setChartLayout"
       />
 
       <RightSidebar
@@ -154,6 +156,7 @@ const {
   currentName,
   currentPeriod,
   currentInterval,
+  chartLayout,
   chartLoading,
   loadingMessage,
   ohlcData,
@@ -200,6 +203,7 @@ const {
   setLeftTab,
   setActiveWatchGroup,
   setRightTab,
+  setChartLayout,
   selectTicker,
   toggleIndicator,
   togglePanel,

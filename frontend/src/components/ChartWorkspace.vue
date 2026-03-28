@@ -24,9 +24,11 @@
       <button class="tool-btn" :class="{ active: activeTool === 'hline' }" @click="$emit('set-tool', 'hline')">─ 水平線</button>
       <button class="tool-btn" :class="{ active: activeTool === 'vline' }" @click="$emit('set-tool', 'vline')">│ 垂直線</button>
       <button class="tool-btn" :class="{ active: activeTool === 'tline' }" @click="$emit('set-tool', 'tline')">╱ 趨勢線</button>
+      <button class="tool-btn" :class="{ active: activeTool === 'arrow' }" @click="$emit('set-tool', 'arrow')">↗ 箭頭</button>
       <button class="tool-btn" :class="{ active: activeTool === 'fib' }" @click="$emit('set-tool', 'fib')">⋮ 費波</button>
       <button class="tool-btn" :class="{ active: activeTool === 'rect' }" @click="$emit('set-tool', 'rect')">▭ 區間</button>
       <button class="tool-btn" :class="{ active: activeTool === 'measure' }" @click="$emit('set-tool', 'measure')">⊕ 測距</button>
+      <button class="tool-btn" :class="{ active: activeTool === 'note' }" @click="$emit('set-tool', 'note')">✎ 註記</button>
       <button class="tool-btn" :class="{ active: activeTool === 'boxzoom' }" @click="$emit('set-tool', 'boxzoom')">□ 框選</button>
 
       <div class="tool-sep"></div>
@@ -64,6 +66,13 @@
       <button class="tool-btn" :class="{ active: chartMode === 'candles' }" @click="setChartMode('candles')">K 線</button>
       <button class="tool-btn" :class="{ active: chartMode === 'line' }" @click="setChartMode('line')">折線</button>
       <button class="tool-btn" :class="{ active: chartMode === 'area' }" @click="setChartMode('area')">面積</button>
+
+      <div class="tool-sep"></div>
+
+      <span class="tool-label">版面：</span>
+      <button class="tool-btn" :class="{ active: chartLayout === 'single' }" @click="$emit('set-chart-layout', 'single')">1 圖</button>
+      <button class="tool-btn" :class="{ active: chartLayout === 'double' }" @click="$emit('set-chart-layout', 'double')">2 圖</button>
+      <button class="tool-btn" :class="{ active: chartLayout === 'quad' }" @click="$emit('set-chart-layout', 'quad')">4 圖</button>
 
       <div class="tool-sep"></div>
 
@@ -142,7 +151,7 @@
       <div class="drawing-manager-head">
         <div class="drawing-manager-title">物件樹</div>
         <div class="drawing-manager-actions">
-          <span class="drawing-shortcuts">快捷鍵：V 游標 / H 水平 / L 垂直 / T 趨勢 / F 費波 / R 區間 / M 測距 / B 框選 / Del 刪除 / Esc 取消</span>
+          <span class="drawing-shortcuts">快捷鍵：V 游標 / H 水平 / L 垂直 / T 趨勢 / A 箭頭 / F 費波 / R 區間 / M 測距 / N 註記 / B 框選 / Del 刪除 / Esc 取消</span>
           <button class="tool-btn compact" :disabled="!selectedDrawingId" @click="removeSelectedDrawing">刪除所選</button>
         </div>
       </div>
@@ -177,6 +186,47 @@
       </div>
     </div>
 
+    <div v-if="selectedDrawing" class="drawing-props">
+      <div class="drawing-manager-head">
+        <div class="drawing-manager-title">屬性面板</div>
+        <div class="drawing-manager-actions">
+          <span class="drawing-shortcuts">{{ drawingTypeLabel(selectedDrawing.type) }} / {{ drawingLabel(selectedDrawing) }}</span>
+        </div>
+      </div>
+      <div class="drawing-prop-grid">
+        <label class="drawing-prop">
+          <span>顏色</span>
+          <input class="drawing-color" type="color" :value="selectedDrawing.color || '#00d4ff'" @input="updateSelectedDrawing({ color: $event.target.value })" />
+        </label>
+        <label v-if="supportsLineWidth" class="drawing-prop">
+          <span>線寬</span>
+          <input class="drawing-range" type="range" min="1" max="5" step="0.5" :value="selectedDrawing.lineWidth || 1.5" @input="updateSelectedDrawing({ lineWidth: Number($event.target.value) })" />
+          <strong>{{ Number(selectedDrawing.lineWidth || 1.5).toFixed(1) }}</strong>
+        </label>
+        <label v-if="supportsLineStyle" class="drawing-prop">
+          <span>線型</span>
+          <select class="drawing-select" :value="selectedDrawing.lineStyle || 'solid'" @change="updateSelectedDrawing({ lineStyle: $event.target.value })">
+            <option value="solid">實線</option>
+            <option value="dash">虛線</option>
+            <option value="dot">點線</option>
+          </select>
+        </label>
+        <label class="drawing-prop wide">
+          <span>標籤</span>
+          <input class="drawing-text" type="text" :value="selectedDrawing.label || ''" placeholder="可選，顯示在圖上的說明" @input="updateSelectedDrawing({ label: $event.target.value })" />
+        </label>
+        <label v-if="supportsText" class="drawing-prop wide">
+          <span>註記文字</span>
+          <input class="drawing-text" type="text" :value="selectedDrawing.text || ''" placeholder="編輯註記內容" @input="updateSelectedDrawing({ text: $event.target.value })" />
+        </label>
+        <label v-if="supportsFillOpacity" class="drawing-prop">
+          <span>填色透明</span>
+          <input class="drawing-range" type="range" min="0.05" max="0.95" step="0.05" :value="selectedDrawing.fillOpacity || 0.12" @input="updateSelectedDrawing({ fillOpacity: Number($event.target.value) })" />
+          <strong>{{ Math.round((selectedDrawing.fillOpacity || 0.12) * 100) }}%</strong>
+        </label>
+      </div>
+    </div>
+
     <div ref="chartAreaRef" class="chart-area">
       <canvas
         ref="mainCanvas"
@@ -206,6 +256,16 @@
       </div>
     </div>
 
+    <div v-if="layoutPanes.length" class="sync-layout-grid" :class="`is-${chartLayout}`">
+      <div v-for="pane in layoutPanes" :key="pane.key" class="sync-pane-card">
+        <div class="sync-pane-head">
+          <span>{{ pane.title }}</span>
+          <span>{{ currentTicker }}</span>
+        </div>
+        <canvas :ref="(el) => setSyncPaneRef(pane.key, el)"></canvas>
+      </div>
+    </div>
+
     <div v-if="compareSeries.length" class="ind-panel visible compare-panel">
       <div class="ind-label-tag">COMPARE ({{ comparisonMode === "percent" ? "%" : "PRICE" }})</div>
       <canvas ref="compareCanvas"></canvas>
@@ -222,7 +282,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useChartEngine } from "../composables/useChartEngine";
@@ -234,6 +294,7 @@ const props = defineProps({
   quote: { type: Object, required: true },
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
+  chartLayout: { type: String, default: "single" },
   loading: { type: Boolean, required: true },
   loadingMessage: { type: String, required: true },
   crosshair: { type: Object, required: true },
@@ -271,6 +332,7 @@ const emit = defineEmits([
   "remove-compare",
   "clear-compare",
   "set-compare-mode",
+  "set-chart-layout",
 ]);
 
 const chartAreaRef = ref(null);
@@ -287,10 +349,14 @@ const adxCanvas = ref(null);
 const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
+const syncPaneRefs = reactive({});
+let syncPaneFrame = 0;
 
 const {
   chartMode,
   priceScaleMode,
+  visibleData,
+  viewportStartIndex,
   canvasClass,
   visibleRangeLabel,
   visibleBarsLabel,
@@ -364,6 +430,32 @@ const stochLabel = computed(
 const atrLabel = computed(() => `ATR(${props.indicatorSettings.atrPeriod})`);
 const cciLabel = computed(() => `CCI(${props.indicatorSettings.cciPeriod})`);
 const adxLabel = computed(() => `ADX(${props.indicatorSettings.adxPeriod})`);
+const selectedDrawing = computed(
+  () => props.drawings.find((drawing) => drawing.id === props.selectedDrawingId) || null,
+);
+const supportsLineWidth = computed(() =>
+  ["hline", "vline", "trendline", "arrow", "fib", "rect", "measure"].includes(selectedDrawing.value?.type),
+);
+const supportsLineStyle = computed(() =>
+  ["hline", "vline", "trendline", "arrow", "fib", "rect", "measure"].includes(selectedDrawing.value?.type),
+);
+const supportsFillOpacity = computed(() =>
+  ["rect", "note"].includes(selectedDrawing.value?.type),
+);
+const supportsText = computed(() => selectedDrawing.value?.type === "note");
+const layoutPanes = computed(() => {
+  if (props.chartLayout === "double") {
+    return [{ key: "sync-line", title: "同步折線", mode: "line" }];
+  }
+  if (props.chartLayout === "quad") {
+    return [
+      { key: "sync-line", title: "同步折線", mode: "line" },
+      { key: "sync-area", title: "同步面積", mode: "area" },
+      { key: "sync-candle", title: "同步 K 線", mode: "candles" },
+    ];
+  }
+  return [];
+});
 
 function drawingTypeLabel(type) {
   const labels = {
@@ -372,9 +464,11 @@ function drawingTypeLabel(type) {
     hline: "水平線",
     vline: "垂直線",
     trendline: "趨勢線",
+    arrow: "箭頭線",
     fib: "費波",
     rect: "區間",
     measure: "測距",
+    note: "註記",
   };
   return labels[type] || type;
 }
@@ -385,10 +479,197 @@ function drawingLabel(drawing) {
   if (drawing.type === "vline") return `第 ${drawing.index + 1} 根`;
   if (drawing.type === "buy" || drawing.type === "sell") return `第 ${drawing.index + 1} 根訊號`;
   if (drawing.type === "trendline") return `${fmtPrice(drawing.startPrice)} → ${fmtPrice(drawing.endPrice)}`;
+  if (drawing.type === "arrow") return `${fmtPrice(drawing.startPrice)} ⇢ ${fmtPrice(drawing.endPrice)}`;
   if (drawing.type === "fib") return `${fmtPrice(drawing.startPrice)} ↔ ${fmtPrice(drawing.endPrice)}`;
   if (drawing.type === "rect") return `${fmtPrice(Math.max(drawing.startPrice, drawing.endPrice))} / ${fmtPrice(Math.min(drawing.startPrice, drawing.endPrice))}`;
   if (drawing.type === "measure") return `${Math.abs(drawing.endIndex - drawing.startIndex) + 1} 根`;
+  if (drawing.type === "note") return drawing.text || drawing.label || "註記";
   return drawing.type;
+}
+
+function updateSelectedDrawing(patch) {
+  if (!selectedDrawing.value) return;
+  emit("update-drawing", selectedDrawing.value.id, patch);
+}
+
+function setSyncPaneRef(key, element) {
+  if (element) syncPaneRefs[key] = element;
+  else delete syncPaneRefs[key];
+  scheduleSyncPaneRender();
+}
+
+function formatPaneDateLabel(dateString, range = 0) {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString.slice(5);
+  if (range > 540) {
+    return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getPaneTickIndices(data, count = 5) {
+  if (!data.length) return [];
+  const indices = new Set([0, data.length - 1]);
+  const step = Math.max(1, Math.floor((data.length - 1) / Math.max(count - 1, 1)));
+  for (let index = 0; index < data.length; index += step) {
+    indices.add(index);
+  }
+  return [...indices].sort((left, right) => left - right);
+}
+
+function resizeSyncPaneCanvas(canvas) {
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const { clientWidth, clientHeight } = canvas;
+  canvas.width = Math.max(1, clientWidth * dpr);
+  canvas.height = Math.max(1, clientHeight * dpr);
+  canvas.style.width = `${clientWidth}px`;
+  canvas.style.height = `${clientHeight}px`;
+}
+
+function drawSyncPane(canvas, pane) {
+  if (!canvas || !visibleData.value.length) {
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    }
+    return;
+  }
+
+  resizeSyncPaneCanvas(canvas);
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.width / dpr;
+  const height = canvas.height / dpr;
+  const pad = { top: 18, right: 12, bottom: 20, left: 10 };
+  const data = visibleData.value;
+  const chartWidth = width - pad.left - pad.right;
+  const chartHeight = height - pad.top - pad.bottom;
+  const step = chartWidth / Math.max(data.length, 1);
+  const barWidth = Math.max(1.5, step * 0.68);
+  const xAt = (index) => pad.left + (index + 0.5) * step;
+  const highs = data.map((row) => row.high);
+  const lows = data.map((row) => row.low);
+  const rawMin = Math.min(...lows);
+  const rawMax = Math.max(...highs);
+  const padValue = Math.max((rawMax - rawMin) * 0.12, Math.abs(rawMax) * 0.02, 0.05);
+  const min = rawMin - padValue;
+  const max = rawMax + padValue;
+  const scaleY = (value) => pad.top + (1 - (value - min) / (max - min || 1)) * chartHeight;
+  const rangeDays = data.length > 1
+    ? Math.abs((new Date(data[data.length - 1].date) - new Date(data[0].date)) / 86400000)
+    : 0;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(8,12,18,0.96)";
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = "rgba(30,45,61,0.72)";
+  ctx.lineWidth = 0.5;
+  [0, 0.33, 0.66, 1].forEach((ratio) => {
+    const y = pad.top + chartHeight * ratio;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(width - pad.right, y);
+    ctx.stroke();
+  });
+
+  const closes = data.map((row) => row.close);
+  if (pane.mode === "candles") {
+    data.forEach((row, index) => {
+      const x = xAt(index);
+      const isUp = row.close >= row.open;
+      const color = isUp ? "#00d9a3" : "#ff4d6a";
+      ctx.strokeStyle = color;
+      ctx.fillStyle = isUp ? "rgba(0,217,163,0.88)" : "rgba(255,77,106,0.88)";
+      ctx.beginPath();
+      ctx.moveTo(x, scaleY(row.high));
+      ctx.lineTo(x, scaleY(row.low));
+      ctx.stroke();
+      const top = scaleY(Math.max(row.open, row.close));
+      const bottom = scaleY(Math.min(row.open, row.close));
+      ctx.fillRect(x - barWidth / 2, top, barWidth, Math.max(1, bottom - top));
+    });
+  } else {
+    ctx.beginPath();
+    closes.forEach((value, index) => {
+      if (index === 0) ctx.moveTo(xAt(index), scaleY(value));
+      else ctx.lineTo(xAt(index), scaleY(value));
+    });
+    if (pane.mode === "area") {
+      ctx.lineTo(xAt(data.length - 1), height - pad.bottom);
+      ctx.lineTo(xAt(0), height - pad.bottom);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(0,212,255,0.12)";
+      ctx.fill();
+      ctx.beginPath();
+      closes.forEach((value, index) => {
+        if (index === 0) ctx.moveTo(xAt(index), scaleY(value));
+        else ctx.lineTo(xAt(index), scaleY(value));
+      });
+    }
+    ctx.strokeStyle = pane.mode === "area" ? "#00d4ff" : "#8dc1ff";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+  }
+
+  const tickIndices = getPaneTickIndices(data, 4);
+  ctx.fillStyle = "rgba(99,123,148,0.9)";
+  ctx.font = "9px JetBrains Mono";
+  tickIndices.forEach((index) => {
+    const x = xAt(index);
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, height - pad.bottom);
+    ctx.strokeStyle = "rgba(30,45,61,0.5)";
+    ctx.stroke();
+    ctx.fillText(formatPaneDateLabel(data[index].date, rangeDays), Math.max(pad.left, x - 16), height - 5);
+  });
+
+  if (
+    props.crosshair.visible
+    && Number.isInteger(props.crosshair.absoluteIndex)
+    && props.crosshair.absoluteIndex >= viewportStartIndex.value
+    && props.crosshair.absoluteIndex < viewportStartIndex.value + data.length
+  ) {
+    const localIndex = props.crosshair.absoluteIndex - viewportStartIndex.value;
+    const x = xAt(localIndex);
+    ctx.strokeStyle = "rgba(255,209,102,0.95)";
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, height - pad.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const label = formatPaneDateLabel(data[localIndex]?.date, rangeDays);
+    const labelWidth = Math.max(44, label.length * 8 + 10);
+    const left = Math.min(Math.max(pad.left, x - labelWidth / 2), width - pad.right - labelWidth);
+    ctx.fillStyle = "rgba(255,209,102,0.16)";
+    ctx.fillRect(left, 2, labelWidth, 14);
+    ctx.strokeStyle = "rgba(255,209,102,0.88)";
+    ctx.strokeRect(left, 2, labelWidth, 14);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText(label, left + 6, 12);
+  }
+}
+
+function renderSyncPanes() {
+  layoutPanes.value.forEach((pane) => {
+    drawSyncPane(syncPaneRefs[pane.key], pane);
+  });
+}
+
+function scheduleSyncPaneRender() {
+  if (syncPaneFrame) cancelAnimationFrame(syncPaneFrame);
+  syncPaneFrame = window.requestAnimationFrame(() => {
+    syncPaneFrame = 0;
+    renderSyncPanes();
+  });
 }
 
 function submitCompare() {
@@ -437,9 +718,11 @@ function handleKeydown(event) {
     h: "hline",
     l: "vline",
     t: "tline",
+    a: "arrow",
     f: "fib",
     r: "rect",
     m: "measure",
+    n: "note",
     b: "boxzoom",
   };
 
@@ -469,11 +752,35 @@ watch(
   },
 );
 
+watch(
+  () => [
+    props.chartLayout,
+    props.currentTicker,
+    props.crosshair.visible,
+    props.crosshair.absoluteIndex,
+    chartMode.value,
+    visibleData.value.length,
+    viewportStartIndex.value,
+  ],
+  () => scheduleSyncPaneRender(),
+  { deep: true },
+);
+
+watch(
+  () => props.ohlcData,
+  () => scheduleSyncPaneRender(),
+  { deep: true },
+);
+
 onMounted(() => {
   window.addEventListener("keydown", handleKeydown);
+  window.addEventListener("resize", scheduleSyncPaneRender);
+  nextTick(() => scheduleSyncPaneRender());
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleKeydown);
+  window.removeEventListener("resize", scheduleSyncPaneRender);
+  if (syncPaneFrame) cancelAnimationFrame(syncPaneFrame);
 });
 </script>

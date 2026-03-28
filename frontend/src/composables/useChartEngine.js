@@ -27,6 +27,11 @@ const AUTO_Y_MIN_PADDING_RATIO = 0.04;
 const DRAWING_HIT_TOLERANCE = 10;
 const VIEW_HISTORY_LIMIT = 80;
 const CHART_PREFS_KEY = "quantvision.chart.prefs.v1";
+const DRAWING_LINE_STYLES = {
+  solid: [],
+  dash: [6, 4],
+  dot: [2, 4],
+};
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const clampPositive = (value) => Math.max(value, Number.EPSILON);
@@ -308,6 +313,11 @@ export function useChartEngine({
         ? "趨勢線：移動滑鼠預覽，再點一下完成"
         : "趨勢線：先點起點，再點終點";
     }
+    if (props.activeTool === "arrow") {
+      return draftDrawing.value?.type === "arrow"
+        ? "箭頭線：移動滑鼠預覽，再點一下完成"
+        : "箭頭線：先點起點，再點終點";
+    }
     if (props.activeTool === "fib") {
       return draftDrawing.value?.type === "fib"
         ? "費波那契：移動滑鼠預覽，再點一下完成"
@@ -323,6 +333,7 @@ export function useChartEngine({
         ? "測距尺：移動滑鼠預覽，再點一下完成"
         : "測距尺：先點起點，再點終點";
     }
+    if (props.activeTool === "note") return "註記：點一下放置，再在屬性面板編輯文字";
     return "可使用圖表工具進行分析";
   });
   const resolvedCanvasClass = computed(() => {
@@ -576,6 +587,164 @@ export function useChartEngine({
   const sliceSeries = (series) =>
     series.slice(viewport.startIndex, viewport.startIndex + visibleData.value.length);
 
+  const getDrawingDash = (drawing, fallback = []) =>
+    drawing?.lineStyle && DRAWING_LINE_STYLES[drawing.lineStyle]
+      ? DRAWING_LINE_STYLES[drawing.lineStyle]
+      : fallback;
+
+  const getDrawingWidth = (drawing, fallback = 1.2) =>
+    Number.isFinite(Number(drawing?.lineWidth)) ? Number(drawing.lineWidth) : fallback;
+
+  const getDrawingFill = (drawing, fallbackColor = "#9b6dff", fallbackOpacity = 0.12) => {
+    const color = drawing?.color || fallbackColor;
+    const opacity = Number.isFinite(Number(drawing?.fillOpacity))
+      ? Number(drawing.fillOpacity)
+      : fallbackOpacity;
+    return { color, opacity };
+  };
+
+  const withOpacity = (color, opacity) => {
+    if (!color) return `rgba(155,109,255,${opacity})`;
+    const normalized = Math.max(0, Math.min(opacity, 1));
+    if (color.startsWith("#")) {
+      const hex = color.slice(1);
+      const full = hex.length === 3
+        ? hex.split("").map((char) => `${char}${char}`).join("")
+        : hex;
+      if (full.length === 6) {
+        const red = parseInt(full.slice(0, 2), 16);
+        const green = parseInt(full.slice(2, 4), 16);
+        const blue = parseInt(full.slice(4, 6), 16);
+        return `rgba(${red},${green},${blue},${normalized})`;
+      }
+    }
+    if (color.startsWith("rgb")) {
+      const parts = color.replace(/rgba?\(|\)/g, "").split(",").map((part) => part.trim()).slice(0, 3);
+      if (parts.length === 3) return `rgba(${parts.join(",")},${normalized})`;
+    }
+    return color;
+  };
+
+  const parseDateValue = (value) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const formatAxisDateLabel = (value, rangeDays = 0) => {
+    const date = parseDateValue(value);
+    if (!date) return String(value || "").slice(5);
+    if (rangeDays >= 730) {
+      return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (rangeDays >= 90) {
+      return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+    }
+    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+  };
+
+  const getTimeTickIndices = (data, targetTickCount = 6) => {
+    if (!data.length) return [];
+    const indices = new Set([0, data.length - 1]);
+    const step = Math.max(1, Math.floor((data.length - 1) / Math.max(targetTickCount - 1, 1)));
+    for (let index = 0; index < data.length; index += step) {
+      indices.add(index);
+    }
+    return [...indices].sort((left, right) => left - right);
+  };
+
+  const drawTimeAxis = (ctx, canvas, data, layout, options = {}) => {
+    if (!data.length) return;
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+    const bottom = options.bottom ?? (height - PAD.bottom + 12);
+    const top = options.top ?? PAD.top;
+    const rangeDays = (() => {
+      const first = parseDateValue(data[0]?.date);
+      const last = parseDateValue(data[data.length - 1]?.date);
+      if (!first || !last) return 0;
+      return Math.abs((last - first) / 86400000);
+    })();
+    const tickIndices = getTimeTickIndices(data, options.tickCount ?? 6);
+
+    ctx.save();
+    ctx.fillStyle = options.labelColor || "rgba(77,102,128,0.92)";
+    ctx.font = options.font || "9px JetBrains Mono";
+    tickIndices.forEach((index) => {
+      const x = layout.barX(index);
+      if (options.showVerticals !== false) {
+        ctx.strokeStyle = options.gridColor || "rgba(30,45,61,0.55)";
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, options.verticalBottom ?? (height - PAD.bottom));
+        ctx.stroke();
+      }
+      const label = formatAxisDateLabel(data[index].date, rangeDays);
+      ctx.fillText(label, Math.max(PAD.left, x - 18), bottom);
+    });
+    ctx.restore();
+  };
+
+  const drawCrosshairGuide = (ctx, x, top, bottom, dateLabel = "", width = 0) => {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,209,102,0.95)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (dateLabel && width) {
+      const labelWidth = Math.max(46, dateLabel.length * 8 + 10);
+      const left = Math.min(Math.max(PAD.left, x - labelWidth / 2), width - PAD.right - labelWidth);
+      ctx.fillStyle = "rgba(255,209,102,0.14)";
+      ctx.strokeStyle = "rgba(255,209,102,0.88)";
+      ctx.fillRect(left, 2, labelWidth, 14);
+      ctx.strokeRect(left, 2, labelWidth, 14);
+      ctx.fillStyle = "#ffd166";
+      ctx.font = "9px JetBrains Mono";
+      ctx.fillText(dateLabel, left + 5, 12);
+    }
+    ctx.restore();
+  };
+
+  const getCrosshairMarker = (layout, data = visibleData.value) => {
+    const absoluteIndex = props.crosshair?.absoluteIndex;
+    if (!props.crosshair?.visible || !Number.isInteger(absoluteIndex)) return null;
+    if (absoluteIndex < viewport.startIndex || absoluteIndex >= viewport.startIndex + data.length) return null;
+    const localIndex = absoluteIndex - viewport.startIndex;
+    return {
+      absoluteIndex,
+      localIndex,
+      x: layout.barX(localIndex),
+      dateLabel: formatAxisDateLabel(data[localIndex]?.date, 0),
+    };
+  };
+
+  const drawPanelAxisAndCrosshair = (ctx, canvas, data, layout, options = {}) => {
+    if (!data?.length) return;
+    const panelHeight = canvasHeight(canvas);
+    const panelWidth = canvasWidth(canvas);
+    const top = options.top ?? 4;
+    const verticalBottom = options.verticalBottom ?? (panelHeight - 18);
+
+    drawTimeAxis(ctx, canvas, data, layout, {
+      bottom: options.bottom ?? (panelHeight - 4),
+      top,
+      verticalBottom,
+      tickCount: options.tickCount ?? 5,
+      labelColor: options.labelColor || "rgba(77,102,128,0.92)",
+      gridColor: options.gridColor || "rgba(30,45,61,0.45)",
+    });
+
+    const marker = getCrosshairMarker(layout, data);
+    if (marker) {
+      drawCrosshairGuide(ctx, marker.x, top, verticalBottom, marker.dateLabel, panelWidth);
+    }
+  };
+
   const drawGrid = (ctx, canvas, min, max, data, scaleMode = "linear") => {
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
@@ -598,10 +767,10 @@ export function useChartEngine({
       ctx.fillText(price.toFixed(2), width - PAD.right + 4, y + 3);
     }
 
-    const step = Math.max(1, Math.floor(data.length / 6));
-    data.forEach((row, index) => {
-      if (index % step !== 0 && index !== data.length - 1) return;
-      ctx.fillText(row.date.slice(5), PAD.left + index * (mainMetrics.step || 1), height - 8);
+    drawTimeAxis(ctx, canvas, data, { barX: (index) => PAD.left + (index + 0.5) * (mainMetrics.step || 1) }, {
+      bottom: height - 8,
+      top: PAD.top,
+      verticalBottom: height - PAD.bottom,
     });
   };
 
@@ -625,13 +794,33 @@ export function useChartEngine({
 
   const drawTrendLine = (ctx, layout, drawing, scale, color = "#00d4ff", dash = []) => {
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = getDrawingWidth(drawing, 1.5);
     ctx.setLineDash(dash);
     ctx.beginPath();
     ctx.moveTo(xForAbsoluteIndex(layout, drawing.startIndex), scale(drawing.startPrice));
     ctx.lineTo(xForAbsoluteIndex(layout, drawing.endIndex), scale(drawing.endPrice));
     ctx.stroke();
     ctx.setLineDash([]);
+  };
+
+  const drawArrowLine = (ctx, layout, drawing, scale, color = "#7be7ff", dash = []) => {
+    const startX = xForAbsoluteIndex(layout, drawing.startIndex);
+    const endX = xForAbsoluteIndex(layout, drawing.endIndex);
+    const startY = scale(drawing.startPrice);
+    const endY = scale(drawing.endPrice);
+    const angle = Math.atan2(endY - startY, endX - startX);
+    const headLength = 10;
+    drawTrendLine(ctx, layout, drawing, scale, color, dash);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = getDrawingWidth(drawing, 1.6);
+    ctx.beginPath();
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - headLength * Math.cos(angle - Math.PI / 6), endY - headLength * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - headLength * Math.cos(angle + Math.PI / 6), endY - headLength * Math.sin(angle + Math.PI / 6));
+    ctx.stroke();
+    ctx.restore();
   };
 
 const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = []) => {
@@ -646,6 +835,7 @@ const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = [
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.font = "9px JetBrains Mono";
+    ctx.lineWidth = getDrawingWidth(drawing, 1.2);
     ctx.setLineDash(dash);
 
     FIB_LEVELS.forEach((level) => {
@@ -664,9 +854,9 @@ const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = [
   ctx.setLineDash([]);
 };
 
-const drawVerticalLine = (ctx, x, height, color = "#ff8c42", dash = [5, 3]) => {
+const drawVerticalLine = (ctx, x, height, color = "#ff8c42", dash = [5, 3], lineWidth = 1) => {
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = lineWidth;
   ctx.setLineDash(dash);
   ctx.beginPath();
   ctx.moveTo(x, PAD.top);
@@ -675,7 +865,7 @@ const drawVerticalLine = (ctx, x, height, color = "#ff8c42", dash = [5, 3]) => {
   ctx.setLineDash([]);
 };
 
-const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, width) => {
+const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, width, dash = [6, 4]) => {
   const x1 = xAtAbsolute(drawing.startIndex);
   const x2 = xAtAbsolute(drawing.endIndex);
   const y1 = scale(drawing.startPrice);
@@ -687,8 +877,8 @@ const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, 
 
   ctx.fillStyle = fillStyle;
   ctx.strokeStyle = strokeStyle;
-  ctx.lineWidth = 1.2;
-  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = getDrawingWidth(drawing, 1.2);
+  ctx.setLineDash(dash);
   ctx.fillRect(left, top, zoneWidth, zoneHeight);
   ctx.strokeRect(left, top, zoneWidth, zoneHeight);
   ctx.setLineDash([]);
@@ -700,7 +890,7 @@ const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, 
   ctx.fillText(`${high.toFixed(2)} / ${low.toFixed(2)}`, width - PAD.right + 2, top + 10);
 };
 
-const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = "#00d4ff") => {
+const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = "#00d4ff", dash = [4, 3]) => {
   const x1 = xAtAbsolute(drawing.startIndex);
   const x2 = xAtAbsolute(drawing.endIndex);
   const y1 = scale(drawing.startPrice);
@@ -715,8 +905,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
   ctx.strokeStyle = strokeStyle;
   ctx.fillStyle = "rgba(0,212,255,0.08)";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = getDrawingWidth(drawing, 1);
+  ctx.setLineDash(dash);
   ctx.fillRect(left, top, boxWidth, boxHeight);
   ctx.strokeRect(left, top, boxWidth, boxHeight);
   ctx.beginPath();
@@ -733,6 +923,49 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     top + 12,
   );
 };
+
+const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
+  const x = xAtAbsolute(drawing.index);
+  const y = scale(drawing.price);
+  const text = drawing.text || drawing.label || "註記";
+  const color = drawing.color || "#ffd166";
+  const { opacity } = getDrawingFill(drawing, color, 0.88);
+  const paddingX = 8;
+  const paddingY = 5;
+  ctx.save();
+  ctx.font = "10px JetBrains Mono";
+  const textWidth = Math.min(180, Math.max(44, ctx.measureText(text).width + paddingX * 2));
+  const boxWidth = Math.min(textWidth, width - PAD.right - 12);
+  const boxHeight = 22;
+  const left = Math.min(Math.max(PAD.left, x + 8), width - PAD.right - boxWidth - 6);
+  const top = Math.max(PAD.top + 6, y - boxHeight - 8);
+  ctx.fillStyle = `rgba(8,12,18,${Math.min(opacity, 0.95)})`;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.fillRect(left, top, boxWidth, boxHeight);
+  ctx.strokeRect(left, top, boxWidth, boxHeight);
+  ctx.fillStyle = color;
+  ctx.fillText(text, left + paddingX, top + paddingY + 8);
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(left, top + boxHeight);
+  ctx.stroke();
+  ctx.restore();
+};
+
+  const drawDrawingLabel = (ctx, text, x, y, color) => {
+    if (!text) return;
+    ctx.save();
+    ctx.font = "9px JetBrains Mono";
+    const boxWidth = ctx.measureText(text).width + 10;
+    ctx.fillStyle = "rgba(8,12,18,0.88)";
+    ctx.strokeStyle = color;
+    ctx.fillRect(x, y - 11, boxWidth, 14);
+    ctx.strokeRect(x, y - 11, boxWidth, 14);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x + 5, y);
+    ctx.restore();
+  };
 
   const isDrawingSelected = (drawing) =>
     !!drawing?.id && drawing.id === props.selectedDrawingId;
@@ -798,7 +1031,25 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
         continue;
       }
 
-      if (!["trendline", "fib", "rect", "measure"].includes(drawing.type)) continue;
+      if (drawing.type === "note") {
+        if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + visibleData.value.length) continue;
+        const x = xAtAbsoluteIndex(drawing.index);
+        const y = scalePriceAtPoint(drawing.price);
+        const text = drawing.text || drawing.label || "註記";
+        const boxWidth = Math.min(180, Math.max(44, text.length * 7 + 16));
+        const canvasLimit = mainCanvas.value ? canvasWidth(mainCanvas.value) : (PAD.left + mainMetrics.chartWidth + PAD.right);
+        const left = Math.min(Math.max(PAD.left, x + 8), canvasLimit - PAD.right - boxWidth - 6);
+        const top = Math.max(PAD.top + 6, y - 30);
+        if (
+          Math.hypot(info.x - x, info.y - y) <= DRAWING_HIT_TOLERANCE + 3
+          || (info.x >= left - 4 && info.x <= left + boxWidth + 4 && info.y >= top - 4 && info.y <= top + 26)
+        ) {
+          return drawing;
+        }
+        continue;
+      }
+
+      if (!["trendline", "arrow", "fib", "rect", "measure"].includes(drawing.type)) continue;
 
       const startX = xAtAbsoluteIndex(drawing.startIndex);
       const endX = xAtAbsoluteIndex(drawing.endIndex);
@@ -809,7 +1060,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       const top = Math.min(startY, endY) - DRAWING_HIT_TOLERANCE;
       const bottom = Math.max(startY, endY) + DRAWING_HIT_TOLERANCE;
 
-      if (drawing.type === "trendline") {
+      if (drawing.type === "trendline" || drawing.type === "arrow") {
         if (distanceToSegment(info.x, info.y, startX, startY, endX, endY) <= DRAWING_HIT_TOLERANCE) return drawing;
         continue;
       }
@@ -869,8 +1120,9 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     if (!drawing || !info) return null;
 
     if (drawing.type === "hline") return "price";
+    if (drawing.type === "note") return "point";
     if (drawing.type === "vline" || drawing.type === "buy" || drawing.type === "sell") return "index";
-    if (!["trendline", "fib", "rect", "measure"].includes(drawing.type)) return null;
+    if (!["trendline", "arrow", "fib", "rect", "measure"].includes(drawing.type)) return null;
 
     const startX = xAtAbsoluteIndex(drawing.startIndex);
     const endX = xAtAbsoluteIndex(drawing.endIndex);
@@ -925,6 +1177,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       nextPatch = { price: info.price };
     } else if (drawingDragState.mode === "index") {
       nextPatch = { index: clampAbsoluteIndex(origin.index + deltaBars) };
+    } else if (drawingDragState.mode === "point") {
+      nextPatch = {
+        index: clampAbsoluteIndex(origin.index + deltaBars),
+        price: origin.price + deltaPrice,
+      };
     } else if (drawingDragState.mode === "start") {
       nextPatch = {
         startIndex: clampAbsoluteIndex(info.absoluteIndex),
@@ -958,7 +1215,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       return drawing.price != null ? [drawing.price] : [];
     }
 
-    if (drawing.type === "trendline" || drawing.type === "fib" || drawing.type === "rect" || drawing.type === "measure") {
+    if (drawing.type === "note") {
+      return drawing.price != null ? [drawing.price] : [];
+    }
+
+    if (drawing.type === "trendline" || drawing.type === "arrow" || drawing.type === "fib" || drawing.type === "rect" || drawing.type === "measure") {
       const drawingStart = Math.min(drawing.startIndex, drawing.endIndex);
       const drawingEnd = Math.max(drawing.startIndex, drawing.endIndex);
       if (drawingEnd < viewStart || drawingStart > viewEnd) return [];
@@ -1147,7 +1408,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       }
 
       if (drawing.type === "hline") {
-        const color = selected ? "#ffd166" : "#f5a623";
+        const color = drawing.color || "#f5a623";
         const y = scale(drawing.price);
         ctx.save();
         ctx.globalAlpha = locked ? 0.72 : 1;
@@ -1156,8 +1417,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
           ctx.shadowBlur = 10;
         }
         ctx.strokeStyle = color;
-        ctx.lineWidth = selected ? 1.8 : 1;
-        ctx.setLineDash(locked ? [2, 4] : selected ? [7, 3] : [5, 3]);
+        ctx.lineWidth = selected ? getDrawingWidth(drawing, 1) + 0.8 : getDrawingWidth(drawing, 1);
+        ctx.setLineDash(getDrawingDash(drawing, locked ? [2, 4] : selected ? [7, 3] : [5, 3]));
         ctx.beginPath();
         ctx.moveTo(PAD.left, y);
         ctx.lineTo(width - PAD.right, y);
@@ -1166,84 +1427,50 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
         ctx.fillStyle = color;
         ctx.font = selected ? "bold 9px JetBrains Mono" : "9px JetBrains Mono";
         ctx.fillText(drawing.price.toFixed(2), width - PAD.right + 2, y + 3);
+        drawDrawingLabel(ctx, drawing.label, PAD.left + 8, y - 4, color);
         ctx.restore();
         return;
       }
 
       if (drawing.type === "vline") {
-        const color = selected ? "#ffd166" : "#ff8c42";
+        const color = drawing.color || "#ff8c42";
+        const x = xForAbsoluteIndex(layout, drawing.index);
         ctx.save();
         ctx.globalAlpha = locked ? 0.72 : 1;
-        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, color, locked ? [2, 4] : selected ? [7, 2] : [5, 3]);
         if (selected) {
-          drawSelectionHandles(ctx, [{ x: xForAbsoluteIndex(layout, drawing.index), y: PAD.top + 14 }], color);
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        drawVerticalLine(
+          ctx,
+          x,
+          height,
+          color,
+          getDrawingDash(drawing, locked ? [2, 4] : selected ? [7, 2] : [5, 3]),
+          selected ? getDrawingWidth(drawing, 1) + 0.8 : getDrawingWidth(drawing, 1),
+        );
+        drawDrawingLabel(ctx, drawing.label, x + 6, PAD.top + 18, color);
+        if (selected) {
+          drawSelectionHandles(ctx, [{ x, y: PAD.top + 14 }], color);
         }
         ctx.restore();
         return;
       }
 
       if (drawing.type === "trendline") {
-        const color = selected ? "#7be7ff" : "#00d4ff";
+        const color = drawing.color || "#00d4ff";
         ctx.save();
         ctx.globalAlpha = locked ? 0.72 : 1;
-        drawTrendLine(ctx, layout, drawing, scale, color, locked ? [2, 4] : selected ? [3, 2] : []);
         if (selected) {
-          drawSelectionHandles(ctx, [
-            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
-            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
-          ], color);
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
         }
-        ctx.restore();
-        return;
-      }
-
-      if (drawing.type === "fib") {
-        const color = selected ? "#ffe082" : "#ffd166";
-        ctx.save();
-        ctx.globalAlpha = locked ? 0.72 : 1;
-        drawFib(ctx, layout, drawing, scale, width, color, locked ? [2, 4] : selected ? [4, 2] : [6, 4]);
-        if (selected) {
-          drawSelectionHandles(ctx, [
-            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
-            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
-          ], color);
-        }
-        ctx.restore();
-        return;
-      }
-
-      if (drawing.type === "rect") {
-        ctx.save();
-        ctx.globalAlpha = locked ? 0.72 : 1;
-        drawRectZone(
+        drawTrendLine(ctx, layout, drawing, scale, color, getDrawingDash(drawing, locked ? [2, 4] : selected ? [3, 2] : []));
+        drawDrawingLabel(
           ctx,
-          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
-          drawing,
-          scale,
-          selected ? "#c2a3ff" : "#9b6dff",
-          selected ? "rgba(155,109,255,0.2)" : "rgba(155,109,255,0.12)",
-          width,
-        );
-        if (selected) {
-          drawSelectionHandles(ctx, [
-            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
-            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
-          ], "#c2a3ff");
-        }
-        ctx.restore();
-        return;
-      }
-
-      if (drawing.type === "measure") {
-        const color = selected ? "#7be7ff" : "#00d4ff";
-        ctx.save();
-        ctx.globalAlpha = locked ? 0.72 : 1;
-        drawMeasureTool(
-          ctx,
-          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
-          drawing,
-          scale,
-          width,
+          drawing.label,
+          xForAbsoluteIndex(layout, drawing.endIndex) + 6,
+          scale(drawing.endPrice) - 4,
           color,
         );
         if (selected) {
@@ -1255,10 +1482,157 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
         ctx.restore();
         return;
       }
+
+      if (drawing.type === "arrow") {
+        const color = drawing.color || "#7be7ff";
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        drawArrowLine(ctx, layout, drawing, scale, color, getDrawingDash(drawing, locked ? [2, 4] : selected ? [3, 2] : []));
+        drawDrawingLabel(
+          ctx,
+          drawing.label,
+          xForAbsoluteIndex(layout, drawing.endIndex) + 6,
+          scale(drawing.endPrice) - 4,
+          color,
+        );
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
+        ctx.restore();
+        return;
+      }
+
+      if (drawing.type === "fib") {
+        const color = drawing.color || "#ffd166";
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        drawFib(ctx, layout, drawing, scale, width, color, getDrawingDash(drawing, locked ? [2, 4] : selected ? [4, 2] : [6, 4]));
+        drawDrawingLabel(
+          ctx,
+          drawing.label,
+          xForAbsoluteIndex(layout, drawing.endIndex) + 6,
+          scale(drawing.endPrice) - 4,
+          color,
+        );
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
+        ctx.restore();
+        return;
+      }
+
+      if (drawing.type === "rect") {
+        const color = drawing.color || "#9b6dff";
+        const fill = getDrawingFill(drawing, color, 0.12);
+        const startX = xForAbsoluteIndex(layout, drawing.startIndex);
+        const endX = xForAbsoluteIndex(layout, drawing.endIndex);
+        const startY = scale(drawing.startPrice);
+        const endY = scale(drawing.endPrice);
+        const left = Math.min(startX, endX);
+        const top = Math.min(startY, endY);
+        const boxWidth = Math.abs(endX - startX);
+        const boxHeight = Math.abs(endY - startY);
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        ctx.fillStyle = withOpacity(fill.color, Math.min(fill.opacity, 0.95));
+        ctx.fillRect(left, top, boxWidth, boxHeight);
+        drawRectZone(
+          ctx,
+          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+          drawing,
+          scale,
+          color,
+          "rgba(0,0,0,0)",
+          width,
+          getDrawingDash(drawing, locked ? [2, 4] : selected ? [4, 2] : [6, 4]),
+        );
+        drawDrawingLabel(ctx, drawing.label, left + 6, top + 16, color);
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
+        ctx.restore();
+        return;
+      }
+
+      if (drawing.type === "measure") {
+        const color = drawing.color || "#00d4ff";
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        drawMeasureTool(
+          ctx,
+          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+          drawing,
+          scale,
+          width,
+          color,
+          getDrawingDash(drawing, locked ? [2, 4] : selected ? [4, 2] : [4, 3]),
+        );
+        drawDrawingLabel(
+          ctx,
+          drawing.label,
+          xForAbsoluteIndex(layout, drawing.endIndex) + 6,
+          scale(drawing.endPrice) - 4,
+          color,
+        );
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
+        ctx.restore();
+        return;
+      }
+
+      if (drawing.type === "note") {
+        const color = drawing.color || "#ffd166";
+        ctx.save();
+        ctx.globalAlpha = locked ? 0.72 : 1;
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        drawNote(ctx, (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex), drawing, scale, width);
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.index), y: scale(drawing.price) },
+          ], color);
+        }
+        ctx.restore();
+      }
     });
 
     if (draftDrawing.value?.type === "trendline") {
       drawTrendLine(ctx, layout, draftDrawing.value, scale, "rgba(0,212,255,0.75)", [6, 4]);
+    }
+
+    if (draftDrawing.value?.type === "arrow") {
+      drawArrowLine(ctx, layout, draftDrawing.value, scale, "rgba(123,231,255,0.82)", [6, 4]);
     }
 
     if (draftDrawing.value?.type === "fib") {
@@ -1304,6 +1678,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     const lastRow = data[data.length - 1];
     const prevRow = data[data.length - 2] || lastRow;
+    const crosshairMarker = getCrosshairMarker(layout, data);
+    if (crosshairMarker) {
+      drawCrosshairGuide(ctx, crosshairMarker.x, PAD.top, height - PAD.bottom, crosshairMarker.dateLabel, width);
+    }
     drawPriceLabel(
       ctx,
       canvas,
@@ -1365,15 +1743,17 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       max += pad;
     }
 
-    const chartHeight = height - 10;
-    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
 
     ctx.strokeStyle = "rgba(30,45,61,0.7)";
     ctx.lineWidth = 0.5;
     ctx.fillStyle = "rgba(77,102,128,0.7)";
     ctx.font = "8px JetBrains Mono";
     for (let index = 0; index <= 4; index += 1) {
-      const y = 4 + index * (chartHeight / 4);
+      const y = plotTop + index * (chartHeight / 4);
       const axisValue = max - ((max - min) * index) / 4;
       ctx.beginPath();
       ctx.moveTo(PAD.left, y);
@@ -1395,6 +1775,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       ctx.font = "8px JetBrains Mono";
       ctx.fillText(label, 8, 12 + seriesList.indexOf(series) * 11);
     });
+
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderVolume = () => {
@@ -1410,8 +1796,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     const layout = getBarLayout(canvas, data.length);
     const maxVolume = Math.max(...data.map((row) => row.volume || 0), 1);
-    const chartHeight = height - 4;
-    const scale = (value) => chartHeight - (value / maxVolume) * chartHeight + 2;
+    const plotTop = 2;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotBottom - (value / maxVolume) * chartHeight;
     const visibleVolumeMa = sliceSeries(volumeMa(props.ohlcData, props.indicatorSettings.volumeMaPeriod));
 
     data.forEach((row, index) => {
@@ -1419,7 +1807,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       ctx.fillStyle = row.close >= row.open ? "rgba(0,217,163,0.4)" : "rgba(255,77,106,0.4)";
       ctx.fillRect(
         layout.barX(index) - (layout.barWidth * 0.78) / 2,
-        chartHeight - barHeight + 2,
+        plotBottom - barHeight,
         layout.barWidth * 0.78,
         barHeight,
       );
@@ -1430,6 +1818,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     ctx.fillStyle = "rgba(77,102,128,0.6)";
     ctx.font = "9px JetBrains Mono";
     ctx.fillText(`VOL / MA${props.indicatorSettings.volumeMaPeriod}`, 2, 12);
+    drawPanelAxisAndCrosshair(ctx, canvas, data, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderRsi = () => {
@@ -1444,8 +1837,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     ctx.clearRect(0, 0, width, height);
 
     const layout = getBarLayout(canvas, visibleData.value.length);
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - value / 100) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - value / 100) * chartHeight;
 
     ctx.fillStyle = "rgba(255,77,106,0.05)";
     ctx.fillRect(PAD.left, scale(100), width - PAD.left - PAD.right, scale(70) - scale(100));
@@ -1467,6 +1862,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     });
 
     drawLine(ctx, values, layout.barX, scale, "#00d9a3", 1.5);
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderMacd = () => {
@@ -1492,8 +1892,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const values = [...visibleHist, ...visibleMacd, ...visibleSignal].filter((value) => value != null);
     const min = Math.min(...values, -1);
     const max = Math.max(...values, 1);
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
 
     ctx.strokeStyle = "rgba(77,102,128,0.4)";
     ctx.lineWidth = 0.5;
@@ -1512,6 +1914,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     drawLine(ctx, visibleMacd, layout.barX, scale, "#3b8bff", 1.2);
     drawLine(ctx, visibleSignal, layout.barX, scale, "#f5a623", 1.2);
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderStoch = () => {
@@ -1528,8 +1935,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     ctx.clearRect(0, 0, width, height);
 
     const layout = getBarLayout(canvas, visibleData.value.length);
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - value / 100) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - value / 100) * chartHeight;
 
     [80, 50, 20].forEach((level) => {
       ctx.strokeStyle = "rgba(77,102,128,0.4)";
@@ -1542,6 +1951,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
 
     drawLine(ctx, visibleK, layout.barX, scale, "#00d9a3", 1.5);
     drawLine(ctx, visibleD, layout.barX, scale, "#f5a623", 1);
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderAtr = () => {
@@ -1571,8 +1985,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       max += pad;
     }
 
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
 
     [0, 0.33, 0.66, 1].forEach((ratio) => {
       const level = min + (max - min) * ratio;
@@ -1593,10 +2009,15 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       visibleAtr,
       layout.barX,
       scale,
-      height - 2,
+      plotBottom,
       "#ff8c42",
       "rgba(255,140,66,0.12)",
     );
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderCci = () => {
@@ -1625,8 +2046,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       max += pad;
     }
 
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
 
     ctx.fillStyle = "rgba(255,77,106,0.05)";
     ctx.fillRect(PAD.left, scale(max), width - PAD.left - PAD.right, scale(100) - scale(max));
@@ -1648,6 +2071,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     });
 
     drawLine(ctx, visibleCci, layout.barX, scale, "#9b6dff", 1.5);
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderObv = () => {
@@ -1676,8 +2104,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       max += pad;
     }
 
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - (value - min) / (max - min || 1)) * chartHeight;
 
     [0, 0.5, 1].forEach((ratio) => {
       const level = min + (max - min) * ratio;
@@ -1695,10 +2125,15 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       visibleObv,
       layout.barX,
       scale,
-      height - 2,
+      plotBottom,
       "#00d4ff",
       "rgba(0,212,255,0.10)",
     );
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const renderAdx = () => {
@@ -1716,8 +2151,10 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     ctx.clearRect(0, 0, width, height);
 
     const layout = getBarLayout(canvas, visibleData.value.length);
-    const chartHeight = height - 8;
-    const scale = (value) => 4 + (1 - value / 100) * chartHeight;
+    const plotTop = 4;
+    const plotBottom = height - 18;
+    const chartHeight = plotBottom - plotTop;
+    const scale = (value) => plotTop + (1 - value / 100) * chartHeight;
 
     [50, 25, 0].forEach((level) => {
       ctx.strokeStyle = "rgba(77,102,128,0.4)";
@@ -1736,6 +2173,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     drawLine(ctx, visibleAdx, layout.barX, scale, "#ffd166", 1.4);
     drawLine(ctx, visiblePlus, layout.barX, scale, "#00d9a3", 1.1);
     drawLine(ctx, visibleMinus, layout.barX, scale, "#ff4d6a", 1.1);
+    drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
+      top: plotTop,
+      verticalBottom: plotBottom,
+      bottom: height - 4,
+    });
   };
 
   const clearAll = () => {
@@ -1896,7 +2338,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     if (
       !draftDrawing.value
       || !info
-      || !["trendline", "fib", "rect", "measure"].includes(draftDrawing.value.type)
+      || !["trendline", "arrow", "fib", "rect", "measure"].includes(draftDrawing.value.type)
     ) {
       return;
     }
@@ -2081,6 +2523,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       low: fmtPrice(info.row.low),
       close: fmtPrice(info.row.close),
       volume: fmtVol(info.row.volume),
+      absoluteIndex: info.absoluteIndex,
     });
 
     updateDraftDrawing(info);
@@ -2148,8 +2591,19 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
       return;
     }
 
+    if (props.activeTool === "note") {
+      emit("add-drawing", {
+        type: "note",
+        index: info.absoluteIndex,
+        price: info.price,
+      });
+      scheduleRender();
+      return;
+    }
+
     const toolTypeMap = {
       tline: "trendline",
+      arrow: "arrow",
       fib: "fib",
       rect: "rect",
       measure: "measure",
@@ -2306,7 +2760,7 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   watch(
     () => props.activeTool,
     (nextTool) => {
-      if (!["tline", "fib", "rect", "measure"].includes(nextTool)) {
+      if (!["tline", "arrow", "fib", "rect", "measure"].includes(nextTool)) {
         draftDrawing.value = null;
       }
       if (nextTool !== "boxzoom") {
@@ -2336,6 +2790,8 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   return {
     chartMode,
     priceScaleMode,
+    visibleData,
+    viewportStartIndex: computed(() => viewport.startIndex),
     canvasClass: resolvedCanvasClass,
     visibleRangeLabel,
     visibleBarsLabel,

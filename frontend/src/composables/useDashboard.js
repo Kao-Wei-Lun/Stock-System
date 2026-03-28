@@ -20,6 +20,7 @@ const TIMEFRAME_OPTIONS = [
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
+const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const DEFAULT_ACTIVE_IND = {
   ma20: true,
   ma50: true,
@@ -39,7 +40,7 @@ const DEFAULT_ACTIVE_PANELS = {
   obv: false,
   adx: false,
 };
-const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
+const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "arrow", "fib", "rect", "measure", "note", "boxzoom"];
 let drawingIdSeed = 1;
 let workspacePresetSeed = 1;
 
@@ -76,8 +77,36 @@ function writeWorkspacePresets(value) {
   window.localStorage.setItem(WORKSPACE_PRESETS_KEY, JSON.stringify(value));
 }
 
+function getDrawingDefaults(type) {
+  const defaults = {
+    color: "#00d4ff",
+    lineWidth: 1.5,
+    lineStyle: "solid",
+    label: "",
+    fillOpacity: 0.12,
+    text: "註記",
+  };
+
+  const byType = {
+    buy: { color: "#00d9a3", lineWidth: 2 },
+    sell: { color: "#ff4d6a", lineWidth: 2 },
+    hline: { color: "#f5a623", lineWidth: 1.2, lineStyle: "dash" },
+    vline: { color: "#ff8c42", lineWidth: 1.2, lineStyle: "dash" },
+    trendline: { color: "#00d4ff", lineWidth: 1.5 },
+    arrow: { color: "#7be7ff", lineWidth: 1.6 },
+    fib: { color: "#ffd166", lineWidth: 1.2, lineStyle: "dash" },
+    rect: { color: "#9b6dff", lineWidth: 1.2, lineStyle: "dash", fillOpacity: 0.12 },
+    measure: { color: "#00d4ff", lineWidth: 1.1, lineStyle: "dash" },
+    note: { color: "#ffd166", lineWidth: 1, lineStyle: "solid", fillOpacity: 0.88, text: "註記" },
+  };
+
+  return { ...defaults, ...(byType[type] || {}) };
+}
+
 function createDrawingEntry(drawing) {
+  const defaults = getDrawingDefaults(drawing.type);
   return {
+    ...defaults,
     ...drawing,
     id: drawing.id || `drawing-${Date.now()}-${drawingIdSeed++}`,
     hidden: Boolean(drawing.hidden),
@@ -121,6 +150,7 @@ export function useDashboard() {
   );
   const initialTool = TOOL_OPTIONS.includes(storedPrefs.activeTool) ? storedPrefs.activeTool : "cursor";
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
+  const initialChartLayout = CHART_LAYOUT_OPTIONS.includes(storedPrefs.chartLayout) ? storedPrefs.chartLayout : "single";
   const storedWorkspacePresets = readWorkspacePresets();
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
@@ -153,6 +183,7 @@ export function useDashboard() {
   const currentName = ref("載入中...");
   const currentPeriod = ref(storedTimeframe?.tf || "1y");
   const currentInterval = ref(storedTimeframe?.iv || "1d");
+  const chartLayout = ref(initialChartLayout);
   const chartLoading = ref(true);
   const loadingMessage = ref("正在載入資料...");
   const ohlcData = ref([]);
@@ -192,6 +223,7 @@ export function useDashboard() {
   const indicatorSettings = reactive(normalizeIndicatorSettings(storedPrefs.indicatorSettings || {}));
   const crosshair = reactive({
     visible: false,
+    absoluteIndex: null,
     date: "—",
     open: "—",
     high: "—",
@@ -670,6 +702,10 @@ export function useDashboard() {
     if (tab === "db") await loadDbStats();
   }
 
+  function setChartLayout(layout) {
+    chartLayout.value = CHART_LAYOUT_OPTIONS.includes(layout) ? layout : "single";
+  }
+
   function toggleIndicator(name) {
     activeInd[name] = !activeInd[name];
   }
@@ -870,6 +906,11 @@ export function useDashboard() {
       return;
     }
 
+    if (nextDrawing.type === "arrow") {
+      pushNotification({ icon: "↗", title: "箭頭線已加", msg: "已標記趨勢方向" });
+      return;
+    }
+
     if (nextDrawing.type === "fib") {
       pushNotification({ icon: "⋮", title: "費波那契已加", msg: "已加入回撤分析" });
       return;
@@ -882,6 +923,9 @@ export function useDashboard() {
 
     if (nextDrawing.type === "measure") {
       pushNotification({ icon: "⊕", title: "測距尺已加", msg: "已記錄價差與時間距離" });
+    }
+    if (nextDrawing.type === "note") {
+      pushNotification({ icon: "✎", title: "註記已加", msg: "可在屬性面板補上文字與標籤" });
     }
   }
 
@@ -948,6 +992,7 @@ export function useDashboard() {
       currentName: currentName.value,
       currentPeriod: currentPeriod.value,
       currentInterval: currentInterval.value,
+      chartLayout: chartLayout.value,
       compareTickers: [...compareTickers.value],
       comparisonMode: comparisonMode.value,
       activeTool: activeTool.value,
@@ -987,6 +1032,7 @@ export function useDashboard() {
     currentName.value = preset.currentName || normalizedTicker;
     currentPeriod.value = preset.currentPeriod || currentPeriod.value;
     currentInterval.value = preset.currentInterval || currentInterval.value;
+    chartLayout.value = CHART_LAYOUT_OPTIONS.includes(preset.chartLayout) ? preset.chartLayout : "single";
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
     leftTab.value = preset.leftTab === "market" ? "market" : "watch";
@@ -1030,6 +1076,7 @@ export function useDashboard() {
 
   function hideCrosshair() {
     crosshair.visible = false;
+    crosshair.absoluteIndex = null;
   }
 
   async function syncCurrentTicker() {
@@ -1177,6 +1224,7 @@ export function useDashboard() {
     leftTab: leftTab.value,
     rightTab: rightTab.value,
     activeTool: activeTool.value,
+    chartLayout: chartLayout.value,
     activeInd: { ...activeInd },
     activePanels: { ...activePanels },
     indicatorSettings: { ...indicatorSettings },
@@ -1233,6 +1281,7 @@ export function useDashboard() {
     currentName,
     currentPeriod,
     currentInterval,
+    chartLayout,
     chartLoading,
     loadingMessage,
     ohlcData,
@@ -1279,6 +1328,7 @@ export function useDashboard() {
     setLeftTab,
     setActiveWatchGroup,
     setRightTab,
+    setChartLayout,
     selectTicker,
     toggleIndicator,
     togglePanel,
