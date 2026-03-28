@@ -633,6 +633,10 @@ async def init_db():
 
 
 def _period_to_date(period: str) -> str:
+    if not period:
+        return (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
+    if period == "max":
+        return "1900-01-01"
     n, unit = int(period[:-2]) if period[:-2].isdigit() else int(period[:-1]), period[-1]
     if period[:-2].isdigit():
         n, unit = int(period[:-2]), period[-2:]

@@ -649,6 +649,14 @@ export function useChartEngine({
     return Number.isNaN(date.getTime()) ? null : date;
   };
 
+  const getDataRangeDays = (data) => {
+    if (!data?.length) return 0;
+    const first = parseDateValue(data[0]?.date);
+    const last = parseDateValue(data[data.length - 1]?.date);
+    if (!first || !last) return 0;
+    return Math.abs((last - first) / 86400000);
+  };
+
   const formatAxisDateLabel = (value, rangeDays = 0) => {
     const date = parseDateValue(value);
     if (!date) return String(value || "").slice(5);
@@ -677,12 +685,7 @@ export function useChartEngine({
     const height = canvasHeight(canvas);
     const bottom = options.bottom ?? (height - PAD.bottom + 12);
     const top = options.top ?? PAD.top;
-    const rangeDays = (() => {
-      const first = parseDateValue(data[0]?.date);
-      const last = parseDateValue(data[data.length - 1]?.date);
-      if (!first || !last) return 0;
-      return Math.abs((last - first) / 86400000);
-    })();
+    const rangeDays = getDataRangeDays(data);
     const tickIndices = getTimeTickIndices(data, options.tickCount ?? 6);
 
     ctx.save();
@@ -729,16 +732,43 @@ export function useChartEngine({
     ctx.restore();
   };
 
+  const drawHorizontalCrosshairGuide = (ctx, y, left, right, label = "", width = 0, top = PAD.top, bottom = 0) => {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,209,102,0.95)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (label && width) {
+      const labelWidth = Math.max(56, label.length * 8 + 10);
+      const boxLeft = Math.max(right + 4, width - labelWidth - 4);
+      const boxTop = clamp(y - 8, top + 2, Math.max(top + 2, bottom - 16));
+      ctx.fillStyle = "rgba(255,209,102,0.14)";
+      ctx.strokeStyle = "rgba(255,209,102,0.88)";
+      ctx.fillRect(boxLeft, boxTop, labelWidth, 14);
+      ctx.strokeRect(boxLeft, boxTop, labelWidth, 14);
+      ctx.fillStyle = "#ffd166";
+      ctx.font = "9px JetBrains Mono";
+      ctx.fillText(label, boxLeft + 5, boxTop + 10);
+    }
+    ctx.restore();
+  };
+
   const getCrosshairMarker = (layout, data = visibleData.value) => {
     const absoluteIndex = props.crosshair?.absoluteIndex;
     if (!props.crosshair?.visible || !Number.isInteger(absoluteIndex)) return null;
     if (absoluteIndex < viewport.startIndex || absoluteIndex >= viewport.startIndex + data.length) return null;
     const localIndex = absoluteIndex - viewport.startIndex;
+    const rangeDays = getDataRangeDays(data);
     return {
       absoluteIndex,
       localIndex,
       x: layout.barX(localIndex),
-      dateLabel: formatAxisDateLabel(data[localIndex]?.date, 0),
+      dateLabel: formatAxisDateLabel(data[localIndex]?.date, rangeDays),
     };
   };
 
@@ -1915,6 +1945,18 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const crosshairMarker = getCrosshairMarker(layout, data);
     if (crosshairMarker) {
       drawCrosshairGuide(ctx, crosshairMarker.x, PAD.top, height - PAD.bottom, crosshairMarker.dateLabel, width);
+      if (Number.isFinite(props.crosshair?.canvasY)) {
+        drawHorizontalCrosshairGuide(
+          ctx,
+          clamp(props.crosshair.canvasY, PAD.top, height - PAD.bottom),
+          PAD.left,
+          width - PAD.right,
+          props.crosshair.hoverPrice || "",
+          width,
+          PAD.top,
+          height - PAD.bottom,
+        );
+      }
     }
     drawPriceLabel(
       ctx,
@@ -2934,17 +2976,28 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       return;
     }
 
+    const prevRow = props.ohlcData[info.absoluteIndex - 1];
+    const referenceClose = prevRow?.close ?? info.row.open ?? info.row.close;
+    const candleChange = (info.row.close ?? 0) - (referenceClose ?? 0);
+    const candleChangePct = referenceClose ? (candleChange / referenceClose) * 100 : 0;
+
     emit("update-crosshair", {
       visible: true,
+      canvasX: info.x,
+      canvasY: info.y,
       date: info.row.date,
+      hoverPrice: fmtPrice(info.price),
       open: fmtPrice(info.row.open),
       high: fmtPrice(info.row.high),
       low: fmtPrice(info.row.low),
       close: fmtPrice(info.row.close),
+      change: `${candleChange >= 0 ? "+" : ""}${fmtPrice(candleChange)}`,
+      changePct: `${candleChangePct >= 0 ? "+" : ""}${candleChangePct.toFixed(2)}%`,
       volume: fmtVol(info.row.volume),
       absoluteIndex: info.absoluteIndex,
     });
 
+    scheduleRender();
     updateDraftDrawing(info);
   };
 
@@ -3158,6 +3211,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
   watch(
     () => [viewport.startIndex, viewport.visibleCount, chartMode.value],
+    () => scheduleRender(),
+  );
+
+  watch(
+    () => [
+      props.crosshair?.visible,
+      props.crosshair?.absoluteIndex,
+      props.crosshair?.canvasY,
+      props.crosshair?.hoverPrice,
+    ],
     () => scheduleRender(),
   );
 

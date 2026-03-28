@@ -15,6 +15,8 @@ const TIMEFRAME_OPTIONS = [
   { tf: "1y", iv: "1d", label: "1Y" },
   { tf: "2y", iv: "1wk", label: "2Y" },
   { tf: "5y", iv: "1mo", label: "5Y" },
+  { tf: "10y", iv: "1wk", label: "10Y" },
+  { tf: "max", iv: "1d", label: "MAX" },
 ];
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
@@ -235,6 +237,11 @@ export function useDashboard() {
   const crosshair = reactive({
     visible: false,
     absoluteIndex: null,
+    canvasX: null,
+    canvasY: null,
+    hoverPrice: "-",
+    change: "-",
+    changePct: "-",
     date: "—",
     open: "—",
     high: "—",
@@ -1141,6 +1148,8 @@ export function useDashboard() {
   function hideCrosshair() {
     crosshair.visible = false;
     crosshair.absoluteIndex = null;
+    crosshair.canvasX = null;
+    crosshair.canvasY = null;
   }
 
   async function syncCurrentTicker() {

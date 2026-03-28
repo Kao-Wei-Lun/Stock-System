@@ -248,10 +248,12 @@
 
       <div v-show="crosshair.visible" class="crosshair-box is-open">
         <div class="ci-row"><span class="ci-label">日期</span><span>{{ crosshair.date }}</span></div>
+        <div class="ci-row"><span class="ci-label">游標價</span><span>{{ crosshair.hoverPrice }}</span></div>
         <div class="ci-row"><span class="ci-label">開盤</span><span>{{ crosshair.open }}</span></div>
         <div class="ci-row"><span class="ci-label">最高</span><span>{{ crosshair.high }}</span></div>
         <div class="ci-row"><span class="ci-label">最低</span><span>{{ crosshair.low }}</span></div>
         <div class="ci-row"><span class="ci-label">收盤</span><span>{{ crosshair.close }}</span></div>
+        <div class="ci-row"><span class="ci-label">漲跌</span><span>{{ crosshair.change }} ({{ crosshair.changePct }})</span></div>
         <div class="ci-row"><span class="ci-label">成交量</span><span>{{ crosshair.volume }}</span></div>
       </div>
     </div>

@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import uvicorn
@@ -69,6 +69,49 @@ DEFAULT_WATCHLIST = [
     "^DJI",
     "^TWII",
 ]
+
+FULL_HISTORY_PERIODS = {"10y", "max"}
+
+
+def _period_to_since(period: str):
+    period = (period or "").strip().lower()
+    if not period or period == "max":
+        return None
+    if period.endswith("mo") and period[:-2].isdigit():
+        return datetime.utcnow() - timedelta(days=int(period[:-2]) * 30)
+    if period.endswith("wk") and period[:-2].isdigit():
+        return datetime.utcnow() - timedelta(days=int(period[:-2]) * 7)
+    if period.endswith("y") and period[:-1].isdigit():
+        return datetime.utcnow() - timedelta(days=int(period[:-1]) * 365)
+    if period.endswith("d") and period[:-1].isdigit():
+        return datetime.utcnow() - timedelta(days=int(period[:-1]))
+    return datetime.utcnow() - timedelta(days=365)
+
+
+def _row_date_to_datetime(row_date):
+    if isinstance(row_date, datetime):
+        return row_date
+    if not row_date:
+        return None
+    try:
+        return datetime.fromisoformat(str(row_date))
+    except ValueError:
+        return None
+
+
+def _needs_history_backfill(rows, period: str) -> bool:
+    if not rows:
+        return True
+    if period in FULL_HISTORY_PERIODS:
+        return True
+
+    expected_since = _period_to_since(period)
+    oldest = _row_date_to_datetime(rows[0].get("date"))
+    if not expected_since or not oldest:
+        return False
+
+    grace_days = 5 if period.endswith("d") else 21
+    return oldest > expected_since + timedelta(days=grace_days)
 
 
 class WatchlistGroupCreate(BaseModel):
@@ -269,7 +312,7 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
         raise HTTPException(400, str(exc)) from exc
 
     try:
-        await fetcher.fetch_and_store(ticker, period="3mo", include_info=False)
+        await fetcher.fetch_and_store(ticker, period="max", interval="1d", include_info=False)
     except Exception as exc:
         log.warning("watchlist sync %s failed: %s", ticker, exc)
 
@@ -309,14 +352,19 @@ async def reorder_watchlist_items(group_id: int, payload: WatchlistItemsOrderUpd
 @app.get("/api/kline/{ticker}")
 async def get_kline(
     ticker: str,
-    period: str = Query("1y", description="1mo 3mo 6mo 1y 2y 5y"),
-    interval: str = Query("1d", description="1d 1wk 1mo"),
+    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query("1d", description="1h 1d 1wk 1mo"),
 ):
     ticker = normalize_ticker(ticker)
+    period = (period or "1y").lower()
+    interval = (interval or "1d").lower()
     rows = await db.get_ohlcv(ticker, period=period, interval=interval)
-    if not rows:
-        await fetcher.fetch_and_store(ticker, period="2y", include_info=False)
+
+    if _needs_history_backfill(rows, period):
+        fetch_period = "max" if period in FULL_HISTORY_PERIODS else period
+        await fetcher.fetch_and_store(ticker, period=fetch_period, interval=interval, include_info=False)
         rows = await db.get_ohlcv(ticker, period=period, interval=interval)
+
     return {"ticker": ticker, "interval": interval, "data": rows}
 
 
@@ -339,10 +387,16 @@ async def get_info(ticker: str):
 
 
 @app.post("/api/sync/{ticker}")
-async def sync_ticker(ticker: str):
+async def sync_ticker(
+    ticker: str,
+    period: str = Query("max", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query("1d", description="1h 1d 1wk 1mo"),
+):
     ticker = normalize_ticker(ticker)
-    count = await fetcher.fetch_and_store(ticker, period="3mo", include_info=False)
-    return {"ticker": ticker, "synced": count}
+    period = (period or "max").lower()
+    interval = (interval or "1d").lower()
+    count = await fetcher.fetch_and_store(ticker, period=period, interval=interval, include_info=False)
+    return {"ticker": ticker, "synced": count, "period": period, "interval": interval}
 
 
 @app.get("/api/search")
