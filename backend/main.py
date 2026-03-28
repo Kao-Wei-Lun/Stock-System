@@ -114,6 +114,16 @@ def _needs_history_backfill(rows, period: str) -> bool:
     return oldest > expected_since + timedelta(days=grace_days)
 
 
+def _has_suspicious_daily_rows(ticker: str, rows, interval: str) -> bool:
+    if interval != "1d" or not rows or ticker.endswith("-USD"):
+        return False
+    for row in rows:
+        row_date = _row_date_to_datetime(row.get("date"))
+        if row_date and row_date.weekday() >= 5:
+            return True
+    return False
+
+
 class WatchlistGroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
 
@@ -360,7 +370,7 @@ async def get_kline(
     interval = (interval or "1d").lower()
     rows = await db.get_ohlcv(ticker, period=period, interval=interval)
 
-    if _needs_history_backfill(rows, period):
+    if _needs_history_backfill(rows, period) or _has_suspicious_daily_rows(ticker, rows, interval):
         fetch_period = "max" if period in FULL_HISTORY_PERIODS else period
         await fetcher.fetch_and_store(ticker, period=fetch_period, interval=interval, include_info=False)
         rows = await db.get_ohlcv(ticker, period=period, interval=interval)

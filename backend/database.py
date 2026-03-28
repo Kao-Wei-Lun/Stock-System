@@ -200,13 +200,14 @@ class Database:
             INSERT INTO `ohlcv`
                 (`ticker`, `date`, `interval`, `open`, `high`, `low`, `close`, `volume`, `adj_close`)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            AS `incoming`
             ON DUPLICATE KEY UPDATE
-                `open` = VALUES(`open`),
-                `high` = VALUES(`high`),
-                `low` = VALUES(`low`),
-                `close` = VALUES(`close`),
-                `volume` = VALUES(`volume`),
-                `adj_close` = VALUES(`adj_close`)
+                `open` = `incoming`.`open`,
+                `high` = `incoming`.`high`,
+                `low` = `incoming`.`low`,
+                `close` = `incoming`.`close`,
+                `volume` = `incoming`.`volume`,
+                `adj_close` = `incoming`.`adj_close`
         """
         params = [
             (
@@ -228,6 +229,30 @@ class Database:
                 async with conn.cursor() as cur:
                     await cur.executemany(sql, params)
         return len(rows)
+
+    async def delete_ohlcv_range(
+        self,
+        ticker: str,
+        interval: str = "1d",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> int:
+        conditions = ["`ticker`=%s", "`interval`=%s"]
+        params: List = [ticker, interval]
+
+        if start_date:
+            conditions.append("`date`>=%s")
+            params.append(start_date)
+        if end_date:
+            conditions.append("`date`<=%s")
+            params.append(end_date)
+
+        sql = f"DELETE FROM `ohlcv` WHERE {' AND '.join(conditions)}"
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, tuple(params))
+                    return cur.rowcount
 
     async def get_ohlcv(self, ticker: str, period: str = "1y", interval: str = "1d") -> List[Dict]:
         since = _period_to_date(period)
@@ -277,20 +302,21 @@ class Database:
                  `dividend_yield`, `week_52_high`, `week_52_low`, `avg_volume`,
                  `description`, `currency`, `exchange`, `country`)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            AS `incoming`
             ON DUPLICATE KEY UPDATE
-                `name` = VALUES(`name`),
-                `sector` = VALUES(`sector`),
-                `industry` = VALUES(`industry`),
-                `market_cap` = VALUES(`market_cap`),
-                `pe_ratio` = VALUES(`pe_ratio`),
-                `dividend_yield` = VALUES(`dividend_yield`),
-                `week_52_high` = VALUES(`week_52_high`),
-                `week_52_low` = VALUES(`week_52_low`),
-                `avg_volume` = VALUES(`avg_volume`),
-                `description` = VALUES(`description`),
-                `currency` = VALUES(`currency`),
-                `exchange` = VALUES(`exchange`),
-                `country` = VALUES(`country`)
+                `name` = `incoming`.`name`,
+                `sector` = `incoming`.`sector`,
+                `industry` = `incoming`.`industry`,
+                `market_cap` = `incoming`.`market_cap`,
+                `pe_ratio` = `incoming`.`pe_ratio`,
+                `dividend_yield` = `incoming`.`dividend_yield`,
+                `week_52_high` = `incoming`.`week_52_high`,
+                `week_52_low` = `incoming`.`week_52_low`,
+                `avg_volume` = `incoming`.`avg_volume`,
+                `description` = `incoming`.`description`,
+                `currency` = `incoming`.`currency`,
+                `exchange` = `incoming`.`exchange`,
+                `country` = `incoming`.`country`
         """
         params = (
             ticker,

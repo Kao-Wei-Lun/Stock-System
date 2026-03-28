@@ -179,7 +179,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .chart-loading .spinner{width:32px;height:32px;border:2px solid var(--border2);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;}
 .chart-loading p{font-size:11px;color:var(--text3);}
 @keyframes spin{to{transform:rotate(360deg)}}
-.crosshair-box{position:absolute;top:8px;right:8px;background:rgba(13,20,32,.92);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;font-size:11px;pointer-events:none;display:none;}
+.crosshair-box{position:absolute;top:8px;left:8px;background:rgba(13,20,32,.92);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;font-size:11px;pointer-events:none;display:none;}
 .crosshair-box.is-open{display:block;}
 .ci-row{display:flex;justify-content:space-between;gap:14px;}
 .ci-label{color:var(--text3);}

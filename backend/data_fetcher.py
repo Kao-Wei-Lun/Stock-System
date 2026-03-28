@@ -5,7 +5,7 @@ Yahoo Finance data fetcher using the public chart endpoint.
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote as urlquote
 
@@ -19,6 +19,7 @@ _quote_cache: Dict[str, tuple] = {}
 QUOTE_CACHE_TTL = 30
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+FULL_HISTORY_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
 RANGE_MAP = {
     "5d": "5d",
     "1mo": "1mo",
@@ -72,6 +73,15 @@ class DataFetcher:
                 await db.log_sync(ticker, "error", 0, str(exc))
                 return 0
 
+        if interval == "1d" and rows:
+            sorted_rows = sorted(rows, key=lambda item: item["date"])
+            await db.delete_ohlcv_range(
+                ticker,
+                interval=interval,
+                start_date=sorted_rows[0]["date"],
+                end_date=sorted_rows[-1]["date"],
+            )
+            rows = sorted_rows
         count = await db.upsert_ohlcv_batch(ticker, rows, interval)
         if info:
             await db.upsert_stock_info(ticker, info)
@@ -88,7 +98,16 @@ class DataFetcher:
         interval: str,
         include_info: bool,
     ) -> Tuple[List[Dict], Dict]:
-        chart = self._fetch_chart_result(ticker, period=period, interval=interval)
+        if interval == "1d":
+            period1, period2 = self._resolve_period_bounds(period)
+            chart = self._fetch_chart_result(
+                ticker,
+                interval=interval,
+                period1=period1,
+                period2=period2,
+            )
+        else:
+            chart = self._fetch_chart_result(ticker, period=period, interval=interval)
         rows = self._rows_from_chart(chart, interval)
         info = self._info_from_chart(ticker, chart) if include_info else {}
         return rows, info
@@ -173,13 +192,24 @@ class DataFetcher:
         chart = self._fetch_chart_result(ticker, period="1mo", interval="1d")
         return self._info_from_chart(ticker, chart)
 
-    def _fetch_chart_result(self, ticker: str, period: str, interval: str) -> Dict:
+    def _fetch_chart_result(
+        self,
+        ticker: str,
+        period: Optional[str] = None,
+        interval: str = "1d",
+        period1: Optional[int] = None,
+        period2: Optional[int] = None,
+    ) -> Dict:
         params = {
-            "range": RANGE_MAP.get(period, period),
             "interval": interval,
             "includePrePost": "false",
             "events": "div,splits",
         }
+        if period1 is not None and period2 is not None:
+            params["period1"] = int(period1)
+            params["period2"] = int(period2)
+        else:
+            params["range"] = RANGE_MAP.get(period or "1y", period or "1y")
         response = requests.get(
             CHART_URL.format(ticker=urlquote(ticker)),
             params=params,
@@ -195,6 +225,28 @@ class DataFetcher:
         if not result:
             raise RuntimeError("Yahoo chart response returned no result")
         return result[0]
+
+    def _resolve_period_bounds(self, period: str) -> Tuple[int, int]:
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(days=1)
+        normalized = (period or "1y").strip().lower()
+
+        if normalized == "max":
+            start = FULL_HISTORY_START
+        elif normalized.endswith("mo") and normalized[:-2].isdigit():
+            start = now - timedelta(days=int(normalized[:-2]) * 31)
+        elif normalized.endswith("wk") and normalized[:-2].isdigit():
+            start = now - timedelta(days=int(normalized[:-2]) * 7)
+        elif normalized.endswith("y") and normalized[:-1].isdigit():
+            start = now - timedelta(days=int(normalized[:-1]) * 366)
+        elif normalized.endswith("d") and normalized[:-1].isdigit():
+            start = now - timedelta(days=int(normalized[:-1]) + 2)
+        else:
+            start = now - timedelta(days=366)
+
+        if start < FULL_HISTORY_START:
+            start = FULL_HISTORY_START
+        return int(start.timestamp()), int(end.timestamp())
 
     def _rows_from_chart(self, chart: Dict, interval: str) -> List[Dict]:
         timestamps = chart.get("timestamp") or []
