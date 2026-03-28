@@ -117,10 +117,15 @@ def _needs_history_backfill(rows, period: str) -> bool:
 def _has_suspicious_daily_rows(ticker: str, rows, interval: str) -> bool:
     if interval != "1d" or not rows or ticker.endswith("-USD"):
         return False
+    prev_date = None
     for row in rows:
         row_date = _row_date_to_datetime(row.get("date"))
         if row_date and row_date.weekday() >= 5:
             return True
+        if prev_date and row_date and (row_date - prev_date).days > 20:
+            return True
+        if row_date:
+            prev_date = row_date
     return False
 
 

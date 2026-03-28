@@ -10,15 +10,19 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote as urlquote
 
 import requests
+import urllib3
 
 from database import db
 
 log = logging.getLogger(__name__)
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 _quote_cache: Dict[str, tuple] = {}
 QUOTE_CACHE_TTL = 30
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+TWSE_STOCK_DAY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
 FULL_HISTORY_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
 RANGE_MAP = {
     "5d": "5d",
@@ -106,9 +110,13 @@ class DataFetcher:
                 period1=period1,
                 period2=period2,
             )
+            rows = self._rows_from_chart(chart, interval)
+            if self._has_large_daily_gap(rows):
+                fallback_rows = self._fetch_twse_daily_rows(ticker, period1, period2)
+                rows = fallback_rows or self._fetch_chunked_daily_rows(ticker, period1, period2)
         else:
             chart = self._fetch_chart_result(ticker, period=period, interval=interval)
-        rows = self._rows_from_chart(chart, interval)
+            rows = self._rows_from_chart(chart, interval)
         info = self._info_from_chart(ticker, chart) if include_info else {}
         return rows, info
 
@@ -216,8 +224,12 @@ class DataFetcher:
             headers={"User-Agent": USER_AGENT},
             timeout=20,
         )
-        response.raise_for_status()
         payload = response.json()
+        if response.status_code >= 400:
+            chart_error = payload.get("chart", {}).get("error")
+            if chart_error:
+                raise RuntimeError(chart_error.get("description") or str(chart_error))
+            response.raise_for_status()
         chart = payload.get("chart", {})
         if chart.get("error"):
             raise RuntimeError(chart["error"].get("description") or str(chart["error"]))
@@ -226,27 +238,226 @@ class DataFetcher:
             raise RuntimeError("Yahoo chart response returned no result")
         return result[0]
 
+    def _fetch_chunked_daily_rows(self, ticker: str, period1: int, period2: int) -> List[Dict]:
+        total_days = max(1, int((period2 - period1) / 86400))
+        if total_days <= 730:
+            rows = self._fetch_monthly_daily_rows(ticker, period1, period2)
+            if not self._has_large_daily_gap(rows):
+                return rows
+
+        if total_days <= 730:
+            chunk_days = 90
+        elif total_days <= 3650:
+            chunk_days = 120
+        else:
+            chunk_days = 180
+
+        rows = self._fetch_chunked_daily_rows_with_size(ticker, period1, period2, chunk_days)
+        if self._has_large_daily_gap(rows) and chunk_days > 45:
+            rows = self._fetch_chunked_daily_rows_with_size(
+                ticker,
+                period1,
+                period2,
+                max(45, chunk_days // 2),
+            )
+        return rows
+
+    def _fetch_monthly_daily_rows(self, ticker: str, period1: int, period2: int) -> List[Dict]:
+        start_dt = datetime.fromtimestamp(period1, timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_dt = datetime.fromtimestamp(period2, timezone.utc)
+        cursor = start_dt
+        merged_rows: Dict[str, Dict] = {}
+        last_error: Optional[Exception] = None
+
+        while cursor < end_dt:
+            if cursor.month == 12:
+                next_month = cursor.replace(year=cursor.year + 1, month=1, day=1)
+            else:
+                next_month = cursor.replace(month=cursor.month + 1, day=1)
+
+            chunk_start = max(period1, int(cursor.timestamp()))
+            chunk_end = min(period2, int(next_month.timestamp()))
+
+            try:
+                chart = self._fetch_chart_result(
+                    ticker,
+                    interval="1d",
+                    period1=chunk_start,
+                    period2=chunk_end,
+                )
+                for row in self._rows_from_chart(chart, "1d"):
+                    merged_rows[row["date"]] = row
+            except Exception as exc:
+                if not self._is_empty_history_error(exc):
+                    last_error = exc
+
+            cursor = next_month
+
+        if merged_rows:
+            return [merged_rows[date] for date in sorted(merged_rows)]
+        if last_error:
+            raise last_error
+        raise RuntimeError("Yahoo chart response returned no rows across monthly daily fetches")
+
+    def _fetch_twse_daily_rows(self, ticker: str, period1: int, period2: int) -> List[Dict]:
+        if not ticker.endswith(".TW"):
+            return []
+
+        stock_no = ticker[:-3]
+        start_dt = datetime.fromtimestamp(period1, timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_dt = datetime.fromtimestamp(period2, timezone.utc)
+        cursor = start_dt
+        merged_rows: Dict[str, Dict] = {}
+
+        while cursor < end_dt:
+            params = {
+                "date": cursor.strftime("%Y%m01"),
+                "stockNo": stock_no,
+                "response": "json",
+            }
+            try:
+                response = requests.get(
+                    TWSE_STOCK_DAY_URL,
+                    params=params,
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=20,
+                    verify=False,
+                )
+                payload = response.json()
+            except Exception as exc:
+                log.debug("TWSE daily fallback %s %s failed: %s", ticker, params["date"], exc)
+                payload = {}
+
+            if payload.get("stat") == "OK":
+                for raw_row in payload.get("data") or []:
+                    row = self._row_from_twse(raw_row)
+                    if not row:
+                        continue
+                    row_date = datetime.strptime(row["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    if row_date < datetime.fromtimestamp(period1, timezone.utc) or row_date >= datetime.fromtimestamp(period2, timezone.utc):
+                        continue
+                    merged_rows[row["date"]] = row
+
+            if cursor.month == 12:
+                cursor = cursor.replace(year=cursor.year + 1, month=1, day=1)
+            else:
+                cursor = cursor.replace(month=cursor.month + 1, day=1)
+
+        return [merged_rows[date] for date in sorted(merged_rows)]
+
+    def _fetch_chunked_daily_rows_with_size(
+        self,
+        ticker: str,
+        period1: int,
+        period2: int,
+        chunk_days: int,
+    ) -> List[Dict]:
+
+        overlap_days = 7
+        cursor = period1
+        merged_rows: Dict[str, Dict] = {}
+        last_error: Optional[Exception] = None
+
+        while cursor < period2:
+            chunk_end = min(period2, cursor + chunk_days * 86400)
+            try:
+                chart = self._fetch_chart_result(
+                    ticker,
+                    interval="1d",
+                    period1=cursor,
+                    period2=chunk_end,
+                )
+                for row in self._rows_from_chart(chart, "1d"):
+                    merged_rows[row["date"]] = row
+            except Exception as exc:
+                if not self._is_empty_history_error(exc):
+                    last_error = exc
+
+            if chunk_end >= period2:
+                break
+            cursor = chunk_end - overlap_days * 86400
+
+        if merged_rows:
+            return [merged_rows[date] for date in sorted(merged_rows)]
+        if last_error:
+            raise last_error
+        raise RuntimeError("Yahoo chart response returned no rows across chunked fetches")
+
     def _resolve_period_bounds(self, period: str) -> Tuple[int, int]:
-        now = datetime.now(timezone.utc)
-        end = now + timedelta(days=1)
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = today + timedelta(days=1)
         normalized = (period or "1y").strip().lower()
 
         if normalized == "max":
             start = FULL_HISTORY_START
         elif normalized.endswith("mo") and normalized[:-2].isdigit():
-            start = now - timedelta(days=int(normalized[:-2]) * 31)
+            start = today - timedelta(days=int(normalized[:-2]) * 31)
         elif normalized.endswith("wk") and normalized[:-2].isdigit():
-            start = now - timedelta(days=int(normalized[:-2]) * 7)
+            start = today - timedelta(days=int(normalized[:-2]) * 7)
         elif normalized.endswith("y") and normalized[:-1].isdigit():
-            start = now - timedelta(days=int(normalized[:-1]) * 366)
+            start = today - timedelta(days=int(normalized[:-1]) * 366)
         elif normalized.endswith("d") and normalized[:-1].isdigit():
-            start = now - timedelta(days=int(normalized[:-1]) + 2)
+            start = today - timedelta(days=int(normalized[:-1]) + 2)
         else:
-            start = now - timedelta(days=366)
+            start = today - timedelta(days=366)
 
         if start < FULL_HISTORY_START:
             start = FULL_HISTORY_START
         return int(start.timestamp()), int(end.timestamp())
+
+    def _has_large_daily_gap(self, rows: List[Dict], max_gap_days: int = 20) -> bool:
+        if len(rows) < 2:
+            return False
+
+        prev_date: Optional[datetime] = None
+        for row in rows:
+            try:
+                current_date = datetime.strptime(row["date"], "%Y-%m-%d")
+            except (KeyError, TypeError, ValueError):
+                continue
+            if prev_date and (current_date - prev_date).days > max_gap_days:
+                return True
+            prev_date = current_date
+        return False
+
+    def _is_empty_history_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            "data doesn't exist" in message
+            or "no data found" in message
+            or "returned no result" in message
+        )
+
+    def _row_from_twse(self, raw_row) -> Optional[Dict]:
+        if not isinstance(raw_row, list) or len(raw_row) < 7:
+            return None
+        date_text = str(raw_row[0]).strip()
+        if not date_text or "/" not in date_text:
+            return None
+
+        try:
+            roc_year, month, day = [int(part) for part in date_text.split("/")]
+            date_value = f"{roc_year + 1911:04d}-{month:02d}-{day:02d}"
+        except ValueError:
+            return None
+
+        open_price = _as_float(_strip_numeric(raw_row[3]))
+        high_price = _as_float(_strip_numeric(raw_row[4]))
+        low_price = _as_float(_strip_numeric(raw_row[5]))
+        close_price = _as_float(_strip_numeric(raw_row[6]))
+        if close_price is None:
+            return None
+
+        volume = _as_int(_strip_numeric(raw_row[1])) or 0
+        return {
+            "date": date_value,
+            "open": round(open_price if open_price is not None else close_price, 4),
+            "high": round(high_price if high_price is not None else close_price, 4),
+            "low": round(low_price if low_price is not None else close_price, 4),
+            "close": round(close_price, 4),
+            "volume": volume,
+            "adj_close": round(close_price, 4),
+        }
 
     def _rows_from_chart(self, chart: Dict, interval: str) -> List[Dict]:
         timestamps = chart.get("timestamp") or []
@@ -332,3 +543,12 @@ def _as_int(value) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _strip_numeric(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").replace("X", "").replace("--", "").strip()
+        return cleaned or None
+    return value
