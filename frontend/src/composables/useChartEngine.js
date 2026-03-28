@@ -46,6 +46,7 @@ const DRAWING_LINE_STYLES = {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const clampPositive = (value) => Math.max(value, Number.EPSILON);
+const isFiniteNumber = (value) => Number.isFinite(value);
 
 const getDpr = () => window.devicePixelRatio || 1;
 const canvasWidth = (canvas) => canvas.width / getDpr();
@@ -73,7 +74,7 @@ const drawLine = (ctx, values, xAt, scale, color, lineWidth = 1.5, dash = []) =>
   ctx.beginPath();
   let started = false;
   values.forEach((value, index) => {
-    if (value == null) return;
+    if (!isFiniteNumber(value)) return;
     if (!started) {
       ctx.moveTo(xAt(index), scale(value));
       started = true;
@@ -87,24 +88,24 @@ const drawLine = (ctx, values, xAt, scale, color, lineWidth = 1.5, dash = []) =>
 
 const findLastDefinedIndex = (values) => {
   for (let index = values.length - 1; index >= 0; index -= 1) {
-    if (values[index] != null) return index;
+    if (isFiniteNumber(values[index])) return index;
   }
   return -1;
 };
 
 const drawArea = (ctx, values, xAt, scale, baseY, strokeColor, fillColor) => {
-  const firstIndex = values.findIndex((value) => value != null);
+  const safeFirstIndex = values.findIndex((value) => isFiniteNumber(value));
   const lastIndex = findLastDefinedIndex(values);
-  if (firstIndex < 0 || lastIndex < 0) return;
+  if (safeFirstIndex < 0 || lastIndex < 0) return;
 
   ctx.beginPath();
-  ctx.moveTo(xAt(firstIndex), scale(values[firstIndex]));
-  for (let index = firstIndex + 1; index <= lastIndex; index += 1) {
-    if (values[index] == null) continue;
+  ctx.moveTo(xAt(safeFirstIndex), scale(values[safeFirstIndex]));
+  for (let index = safeFirstIndex + 1; index <= lastIndex; index += 1) {
+    if (!isFiniteNumber(values[index])) continue;
     ctx.lineTo(xAt(index), scale(values[index]));
   }
   ctx.lineTo(xAt(lastIndex), baseY);
-  ctx.lineTo(xAt(firstIndex), baseY);
+  ctx.lineTo(xAt(safeFirstIndex), baseY);
   ctx.closePath();
   ctx.fillStyle = fillColor;
   ctx.fill();
@@ -135,7 +136,7 @@ const fillBetweenSeries = (ctx, upperValues, lowerValues, xAt, scale, fillAbove,
 
   upperValues.forEach((upper, index) => {
     const lower = lowerValues[index];
-    if (upper == null || lower == null) {
+    if (!isFiniteNumber(upper) || !isFiniteNumber(lower)) {
       flushSegment(segment, currentAbove);
       segment = [];
       currentAbove = null;
@@ -400,13 +401,13 @@ export function useChartEngine({
   };
 
   const getVisiblePriceScale = (data, extras = [], scaleMode = "linear") => {
-    const pricePoints = data.flatMap((row) => [row.high, row.low]);
+    const pricePoints = data.flatMap((row) => [row.high, row.low]).filter(isFiniteNumber);
     extras.forEach((value) => {
       if (Array.isArray(value)) {
         value.forEach((item) => {
-          if (item != null) pricePoints.push(item);
+          if (isFiniteNumber(item)) pricePoints.push(item);
         });
-      } else if (value != null) {
+      } else if (isFiniteNumber(value)) {
         pricePoints.push(value);
       }
     });
@@ -1555,7 +1556,9 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       overlayValues.push(donchianSlice.map((item) => item.l));
       overlayValues.push(donchianSlice.map((item) => item.m));
     }
-    props.drawings.forEach((drawing) => overlayValues.push(getDrawingPriceValues(drawing)));
+    props.drawings.forEach((drawing) => {
+      if (!isDrawingHidden(drawing)) overlayValues.push(getDrawingPriceValues(drawing));
+    });
     if (draftDrawing.value) overlayValues.push(getDrawingPriceValues(draftDrawing.value));
 
     const { min: autoMin, max: autoMax } = getVisiblePriceScale(data, overlayValues, priceScaleMode.value);

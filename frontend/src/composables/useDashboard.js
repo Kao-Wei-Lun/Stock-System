@@ -190,6 +190,94 @@ function getBucketStart(date, mode) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+function getPeriodStartDate(period) {
+  if (!period || period === "max") return null;
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+
+  const directMap = {
+    "5d": () => base.setDate(base.getDate() - 5),
+    "1mo": () => base.setMonth(base.getMonth() - 1),
+    "3mo": () => base.setMonth(base.getMonth() - 3),
+    "6mo": () => base.setMonth(base.getMonth() - 6),
+    "1y": () => base.setFullYear(base.getFullYear() - 1),
+    "2y": () => base.setFullYear(base.getFullYear() - 2),
+    "5y": () => base.setFullYear(base.getFullYear() - 5),
+    "10y": () => base.setFullYear(base.getFullYear() - 10),
+  };
+
+  if (directMap[period]) {
+    directMap[period]();
+    return base;
+  }
+
+  const match = String(period).match(/^(\d+)(d|mo|y)$/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (unit === "d") base.setDate(base.getDate() - amount);
+  if (unit === "mo") base.setMonth(base.getMonth() - amount);
+  if (unit === "y") base.setFullYear(base.getFullYear() - amount);
+  return base;
+}
+
+function getExpandedFetchPeriod(period, mode) {
+  if (mode === "day" || period === "max") return period;
+
+  const weekMap = {
+    "5d": "1mo",
+    "1mo": "3mo",
+    "3mo": "6mo",
+    "6mo": "1y",
+    "1y": "2y",
+    "2y": "5y",
+    "5y": "10y",
+    "10y": "max",
+  };
+  const monthMap = {
+    "5d": "3mo",
+    "1mo": "6mo",
+    "3mo": "1y",
+    "6mo": "2y",
+    "1y": "2y",
+    "2y": "5y",
+    "5y": "10y",
+    "10y": "max",
+  };
+  const quarterMap = {
+    "5d": "1y",
+    "1mo": "1y",
+    "3mo": "2y",
+    "6mo": "2y",
+    "1y": "5y",
+    "2y": "10y",
+    "5y": "max",
+    "10y": "max",
+  };
+
+  const mapByMode = {
+    week: weekMap,
+    month: monthMap,
+    quarter: quarterMap,
+  };
+
+  return mapByMode[mode]?.[period] || "max";
+}
+
+function filterRowsForDisplayPeriod(rows, period, mode) {
+  if (!Array.isArray(rows) || !rows.length || !period || period === "max") return Array.isArray(rows) ? rows : [];
+  const since = getPeriodStartDate(period);
+  if (!since) return rows;
+  const boundary = mode === "day" ? since : getBucketStart(since, mode);
+  const boundaryTime = boundary.getTime();
+  return rows.filter((row) => {
+    const date = parseChartDate(row.date);
+    if (!date) return false;
+    const current = mode === "day" ? date : getBucketStart(date, mode);
+    return current.getTime() >= boundaryTime;
+  });
+}
+
 function aggregateOhlcRows(rows, mode) {
   if (!Array.isArray(rows) || !rows.length || mode === "day") return Array.isArray(rows) ? rows : [];
 
@@ -275,10 +363,21 @@ export function useDashboard() {
   const watchlistError = ref(false);
   const compareSeries = computed(() =>
     rawCompareSeries.value
-      .map((series) => ({
-        ...series,
-        data: aggregateOhlcRows(series.data || [], klineDisplayMode.value),
-      }))
+      .map((series) => {
+        const data = filterRowsForDisplayPeriod(
+          aggregateOhlcRows(series.data || [], klineDisplayMode.value),
+          currentPeriod.value,
+          klineDisplayMode.value,
+        );
+        const firstClose = data.find((row) => row.close != null)?.close ?? null;
+        const lastClose = data.length ? data[data.length - 1].close : null;
+        const changePct = firstClose && lastClose ? ((lastClose - firstClose) / firstClose) * 100 : 0;
+        return {
+          ...series,
+          data,
+          changePct,
+        };
+      })
       .filter((series) => (series.data || []).length),
   );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
@@ -353,7 +452,11 @@ export function useDashboard() {
     tp: 10,
   });
 
-  const ohlcData = computed(() => aggregateOhlcRows(rawOhlcData.value, klineDisplayMode.value));
+  const ohlcData = computed(() => filterRowsForDisplayPeriod(
+    aggregateOhlcRows(rawOhlcData.value, klineDisplayMode.value),
+    currentPeriod.value,
+    klineDisplayMode.value,
+  ));
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
     () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
@@ -682,11 +785,12 @@ export function useDashboard() {
       return;
     }
     const resolvedInterval = resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
+    const fetchPeriod = getExpandedFetchPeriod(currentPeriod.value, klineDisplayMode.value);
 
     const results = await Promise.allSettled(
       normalizedTickers.map(async (ticker, index) => {
         const payload = await apiFetch(
-          `/api/kline/${ticker}?period=${currentPeriod.value}&interval=${resolvedInterval}`,
+          `/api/kline/${ticker}?period=${fetchPeriod}&interval=${resolvedInterval}`,
         );
         const data = payload.data || [];
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
@@ -758,12 +862,13 @@ export function useDashboard() {
     const normalized = normalizeTicker(ticker);
     const resolvedPeriod = (period || "1y").toLowerCase();
     const resolvedInterval = resolveTimeframeInterval(resolvedPeriod, interval);
+    const fetchPeriod = getExpandedFetchPeriod(resolvedPeriod, klineDisplayMode.value);
     currentPeriod.value = resolvedPeriod;
     currentInterval.value = resolvedInterval;
     chartLoading.value = true;
     loadingMessage.value = `載入 ${normalized} K 線...`;
     try {
-      const data = await apiFetch(`/api/kline/${normalized}?period=${resolvedPeriod}&interval=${resolvedInterval}`);
+      const data = await apiFetch(`/api/kline/${normalized}?period=${fetchPeriod}&interval=${resolvedInterval}`);
       rawOhlcData.value = data.data || [];
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
@@ -806,8 +911,12 @@ export function useDashboard() {
     loadKline(currentTicker.value, timeframe.tf, currentInterval.value);
   }
 
-  function setKlineDisplayMode(mode) {
-    klineDisplayMode.value = normalizeKlineDisplayMode(mode);
+  async function setKlineDisplayMode(mode) {
+    const nextMode = normalizeKlineDisplayMode(mode);
+    if (nextMode === klineDisplayMode.value) return;
+    klineDisplayMode.value = nextMode;
+    crosshair.visible = false;
+    await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
   }
 
   function setLeftTab(tab) {
