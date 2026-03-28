@@ -285,8 +285,8 @@
     <div class="ind-panel" :class="{ visible: activePanels.roc }"><div class="ind-label-tag">{{ rocLabel }}</div><canvas ref="rocCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.bbPercent }"><div class="ind-label-tag">{{ bbPercentLabel }}</div><canvas ref="bbPercentCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.bbWidth }"><div class="ind-label-tag">{{ bbWidthLabel }}</div><canvas ref="bbWidthCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">{{ macdLabel }}</div><canvas ref="macdCanvas"></canvas></div>
-    <div class="ind-panel" :class="{ visible: activePanels.stoch }"><div class="ind-label-tag">{{ stochLabel }}</div><canvas ref="stochCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: showMacdPanel }"><div class="ind-label-tag">{{ macdLabel }}</div><canvas ref="macdCanvas"></canvas></div>
+    <div class="ind-panel" :class="{ visible: showStochPanel }"><div class="ind-label-tag">{{ stochLabel }}</div><canvas ref="stochCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.atr }"><div class="ind-label-tag">{{ atrLabel }}</div><canvas ref="atrCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.cci }"><div class="ind-label-tag">{{ cciLabel }}</div><canvas ref="cciCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.obv }"><div class="ind-label-tag">OBV</div><canvas ref="obvCanvas"></canvas></div>
@@ -466,6 +466,8 @@ const macdLabel = computed(
 const stochLabel = computed(
   () => `KD Stoch(${props.indicatorSettings.stochK},${props.indicatorSettings.stochD})`,
 );
+const showMacdPanel = computed(() => props.isFullscreen ? props.activePanels.macd : true);
+const showStochPanel = computed(() => props.isFullscreen ? props.activePanels.stoch : true);
 const atrLabel = computed(() => `ATR(${props.indicatorSettings.atrPeriod})`);
 const cciLabel = computed(() => `CCI(${props.indicatorSettings.cciPeriod})`);
 const adxLabel = computed(() => `ADX(${props.indicatorSettings.adxPeriod})`);
@@ -545,7 +547,7 @@ function formatPaneDateLabel(dateString, range = 0) {
   if (range > 540) {
     return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   }
-  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+  return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function getPaneTickIndices(data, count = 5) {
@@ -667,7 +669,8 @@ function drawSyncPane(canvas, pane) {
     ctx.lineTo(x, height - pad.bottom);
     ctx.strokeStyle = "rgba(30,45,61,0.5)";
     ctx.stroke();
-    ctx.fillText(formatPaneDateLabel(data[index].date, rangeDays), Math.max(pad.left, x - 16), height - 5);
+    const label = formatPaneDateLabel(data[index].date, rangeDays);
+    ctx.fillText(label, Math.max(pad.left, x - Math.max(16, label.length * 3.4)), height - 5);
   });
 
   if (

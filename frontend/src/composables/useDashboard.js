@@ -24,6 +24,7 @@ const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const DEFAULT_ACTIVE_IND = {
+  cycleMa: true,
   ma20: true,
   ma50: true,
   ma200: false,
@@ -45,8 +46,8 @@ const DEFAULT_ACTIVE_PANELS = {
   roc: false,
   bbPercent: false,
   bbWidth: false,
-  macd: false,
-  stoch: false,
+  macd: true,
+  stoch: true,
   atr: false,
   cci: false,
   obv: false,

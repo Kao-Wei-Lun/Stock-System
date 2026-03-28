@@ -179,6 +179,7 @@ defineEmits([
 ]);
 
 const overlayRows = computed(() => [
+  { key: "cycleMa", label: "周 / 月 / 季 / 年線", value: "MA 5 / 20 / 60 / 240", color: "#7be7ff", hint: "日線圖對應 5 / 20 / 60 / 240 日均線" },
   { key: "ma20", label: `MA ${props.indicatorSettings.ma20Period}`, value: props.indicatorSnapshot.ma20, color: "#3b8bff" },
   { key: "ma50", label: `MA ${props.indicatorSettings.ma50Period}`, value: props.indicatorSnapshot.ma50, color: "#f5a623" },
   { key: "ma200", label: `MA ${props.indicatorSettings.ma200Period}`, value: props.indicatorSnapshot.ma200, color: "#9b6dff" },

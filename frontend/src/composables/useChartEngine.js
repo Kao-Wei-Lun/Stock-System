@@ -663,10 +663,7 @@ export function useChartEngine({
     if (rangeDays >= 730) {
       return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}`;
     }
-    if (rangeDays >= 90) {
-      return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
-    }
-    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+    return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
   };
 
   const getTimeTickIndices = (data, targetTickCount = 6) => {
@@ -702,9 +699,16 @@ export function useChartEngine({
         ctx.stroke();
       }
       const label = formatAxisDateLabel(data[index].date, rangeDays);
-      ctx.fillText(label, Math.max(PAD.left, x - 18), bottom);
+      ctx.fillText(label, Math.max(PAD.left, x - Math.max(18, label.length * 3.4)), bottom);
     });
     ctx.restore();
+  };
+
+  const isAuxPanelVisible = (key) => {
+    if (!props.isFullscreen && (key === "macd" || key === "stoch")) {
+      return true;
+    }
+    return !!props.activePanels?.[key];
   };
 
   const drawCrosshairGuide = (ctx, x, top, bottom, dateLabel = "", width = 0) => {
@@ -1457,6 +1461,10 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
     const chartHeight = height - PAD.top - PAD.bottom;
     const layout = getBarLayout(canvas, count);
+    const fullCycleWeek = props.activeInd.cycleMa ? calcMA(fullData, 5) : [];
+    const fullCycleMonth = props.activeInd.cycleMa ? calcMA(fullData, 20) : [];
+    const fullCycleQuarter = props.activeInd.cycleMa ? calcMA(fullData, 60) : [];
+    const fullCycleYear = props.activeInd.cycleMa ? calcMA(fullData, 240) : [];
     const fullMa20 = props.activeInd.ma20 ? calcMA(fullData, props.indicatorSettings.ma20Period) : [];
     const fullMa50 = props.activeInd.ma50 ? calcMA(fullData, props.indicatorSettings.ma50Period) : [];
     const fullMa200 = props.activeInd.ma200 ? calcMA(fullData, props.indicatorSettings.ma200Period) : [];
@@ -1487,6 +1495,10 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       ? calcSuperTrend(fullData, props.indicatorSettings.supertrendPeriod, props.indicatorSettings.supertrendMultiplier)
       : null;
 
+    const cycleWeek = sliceSeries(fullCycleWeek);
+    const cycleMonth = sliceSeries(fullCycleMonth);
+    const cycleQuarter = sliceSeries(fullCycleQuarter);
+    const cycleYear = sliceSeries(fullCycleYear);
     const ma20 = sliceSeries(fullMa20);
     const ma50 = sliceSeries(fullMa50);
     const ma200 = sliceSeries(fullMa200);
@@ -1508,6 +1520,9 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       ? sliceSeries(fullSuperTrend.line.map((value, index) => (fullSuperTrend.trend[index] === -1 ? value : null)))
       : [];
     const overlayValues = [];
+    if (props.activeInd.cycleMa) {
+      overlayValues.push(cycleWeek, cycleMonth, cycleQuarter, cycleYear);
+    }
     if (props.activeInd.ma20) overlayValues.push(ma20);
     if (props.activeInd.ma50) overlayValues.push(ma50);
     if (props.activeInd.ma200) overlayValues.push(ma200);
@@ -1588,6 +1603,12 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       }
     }
 
+    if (props.activeInd.cycleMa) {
+      drawLine(ctx, cycleWeek, layout.barX, scale, "#7be7ff", 1.1);
+      drawLine(ctx, cycleMonth, layout.barX, scale, "#ffd166", 1.15);
+      drawLine(ctx, cycleQuarter, layout.barX, scale, "#9b6dff", 1.1);
+      drawLine(ctx, cycleYear, layout.barX, scale, "#ff6b6b", 1.2);
+    }
     if (props.activeInd.ma20) drawLine(ctx, ma20, layout.barX, scale, "#3b8bff", 1.5);
     if (props.activeInd.ma50) drawLine(ctx, ma50, layout.barX, scale, "#f5a623", 1.5);
     if (props.activeInd.ma200) drawLine(ctx, ma200, layout.barX, scale, "#9b6dff", 1.4);
@@ -2275,7 +2296,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   };
 
   const renderMacd = () => {
-    if (!macdCanvas.value || !visibleData.value.length || !props.activePanels.macd) return;
+    if (!macdCanvas.value || !visibleData.value.length || !isAuxPanelVisible("macd")) return;
     const canvas = macdCanvas.value;
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
@@ -2327,7 +2348,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   };
 
   const renderStoch = () => {
-    if (!stochCanvas.value || !visibleData.value.length || !props.activePanels.stoch) return;
+    if (!stochCanvas.value || !visibleData.value.length || !isAuxPanelVisible("stoch")) return;
     const canvas = stochCanvas.value;
     const ctx = canvas.getContext("2d");
     const width = canvasWidth(canvas);
@@ -3273,6 +3294,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       props.activePanels.adx,
       props.activePanels.cmf,
       props.compareSeries.length,
+      props.isFullscreen,
     ],
     () => nextTick(() => resizeAll()),
   );
