@@ -30,7 +30,11 @@
         @set-left-tab="setLeftTab"
         @select-group="setActiveWatchGroup"
         @create-group="createWatchGroup"
+        @rename-group="renameWatchGroup"
+        @delete-group="deleteWatchGroup"
         @add-to-watchlist="addTickerToWatchlist"
+        @remove-from-watchlist="removeTickerFromWatchlist"
+        @reorder-items="reorderWatchlistItems"
         @select-ticker="handleSelectTicker"
       />
 
@@ -47,6 +51,8 @@
         :active-ind="activeInd"
         :drawings="drawings"
         :syncing-current="syncingCurrent"
+        :compare-series="compareSeries"
+        :comparison-mode="comparisonMode"
         @set-tool="setTool"
         @add-signal="addSignal"
         @clear-drawings="clearDrawings"
@@ -56,6 +62,10 @@
         @add-drawing="addDrawing"
         @update-crosshair="updateCrosshair"
         @hide-crosshair="hideCrosshair"
+        @add-compare="addCompareTicker"
+        @remove-compare="removeCompareTicker"
+        @clear-compare="clearCompareTickers"
+        @set-compare-mode="setComparisonMode"
       />
 
       <RightSidebar
@@ -116,6 +126,8 @@ const {
   searchOpen,
   watchlistGroups,
   activeWatchGroupId,
+  compareSeries,
+  comparisonMode,
   watchlist,
   watchlistLoading,
   watchlistError,
@@ -156,7 +168,15 @@ const {
   submitSearch,
   selectSearchResult,
   createWatchGroup,
+  renameWatchGroup,
+  deleteWatchGroup,
   addTickerToWatchlist,
+  removeTickerFromWatchlist,
+  reorderWatchlistItems,
+  addCompareTicker,
+  removeCompareTicker,
+  clearCompareTickers,
+  setComparisonMode,
   setTimeframe,
   setLeftTab,
   setActiveWatchGroup,

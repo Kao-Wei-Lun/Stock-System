@@ -401,15 +401,27 @@ class Database:
         async with self._lock:
             async with self._pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`
+                        FROM `watchlist_groups`
+                        WHERE `name`=%s
+                        LIMIT 1
+                        """,
+                        (clean_name,),
+                    )
+                    duplicate = await cur.fetchone()
+                    if duplicate:
+                        raise ValueError("Group name already exists")
+
                     await cur.execute("SELECT COALESCE(MAX(`sort_order`), -1) + 1 AS `next_sort` FROM `watchlist_groups`")
                     next_sort = (await cur.fetchone())["next_sort"]
 
+                async with conn.cursor() as cur:
                     await cur.execute(
                         """
                         INSERT INTO `watchlist_groups` (`name`, `sort_order`)
                         VALUES (%s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            `id` = LAST_INSERT_ID(`id`)
                         """,
                         (clean_name, next_sort),
                     )
@@ -418,27 +430,82 @@ class Database:
         group = await self.get_watchlist_group(group_id)
         return group or {"id": group_id, "name": clean_name, "sort_order": next_sort, "items": []}
 
+    async def rename_watchlist_group(self, group_id: int, name: str) -> Optional[Dict]:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("Group name is required")
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`
+                        FROM `watchlist_groups`
+                        WHERE `name`=%s AND `id`<>%s
+                        LIMIT 1
+                        """,
+                        (clean_name, group_id),
+                    )
+                    duplicate = await cur.fetchone()
+                    if duplicate:
+                        raise ValueError("Group name already exists")
+
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE `watchlist_groups`
+                        SET `name`=%s
+                        WHERE `id`=%s
+                        """,
+                        (clean_name, group_id),
+                    )
+                    if cur.rowcount == 0:
+                        return None
+
+        return await self.get_watchlist_group(group_id)
+
+    async def delete_watchlist_group(self, group_id: int) -> bool:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("DELETE FROM `watchlist_groups` WHERE `id`=%s", (group_id,))
+                    return cur.rowcount > 0
+
     async def add_watchlist_item(self, group_id: int, ticker: str) -> Dict:
         async with self._lock:
             async with self._pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`
+                        FROM `watchlist_items`
+                        WHERE `group_id`=%s AND `ticker`=%s
+                        LIMIT 1
+                        """,
+                        (group_id, ticker),
+                    )
+                    duplicate = await cur.fetchone()
+                    if duplicate:
+                        raise ValueError("Ticker already exists in this group")
+
                     await cur.execute(
                         "SELECT COALESCE(MAX(`sort_order`), -1) + 1 AS `next_sort` FROM `watchlist_items` WHERE `group_id`=%s",
                         (group_id,),
                     )
                     next_sort = (await cur.fetchone())["next_sort"]
 
+                async with conn.cursor() as cur:
                     await cur.execute(
                         """
                         INSERT INTO `watchlist_items` (`group_id`, `ticker`, `sort_order`)
                         VALUES (%s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            `id` = LAST_INSERT_ID(`id`)
                         """,
                         (group_id, ticker, next_sort),
                     )
                     item_id = cur.lastrowid
 
+                async with conn.cursor(aiomysql.DictCursor) as cur:
                     await cur.execute(
                         """
                         SELECT `id`, `group_id`, `ticker`, `sort_order`, `created_at`
@@ -448,6 +515,57 @@ class Database:
                         (item_id,),
                     )
                     return await cur.fetchone()
+
+    async def delete_watchlist_item(self, item_id: int) -> bool:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("DELETE FROM `watchlist_items` WHERE `id`=%s", (item_id,))
+                    return cur.rowcount > 0
+
+    async def reorder_watchlist_items(self, group_id: int, item_ids: List[int]) -> bool:
+        if not item_ids:
+            return False
+
+        unique_ids = list(dict.fromkeys(item_ids))
+        if len(unique_ids) != len(item_ids):
+            raise ValueError("Duplicate item ids are not allowed")
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`
+                        FROM `watchlist_items`
+                        WHERE `group_id`=%s
+                        ORDER BY `sort_order` ASC, `id` ASC
+                        """,
+                        (group_id,),
+                    )
+                    rows = await cur.fetchall()
+                    existing_ids = [row["id"] for row in rows]
+
+                if not existing_ids:
+                    return False
+
+                if set(existing_ids) != set(unique_ids):
+                    raise ValueError("Item ids do not match the selected group")
+
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        UPDATE `watchlist_items`
+                        SET `sort_order`=%s
+                        WHERE `id`=%s AND `group_id`=%s
+                        """,
+                        [
+                            (sort_order, item_id, group_id)
+                            for sort_order, item_id in enumerate(unique_ids)
+                        ],
+                    )
+
+        return True
 
     async def search_tickers(self, q: str) -> List[Dict]:
         pattern = f"%{q}%"

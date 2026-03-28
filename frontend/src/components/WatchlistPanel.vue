@@ -32,6 +32,23 @@
         <button @click="submitGroup">建立</button>
       </div>
 
+      <div v-if="leftTab === 'watch' && selectedGroup" class="watchlist-form">
+        <template v-if="editingGroupId === selectedGroup.id">
+          <input
+            v-model.trim="editGroupName"
+            type="text"
+            placeholder="重新命名群組"
+            @keydown.enter.prevent="submitRenameGroup"
+          />
+          <button @click="submitRenameGroup">儲存</button>
+          <button class="ghost" @click="cancelRenameGroup">取消</button>
+        </template>
+        <template v-else>
+          <button class="secondary" @click="beginRenameGroup(selectedGroup)">✎ 重新命名</button>
+          <button class="danger" @click="requestDeleteGroup(selectedGroup)">🗑 刪除群組</button>
+        </template>
+      </div>
+
       <div v-if="leftTab === 'watch'" class="watchlist-form">
         <input
           v-model.trim="newTicker"
@@ -62,7 +79,12 @@
             <div class="wl-ticker">{{ item.ticker }}</div>
             <div class="wl-name">{{ item.name || "" }}<span v-if="item.category"> · {{ item.category }}</span></div>
           </div>
-          <div>
+          <div class="wl-side">
+            <div v-if="leftTab === 'watch' && selectedGroup" class="wl-ops">
+              <button class="wl-op" title="上移" :disabled="!canMoveItem(item, -1)" @click.stop="moveItem(item, -1)">↑</button>
+              <button class="wl-op" title="下移" :disabled="!canMoveItem(item, 1)" @click.stop="moveItem(item, 1)">↓</button>
+              <button class="wl-op danger" title="移除" @click.stop="removeItem(item)">✕</button>
+            </div>
             <div class="wl-price" :class="item.change_pct >= 0 ? 'up' : 'dn'">{{ fmtPrice(item.close) }}</div>
             <div class="wl-chg" :class="item.change_pct >= 0 ? 'up' : 'dn'">
               {{ item.change_pct >= 0 ? "+" : "" }}{{ Number(item.change_pct || 0).toFixed(2) }}%
@@ -94,7 +116,11 @@ const emit = defineEmits([
   "set-left-tab",
   "select-group",
   "create-group",
+  "rename-group",
+  "delete-group",
   "add-to-watchlist",
+  "remove-from-watchlist",
+  "reorder-items",
   "select-ticker",
 ]);
 
@@ -102,6 +128,8 @@ const marketCategories = ["ETF", "指數", "加密"];
 const createGroupOpen = ref(false);
 const newGroupName = ref("");
 const newTicker = ref("");
+const editingGroupId = ref(null);
+const editGroupName = ref("");
 
 const selectedGroup = computed(
   () => props.groups.find((group) => group.id === props.activeGroupId) || props.groups[0] || null,
@@ -141,5 +169,47 @@ function submitTicker() {
   if (!newTicker.value || !props.activeGroupId) return;
   emit("add-to-watchlist", newTicker.value, props.activeGroupId);
   newTicker.value = "";
+}
+
+function beginRenameGroup(group) {
+  editingGroupId.value = group.id;
+  editGroupName.value = group.name || "";
+}
+
+function cancelRenameGroup() {
+  editingGroupId.value = null;
+  editGroupName.value = "";
+}
+
+function submitRenameGroup() {
+  if (!editingGroupId.value || !editGroupName.value) return;
+  emit("rename-group", editingGroupId.value, editGroupName.value);
+  cancelRenameGroup();
+}
+
+function requestDeleteGroup(group) {
+  if (!window.confirm(`確定要刪除群組「${group.name}」嗎？`)) return;
+  emit("delete-group", group.id);
+}
+
+function canMoveItem(item, direction) {
+  const items = selectedGroup.value?.items || [];
+  const index = items.findIndex((candidate) => candidate.id === item.id);
+  const targetIndex = index + direction;
+  return index >= 0 && targetIndex >= 0 && targetIndex < items.length;
+}
+
+function moveItem(item, direction) {
+  const items = [...(selectedGroup.value?.items || [])];
+  const index = items.findIndex((candidate) => candidate.id === item.id);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return;
+  [items[index], items[targetIndex]] = [items[targetIndex], items[index]];
+  emit("reorder-items", props.activeGroupId, items.map((entry) => entry.id));
+}
+
+function removeItem(item) {
+  if (!window.confirm(`確定要從群組移除 ${item.ticker} 嗎？`)) return;
+  emit("remove-from-watchlist", item.id);
 }
 </script>

@@ -75,9 +75,17 @@ class WatchlistGroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
 
 
+class WatchlistGroupUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
 class WatchlistItemCreate(BaseModel):
     group_id: int
     ticker: str = Field(..., min_length=1, max_length=32)
+
+
+class WatchlistItemsOrderUpdate(BaseModel):
+    item_ids: list[int] = Field(..., min_length=1)
 
 
 @asynccontextmanager
@@ -229,6 +237,25 @@ async def create_watchlist_group(payload: WatchlistGroupCreate):
     return {**group, "items": []}
 
 
+@app.patch("/api/watchlist/groups/{group_id}")
+async def rename_watchlist_group(group_id: int, payload: WatchlistGroupUpdate):
+    try:
+        group = await db.rename_watchlist_group(group_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not group:
+        raise HTTPException(404, "Watchlist group not found")
+    return group
+
+
+@app.delete("/api/watchlist/groups/{group_id}")
+async def delete_watchlist_group(group_id: int):
+    deleted = await db.delete_watchlist_group(group_id)
+    if not deleted:
+        raise HTTPException(404, "Watchlist group not found")
+    return {"ok": True, "group_id": group_id}
+
+
 @app.post("/api/watchlist/items")
 async def add_watchlist_item(payload: WatchlistItemCreate):
     group = await db.get_watchlist_group(payload.group_id)
@@ -236,7 +263,10 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
         raise HTTPException(404, "Watchlist group not found")
 
     ticker = normalize_ticker(payload.ticker)
-    item = await db.add_watchlist_item(payload.group_id, ticker)
+    try:
+        item = await db.add_watchlist_item(payload.group_id, ticker)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     try:
         await fetcher.fetch_and_store(ticker, period="3mo", include_info=False)
@@ -252,6 +282,28 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
     hydrated["id"] = item["id"]
     hydrated["sort_order"] = item["sort_order"]
     return hydrated
+
+
+@app.delete("/api/watchlist/items/{item_id}")
+async def delete_watchlist_item(item_id: int):
+    deleted = await db.delete_watchlist_item(item_id)
+    if not deleted:
+        raise HTTPException(404, "Watchlist item not found")
+    return {"ok": True, "item_id": item_id}
+
+
+@app.put("/api/watchlist/groups/{group_id}/items/order")
+async def reorder_watchlist_items(group_id: int, payload: WatchlistItemsOrderUpdate):
+    group = await db.get_watchlist_group(group_id)
+    if not group:
+        raise HTTPException(404, "Watchlist group not found")
+    try:
+        updated = await db.reorder_watchlist_items(group_id, payload.item_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not updated:
+        raise HTTPException(404, "Watchlist items not found")
+    return {"ok": True, "group_id": group_id, "item_ids": payload.item_ids}
 
 
 @app.get("/api/kline/{ticker}")

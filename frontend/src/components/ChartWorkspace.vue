@@ -22,8 +22,11 @@
       <span class="tool-label">繪圖：</span>
       <button class="tool-btn" :class="{ active: activeTool === 'cursor' }" @click="$emit('set-tool', 'cursor')">⊹ 游標</button>
       <button class="tool-btn" :class="{ active: activeTool === 'hline' }" @click="$emit('set-tool', 'hline')">─ 水平線</button>
+      <button class="tool-btn" :class="{ active: activeTool === 'vline' }" @click="$emit('set-tool', 'vline')">│ 垂直線</button>
       <button class="tool-btn" :class="{ active: activeTool === 'tline' }" @click="$emit('set-tool', 'tline')">╱ 趨勢線</button>
       <button class="tool-btn" :class="{ active: activeTool === 'fib' }" @click="$emit('set-tool', 'fib')">⋮ 費波</button>
+      <button class="tool-btn" :class="{ active: activeTool === 'rect' }" @click="$emit('set-tool', 'rect')">▭ 區間</button>
+      <button class="tool-btn" :class="{ active: activeTool === 'measure' }" @click="$emit('set-tool', 'measure')">⊕ 測距</button>
       <button class="tool-btn" :class="{ active: activeTool === 'boxzoom' }" @click="$emit('set-tool', 'boxzoom')">□ 框選</button>
 
       <div class="tool-sep"></div>
@@ -74,6 +77,38 @@
       <div class="meta-chip is-hint">{{ interactionHint }}</div>
     </div>
 
+    <div class="compare-toolbar">
+      <span class="tool-label">比較：</span>
+      <input
+        v-model.trim="compareInput"
+        class="compare-input"
+        type="text"
+        placeholder="輸入代號加入比較，例如 MSFT / 0050"
+        @keydown.enter.prevent="submitCompare"
+      />
+      <button class="tool-btn" @click="submitCompare">加入比較</button>
+      <button class="tool-btn" :class="{ active: comparisonMode === 'percent' }" @click="$emit('set-compare-mode', 'percent')">相對報酬</button>
+      <button class="tool-btn" :class="{ active: comparisonMode === 'price' }" @click="$emit('set-compare-mode', 'price')">絕對價格</button>
+      <button class="tool-btn" :disabled="!compareSeries.length" @click="$emit('clear-compare')">清空比較</button>
+    </div>
+
+    <div v-if="compareSeries.length" class="compare-legend">
+      <button
+        v-for="series in compareSeries"
+        :key="series.ticker"
+        class="compare-chip"
+        :style="{ '--compare-color': series.color }"
+        @click="$emit('remove-compare', series.ticker)"
+      >
+        <span class="compare-chip-line"></span>
+        <span>{{ series.ticker }}</span>
+        <span :class="series.changePct >= 0 ? 'up' : 'dn'">
+          {{ series.changePct >= 0 ? "+" : "" }}{{ Number(series.changePct || 0).toFixed(2) }}%
+        </span>
+        <span class="compare-chip-close">✕</span>
+      </button>
+    </div>
+
     <div ref="chartAreaRef" class="chart-area">
       <canvas
         ref="mainCanvas"
@@ -103,6 +138,10 @@
       </div>
     </div>
 
+    <div v-if="compareSeries.length" class="ind-panel visible compare-panel">
+      <div class="ind-label-tag">COMPARE ({{ comparisonMode === "percent" ? "%" : "PRICE" }})</div>
+      <canvas ref="compareCanvas"></canvas>
+    </div>
     <div class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.rsi }"><div class="ind-label-tag">RSI(14)</div><canvas ref="rsiCanvas"></canvas></div>
     <div class="ind-panel" :class="{ visible: activePanels.macd }"><div class="ind-label-tag">MACD(12,26,9)</div><canvas ref="macdCanvas"></canvas></div>
@@ -112,6 +151,8 @@
 
 <script setup>
 import { computed, ref } from "vue";
+
+import { normalizeTicker } from "../composables/useDashboard";
 
 import { useChartEngine } from "../composables/useChartEngine";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
@@ -129,6 +170,8 @@ const props = defineProps({
   activeInd: { type: Object, required: true },
   drawings: { type: Array, required: true },
   syncingCurrent: { type: Boolean, required: true },
+  compareSeries: { type: Array, default: () => [] },
+  comparisonMode: { type: String, default: "percent" },
 });
 
 const emit = defineEmits([
@@ -141,14 +184,20 @@ const emit = defineEmits([
   "add-drawing",
   "update-crosshair",
   "hide-crosshair",
+  "add-compare",
+  "remove-compare",
+  "clear-compare",
+  "set-compare-mode",
 ]);
 
 const chartAreaRef = ref(null);
 const mainCanvas = ref(null);
 const volumeCanvas = ref(null);
+const compareCanvas = ref(null);
 const rsiCanvas = ref(null);
 const macdCanvas = ref(null);
 const stochCanvas = ref(null);
+const compareInput = ref("");
 
 const {
   chartMode,
@@ -185,6 +234,7 @@ const {
 } = useChartEngine({
   mainCanvas,
   volumeCanvas,
+  compareCanvas,
   rsiCanvas,
   macdCanvas,
   stochCanvas,
@@ -202,4 +252,11 @@ const displayChange = computed(() => {
   const sign = props.quote.change_pct >= 0 ? "+" : "";
   return `${sign}${(props.quote.change || 0).toFixed(2)} (${sign}${(props.quote.change_pct || 0).toFixed(2)}%)`;
 });
+
+function submitCompare() {
+  const ticker = normalizeTicker(compareInput.value);
+  if (!ticker) return;
+  compareInput.value = "";
+  emit("add-compare", ticker);
+}
 </script>

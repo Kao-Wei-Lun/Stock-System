@@ -75,6 +75,7 @@ const volumeMa = (data, period = 20) => calcMA(data.map((row) => ({ close: row.v
 export function useChartEngine({
   mainCanvas,
   volumeCanvas,
+  compareCanvas,
   rsiCanvas,
   macdCanvas,
   stochCanvas,
@@ -201,6 +202,7 @@ export function useChartEngine({
       return "按住拖曳框出區間，放開後放大所選時間與價格範圍";
     }
     if (props.activeTool === "hline") return "點一下加入水平壓力/支撐線";
+    if (props.activeTool === "vline") return "點一下加入事件垂直線";
     if (props.activeTool === "tline") {
       return draftDrawing.value?.type === "trendline"
         ? "趨勢線：移動滑鼠預覽，再點一下完成"
@@ -210,6 +212,16 @@ export function useChartEngine({
       return draftDrawing.value?.type === "fib"
         ? "費波那契：移動滑鼠預覽，再點一下完成"
         : "費波那契：先點低/高點，再點另一端";
+    }
+    if (props.activeTool === "rect") {
+      return draftDrawing.value?.type === "rect"
+        ? "區間框：移動滑鼠預覽，再點一下完成"
+        : "區間框：先點第一個角，再點第二個角";
+    }
+    if (props.activeTool === "measure") {
+      return draftDrawing.value?.type === "measure"
+        ? "測距尺：移動滑鼠預覽，再點一下完成"
+        : "測距尺：先點起點，再點終點";
     }
     return "可使用圖表工具進行分析";
   });
@@ -221,34 +233,6 @@ export function useChartEngine({
     if (props.activeTool === "boxzoom") return "chart-canvas is-zoom";
     return "chart-canvas is-draw";
   });
-
-  const interactionHint = computed(() => {
-    if (isDragging.value) return "拖曳中：左右平移時間視窗";
-    if (props.activeTool === "cursor") return "滾輪縮放、拖曳平移、雙擊重置視窗";
-    if (props.activeTool === "hline") return "點一下加入水平壓力/支撐線";
-    if (props.activeTool === "tline") {
-      return draftDrawing.value?.type === "trendline"
-        ? "趨勢線：移動滑鼠預覽，再點一下完成"
-        : "趨勢線：先點起點，再點終點";
-    }
-    if (props.activeTool === "fib") {
-      return draftDrawing.value?.type === "fib"
-        ? "費波那契：移動滑鼠預覽，再點一下完成"
-        : "費波那契：先點低/高點，再點另一端";
-    }
-    return "可使用圖表工具進行分析";
-  });
-
-  const canvasClass = computed(() => {
-    if (isDragging.value) return "chart-canvas is-grabbing";
-    if (props.activeTool === "cursor") return "chart-canvas is-grab";
-    return "chart-canvas is-draw";
-  });
-
-  const getVisibleStep = (canvas, count) => {
-    const width = canvasWidth(canvas) - PAD.left - PAD.right;
-    return width / Math.max(count, 1);
-  };
 
   const getBarLayout = (canvas, count) => {
     const width = canvasWidth(canvas) - PAD.left - PAD.right;
@@ -431,7 +415,7 @@ export function useChartEngine({
     ctx.setLineDash([]);
   };
 
-  const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = []) => {
+const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = []) => {
     const x1 = xForAbsoluteIndex(layout, drawing.startIndex);
     const x2 = xForAbsoluteIndex(layout, drawing.endIndex);
     const leftX = Math.min(x1, x2);
@@ -458,8 +442,78 @@ export function useChartEngine({
       ctx.fillText(`${Math.round(level * 100)}% ${price.toFixed(2)}`, width - PAD.right + 3, y + 3);
     });
 
-    ctx.setLineDash([]);
-  };
+  ctx.setLineDash([]);
+};
+
+const drawVerticalLine = (ctx, x, height, color = "#ff8c42", dash = [5, 3]) => {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  ctx.moveTo(x, PAD.top);
+  ctx.lineTo(x, height - PAD.bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+};
+
+const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, width) => {
+  const x1 = xAtAbsolute(drawing.startIndex);
+  const x2 = xAtAbsolute(drawing.endIndex);
+  const y1 = scale(drawing.startPrice);
+  const y2 = scale(drawing.endPrice);
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const zoneWidth = Math.abs(x2 - x1);
+  const zoneHeight = Math.abs(y2 - y1);
+
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([6, 4]);
+  ctx.fillRect(left, top, zoneWidth, zoneHeight);
+  ctx.strokeRect(left, top, zoneWidth, zoneHeight);
+  ctx.setLineDash([]);
+
+  const high = Math.max(drawing.startPrice, drawing.endPrice);
+  const low = Math.min(drawing.startPrice, drawing.endPrice);
+  ctx.fillStyle = strokeStyle;
+  ctx.font = "9px JetBrains Mono";
+  ctx.fillText(`${high.toFixed(2)} / ${low.toFixed(2)}`, width - PAD.right + 2, top + 10);
+};
+
+const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = "#00d4ff") => {
+  const x1 = xAtAbsolute(drawing.startIndex);
+  const x2 = xAtAbsolute(drawing.endIndex);
+  const y1 = scale(drawing.startPrice);
+  const y2 = scale(drawing.endPrice);
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const boxWidth = Math.abs(x2 - x1);
+  const boxHeight = Math.abs(y2 - y1);
+  const bars = Math.abs(drawing.endIndex - drawing.startIndex) + 1;
+  const priceChange = drawing.endPrice - drawing.startPrice;
+  const pctChange = drawing.startPrice ? (priceChange / drawing.startPrice) * 100 : 0;
+
+  ctx.strokeStyle = strokeStyle;
+  ctx.fillStyle = "rgba(0,212,255,0.08)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.fillRect(left, top, boxWidth, boxHeight);
+  ctx.strokeRect(left, top, boxWidth, boxHeight);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = strokeStyle;
+  ctx.font = "9px JetBrains Mono";
+  ctx.fillText(
+    `${bars} bars | ${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)} | ${pctChange >= 0 ? "+" : ""}${pctChange.toFixed(2)}%`,
+    Math.min(left + 6, width - PAD.right - 150),
+    top + 12,
+  );
+};
 
   const renderMain = () => {
     if (!mainCanvas.value || !visibleData.value.length) return;
@@ -578,6 +632,11 @@ export function useChartEngine({
         return;
       }
 
+      if (drawing.type === "vline") {
+        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, "#ff8c42");
+        return;
+      }
+
       if (drawing.type === "trendline") {
         drawTrendLine(ctx, layout, drawing, scale, "#00d4ff");
         return;
@@ -585,6 +644,32 @@ export function useChartEngine({
 
       if (drawing.type === "fib") {
         drawFib(ctx, layout, drawing, scale, width, "#ffd166", [6, 4]);
+        return;
+      }
+
+      if (drawing.type === "rect") {
+        drawRectZone(
+          ctx,
+          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+          drawing,
+          scale,
+          "#9b6dff",
+          "rgba(155,109,255,0.12)",
+          width,
+        );
+        return;
+      }
+
+      if (drawing.type === "measure") {
+        drawMeasureTool(
+          ctx,
+          (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+          drawing,
+          scale,
+          width,
+          "#00d4ff",
+        );
+        return;
       }
     });
 
@@ -594,6 +679,29 @@ export function useChartEngine({
 
     if (draftDrawing.value?.type === "fib") {
       drawFib(ctx, layout, draftDrawing.value, scale, width, "rgba(255,209,102,0.8)", [4, 4]);
+    }
+
+    if (draftDrawing.value?.type === "rect") {
+      drawRectZone(
+        ctx,
+        (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+        draftDrawing.value,
+        scale,
+        "rgba(155,109,255,0.9)",
+        "rgba(155,109,255,0.1)",
+        width,
+      );
+    }
+
+    if (draftDrawing.value?.type === "measure") {
+      drawMeasureTool(
+        ctx,
+        (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
+        draftDrawing.value,
+        scale,
+        width,
+        "rgba(0,212,255,0.85)",
+      );
     }
 
     if (selectionBox.active) {
@@ -619,6 +727,90 @@ export function useChartEngine({
       scale,
       lastRow.close >= prevRow.close ? "#00d9a3" : "#ff4d6a",
     );
+  };
+
+  const renderCompare = () => {
+    if (!compareCanvas.value) return;
+
+    const canvas = compareCanvas.value;
+    const ctx = canvas.getContext("2d");
+    const width = canvasWidth(canvas);
+    const height = canvasHeight(canvas);
+
+    setupCtx(ctx);
+    ctx.clearRect(0, 0, width, height);
+
+    if (!visibleData.value.length || !props.compareSeries?.length) return;
+
+    const baseDates = visibleData.value.map((row) => row.date);
+    const layout = getBarLayout(canvas, visibleData.value.length);
+
+    const toSeriesValues = (rows, mode) => {
+      const closeByDate = new Map(rows.map((row) => [row.date, row.close]));
+      const rawValues = baseDates.map((date) => closeByDate.get(date) ?? null);
+      if (mode === "price") return rawValues;
+      const baseValue = rawValues.find((value) => value != null);
+      if (baseValue == null) return rawValues;
+      return rawValues.map((value) => (value == null ? null : ((value - baseValue) / baseValue) * 100));
+    };
+
+    const seriesList = [
+      {
+        ticker: props.currentTicker,
+        color: "#00d4ff",
+        values: toSeriesValues(visibleData.value, props.comparisonMode),
+      },
+      ...props.compareSeries.map((series) => ({
+        ticker: series.ticker,
+        color: series.color,
+        values: toSeriesValues(series.data || [], props.comparisonMode),
+      })),
+    ].filter((series) => series.values.some((value) => value != null));
+
+    if (!seriesList.length) return;
+
+    const points = seriesList.flatMap((series) => series.values.filter((value) => value != null));
+    let min = Math.min(...points);
+    let max = Math.max(...points);
+    if (min === max) {
+      min -= 1;
+      max += 1;
+    } else {
+      const pad = (max - min) * 0.08;
+      min -= pad;
+      max += pad;
+    }
+
+    const chartHeight = height - 10;
+    const scale = (value) => 4 + (1 - (value - min) / (max - min || 1)) * chartHeight;
+
+    ctx.strokeStyle = "rgba(30,45,61,0.7)";
+    ctx.lineWidth = 0.5;
+    ctx.fillStyle = "rgba(77,102,128,0.7)";
+    ctx.font = "8px JetBrains Mono";
+    for (let index = 0; index <= 4; index += 1) {
+      const y = 4 + index * (chartHeight / 4);
+      const axisValue = max - ((max - min) * index) / 4;
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, y);
+      ctx.lineTo(width - PAD.right, y);
+      ctx.stroke();
+      const label = props.comparisonMode === "percent" ? `${axisValue.toFixed(1)}%` : axisValue.toFixed(2);
+      ctx.fillText(label, width - PAD.right + 2, y + 3);
+    }
+
+    seriesList.forEach((series) => {
+      drawLine(ctx, series.values, layout.barX, scale, series.color, 1.5);
+      const lastIndex = findLastDefinedIndex(series.values);
+      if (lastIndex < 0) return;
+      const lastValue = series.values[lastIndex];
+      const label = props.comparisonMode === "percent"
+        ? `${series.ticker} ${lastValue >= 0 ? "+" : ""}${lastValue.toFixed(2)}%`
+        : `${series.ticker} ${lastValue.toFixed(2)}`;
+      ctx.fillStyle = series.color;
+      ctx.font = "8px JetBrains Mono";
+      ctx.fillText(label, 8, 12 + seriesList.indexOf(series) * 11);
+    });
   };
 
   const renderVolume = () => {
@@ -764,7 +956,7 @@ export function useChartEngine({
   };
 
   const clearAll = () => {
-    [mainCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value]
+    [mainCanvas.value, compareCanvas.value, volumeCanvas.value, rsiCanvas.value, macdCanvas.value, stochCanvas.value]
       .filter(Boolean)
       .forEach((canvas) => {
         const ctx = canvas.getContext("2d");
@@ -787,6 +979,7 @@ export function useChartEngine({
       return;
     }
     renderMain();
+    renderCompare();
     renderVolume();
     renderRsi();
     renderMacd();
@@ -804,6 +997,7 @@ export function useChartEngine({
 
   const resizeAll = () => {
     resizeCanvas(mainCanvas.value, chartAreaRef.value);
+    resizeCanvas(compareCanvas.value, compareCanvas.value?.parentElement);
     resizeCanvas(volumeCanvas.value, volumeCanvas.value?.parentElement);
     resizeCanvas(rsiCanvas.value, rsiCanvas.value?.parentElement);
     resizeCanvas(macdCanvas.value, macdCanvas.value?.parentElement);
@@ -897,7 +1091,13 @@ export function useChartEngine({
   };
 
   const updateDraftDrawing = (info) => {
-    if (!draftDrawing.value || draftDrawing.value.type === "hline" || !info) return;
+    if (
+      !draftDrawing.value
+      || !info
+      || !["trendline", "fib", "rect", "measure"].includes(draftDrawing.value.type)
+    ) {
+      return;
+    }
     draftDrawing.value = {
       ...draftDrawing.value,
       endIndex: info.absoluteIndex,
@@ -1088,46 +1288,42 @@ export function useChartEngine({
       return;
     }
 
-    if (props.activeTool === "tline") {
-      if (!draftDrawing.value || draftDrawing.value.type !== "trendline") {
-        draftDrawing.value = {
-          type: "trendline",
-          startIndex: info.absoluteIndex,
-          endIndex: info.absoluteIndex,
-          startPrice: info.price,
-          endPrice: info.price,
-        };
-      } else {
-        emit("add-drawing", {
-          ...draftDrawing.value,
-          endIndex: info.absoluteIndex,
-          endPrice: info.price,
-        });
-        draftDrawing.value = null;
-      }
-      scheduleRender();
+    if (props.activeTool === "vline") {
+      emit("add-drawing", {
+        type: "vline",
+        index: info.absoluteIndex,
+        price: info.price,
+      });
       return;
     }
 
-    if (props.activeTool === "fib") {
-      if (!draftDrawing.value || draftDrawing.value.type !== "fib") {
-        draftDrawing.value = {
-          type: "fib",
-          startIndex: info.absoluteIndex,
-          endIndex: info.absoluteIndex,
-          startPrice: info.price,
-          endPrice: info.price,
-        };
-      } else {
-        emit("add-drawing", {
-          ...draftDrawing.value,
-          endIndex: info.absoluteIndex,
-          endPrice: info.price,
-        });
-        draftDrawing.value = null;
-      }
-      scheduleRender();
+    const toolTypeMap = {
+      tline: "trendline",
+      fib: "fib",
+      rect: "rect",
+      measure: "measure",
+    };
+    const draftType = toolTypeMap[props.activeTool];
+    if (!draftType) return;
+
+    if (!draftDrawing.value || draftDrawing.value.type !== draftType) {
+      draftDrawing.value = {
+        type: draftType,
+        startIndex: info.absoluteIndex,
+        endIndex: info.absoluteIndex,
+        startPrice: info.price,
+        endPrice: info.price,
+      };
+    } else {
+      emit("add-drawing", {
+        ...draftDrawing.value,
+        endIndex: info.absoluteIndex,
+        endPrice: info.price,
+      });
+      draftDrawing.value = null;
     }
+
+    scheduleRender();
   };
 
   const onDoubleClick = () => {
@@ -1198,6 +1394,17 @@ export function useChartEngine({
   );
 
   watch(
+    () => props.compareSeries,
+    () => nextTick(() => resizeAll()),
+    { deep: true },
+  );
+
+  watch(
+    () => props.comparisonMode,
+    () => scheduleRender(),
+  );
+
+  watch(
     () => [viewport.startIndex, viewport.visibleCount, chartMode.value],
     () => scheduleRender(),
   );
@@ -1210,7 +1417,7 @@ export function useChartEngine({
   watch(
     () => props.activeTool,
     (nextTool) => {
-      if (!["tline", "fib"].includes(nextTool)) {
+      if (!["tline", "fib", "rect", "measure"].includes(nextTool)) {
         draftDrawing.value = null;
       }
       if (nextTool !== "boxzoom") {
@@ -1223,7 +1430,7 @@ export function useChartEngine({
   );
 
   watch(
-    () => [props.activePanels.rsi, props.activePanels.macd, props.activePanels.stoch],
+    () => [props.activePanels.rsi, props.activePanels.macd, props.activePanels.stoch, props.compareSeries.length],
     () => nextTick(() => resizeAll()),
   );
 

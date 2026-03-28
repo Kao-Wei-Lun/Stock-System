@@ -12,6 +12,8 @@ const TIMEFRAME_OPTIONS = [
   { tf: "5y", iv: "1mo", label: "5Y" },
 ];
 
+const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
+
 function getBackendTarget() {
   return (import.meta.env.VITE_BACKEND_TARGET || "http://127.0.0.1:8001").replace(/\/$/, "");
 }
@@ -49,6 +51,9 @@ export function useDashboard() {
   const searchOpen = ref(false);
   const watchlistGroups = ref([]);
   const activeWatchGroupId = ref(null);
+  const compareTickers = ref([]);
+  const compareSeries = ref([]);
+  const comparisonMode = ref("percent");
   const watchlist = computed(() =>
     watchlistGroups.value.flatMap((group) =>
       (group.items || []).map((item) => ({
@@ -274,6 +279,15 @@ export function useDashboard() {
     }
   }
 
+  function getDisplayNameForTicker(ticker) {
+    const normalized = normalizeTicker(ticker);
+    return (
+      watchlist.value.find((item) => item.ticker === normalized)?.name
+      || searchResults.value.find((item) => item.ticker === normalized)?.name
+      || normalized
+    );
+  }
+
   async function createWatchGroup(name) {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
@@ -295,6 +309,56 @@ export function useDashboard() {
       pushNotification({
         icon: "⚠️",
         title: "建立群組失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    }
+  }
+
+  async function renameWatchGroup(groupId, name) {
+    const trimmed = (name || "").trim();
+    if (!groupId || !trimmed) return;
+    try {
+      await apiFetch(`/api/watchlist/groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      await loadWatchlist();
+      pushNotification({
+        icon: "✎",
+        title: "群組已重新命名",
+        msg: trimmed,
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "重新命名失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    }
+  }
+
+  async function deleteWatchGroup(groupId) {
+    if (!groupId) return;
+    try {
+      await apiFetch(`/api/watchlist/groups/${groupId}`, { method: "DELETE" });
+      if (activeWatchGroupId.value === groupId) {
+        activeWatchGroupId.value = watchlistGroups.value.find((group) => group.id !== groupId)?.id ?? null;
+      }
+      await loadWatchlist();
+      pushNotification({
+        icon: "🗑",
+        title: "群組已刪除",
+        msg: "觀察群組已移除",
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "刪除群組失敗",
         msg: error.message || "請稍後再試",
         type: "error",
       });
@@ -327,6 +391,122 @@ export function useDashboard() {
     }
   }
 
+  async function removeTickerFromWatchlist(itemId) {
+    if (!itemId) return;
+    try {
+      await apiFetch(`/api/watchlist/items/${itemId}`, { method: "DELETE" });
+      await loadWatchlist();
+      pushNotification({
+        icon: "🗑",
+        title: "已移除自選股",
+        msg: "標的已從群組中移除",
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "移除失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    }
+  }
+
+  async function reorderWatchlistItems(groupId, itemIds) {
+    if (!groupId || !Array.isArray(itemIds) || !itemIds.length) return;
+    try {
+      await apiFetch(`/api/watchlist/groups/${groupId}/items/order`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      await loadWatchlist();
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "排序更新失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    }
+  }
+
+  async function loadComparisonSeries(targetTickers = compareTickers.value) {
+    const normalizedTickers = [...new Set(
+      (targetTickers || [])
+        .map((ticker) => normalizeTicker(ticker))
+        .filter((ticker) => ticker && ticker !== normalizeTicker(currentTicker.value)),
+    )].slice(0, 5);
+
+    compareTickers.value = normalizedTickers;
+
+    if (!normalizedTickers.length) {
+      compareSeries.value = [];
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      normalizedTickers.map(async (ticker, index) => {
+        const payload = await apiFetch(
+          `/api/kline/${ticker}?period=${currentPeriod.value}&interval=${currentInterval.value}`,
+        );
+        const data = payload.data || [];
+        const firstClose = data.find((row) => row.close != null)?.close ?? null;
+        const lastClose = data.length ? data[data.length - 1].close : null;
+        const changePct = firstClose && lastClose ? ((lastClose - firstClose) / firstClose) * 100 : 0;
+
+        return {
+          ticker,
+          name: getDisplayNameForTicker(ticker),
+          color: COMPARE_COLOR_PALETTE[index % COMPARE_COLOR_PALETTE.length],
+          changePct,
+          data,
+        };
+      }),
+    );
+
+    compareSeries.value = results
+      .filter((result) => result.status === "fulfilled" && result.value.data.length)
+      .map((result) => result.value);
+  }
+
+  async function addCompareTicker(ticker) {
+    const normalized = normalizeTicker(ticker);
+    if (!normalized) return;
+    if (normalized === normalizeTicker(currentTicker.value)) {
+      pushNotification({
+        icon: "ℹ",
+        title: "主圖已是這檔股票",
+        msg: normalized,
+      });
+      return;
+    }
+    if (compareTickers.value.includes(normalized)) return;
+    if (compareTickers.value.length >= 5) {
+      pushNotification({
+        icon: "⚠️",
+        title: "比較標的已達上限",
+        msg: "最多可同時比較 5 檔股票",
+        type: "error",
+      });
+      return;
+    }
+    await loadComparisonSeries([...compareTickers.value, normalized]);
+  }
+
+  async function removeCompareTicker(ticker) {
+    await loadComparisonSeries(compareTickers.value.filter((item) => item !== normalizeTicker(ticker)));
+  }
+
+  function clearCompareTickers() {
+    compareTickers.value = [];
+    compareSeries.value = [];
+  }
+
+  function setComparisonMode(mode) {
+    comparisonMode.value = mode === "price" ? "price" : "percent";
+  }
+
   async function loadQuote(ticker = currentTicker.value) {
     try {
       const data = await apiFetch(`/api/quote/${normalizeTicker(ticker)}`);
@@ -344,6 +524,7 @@ export function useDashboard() {
       const data = await apiFetch(`/api/kline/${normalized}?period=${period}&interval=${interval}`);
       ohlcData.value = data.data || [];
       crosshair.visible = false;
+      await loadComparisonSeries(compareTickers.value);
       if (ohlcData.value.length > 0) await loadQuote(normalized);
       else resetQuote();
     } catch (error) {
@@ -368,6 +549,7 @@ export function useDashboard() {
     wsSend({ action: "unsubscribe", ticker: normalizeTicker(currentTicker.value) });
     currentTicker.value = normalized;
     currentName.value = name || normalized;
+    compareTickers.value = compareTickers.value.filter((item) => item !== normalized);
     drawings.value = [];
     ohlcData.value = [];
     crosshair.visible = false;
@@ -429,6 +611,11 @@ export function useDashboard() {
   function addDrawing(drawing) {
     drawings.value = [...drawings.value, drawing];
 
+    if (drawing.type === "vline") {
+      pushNotification({ icon: "│", title: "垂直線已加", msg: "已標記關鍵事件時間" });
+      return;
+    }
+
     if (drawing.type === "trendline") {
       pushNotification({ icon: "╱", title: "趨勢線已加", msg: "已加入分析線段" });
       return;
@@ -436,6 +623,16 @@ export function useDashboard() {
 
     if (drawing.type === "fib") {
       pushNotification({ icon: "⋮", title: "費波那契已加", msg: "已加入回撤分析" });
+      return;
+    }
+
+    if (drawing.type === "rect") {
+      pushNotification({ icon: "▭", title: "區間框已加", msg: "已標記壓力／支撐區間" });
+      return;
+    }
+
+    if (drawing.type === "measure") {
+      pushNotification({ icon: "⊕", title: "測距尺已加", msg: "已記錄價差與時間距離" });
     }
   }
 
@@ -610,6 +807,9 @@ export function useDashboard() {
     watchlistGroups,
     activeWatchGroup,
     activeWatchGroupId,
+    compareTickers,
+    compareSeries,
+    comparisonMode,
     watchlist,
     watchlistLoading,
     watchlistError,
@@ -650,7 +850,15 @@ export function useDashboard() {
     submitSearch,
     selectSearchResult,
     createWatchGroup,
+    renameWatchGroup,
+    deleteWatchGroup,
     addTickerToWatchlist,
+    removeTickerFromWatchlist,
+    reorderWatchlistItems,
+    addCompareTicker,
+    removeCompareTicker,
+    clearCompareTickers,
+    setComparisonMode,
     setTimeframe,
     setLeftTab,
     setActiveWatchGroup,
