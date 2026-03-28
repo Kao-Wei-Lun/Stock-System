@@ -114,6 +114,29 @@
       </button>
     </div>
 
+    <div v-if="drawings.length" class="drawing-manager">
+      <div class="drawing-manager-head">
+        <div class="drawing-manager-title">物件樹</div>
+        <div class="drawing-manager-actions">
+          <span class="drawing-shortcuts">快捷鍵：V 游標 / H 水平 / L 垂直 / T 趨勢 / F 費波 / R 區間 / M 測距 / B 框選 / Del 刪除 / Esc 取消</span>
+          <button class="tool-btn compact" :disabled="!selectedDrawingId" @click="removeSelectedDrawing">刪除所選</button>
+        </div>
+      </div>
+      <div class="drawing-list">
+        <button
+          v-for="drawing in drawings"
+          :key="drawing.id || drawingLabel(drawing)"
+          class="drawing-chip"
+          :class="{ active: drawing.id === selectedDrawingId }"
+          @click="$emit('select-drawing', drawing.id)"
+        >
+          <span class="drawing-chip-type">{{ drawingTypeLabel(drawing.type) }}</span>
+          <span class="drawing-chip-label">{{ drawingLabel(drawing) }}</span>
+          <span class="drawing-chip-close" @click.stop="$emit('remove-drawing', drawing.id)">✕</span>
+        </button>
+      </div>
+    </div>
+
     <div ref="chartAreaRef" class="chart-area">
       <canvas
         ref="mainCanvas"
@@ -155,7 +178,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useChartEngine } from "../composables/useChartEngine";
@@ -173,6 +196,7 @@ const props = defineProps({
   ohlcData: { type: Array, required: true },
   activeInd: { type: Object, required: true },
   drawings: { type: Array, required: true },
+  selectedDrawingId: { type: String, default: null },
   syncingCurrent: { type: Boolean, required: true },
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
@@ -186,6 +210,8 @@ const emit = defineEmits([
   "sync-current",
   "add-horizontal-line",
   "add-drawing",
+  "select-drawing",
+  "remove-drawing",
   "update-crosshair",
   "hide-crosshair",
   "add-compare",
@@ -265,10 +291,91 @@ const displayChange = computed(() => {
   return `${sign}${(props.quote.change || 0).toFixed(2)} (${sign}${(props.quote.change_pct || 0).toFixed(2)}%)`;
 });
 
+function drawingTypeLabel(type) {
+  const labels = {
+    buy: "買點",
+    sell: "賣點",
+    hline: "水平線",
+    vline: "垂直線",
+    trendline: "趨勢線",
+    fib: "費波",
+    rect: "區間",
+    measure: "測距",
+  };
+  return labels[type] || type;
+}
+
+function drawingLabel(drawing) {
+  if (!drawing) return "未命名";
+  if (drawing.type === "hline") return `@ ${fmtPrice(drawing.price)}`;
+  if (drawing.type === "vline") return `第 ${drawing.index + 1} 根`;
+  if (drawing.type === "buy" || drawing.type === "sell") return `第 ${drawing.index + 1} 根訊號`;
+  if (drawing.type === "trendline") return `${fmtPrice(drawing.startPrice)} → ${fmtPrice(drawing.endPrice)}`;
+  if (drawing.type === "fib") return `${fmtPrice(drawing.startPrice)} ↔ ${fmtPrice(drawing.endPrice)}`;
+  if (drawing.type === "rect") return `${fmtPrice(Math.max(drawing.startPrice, drawing.endPrice))} / ${fmtPrice(Math.min(drawing.startPrice, drawing.endPrice))}`;
+  if (drawing.type === "measure") return `${Math.abs(drawing.endIndex - drawing.startIndex) + 1} 根`;
+  return drawing.type;
+}
+
 function submitCompare() {
   const ticker = normalizeTicker(compareInput.value);
   if (!ticker) return;
   compareInput.value = "";
   emit("add-compare", ticker);
 }
+
+function removeSelectedDrawing() {
+  if (!props.selectedDrawingId) return;
+  emit("remove-drawing", props.selectedDrawingId);
+}
+
+function handleKeydown(event) {
+  const target = event.target;
+  if (
+    target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target?.isContentEditable
+  ) {
+    return;
+  }
+
+  const key = event.key.toLowerCase();
+  const toolMap = {
+    v: "cursor",
+    h: "hline",
+    l: "vline",
+    t: "tline",
+    f: "fib",
+    r: "rect",
+    m: "measure",
+    b: "boxzoom",
+  };
+
+  if (toolMap[key]) {
+    event.preventDefault();
+    emit("set-tool", toolMap[key]);
+    return;
+  }
+
+  if ((event.key === "Delete" || event.key === "Backspace") && props.selectedDrawingId) {
+    event.preventDefault();
+    emit("remove-drawing", props.selectedDrawingId);
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    emit("set-tool", "cursor");
+    emit("select-drawing", null);
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+});
 </script>

@@ -16,8 +16,9 @@ const DEFAULT_VISIBLE_BARS = 90;
 const MIN_VISIBLE_BARS = 20;
 const PAN_STEP_RATIO = 0.18;
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-const AUTO_Y_PADDING_RATIO = 0.08;
-const AUTO_Y_MIN_PADDING_RATIO = 0.02;
+const AUTO_Y_PADDING_RATIO = 0.14;
+const AUTO_Y_MIN_PADDING_RATIO = 0.04;
+const DRAWING_HIT_TOLERANCE = 10;
 const VIEW_HISTORY_LIMIT = 80;
 const CHART_PREFS_KEY = "quantvision.chart.prefs.v1";
 
@@ -281,6 +282,30 @@ export function useChartEngine({
     };
   };
 
+  const getPaddedPriceRange = (rawMin, rawMax, scaleMode = "linear") => {
+    let min = rawMin;
+    let max = rawMax;
+
+    if (rawMin === rawMax) {
+      const singlePad = Math.max(Math.abs(rawMin) * 0.08, 1);
+      min = rawMin - singlePad;
+      max = rawMax + singlePad;
+    } else {
+      const range = rawMax - rawMin;
+      const edgeMagnitude = Math.max(Math.abs(rawMax), Math.abs(rawMin));
+      const padding = Math.max(range * AUTO_Y_PADDING_RATIO, edgeMagnitude * AUTO_Y_MIN_PADDING_RATIO, 0.05);
+      min = rawMin - padding;
+      max = rawMax + padding;
+    }
+
+    if (scaleMode === "log" && rawMin > 0) {
+      min = Math.max(min, rawMin * 0.42);
+      max = Math.max(max, clampPositive(rawMax) * 1.08);
+    }
+
+    return { min, max };
+  };
+
   const getVisiblePriceScale = (data, extras = [], scaleMode = "linear") => {
     const pricePoints = data.flatMap((row) => [row.high, row.low]);
     extras.forEach((value) => {
@@ -299,26 +324,7 @@ export function useChartEngine({
 
     const rawMin = Math.min(...pricePoints);
     const rawMax = Math.max(...pricePoints);
-    let min = rawMin;
-    let max = rawMax;
-
-    if (rawMin === rawMax) {
-      const singlePad = Math.max(Math.abs(rawMin) * 0.06, 0.5);
-      min = rawMin - singlePad;
-      max = rawMax + singlePad;
-    } else {
-      const range = rawMax - rawMin;
-      const padding = Math.max(range * AUTO_Y_PADDING_RATIO, Math.abs(rawMax) * AUTO_Y_MIN_PADDING_RATIO, 0.02);
-      min = rawMin - padding;
-      max = rawMax + padding;
-    }
-
-    if (scaleMode === "log" && rawMin > 0) {
-      min = Math.max(min, rawMin * 0.55);
-      max = Math.max(max, clampPositive(rawMax));
-    }
-
-    return { min, max };
+    return getPaddedPriceRange(rawMin, rawMax, scaleMode);
   };
 
   const scaleY = (value, min, max, topPad, chartHeight, scaleMode = "linear") => {
@@ -665,6 +671,115 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
   );
 };
 
+  const isDrawingSelected = (drawing) =>
+    !!drawing?.id && drawing.id === props.selectedDrawingId;
+
+  const drawSelectionHandles = (ctx, points, color = "#ffffff") => {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.strokeStyle = "rgba(8,12,18,0.9)";
+    ctx.lineWidth = 1;
+    points.forEach((point) => {
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    ctx.restore();
+  };
+
+  const distanceToSegment = (pointX, pointY, x1, y1, x2, y2) => {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    if (!dx && !dy) return Math.hypot(pointX - x1, pointY - y1);
+    const t = clamp(((pointX - x1) * dx + (pointY - y1) * dy) / (dx * dx + dy * dy), 0, 1);
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.hypot(pointX - projX, pointY - projY);
+  };
+
+  const xAtAbsoluteIndex = (absoluteIndex) =>
+    PAD.left + (absoluteIndex - viewport.startIndex + 0.5) * mainMetrics.step;
+
+  const scalePriceAtPoint = (value) =>
+    scaleY(value, mainMetrics.min, mainMetrics.max, PAD.top, mainMetrics.chartHeight, priceScaleMode.value);
+
+  const findDrawingAtPoint = (info) => {
+    if (!props.drawings?.length) return null;
+
+    for (let index = props.drawings.length - 1; index >= 0; index -= 1) {
+      const drawing = props.drawings[index];
+
+      if (drawing.type === "buy" || drawing.type === "sell") {
+        if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + visibleData.value.length) continue;
+        const row = props.ohlcData[drawing.index];
+        const markerX = xAtAbsoluteIndex(drawing.index);
+        const markerY = drawing.type === "buy" ? scalePriceAtPoint(row.low) + 8 : scalePriceAtPoint(row.high) - 8;
+        if (Math.hypot(info.x - markerX, info.y - markerY) <= DRAWING_HIT_TOLERANCE + 2) return drawing;
+        continue;
+      }
+
+      if (drawing.type === "hline") {
+        if (Math.abs(scalePriceAtPoint(drawing.price) - info.y) <= DRAWING_HIT_TOLERANCE) return drawing;
+        continue;
+      }
+
+      if (drawing.type === "vline") {
+        if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + visibleData.value.length) continue;
+        if (Math.abs(xAtAbsoluteIndex(drawing.index) - info.x) <= DRAWING_HIT_TOLERANCE) return drawing;
+        continue;
+      }
+
+      if (!["trendline", "fib", "rect", "measure"].includes(drawing.type)) continue;
+
+      const startX = xAtAbsoluteIndex(drawing.startIndex);
+      const endX = xAtAbsoluteIndex(drawing.endIndex);
+      const startY = scalePriceAtPoint(drawing.startPrice);
+      const endY = scalePriceAtPoint(drawing.endPrice);
+      const left = Math.min(startX, endX) - DRAWING_HIT_TOLERANCE;
+      const right = Math.max(startX, endX) + DRAWING_HIT_TOLERANCE;
+      const top = Math.min(startY, endY) - DRAWING_HIT_TOLERANCE;
+      const bottom = Math.max(startY, endY) + DRAWING_HIT_TOLERANCE;
+
+      if (drawing.type === "trendline") {
+        if (distanceToSegment(info.x, info.y, startX, startY, endX, endY) <= DRAWING_HIT_TOLERANCE) return drawing;
+        continue;
+      }
+
+      if (drawing.type === "fib") {
+        const leftX = Math.min(startX, endX);
+        const rightX = Math.max(startX, endX);
+        const high = Math.max(drawing.startPrice, drawing.endPrice);
+        const low = Math.min(drawing.startPrice, drawing.endPrice);
+        const direction = drawing.endPrice >= drawing.startPrice ? 1 : -1;
+        if (info.x < leftX - DRAWING_HIT_TOLERANCE || info.x > rightX + DRAWING_HIT_TOLERANCE) continue;
+        for (const level of FIB_LEVELS) {
+          const price = direction >= 0 ? high - (high - low) * level : low + (high - low) * level;
+          const levelY = scalePriceAtPoint(price);
+          if (Math.abs(levelY - info.y) <= DRAWING_HIT_TOLERANCE) return drawing;
+        }
+        continue;
+      }
+
+      if (drawing.type === "rect") {
+        if (info.x >= left && info.x <= right && info.y >= top && info.y <= bottom) return drawing;
+        continue;
+      }
+
+      if (drawing.type === "measure") {
+        if (
+          distanceToSegment(info.x, info.y, startX, startY, endX, endY) <= DRAWING_HIT_TOLERANCE
+          || (info.x >= left && info.x <= right && info.y >= top && info.y <= bottom)
+        ) {
+          return drawing;
+        }
+      }
+    }
+
+    return null;
+  };
+
   const getDrawingPriceValues = (drawing) => {
     if (!drawing) return [];
     const viewStart = viewport.startIndex;
@@ -787,45 +902,79 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     }
 
     props.drawings.forEach((drawing) => {
+      const selected = isDrawingSelected(drawing);
       if (drawing.type === "buy" || drawing.type === "sell") {
         if (drawing.index < viewport.startIndex || drawing.index >= viewport.startIndex + count) return;
         const localIndex = drawing.index - viewport.startIndex;
         const x = layout.barX(localIndex);
-        ctx.fillStyle = drawing.type === "buy" ? "#00d9a3" : "#ff4d6a";
-        ctx.font = "bold 13px sans-serif";
+        const color = drawing.type === "buy" ? "#00d9a3" : "#ff4d6a";
+        ctx.save();
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 12;
+        }
+        ctx.fillStyle = color;
+        ctx.font = selected ? "bold 16px sans-serif" : "bold 13px sans-serif";
         const row = fullData[drawing.index];
         const y = drawing.type === "buy" ? scale(row.low) + 14 : scale(row.high) - 6;
-        ctx.fillText(drawing.type === "buy" ? "▲" : "▼", x - 5, y);
+        ctx.fillText(drawing.type === "buy" ? "▲" : "▼", x - (selected ? 6 : 5), y);
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "hline") {
-        ctx.strokeStyle = "#f5a623";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 3]);
+        const color = selected ? "#ffd166" : "#f5a623";
+        const y = scale(drawing.price);
+        ctx.save();
+        if (selected) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = selected ? 1.8 : 1;
+        ctx.setLineDash(selected ? [7, 3] : [5, 3]);
         ctx.beginPath();
-        ctx.moveTo(PAD.left, scale(drawing.price));
-        ctx.lineTo(width - PAD.right, scale(drawing.price));
+        ctx.moveTo(PAD.left, y);
+        ctx.lineTo(width - PAD.right, y);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = "#f5a623";
-        ctx.font = "9px JetBrains Mono";
-        ctx.fillText(drawing.price.toFixed(2), width - PAD.right + 2, scale(drawing.price) + 3);
+        ctx.fillStyle = color;
+        ctx.font = selected ? "bold 9px JetBrains Mono" : "9px JetBrains Mono";
+        ctx.fillText(drawing.price.toFixed(2), width - PAD.right + 2, y + 3);
+        ctx.restore();
         return;
       }
 
       if (drawing.type === "vline") {
-        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, "#ff8c42");
+        const color = selected ? "#ffd166" : "#ff8c42";
+        drawVerticalLine(ctx, xForAbsoluteIndex(layout, drawing.index), height, color, selected ? [7, 2] : [5, 3]);
+        if (selected) {
+          drawSelectionHandles(ctx, [{ x: xForAbsoluteIndex(layout, drawing.index), y: PAD.top + 14 }], color);
+        }
         return;
       }
 
       if (drawing.type === "trendline") {
-        drawTrendLine(ctx, layout, drawing, scale, "#00d4ff");
+        const color = selected ? "#7be7ff" : "#00d4ff";
+        drawTrendLine(ctx, layout, drawing, scale, color, selected ? [3, 2] : []);
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
         return;
       }
 
       if (drawing.type === "fib") {
-        drawFib(ctx, layout, drawing, scale, width, "#ffd166", [6, 4]);
+        const color = selected ? "#ffe082" : "#ffd166";
+        drawFib(ctx, layout, drawing, scale, width, color, selected ? [4, 2] : [6, 4]);
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
         return;
       }
 
@@ -835,22 +984,35 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
           (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
           drawing,
           scale,
-          "#9b6dff",
-          "rgba(155,109,255,0.12)",
+          selected ? "#c2a3ff" : "#9b6dff",
+          selected ? "rgba(155,109,255,0.2)" : "rgba(155,109,255,0.12)",
           width,
         );
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], "#c2a3ff");
+        }
         return;
       }
 
       if (drawing.type === "measure") {
+        const color = selected ? "#7be7ff" : "#00d4ff";
         drawMeasureTool(
           ctx,
           (absoluteIndex) => xForAbsoluteIndex(layout, absoluteIndex),
           drawing,
           scale,
           width,
-          "#00d4ff",
+          color,
         );
+        if (selected) {
+          drawSelectionHandles(ctx, [
+            { x: xForAbsoluteIndex(layout, drawing.startIndex), y: scale(drawing.startPrice) },
+            { x: xForAbsoluteIndex(layout, drawing.endIndex), y: scale(drawing.endPrice) },
+          ], color);
+        }
         return;
       }
     });
@@ -1365,7 +1527,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
         mainMetrics.chartHeight,
         priceScaleMode.value,
       );
-      setManualYRange(priceBottom, priceTop, { render: false });
+      const paddedRange = getPaddedPriceRange(
+        Math.min(priceBottom, priceTop),
+        Math.max(priceBottom, priceTop),
+        priceScaleMode.value,
+      );
+      setManualYRange(paddedRange.min, paddedRange.max, { render: false });
       changed = true;
     }
 
@@ -1497,6 +1664,12 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     const info = getPointerData(event);
     if (!info) return;
 
+    if (props.activeTool === "cursor") {
+      emit("select-drawing", findDrawingAtPoint(info)?.id || null);
+      scheduleRender();
+      return;
+    }
+
     if (props.activeTool === "hline") {
       emit("add-horizontal-line", info.price);
       return;
@@ -1606,6 +1779,11 @@ const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = 
     () => props.drawings,
     () => scheduleRender(),
     { deep: true },
+  );
+
+  watch(
+    () => props.selectedDrawingId,
+    () => scheduleRender(),
   );
 
   watch(

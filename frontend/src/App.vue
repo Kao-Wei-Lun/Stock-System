@@ -50,6 +50,7 @@
         :ohlc-data="ohlcData"
         :active-ind="activeInd"
         :drawings="drawings"
+        :selected-drawing-id="selectedDrawingId"
         :syncing-current="syncingCurrent"
         :compare-series="compareSeries"
         :comparison-mode="comparisonMode"
@@ -60,6 +61,8 @@
         @sync-current="syncCurrentTicker"
         @add-horizontal-line="addHorizontalLine"
         @add-drawing="addDrawing"
+        @select-drawing="selectDrawing"
+        @remove-drawing="removeDrawing"
         @update-crosshair="updateCrosshair"
         @hide-crosshair="hideCrosshair"
         @add-compare="addCompareTicker"
@@ -141,6 +144,7 @@ const {
   loadingMessage,
   ohlcData,
   drawings,
+  selectedDrawingId,
   alerts,
   notifications,
   wsConnected,
@@ -190,6 +194,8 @@ const {
   addHorizontalLine,
   addDrawing,
   removeLastDrawing,
+  selectDrawing,
+  removeDrawing,
   updateCrosshair,
   hideCrosshair,
   syncCurrentTicker,

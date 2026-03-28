@@ -17,6 +17,7 @@ const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const DEFAULT_ACTIVE_IND = { ma20: true, ma50: true, ma200: false, ema12: true, bb: false, vwap: false };
 const DEFAULT_ACTIVE_PANELS = { rsi: true, macd: false, stoch: false };
 const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "fib", "rect", "measure", "boxzoom"];
+let drawingIdSeed = 1;
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -34,6 +35,13 @@ function readDashboardPrefs() {
 function writeDashboardPrefs(value) {
   if (!isBrowser()) return;
   window.localStorage.setItem(DASHBOARD_PREFS_KEY, JSON.stringify(value));
+}
+
+function createDrawingEntry(drawing) {
+  return {
+    ...drawing,
+    id: drawing.id || `drawing-${Date.now()}-${drawingIdSeed++}`,
+  };
 }
 
 function getBackendTarget() {
@@ -107,6 +115,7 @@ export function useDashboard() {
   const loadingMessage = ref("正在載入資料...");
   const ohlcData = ref([]);
   const drawings = ref([]);
+  const selectedDrawingId = ref(null);
   const alerts = ref([]);
   const notifications = ref([]);
   const wsConnected = ref(false);
@@ -587,6 +596,7 @@ export function useDashboard() {
     currentName.value = name || normalized;
     compareTickers.value = compareTickers.value.filter((item) => item !== normalized);
     drawings.value = [];
+    selectedDrawingId.value = null;
     ohlcData.value = [];
     crosshair.visible = false;
     wsSend({ action: "subscribe", ticker: normalized });
@@ -627,7 +637,9 @@ export function useDashboard() {
   function addSignal(type) {
     if (!ohlcData.value.length) return;
     const index = Math.min(ohlcData.value.length - 1, Math.floor(ohlcData.value.length * 0.9));
-    drawings.value = [...drawings.value, { type, index }];
+    const drawing = createDrawingEntry({ type, index });
+    drawings.value = [...drawings.value, drawing];
+    selectedDrawingId.value = drawing.id;
     pushNotification({
       icon: type === "buy" ? "▲" : "▼",
       title: type === "buy" ? "買入標記" : "賣出標記",
@@ -637,45 +649,66 @@ export function useDashboard() {
 
   function clearDrawings() {
     drawings.value = [];
+    selectedDrawingId.value = null;
   }
 
   function addHorizontalLine(price) {
-    drawings.value = [...drawings.value, { type: "hline", price }];
+    const drawing = createDrawingEntry({ type: "hline", price });
+    drawings.value = [...drawings.value, drawing];
+    selectedDrawingId.value = drawing.id;
     pushNotification({ icon: "─", title: "水平線已加", msg: `@${price.toFixed(2)}` });
   }
 
   function addDrawing(drawing) {
-    drawings.value = [...drawings.value, drawing];
+    const nextDrawing = createDrawingEntry(drawing);
+    drawings.value = [...drawings.value, nextDrawing];
+    selectedDrawingId.value = nextDrawing.id;
 
-    if (drawing.type === "vline") {
+    if (nextDrawing.type === "vline") {
       pushNotification({ icon: "│", title: "垂直線已加", msg: "已標記關鍵事件時間" });
       return;
     }
 
-    if (drawing.type === "trendline") {
+    if (nextDrawing.type === "trendline") {
       pushNotification({ icon: "╱", title: "趨勢線已加", msg: "已加入分析線段" });
       return;
     }
 
-    if (drawing.type === "fib") {
+    if (nextDrawing.type === "fib") {
       pushNotification({ icon: "⋮", title: "費波那契已加", msg: "已加入回撤分析" });
       return;
     }
 
-    if (drawing.type === "rect") {
+    if (nextDrawing.type === "rect") {
       pushNotification({ icon: "▭", title: "區間框已加", msg: "已標記壓力／支撐區間" });
       return;
     }
 
-    if (drawing.type === "measure") {
+    if (nextDrawing.type === "measure") {
       pushNotification({ icon: "⊕", title: "測距尺已加", msg: "已記錄價差與時間距離" });
     }
   }
 
   function removeLastDrawing() {
     if (!drawings.value.length) return;
-    drawings.value = drawings.value.slice(0, -1);
+    const nextDrawings = drawings.value.slice(0, -1);
+    drawings.value = nextDrawings;
+    selectedDrawingId.value = nextDrawings.at(-1)?.id ?? null;
     pushNotification({ icon: "↶", title: "已復原", msg: "已移除最後一筆繪圖" });
+  }
+
+  function selectDrawing(drawingId) {
+    selectedDrawingId.value = drawingId || null;
+  }
+
+  function removeDrawing(drawingId) {
+    if (!drawingId) return;
+    const target = drawings.value.find((item) => item.id === drawingId);
+    if (!target) return;
+    const nextDrawings = drawings.value.filter((item) => item.id !== drawingId);
+    drawings.value = nextDrawings;
+    selectedDrawingId.value = nextDrawings.at(-1)?.id ?? null;
+    pushNotification({ icon: "✕", title: "已移除繪圖", msg: `已刪除 ${target.type}` });
   }
 
   function updateCrosshair(payload) {
@@ -880,6 +913,7 @@ export function useDashboard() {
     loadingMessage,
     ohlcData,
     drawings,
+    selectedDrawingId,
     alerts,
     notifications,
     wsConnected,
@@ -929,6 +963,8 @@ export function useDashboard() {
     addHorizontalLine,
     addDrawing,
     removeLastDrawing,
+    selectDrawing,
+    removeDrawing,
     updateCrosshair,
     hideCrosshair,
     syncCurrentTicker,
