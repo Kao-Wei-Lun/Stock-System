@@ -1,0 +1,83 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createDashboardApi } from "./dashboardApi";
+
+function jsonResponse(payload, status = 200) {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        return name === "content-type" ? "application/json" : "";
+      },
+    },
+    json: async () => payload,
+  });
+}
+
+describe("dashboardApi", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates workspaces with JSON payloads", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ id: 9, name: "Morning Desk" }));
+    const api = createDashboardApi({ baseUrl: "http://127.0.0.1:8001/" });
+
+    const payload = {
+      name: "Morning Desk",
+      chart_layout: "single",
+      payload: { drawings: [] },
+    };
+    const result = await api.createWorkspace(payload);
+
+    expect(result).toEqual({ id: 9, name: "Morning Desk" });
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://127.0.0.1:8001/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  });
+
+  it("builds notification query strings", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ items: [] }));
+    const api = createDashboardApi();
+
+    await api.listNotifications({ unreadOnly: true, limit: 20 });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/notifications?unread_only=true&limit=20", {});
+  });
+
+  it("marks notifications as read", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ id: 5, read_at: "2026-03-29T03:00:00+00:00" }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    const result = await api.markNotificationRead(5);
+
+    expect(result.read_at).toBe("2026-03-29T03:00:00+00:00");
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/notifications/5/read", {
+      method: "POST",
+    });
+  });
+
+  it("requests quote metadata from the quote endpoint", async () => {
+    globalThis.fetch.mockImplementation(() =>
+      jsonResponse({
+        ticker: "AAPL",
+        source: "yahoo_finance",
+        quote_type: "delayed_snapshot",
+        is_delayed: true,
+      }),
+    );
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    const result = await api.getQuote("AAPL");
+
+    expect(result.quote_type).toBe("delayed_snapshot");
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/quote/AAPL", {});
+  });
+});

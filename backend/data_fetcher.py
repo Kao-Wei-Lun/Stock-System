@@ -174,6 +174,8 @@ class DataFetcher:
         day_high = _as_float(meta.get("regularMarketDayHigh")) or last["high"]
         day_low = _as_float(meta.get("regularMarketDayLow")) or last["low"]
         volume = _as_int(meta.get("regularMarketVolume")) or last["volume"] or 0
+        quote_timestamp = _timestamp_to_iso(meta.get("regularMarketTime")) or _date_text_to_iso(last.get("date"))
+        synced_at = datetime.now(timezone.utc).isoformat()
 
         change = round(price - prev_close, 4) if prev_close else 0
         change_pct = round(change / prev_close * 100, 2) if prev_close else 0
@@ -191,6 +193,11 @@ class DataFetcher:
             "market_cap": _as_int(meta.get("marketCap")),
             "name": meta.get("longName") or meta.get("shortName") or ticker,
             "currency": meta.get("currency") or "USD",
+            "source": "yahoo_finance",
+            "quote_type": "delayed_snapshot",
+            "is_delayed": True,
+            "quote_timestamp": quote_timestamp,
+            "synced_at": synced_at,
             "ts": int(time.time() * 1000),
         }
 
@@ -625,3 +632,27 @@ def _strip_numeric(value):
         cleaned = value.replace(",", "").replace("X", "").replace("--", "").strip()
         return cleaned or None
     return value
+
+
+def _timestamp_to_iso(value) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value), timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _date_text_to_iso(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = str(value).strip().replace(" ", "T")
+    if len(normalized) == 10:
+        normalized = f"{normalized}T00:00:00+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()

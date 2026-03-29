@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
@@ -23,6 +23,342 @@ MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "quantvision")
 MYSQL_CHARSET = os.getenv("MYSQL_CHARSET", "utf8mb4")
+
+DEFAULT_OWNER_ID = 1
+DEFAULT_OWNER_USERNAME = "local-owner"
+DEFAULT_OWNER_DISPLAY_NAME = "Local Owner"
+DEFAULT_OWNER_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
+
+CREATE_TABLE_STATEMENTS = {
+    "ohlcv": """
+        CREATE TABLE `ohlcv` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ticker` VARCHAR(32) NOT NULL,
+            `date` VARCHAR(32) NOT NULL,
+            `interval` VARCHAR(16) NOT NULL DEFAULT '1d',
+            `open` DOUBLE NOT NULL,
+            `high` DOUBLE NOT NULL,
+            `low` DOUBLE NOT NULL,
+            `close` DOUBLE NOT NULL,
+            `volume` BIGINT NOT NULL DEFAULT 0,
+            `adj_close` DOUBLE NULL,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'yahoo_finance',
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_ohlcv_ticker_date_interval` (`ticker`, `date`, `interval`),
+            KEY `idx_ohlcv_ticker_date` (`ticker`, `interval`, `date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "stock_info": """
+        CREATE TABLE `stock_info` (
+            `ticker` VARCHAR(32) NOT NULL,
+            `name` VARCHAR(255) NULL,
+            `sector` VARCHAR(255) NULL,
+            `industry` VARCHAR(255) NULL,
+            `market_cap` BIGINT NULL,
+            `pe_ratio` DOUBLE NULL,
+            `dividend_yield` DOUBLE NULL,
+            `week_52_high` DOUBLE NULL,
+            `week_52_low` DOUBLE NULL,
+            `avg_volume` BIGINT NULL,
+            `description` TEXT NULL,
+            `currency` VARCHAR(16) NULL,
+            `exchange` VARCHAR(32) NULL,
+            `country` VARCHAR(64) NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`ticker`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "sync_log": """
+        CREATE TABLE `sync_log` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ticker` VARCHAR(32) NOT NULL,
+            `status` VARCHAR(32) NOT NULL,
+            `rows_added` BIGINT NOT NULL DEFAULT 0,
+            `message` TEXT NULL,
+            `synced_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_sync_log_ticker_synced_at` (`ticker`, `synced_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "user_profiles": """
+        CREATE TABLE `user_profiles` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `username` VARCHAR(64) NOT NULL,
+            `display_name` VARCHAR(128) NOT NULL,
+            `timezone` VARCHAR(64) NOT NULL DEFAULT 'Asia/Taipei',
+            `is_active` TINYINT NOT NULL DEFAULT 1,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_user_profiles_username` (`username`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "user_preferences": """
+        CREATE TABLE `user_preferences` (
+            `owner_id` BIGINT NOT NULL,
+            `preferences_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`owner_id`),
+            CONSTRAINT `fk_user_preferences_owner`
+                FOREIGN KEY (`owner_id`) REFERENCES `user_profiles` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "workspace_presets": """
+        CREATE TABLE `workspace_presets` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL,
+            `name` VARCHAR(128) NOT NULL,
+            `chart_layout` VARCHAR(32) NOT NULL DEFAULT 'single',
+            `active_ticker` VARCHAR(32) NULL,
+            `current_period` VARCHAR(16) NOT NULL DEFAULT '1y',
+            `current_interval` VARCHAR(16) NOT NULL DEFAULT '1d',
+            `workspace_tab` VARCHAR(32) NOT NULL DEFAULT 'chart',
+            `comparison_mode` VARCHAR(32) NOT NULL DEFAULT 'percent',
+            `payload_json` LONGTEXT NOT NULL,
+            `is_default` TINYINT NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_workspace_presets_owner_name` (`owner_id`, `name`),
+            KEY `idx_workspace_presets_owner_updated` (`owner_id`, `updated_at`),
+            CONSTRAINT `fk_workspace_presets_owner`
+                FOREIGN KEY (`owner_id`) REFERENCES `user_profiles` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "market_quotes_latest": """
+        CREATE TABLE `market_quotes_latest` (
+            `ticker` VARCHAR(32) NOT NULL,
+            `source` VARCHAR(64) NOT NULL,
+            `quote_type` VARCHAR(64) NOT NULL DEFAULT 'delayed_snapshot',
+            `is_delayed` TINYINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(255) NULL,
+            `currency` VARCHAR(16) NULL,
+            `price` DOUBLE NULL,
+            `open` DOUBLE NULL,
+            `high` DOUBLE NULL,
+            `low` DOUBLE NULL,
+            `prev_close` DOUBLE NULL,
+            `change_amount` DOUBLE NULL,
+            `change_pct` DOUBLE NULL,
+            `volume` BIGINT NULL,
+            `market_cap` BIGINT NULL,
+            `quote_timestamp` DATETIME NULL,
+            `payload_json` LONGTEXT NOT NULL,
+            `synced_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`ticker`),
+            KEY `idx_market_quotes_latest_synced_at` (`synced_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "alerts": """
+        CREATE TABLE `alerts` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `type` VARCHAR(32) NOT NULL,
+            `condition` VARCHAR(32) NOT NULL,
+            `value` DOUBLE NULL,
+            `value2` DOUBLE NULL,
+            `timeframe` VARCHAR(16) NOT NULL DEFAULT '1d',
+            `condition_json` LONGTEXT NULL,
+            `notification_title` VARCHAR(255) NULL,
+            `note` TEXT NULL,
+            `active` TINYINT NOT NULL DEFAULT 1,
+            `triggered` TINYINT NOT NULL DEFAULT 0,
+            `triggered_at` DATETIME NULL,
+            `last_evaluated_at` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_alerts_owner_active` (`owner_id`, `active`, `updated_at`),
+            KEY `idx_alerts_ticker` (`ticker`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "alert_trigger_logs": """
+        CREATE TABLE `alert_trigger_logs` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `alert_id` BIGINT NOT NULL,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `ticker` VARCHAR(32) NOT NULL,
+            `trigger_value` DOUBLE NULL,
+            `threshold_value` DOUBLE NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_alert_trigger_logs_alert_id` (`alert_id`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "notifications": """
+        CREATE TABLE `notifications` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `category` VARCHAR(64) NOT NULL DEFAULT 'system',
+            `level` VARCHAR(32) NOT NULL DEFAULT 'info',
+            `title` VARCHAR(255) NOT NULL,
+            `message` TEXT NOT NULL,
+            `related_entity_type` VARCHAR(64) NULL,
+            `related_entity_id` BIGINT NULL,
+            `link_url` VARCHAR(255) NULL,
+            `payload_json` LONGTEXT NULL,
+            `read_at` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_notifications_owner_created` (`owner_id`, `created_at`),
+            KEY `idx_notifications_owner_read` (`owner_id`, `read_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "sync_jobs": """
+        CREATE TABLE `sync_jobs` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `job_type` VARCHAR(64) NOT NULL,
+            `scope` VARCHAR(128) NULL,
+            `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+            `payload_json` LONGTEXT NULL,
+            `error_message` TEXT NULL,
+            `requested_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `started_at` DATETIME NULL,
+            `finished_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_sync_jobs_status_requested` (`status`, `requested_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "sync_job_logs": """
+        CREATE TABLE `sync_job_logs` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `sync_job_id` BIGINT NOT NULL,
+            `ticker` VARCHAR(32) NULL,
+            `status` VARCHAR(32) NOT NULL,
+            `rows_added` BIGINT NOT NULL DEFAULT 0,
+            `message` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_sync_job_logs_job_created` (`sync_job_id`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "watchlist_groups": """
+        CREATE TABLE `watchlist_groups` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NOT NULL,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_watchlist_groups_name` (`name`),
+            KEY `idx_watchlist_groups_owner_sort` (`owner_id`, `sort_order`, `id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "watchlist_items": """
+        CREATE TABLE `watchlist_items` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `group_id` BIGINT NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `tags_json` LONGTEXT NULL,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_watchlist_items_group_ticker` (`group_id`, `ticker`),
+            KEY `idx_watchlist_items_group_order` (`group_id`, `sort_order`, `id`),
+            CONSTRAINT `fk_watchlist_items_group`
+                FOREIGN KEY (`group_id`) REFERENCES `watchlist_groups` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "institutional_snapshots": """
+        CREATE TABLE `institutional_snapshots` (
+            `resolved_date` DATE NOT NULL,
+            `query_date` DATE NOT NULL,
+            `payload_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`resolved_date`),
+            KEY `idx_institutional_query_date` (`query_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+}
+
+REQUIRED_COLUMN_MIGRATIONS = {
+    "ohlcv": {
+        "source": """
+            ALTER TABLE `ohlcv`
+            ADD COLUMN `source` VARCHAR(64) NOT NULL DEFAULT 'yahoo_finance' AFTER `adj_close`
+        """,
+        "updated_at": """
+            ALTER TABLE `ohlcv`
+            ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            AFTER `created_at`
+        """,
+    },
+    "watchlist_groups": {
+        "owner_id": """
+            ALTER TABLE `watchlist_groups`
+            ADD COLUMN `owner_id` BIGINT NOT NULL DEFAULT 1 AFTER `id`
+        """,
+    },
+    "watchlist_items": {
+        "tags_json": """
+            ALTER TABLE `watchlist_items`
+            ADD COLUMN `tags_json` LONGTEXT NULL AFTER `ticker`
+        """,
+    },
+    "alerts": {
+        "owner_id": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `owner_id` BIGINT NOT NULL DEFAULT 1 AFTER `id`
+        """,
+        "name": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `name` VARCHAR(128) NULL AFTER `owner_id`
+        """,
+        "timeframe": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `timeframe` VARCHAR(16) NOT NULL DEFAULT '1d' AFTER `value2`
+        """,
+        "condition_json": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `condition_json` LONGTEXT NULL AFTER `timeframe`
+        """,
+        "notification_title": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `notification_title` VARCHAR(255) NULL AFTER `condition_json`
+        """,
+        "note": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `note` TEXT NULL AFTER `notification_title`
+        """,
+        "last_evaluated_at": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `last_evaluated_at` DATETIME NULL AFTER `triggered_at`
+        """,
+        "updated_at": """
+            ALTER TABLE `alerts`
+            ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            AFTER `created_at`
+        """,
+    },
+}
+
+
+def build_schema_plan(existing_tables: Set[str], existing_columns: Dict[str, Set[str]]) -> List[str]:
+    plan: List[str] = []
+    for table_name, statement in CREATE_TABLE_STATEMENTS.items():
+        if table_name not in existing_tables:
+            plan.append(statement.strip())
+
+    for table_name, column_statements in REQUIRED_COLUMN_MIGRATIONS.items():
+        if table_name not in existing_tables:
+            continue
+        present_columns = existing_columns.get(table_name, set())
+        for column_name, statement in column_statements.items():
+            if column_name not in present_columns:
+                plan.append(statement.strip())
+
+    return plan
 
 
 class Database:
@@ -83,110 +419,6 @@ class Database:
             await self._pool.wait_closed()
 
     async def create_tables(self):
-        statements = {
-            "ohlcv": """
-            CREATE TABLE `ohlcv` (
-                `id` BIGINT NOT NULL AUTO_INCREMENT,
-                `ticker` VARCHAR(32) NOT NULL,
-                `date` VARCHAR(32) NOT NULL,
-                `interval` VARCHAR(16) NOT NULL DEFAULT '1d',
-                `open` DOUBLE NOT NULL,
-                `high` DOUBLE NOT NULL,
-                `low` DOUBLE NOT NULL,
-                `close` DOUBLE NOT NULL,
-                `volume` BIGINT NOT NULL DEFAULT 0,
-                `adj_close` DOUBLE NULL,
-                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (`id`),
-                UNIQUE KEY `uq_ohlcv_ticker_date_interval` (`ticker`, `date`, `interval`),
-                KEY `idx_ohlcv_ticker_date` (`ticker`, `interval`, `date`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "stock_info": """
-            CREATE TABLE `stock_info` (
-                `ticker` VARCHAR(32) NOT NULL,
-                `name` VARCHAR(255) NULL,
-                `sector` VARCHAR(255) NULL,
-                `industry` VARCHAR(255) NULL,
-                `market_cap` BIGINT NULL,
-                `pe_ratio` DOUBLE NULL,
-                `dividend_yield` DOUBLE NULL,
-                `week_52_high` DOUBLE NULL,
-                `week_52_low` DOUBLE NULL,
-                `avg_volume` BIGINT NULL,
-                `description` TEXT NULL,
-                `currency` VARCHAR(16) NULL,
-                `exchange` VARCHAR(32) NULL,
-                `country` VARCHAR(64) NULL,
-                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                PRIMARY KEY (`ticker`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "sync_log": """
-            CREATE TABLE `sync_log` (
-                `id` BIGINT NOT NULL AUTO_INCREMENT,
-                `ticker` VARCHAR(32) NOT NULL,
-                `status` VARCHAR(32) NOT NULL,
-                `rows_added` BIGINT NOT NULL DEFAULT 0,
-                `message` TEXT NULL,
-                `synced_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (`id`),
-                KEY `idx_sync_log_ticker_synced_at` (`ticker`, `synced_at`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "alerts": """
-            CREATE TABLE `alerts` (
-                `id` BIGINT NOT NULL AUTO_INCREMENT,
-                `ticker` VARCHAR(32) NOT NULL,
-                `type` VARCHAR(32) NOT NULL,
-                `condition` VARCHAR(32) NOT NULL,
-                `value` DOUBLE NULL,
-                `value2` DOUBLE NULL,
-                `active` TINYINT NOT NULL DEFAULT 1,
-                `triggered` TINYINT NOT NULL DEFAULT 0,
-                `triggered_at` DATETIME NULL,
-                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (`id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "watchlist_groups": """
-            CREATE TABLE `watchlist_groups` (
-                `id` BIGINT NOT NULL AUTO_INCREMENT,
-                `name` VARCHAR(128) NOT NULL,
-                `sort_order` INT NOT NULL DEFAULT 0,
-                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (`id`),
-                UNIQUE KEY `uq_watchlist_groups_name` (`name`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "watchlist_items": """
-            CREATE TABLE `watchlist_items` (
-                `id` BIGINT NOT NULL AUTO_INCREMENT,
-                `group_id` BIGINT NOT NULL,
-                `ticker` VARCHAR(32) NOT NULL,
-                `sort_order` INT NOT NULL DEFAULT 0,
-                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (`id`),
-                UNIQUE KEY `uq_watchlist_items_group_ticker` (`group_id`, `ticker`),
-                KEY `idx_watchlist_items_group_order` (`group_id`, `sort_order`, `id`),
-                CONSTRAINT `fk_watchlist_items_group`
-                    FOREIGN KEY (`group_id`) REFERENCES `watchlist_groups` (`id`)
-                    ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            "institutional_snapshots": """
-            CREATE TABLE `institutional_snapshots` (
-                `resolved_date` DATE NOT NULL,
-                `query_date` DATE NOT NULL,
-                `payload_json` LONGTEXT NOT NULL,
-                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                PRIMARY KEY (`resolved_date`),
-                KEY `idx_institutional_query_date` (`query_date`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-        }
-
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
@@ -198,11 +430,78 @@ class Database:
                     (MYSQL_DATABASE,),
                 )
                 existing_tables: Set[str] = {row["table_name"] for row in await cur.fetchall()}
+                await cur.execute(
+                    """
+                    SELECT `TABLE_NAME` AS `table_name`, `COLUMN_NAME` AS `column_name`
+                    FROM `INFORMATION_SCHEMA`.`COLUMNS`
+                    WHERE `TABLE_SCHEMA`=%s
+                    """,
+                    (MYSQL_DATABASE,),
+                )
+                existing_columns: Dict[str, Set[str]] = {}
+                for row in await cur.fetchall():
+                    existing_columns.setdefault(row["table_name"], set()).add(row["column_name"])
             async with conn.cursor() as cur:
-                for table_name, statement in statements.items():
-                    if table_name in existing_tables:
-                        continue
+                for statement in build_schema_plan(existing_tables, existing_columns):
                     await cur.execute(statement)
+        await self.ensure_default_owner()
+
+    async def _fetchone(self, sql: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                return await cur.fetchone()
+
+    async def _fetchall(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                rows = await cur.fetchall()
+        return list(rows)
+
+    async def _execute(self, sql: str, params: tuple = ()) -> int:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, params)
+                    return cur.rowcount
+
+    async def _execute_insert(self, sql: str, params: tuple = ()) -> int:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, params)
+                    return cur.lastrowid
+
+    async def ensure_default_owner(self) -> Dict[str, Any]:
+        sql = """
+            INSERT INTO `user_profiles`
+                (`id`, `username`, `display_name`, `timezone`, `is_active`)
+            VALUES (%s, %s, %s, %s, 1)
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `display_name` = `incoming`.`display_name`,
+                `timezone` = `incoming`.`timezone`,
+                `is_active` = 1
+        """
+        await self._execute(
+            sql,
+            (
+                DEFAULT_OWNER_ID,
+                DEFAULT_OWNER_USERNAME,
+                DEFAULT_OWNER_DISPLAY_NAME,
+                DEFAULT_OWNER_TIMEZONE,
+            ),
+        )
+        owner = await self._fetchone(
+            """
+            SELECT `id`, `username`, `display_name`, `timezone`, `is_active`, `created_at`, `updated_at`
+            FROM `user_profiles`
+            WHERE `id`=%s
+            """,
+            (DEFAULT_OWNER_ID,),
+        )
+        return _serialize_user_profile(owner)
 
     async def upsert_ohlcv_batch(self, ticker: str, rows: List[Dict], interval: str = "1d") -> int:
         if not rows:
@@ -210,8 +509,8 @@ class Database:
 
         sql = """
             INSERT INTO `ohlcv`
-                (`ticker`, `date`, `interval`, `open`, `high`, `low`, `close`, `volume`, `adj_close`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (`ticker`, `date`, `interval`, `open`, `high`, `low`, `close`, `volume`, `adj_close`, `source`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             AS `incoming`
             ON DUPLICATE KEY UPDATE
                 `open` = `incoming`.`open`,
@@ -219,7 +518,8 @@ class Database:
                 `low` = `incoming`.`low`,
                 `close` = `incoming`.`close`,
                 `volume` = `incoming`.`volume`,
-                `adj_close` = `incoming`.`adj_close`
+                `adj_close` = `incoming`.`adj_close`,
+                `source` = `incoming`.`source`
         """
         params = [
             (
@@ -232,6 +532,7 @@ class Database:
                 row["close"],
                 row.get("volume", 0),
                 row.get("adj_close"),
+                row.get("source", "yahoo_finance"),
             )
             for row in rows
         ]
@@ -269,7 +570,7 @@ class Database:
     async def get_ohlcv(self, ticker: str, period: str = "1y", interval: str = "1d") -> List[Dict]:
         since = _period_to_date(period)
         sql = """
-            SELECT `date`, `open`, `high`, `low`, `close`, `volume`, `adj_close`
+            SELECT `date`, `open`, `high`, `low`, `close`, `volume`, `adj_close`, `source`, `updated_at`
             FROM `ohlcv`
             WHERE `ticker`=%s AND `interval`=%s AND `date`>=%s
             ORDER BY `date` ASC
@@ -357,6 +658,401 @@ class Database:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute("SELECT * FROM `stock_info` WHERE `ticker`=%s", (ticker,))
                 return await cur.fetchone()
+
+    async def list_workspace_presets(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `workspace_presets`
+            WHERE `owner_id`=%s
+            ORDER BY `updated_at` DESC, `id` DESC
+            """,
+            (owner_id,),
+        )
+        return [_deserialize_workspace_preset(row) for row in rows]
+
+    async def get_workspace_preset(
+        self,
+        workspace_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `workspace_presets`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (workspace_id, owner_id),
+        )
+        return _deserialize_workspace_preset(row)
+
+    async def create_workspace_preset(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_workspace_payload(payload)
+        if normalized["is_default"]:
+            await self._execute(
+                "UPDATE `workspace_presets` SET `is_default`=0 WHERE `owner_id`=%s",
+                (owner_id,),
+            )
+
+        workspace_id = await self._execute_insert(
+            """
+            INSERT INTO `workspace_presets`
+                (`owner_id`, `name`, `chart_layout`, `active_ticker`, `current_period`,
+                 `current_interval`, `workspace_tab`, `comparison_mode`, `payload_json`, `is_default`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["name"],
+                normalized["chart_layout"],
+                normalized["active_ticker"],
+                normalized["current_period"],
+                normalized["current_interval"],
+                normalized["workspace_tab"],
+                normalized["comparison_mode"],
+                _json_dumps(normalized["payload"]),
+                1 if normalized["is_default"] else 0,
+            ),
+        )
+        workspace = await self.get_workspace_preset(workspace_id, owner_id=owner_id)
+        if not workspace:
+            raise RuntimeError("Workspace preset was not persisted")
+        return workspace
+
+    async def update_workspace_preset(
+        self,
+        workspace_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_workspace_preset(workspace_id, owner_id=owner_id)
+        if not existing:
+            return None
+
+        normalized = _normalize_workspace_payload(payload, existing=existing)
+        if normalized["is_default"]:
+            await self._execute(
+                "UPDATE `workspace_presets` SET `is_default`=0 WHERE `owner_id`=%s AND `id`<>%s",
+                (owner_id, workspace_id),
+            )
+
+        await self._execute(
+            """
+            UPDATE `workspace_presets`
+            SET `name`=%s,
+                `chart_layout`=%s,
+                `active_ticker`=%s,
+                `current_period`=%s,
+                `current_interval`=%s,
+                `workspace_tab`=%s,
+                `comparison_mode`=%s,
+                `payload_json`=%s,
+                `is_default`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["name"],
+                normalized["chart_layout"],
+                normalized["active_ticker"],
+                normalized["current_period"],
+                normalized["current_interval"],
+                normalized["workspace_tab"],
+                normalized["comparison_mode"],
+                _json_dumps(normalized["payload"]),
+                1 if normalized["is_default"] else 0,
+                workspace_id,
+                owner_id,
+            ),
+        )
+        return await self.get_workspace_preset(workspace_id, owner_id=owner_id)
+
+    async def delete_workspace_preset(
+        self,
+        workspace_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `workspace_presets` WHERE `id`=%s AND `owner_id`=%s",
+            (workspace_id, owner_id),
+        )
+        return deleted > 0
+
+    async def list_alerts(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `alerts`
+            WHERE `owner_id`=%s
+            ORDER BY `active` DESC, `updated_at` DESC, `id` DESC
+            """,
+            (owner_id,),
+        )
+        return [_deserialize_alert(row) for row in rows]
+
+    async def get_alert(self, alert_id: int, owner_id: int = DEFAULT_OWNER_ID) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `alerts`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (alert_id, owner_id),
+        )
+        return _deserialize_alert(row)
+
+    async def create_alert(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_alert_payload(payload)
+        alert_id = await self._execute_insert(
+            """
+            INSERT INTO `alerts`
+                (`owner_id`, `name`, `ticker`, `type`, `condition`, `value`, `value2`,
+                 `timeframe`, `condition_json`, `notification_title`, `note`,
+                 `active`, `triggered`, `triggered_at`, `last_evaluated_at`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["name"],
+                normalized["ticker"],
+                normalized["type"],
+                normalized["condition"],
+                normalized["value"],
+                normalized["value2"],
+                normalized["timeframe"],
+                _json_dumps(normalized["condition_payload"]),
+                normalized["notification_title"],
+                normalized["note"],
+                1 if normalized["active"] else 0,
+                1 if normalized["triggered"] else 0,
+                _parse_datetime_value(normalized.get("triggered_at")),
+                _parse_datetime_value(normalized.get("last_evaluated_at")),
+            ),
+        )
+        alert = await self.get_alert(alert_id, owner_id=owner_id)
+        if not alert:
+            raise RuntimeError("Alert was not persisted")
+        return alert
+
+    async def update_alert(
+        self,
+        alert_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_alert(alert_id, owner_id=owner_id)
+        if not existing:
+            return None
+
+        normalized = _normalize_alert_payload(payload, existing=existing)
+        await self._execute(
+            """
+            UPDATE `alerts`
+            SET `name`=%s,
+                `ticker`=%s,
+                `type`=%s,
+                `condition`=%s,
+                `value`=%s,
+                `value2`=%s,
+                `timeframe`=%s,
+                `condition_json`=%s,
+                `notification_title`=%s,
+                `note`=%s,
+                `active`=%s,
+                `triggered`=%s,
+                `triggered_at`=%s,
+                `last_evaluated_at`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["name"],
+                normalized["ticker"],
+                normalized["type"],
+                normalized["condition"],
+                normalized["value"],
+                normalized["value2"],
+                normalized["timeframe"],
+                _json_dumps(normalized["condition_payload"]),
+                normalized["notification_title"],
+                normalized["note"],
+                1 if normalized["active"] else 0,
+                1 if normalized["triggered"] else 0,
+                _parse_datetime_value(normalized.get("triggered_at")),
+                _parse_datetime_value(normalized.get("last_evaluated_at")),
+                alert_id,
+                owner_id,
+            ),
+        )
+        return await self.get_alert(alert_id, owner_id=owner_id)
+
+    async def delete_alert(self, alert_id: int, owner_id: int = DEFAULT_OWNER_ID) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `alerts` WHERE `id`=%s AND `owner_id`=%s",
+            (alert_id, owner_id),
+        )
+        return deleted > 0
+
+    async def create_notification(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_notification_payload(payload)
+        notification_id = await self._execute_insert(
+            """
+            INSERT INTO `notifications`
+                (`owner_id`, `category`, `level`, `title`, `message`,
+                 `related_entity_type`, `related_entity_id`, `link_url`, `payload_json`, `read_at`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["category"],
+                normalized["level"],
+                normalized["title"],
+                normalized["message"],
+                normalized["related_entity_type"],
+                normalized["related_entity_id"],
+                normalized["link_url"],
+                _json_dumps(normalized["payload"]),
+                _parse_datetime_value(normalized.get("read_at")),
+            ),
+        )
+        notification = await self.get_notification(notification_id, owner_id=owner_id)
+        if not notification:
+            raise RuntimeError("Notification was not persisted")
+        return notification
+
+    async def get_notification(
+        self,
+        notification_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `notifications`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (notification_id, owner_id),
+        )
+        return _deserialize_notification(row)
+
+    async def list_notifications(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        unread_only: bool = False,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 200))
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if unread_only:
+            filters.append("`read_at` IS NULL")
+
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `notifications`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `created_at` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_notification(row) for row in rows]
+
+    async def mark_notification_read(
+        self,
+        notification_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        updated = await self._execute(
+            """
+            UPDATE `notifications`
+            SET `read_at`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (datetime.now(timezone.utc).replace(tzinfo=None), notification_id, owner_id),
+        )
+        if not updated:
+            return None
+        return await self.get_notification(notification_id, owner_id=owner_id)
+
+    async def upsert_market_quote(self, quote: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = _normalize_quote_payload(quote)
+        await self._execute(
+            """
+            INSERT INTO `market_quotes_latest`
+                (`ticker`, `source`, `quote_type`, `is_delayed`, `name`, `currency`, `price`,
+                 `open`, `high`, `low`, `prev_close`, `change_amount`, `change_pct`,
+                 `volume`, `market_cap`, `quote_timestamp`, `payload_json`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `source`=`incoming`.`source`,
+                `quote_type`=`incoming`.`quote_type`,
+                `is_delayed`=`incoming`.`is_delayed`,
+                `name`=`incoming`.`name`,
+                `currency`=`incoming`.`currency`,
+                `price`=`incoming`.`price`,
+                `open`=`incoming`.`open`,
+                `high`=`incoming`.`high`,
+                `low`=`incoming`.`low`,
+                `prev_close`=`incoming`.`prev_close`,
+                `change_amount`=`incoming`.`change_amount`,
+                `change_pct`=`incoming`.`change_pct`,
+                `volume`=`incoming`.`volume`,
+                `market_cap`=`incoming`.`market_cap`,
+                `quote_timestamp`=`incoming`.`quote_timestamp`,
+                `payload_json`=`incoming`.`payload_json`
+            """,
+            (
+                normalized["ticker"],
+                normalized["source"],
+                normalized["quote_type"],
+                1 if normalized["is_delayed"] else 0,
+                normalized["name"],
+                normalized["currency"],
+                normalized["price"],
+                normalized["open"],
+                normalized["high"],
+                normalized["low"],
+                normalized["prev_close"],
+                normalized["change"],
+                normalized["change_pct"],
+                normalized["volume"],
+                normalized["market_cap"],
+                _parse_datetime_value(normalized.get("quote_timestamp")),
+                _json_dumps(normalized),
+            ),
+        )
+        quote_row = await self.get_market_quote(normalized["ticker"])
+        if not quote_row:
+            raise RuntimeError("Market quote was not persisted")
+        return quote_row
+
+    async def get_market_quote(self, ticker: str) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `market_quotes_latest`
+            WHERE `ticker`=%s
+            LIMIT 1
+            """,
+            (ticker,),
+        )
+        return _deserialize_market_quote(row)
 
     async def ensure_default_watchlist(self, tickers: List[str], group_name: str = "我的自選") -> None:
         async with self._lock:
@@ -832,11 +1528,23 @@ class Database:
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `institutional_snapshots`")
                 institutional_snapshots = (await cur.fetchone())["c"]
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `workspace_presets`")
+                workspace_presets = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `alerts`")
+                alerts = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `notifications`")
+                notifications = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
             "top_tickers": top,
             "institutional_snapshots": institutional_snapshots,
+            "workspace_presets": workspace_presets,
+            "alerts": alerts,
+            "notifications": notifications,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -847,6 +1555,324 @@ class Database:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, (ticker, status, rows, msg))
+
+
+def _serialize_user_profile(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "username": row.get("username"),
+        "display_name": row.get("display_name"),
+        "timezone": row.get("timezone"),
+        "is_active": bool(row.get("is_active", True)),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_workspace_preset(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "name": row.get("name"),
+        "chart_layout": row.get("chart_layout"),
+        "active_ticker": row.get("active_ticker"),
+        "current_period": row.get("current_period"),
+        "current_interval": row.get("current_interval"),
+        "workspace_tab": row.get("workspace_tab"),
+        "comparison_mode": row.get("comparison_mode"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "is_default": bool(row.get("is_default", False)),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_alert(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "name": row.get("name"),
+        "ticker": row.get("ticker"),
+        "type": row.get("type"),
+        "condition": row.get("condition"),
+        "value": row.get("value"),
+        "value2": row.get("value2"),
+        "timeframe": row.get("timeframe") or "1d",
+        "condition_payload": _json_loads(row.get("condition_json"), {}),
+        "notification_title": row.get("notification_title"),
+        "note": row.get("note"),
+        "active": bool(row.get("active", True)),
+        "triggered": bool(row.get("triggered", False)),
+        "triggered_at": _datetime_to_iso(row.get("triggered_at")),
+        "last_evaluated_at": _datetime_to_iso(row.get("last_evaluated_at")),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_notification(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "category": row.get("category"),
+        "level": row.get("level"),
+        "title": row.get("title"),
+        "message": row.get("message"),
+        "related_entity_type": row.get("related_entity_type"),
+        "related_entity_id": row.get("related_entity_id"),
+        "link_url": row.get("link_url"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "read_at": _datetime_to_iso(row.get("read_at")),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+    }
+
+
+def _deserialize_market_quote(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    payload = _json_loads(row.get("payload_json"), {})
+    payload.update(
+        {
+            "ticker": row.get("ticker"),
+            "source": row.get("source"),
+            "quote_type": row.get("quote_type"),
+            "is_delayed": bool(row.get("is_delayed", True)),
+            "name": row.get("name"),
+            "currency": row.get("currency"),
+            "price": row.get("price"),
+            "open": row.get("open"),
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "prev_close": row.get("prev_close"),
+            "change": row.get("change_amount"),
+            "change_pct": row.get("change_pct"),
+            "volume": row.get("volume"),
+            "market_cap": row.get("market_cap"),
+            "quote_timestamp": _datetime_to_iso(row.get("quote_timestamp")),
+            "synced_at": _datetime_to_iso(row.get("synced_at")),
+        }
+    )
+    return payload
+
+
+def _normalize_workspace_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    name = _required_string(source.get("name"), "Workspace name is required", max_length=128)
+    data_payload = source.get("payload")
+    if data_payload is None:
+        data_payload = (existing or {}).get("payload", {})
+    if data_payload is None:
+        data_payload = {}
+    if not isinstance(data_payload, dict):
+        raise ValueError("Workspace payload must be an object")
+
+    return {
+        "name": name,
+        "chart_layout": _optional_string(source.get("chart_layout"), max_length=32) or "single",
+        "active_ticker": _optional_string(source.get("active_ticker"), max_length=32),
+        "current_period": _optional_string(source.get("current_period"), max_length=16) or "1y",
+        "current_interval": _optional_string(source.get("current_interval"), max_length=16) or "1d",
+        "workspace_tab": _optional_string(source.get("workspace_tab"), max_length=32) or "chart",
+        "comparison_mode": _optional_string(source.get("comparison_mode"), max_length=32) or "percent",
+        "payload": data_payload,
+        "is_default": _coerce_bool(source.get("is_default"), False),
+    }
+
+
+def _normalize_alert_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    ticker = _required_string(source.get("ticker"), "Alert ticker is required", max_length=32).upper()
+    alert_type = _required_string(source.get("type"), "Alert type is required", max_length=32)
+    condition = _required_string(source.get("condition"), "Alert condition is required", max_length=32)
+    condition_payload = source.get("condition_payload")
+    if condition_payload is None:
+        condition_payload = (existing or {}).get("condition_payload", {})
+    if condition_payload is None:
+        condition_payload = {}
+    if not isinstance(condition_payload, dict):
+        raise ValueError("Alert condition payload must be an object")
+
+    name = _optional_string(source.get("name"), max_length=128)
+    notification_title = _optional_string(source.get("notification_title"), max_length=255)
+
+    return {
+        "name": name or f"{ticker} {condition}",
+        "ticker": ticker,
+        "type": alert_type,
+        "condition": condition,
+        "value": _optional_float(source.get("value")),
+        "value2": _optional_float(source.get("value2")),
+        "timeframe": _optional_string(source.get("timeframe"), max_length=16) or "1d",
+        "condition_payload": condition_payload,
+        "notification_title": notification_title or name or f"{ticker} {condition}",
+        "note": _optional_string(source.get("note"), max_length=4000),
+        "active": _coerce_bool(source.get("active"), True),
+        "triggered": _coerce_bool(source.get("triggered"), False),
+        "triggered_at": source.get("triggered_at"),
+        "last_evaluated_at": source.get("last_evaluated_at"),
+    }
+
+
+def _normalize_notification_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    title = _required_string(source.get("title"), "Notification title is required", max_length=255)
+    message = _required_string(source.get("message"), "Notification message is required", max_length=4000)
+    extra_payload = source.get("payload") or {}
+    if not isinstance(extra_payload, dict):
+        raise ValueError("Notification payload must be an object")
+
+    return {
+        "category": _optional_string(source.get("category"), max_length=64) or "system",
+        "level": _optional_string(source.get("level"), max_length=32) or "info",
+        "title": title,
+        "message": message,
+        "related_entity_type": _optional_string(source.get("related_entity_type"), max_length=64),
+        "related_entity_id": _optional_int(source.get("related_entity_id")),
+        "link_url": _optional_string(source.get("link_url"), max_length=255),
+        "payload": extra_payload,
+        "read_at": source.get("read_at"),
+    }
+
+
+def _normalize_quote_payload(quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(quote or {})
+    ticker = _required_string(source.get("ticker"), "Quote ticker is required", max_length=32).upper()
+    quote_timestamp = source.get("quote_timestamp")
+    if quote_timestamp is None and source.get("ts") is not None:
+        quote_timestamp = source.get("ts")
+
+    return {
+        "ticker": ticker,
+        "source": _optional_string(source.get("source"), max_length=64) or "local_cache",
+        "quote_type": _optional_string(source.get("quote_type"), max_length=64) or "delayed_snapshot",
+        "is_delayed": _coerce_bool(source.get("is_delayed"), True),
+        "name": _optional_string(source.get("name"), max_length=255) or ticker,
+        "currency": _optional_string(source.get("currency"), max_length=16),
+        "price": _optional_float(source.get("price")),
+        "open": _optional_float(source.get("open")),
+        "high": _optional_float(source.get("high")),
+        "low": _optional_float(source.get("low")),
+        "prev_close": _optional_float(source.get("prev_close")),
+        "change": _optional_float(source.get("change")),
+        "change_pct": _optional_float(source.get("change_pct")),
+        "volume": _optional_int(source.get("volume")),
+        "market_cap": _optional_int(source.get("market_cap")),
+        "quote_timestamp": quote_timestamp,
+        "ts": _optional_int(source.get("ts")),
+    }
+
+
+def _required_string(value: Any, error_message: str, max_length: Optional[int] = None) -> str:
+    normalized = _optional_string(value, max_length=max_length)
+    if not normalized:
+        raise ValueError(error_message)
+    return normalized
+
+
+def _optional_string(value: Any, max_length: Optional[int] = None) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if max_length:
+        return text[:max_length]
+    return text
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Unable to parse float from {value!r}")
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Unable to parse int from {value!r}")
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value if value is not None else {}, ensure_ascii=False)
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    if value in (None, ""):
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_datetime_value(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000.0
+        return datetime.fromtimestamp(timestamp, timezone.utc).replace(tzinfo=None)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    return None
 
 
 db = Database()
@@ -865,30 +1891,31 @@ async def init_db():
 
 
 def _period_to_date(period: str) -> str:
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     if not period:
-        return (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
+        return (now_utc - timedelta(days=365)).strftime("%Y-%m-%d")
     if period == "max":
         return "1900-01-01"
     n, unit = int(period[:-2]) if period[:-2].isdigit() else int(period[:-1]), period[-1]
     if period[:-2].isdigit():
         n, unit = int(period[:-2]), period[-2:]
         if unit == "mo":
-            d = datetime.utcnow() - timedelta(days=n * 30)
+            d = now_utc - timedelta(days=n * 30)
         elif unit == "yr" or unit == "y":
-            d = datetime.utcnow() - timedelta(days=n * 365)
+            d = now_utc - timedelta(days=n * 365)
         else:
-            d = datetime.utcnow() - timedelta(days=30)
+            d = now_utc - timedelta(days=30)
     else:
         n = int(period[:-1])
         unit = period[-1]
         if unit == "y":
-            d = datetime.utcnow() - timedelta(days=n * 365)
+            d = now_utc - timedelta(days=n * 365)
         elif unit == "m":
-            d = datetime.utcnow() - timedelta(days=n * 30)
+            d = now_utc - timedelta(days=n * 30)
         elif unit == "d":
-            d = datetime.utcnow() - timedelta(days=n)
+            d = now_utc - timedelta(days=n)
         else:
-            d = datetime.utcnow() - timedelta(days=365)
+            d = now_utc - timedelta(days=365)
     return d.strftime("%Y-%m-%d")
 
 
@@ -915,4 +1942,14 @@ def _date_to_iso(value) -> Optional[str]:
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    return str(value)
+
+
+def _datetime_to_iso(value) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()).isoformat()
     return str(value)

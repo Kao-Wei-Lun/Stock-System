@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, time as time_of_day, timedelta
+from datetime import datetime, time as time_of_day, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from data_fetcher import DataFetcher, normalize_ticker
-from database import db, init_db
+from database import DEFAULT_OWNER_ID, db, init_db
 from taifex_fetcher import taifex_fetcher
 from ws_manager import ConnectionManager
 
@@ -235,6 +235,85 @@ class WatchlistItemsOrderUpdate(BaseModel):
     item_ids: list[int] = Field(..., min_length=1)
 
 
+class WorkspacePresetCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    chart_layout: str = Field("single", max_length=32)
+    active_ticker: str | None = Field(None, max_length=32)
+    current_period: str = Field("1y", max_length=16)
+    current_interval: str = Field("1d", max_length=16)
+    workspace_tab: str = Field("chart", max_length=32)
+    comparison_mode: str = Field("percent", max_length=32)
+    payload: dict = Field(default_factory=dict)
+    is_default: bool = False
+
+
+class WorkspacePresetUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    chart_layout: str | None = Field(None, max_length=32)
+    active_ticker: str | None = Field(None, max_length=32)
+    current_period: str | None = Field(None, max_length=16)
+    current_interval: str | None = Field(None, max_length=16)
+    workspace_tab: str | None = Field(None, max_length=32)
+    comparison_mode: str | None = Field(None, max_length=32)
+    payload: dict | None = None
+    is_default: bool | None = None
+
+
+class AlertCreatePayload(BaseModel):
+    name: str | None = Field(None, max_length=128)
+    ticker: str = Field(..., min_length=1, max_length=32)
+    type: str = Field(..., min_length=1, max_length=32)
+    condition: str = Field(..., min_length=1, max_length=32)
+    value: float | None = None
+    value2: float | None = None
+    timeframe: str = Field("1d", max_length=16)
+    condition_payload: dict = Field(default_factory=dict)
+    notification_title: str | None = Field(None, max_length=255)
+    note: str | None = None
+    active: bool = True
+    triggered: bool = False
+    triggered_at: str | None = None
+    last_evaluated_at: str | None = None
+
+
+class AlertUpdatePayload(BaseModel):
+    name: str | None = Field(None, max_length=128)
+    ticker: str | None = Field(None, min_length=1, max_length=32)
+    type: str | None = Field(None, min_length=1, max_length=32)
+    condition: str | None = Field(None, min_length=1, max_length=32)
+    value: float | None = None
+    value2: float | None = None
+    timeframe: str | None = Field(None, max_length=16)
+    condition_payload: dict | None = None
+    notification_title: str | None = Field(None, max_length=255)
+    note: str | None = None
+    active: bool | None = None
+    triggered: bool | None = None
+    triggered_at: str | None = None
+    last_evaluated_at: str | None = None
+
+
+class QuoteResponse(BaseModel):
+    ticker: str
+    source: str
+    quote_type: str
+    is_delayed: bool
+    quote_timestamp: str | None = None
+    synced_at: str | None = None
+    name: str | None = None
+    currency: str | None = None
+    price: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    prev_close: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    volume: int | None = None
+    market_cap: int | None = None
+    ts: int | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
@@ -433,7 +512,7 @@ async def realtime_polling_loop():
         if subscribed:
             for ticker in subscribed:
                 try:
-                    quote = await fetcher.fetch_realtime_quote(ticker)
+                    quote = await fetch_and_store_quote_snapshot(ticker)
                     if quote:
                         await ws_manager.broadcast_to_ticker(
                             ticker,
@@ -448,6 +527,14 @@ async def realtime_polling_loop():
                     log.debug("quote error %s: %s", ticker, exc)
                 await asyncio.sleep(0.2)
         await asyncio.sleep(15)
+
+
+async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
+    ticker = normalize_ticker(ticker)
+    quote = await fetcher.fetch_realtime_quote(ticker)
+    if not quote:
+        return None
+    return await db.upsert_market_quote(quote)
 
 
 async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
@@ -479,7 +566,7 @@ async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/watchlist")
@@ -578,6 +665,108 @@ async def reorder_watchlist_items(group_id: int, payload: WatchlistItemsOrderUpd
     return {"ok": True, "group_id": group_id, "item_ids": payload.item_ids}
 
 
+@app.get("/api/workspaces")
+async def list_workspaces():
+    return {"items": await db.list_workspace_presets(owner_id=DEFAULT_OWNER_ID)}
+
+
+@app.post("/api/workspaces")
+async def create_workspace(payload: WorkspacePresetCreate):
+    try:
+        return await db.create_workspace_preset(payload.model_dump(), owner_id=DEFAULT_OWNER_ID)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/workspaces/{workspace_id}")
+async def get_workspace(workspace_id: int):
+    workspace = await db.get_workspace_preset(workspace_id, owner_id=DEFAULT_OWNER_ID)
+    if not workspace:
+        raise HTTPException(404, "Workspace not found")
+    return workspace
+
+
+@app.put("/api/workspaces/{workspace_id}")
+async def update_workspace(workspace_id: int, payload: WorkspacePresetUpdate):
+    try:
+        workspace = await db.update_workspace_preset(
+            workspace_id,
+            payload.model_dump(exclude_unset=True),
+            owner_id=DEFAULT_OWNER_ID,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not workspace:
+        raise HTTPException(404, "Workspace not found")
+    return workspace
+
+
+@app.delete("/api/workspaces/{workspace_id}")
+async def delete_workspace(workspace_id: int):
+    deleted = await db.delete_workspace_preset(workspace_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Workspace not found")
+    return {"ok": True, "workspace_id": workspace_id}
+
+
+@app.get("/api/alerts")
+async def list_alerts():
+    return {"items": await db.list_alerts(owner_id=DEFAULT_OWNER_ID)}
+
+
+@app.post("/api/alerts")
+async def create_alert(payload: AlertCreatePayload):
+    try:
+        return await db.create_alert(payload.model_dump(), owner_id=DEFAULT_OWNER_ID)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.patch("/api/alerts/{alert_id}")
+async def update_alert(alert_id: int, payload: AlertUpdatePayload):
+    try:
+        alert = await db.update_alert(
+            alert_id,
+            payload.model_dump(exclude_unset=True),
+            owner_id=DEFAULT_OWNER_ID,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    return alert
+
+
+@app.delete("/api/alerts/{alert_id}")
+async def delete_alert(alert_id: int):
+    deleted = await db.delete_alert(alert_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Alert not found")
+    return {"ok": True, "alert_id": alert_id}
+
+
+@app.get("/api/notifications")
+async def list_notifications(
+    unread_only: bool = Query(False, description="Only unread notifications"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    return {
+        "items": await db.list_notifications(
+            owner_id=DEFAULT_OWNER_ID,
+            unread_only=unread_only,
+            limit=limit,
+        )
+    }
+
+
+@app.post("/api/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: int):
+    notification = await db.mark_notification_read(notification_id, owner_id=DEFAULT_OWNER_ID)
+    if not notification:
+        raise HTTPException(404, "Notification not found")
+    return notification
+
+
 @app.get("/api/kline/{ticker}")
 async def get_kline(
     ticker: str,
@@ -597,10 +786,12 @@ async def get_kline(
     return {"ticker": ticker, "interval": interval, "data": rows}
 
 
-@app.get("/api/quote/{ticker}")
+@app.get("/api/quote/{ticker}", response_model=QuoteResponse)
 async def get_quote(ticker: str):
     ticker = normalize_ticker(ticker)
-    quote = await fetcher.fetch_realtime_quote(ticker)
+    quote = await fetch_and_store_quote_snapshot(ticker)
+    if not quote:
+        quote = await db.get_market_quote(ticker)
     if not quote:
         raise HTTPException(404, "Unable to fetch quote")
     return quote
@@ -662,7 +853,9 @@ async def get_taifex_institutional(
 
     spot_cards = []
     for item in TAIFEX_SPOT_REFERENCE:
-        quote = await fetcher.fetch_realtime_quote(item["ticker"])
+        quote = await fetch_and_store_quote_snapshot(item["ticker"])
+        if not quote:
+            quote = await db.get_market_quote(item["ticker"])
         if not quote:
             continue
         spot_cards.append(
