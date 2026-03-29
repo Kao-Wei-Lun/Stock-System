@@ -5,6 +5,7 @@ TAIFEX institutional positions fetcher.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import date, datetime, timedelta
 from io import StringIO
@@ -51,6 +52,8 @@ OPTIONS_POINT_VALUE = {
 }
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+log = logging.getLogger(__name__)
 
 
 def _format_taifex_date(value: date) -> str:
@@ -511,7 +514,29 @@ class TaifexFetcher:
             timeout=20,
             verify=False,
         )
-        payload = response.json()
+        content_type = (response.headers.get("content-type") or "").lower()
+        if response.status_code != 200 or "json" not in content_type:
+            log.warning(
+                "TWSE cash summary unavailable for %s: status=%s content-type=%s",
+                _format_iso_date(target_date),
+                response.status_code,
+                response.headers.get("content-type"),
+            )
+            return []
+        try:
+            payload = response.json()
+        except requests.exceptions.JSONDecodeError:
+            log.warning(
+                "TWSE cash summary returned non-JSON body for %s",
+                _format_iso_date(target_date),
+            )
+            return []
+        if not isinstance(payload, dict):
+            log.warning(
+                "TWSE cash summary returned unexpected payload type for %s",
+                _format_iso_date(target_date),
+            )
+            return []
         rows = []
         for raw_row in payload.get("data") or []:
             if len(raw_row) < 4:
