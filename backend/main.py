@@ -42,6 +42,8 @@ STARTUP_DOWNLOAD_ENABLED = os.getenv("STARTUP_DOWNLOAD_ENABLED", "false").strip(
 }
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
+DEFAULT_WATCH_GROUP_NAME = "我的自選"
+MARKET_OVERVIEW_GROUP_NAME = "全球大盤"
 DEFAULT_WATCHLIST = [
     "AAPL",
     "MSFT",
@@ -58,17 +60,62 @@ DEFAULT_WATCHLIST = [
     "2303.TW",
     "0700.HK",
     "9988.HK",
-    "SPY",
-    "QQQ",
-    "VTI",
-    "GLD",
-    "BTC-USD",
-    "ETH-USD",
+]
+MARKET_OVERVIEW_TICKERS = [
+    "^TWII",
+    "^TWOII",
     "^GSPC",
     "^IXIC",
+    "^SOX",
     "^DJI",
-    "^TWII",
+    "^N225",
+    "^HSI",
+    "000001.SS",
+    "^STOXX50E",
+    "GC=F",
+    "SI=F",
+    "HG=F",
+    "CL=F",
+    "BZ=F",
+    "NG=F",
 ]
+STARTUP_DOWNLOAD_TICKERS = list(dict.fromkeys(DEFAULT_WATCHLIST + MARKET_OVERVIEW_TICKERS))
+DISPLAY_NAME_OVERRIDES = {
+    "^TWII": "台灣加權指數",
+    "^TWOII": "櫃買指數",
+    "^GSPC": "S&P 500",
+    "^IXIC": "NASDAQ 指數",
+    "^SOX": "費城半導體",
+    "^DJI": "道瓊工業指數",
+    "^N225": "日經 225",
+    "^HSI": "恆生指數",
+    "000001.SS": "上證綜合指數",
+    "^STOXX50E": "Euro Stoxx 50",
+    "GC=F": "黃金",
+    "SI=F": "白銀",
+    "HG=F": "銅",
+    "CL=F": "WTI 原油",
+    "BZ=F": "布蘭特原油",
+    "NG=F": "天然氣",
+}
+CATEGORY_OVERRIDES = {
+    "^TWII": "台灣指數",
+    "^TWOII": "台灣指數",
+    "^GSPC": "美股指數",
+    "^IXIC": "美股指數",
+    "^SOX": "美股指數",
+    "^DJI": "美股指數",
+    "^N225": "亞洲指數",
+    "^HSI": "亞洲指數",
+    "000001.SS": "亞洲指數",
+    "^STOXX50E": "歐洲指數",
+    "GC=F": "原物料",
+    "SI=F": "原物料",
+    "HG=F": "原物料",
+    "CL=F": "原物料",
+    "BZ=F": "原物料",
+    "NG=F": "原物料",
+}
 
 FULL_HISTORY_PERIODS = {"10y", "max"}
 
@@ -150,7 +197,12 @@ class WatchlistItemsOrderUpdate(BaseModel):
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
     await init_db()
-    await db.ensure_default_watchlist(DEFAULT_WATCHLIST)
+    await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
+    await db.ensure_watchlist_group_items(
+        MARKET_OVERVIEW_GROUP_NAME,
+        MARKET_OVERVIEW_TICKERS,
+        sort_order=999,
+    )
     if STARTUP_DOWNLOAD_ENABLED:
         asyncio.create_task(startup_download())
     else:
@@ -199,8 +251,8 @@ if FRONTEND_DIST_DIR.exists():
 
 
 async def startup_download():
-    log.info("Starting history download for %s tickers...", len(DEFAULT_WATCHLIST))
-    for ticker in DEFAULT_WATCHLIST:
+    log.info("Starting history download for %s tickers...", len(STARTUP_DOWNLOAD_TICKERS))
+    for ticker in STARTUP_DOWNLOAD_TICKERS:
         try:
             count = await fetcher.fetch_and_store(
                 ticker,
@@ -246,10 +298,15 @@ async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
     info = await db.get_stock_info(ticker)
     prev = await db.get_prev_close(ticker) if row else None
     chg_pct = ((row["close"] - prev) / prev * 100) if row and prev else 0
+    display_name = (
+        DISPLAY_NAME_OVERRIDES.get(ticker)
+        or (info.get("name") if info else None)
+        or ticker
+    )
 
     return {
         "ticker": ticker,
-        "name": info.get("name", ticker) if info else ticker,
+        "name": display_name,
         "close": row["close"] if row else None,
         "open": row["open"] if row else None,
         "high": row["high"] if row else None,
@@ -449,6 +506,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 def categorize(ticker: str) -> str:
+    if ticker in CATEGORY_OVERRIDES:
+        return CATEGORY_OVERRIDES[ticker]
     if ticker.endswith(".TW"):
         return "台股"
     if ticker.endswith(".HK"):

@@ -5,7 +5,7 @@
       <div class="ptab" :class="{ active: leftTab === 'market' }" @click="$emit('set-left-tab', 'market')">大盤</div>
     </div>
 
-    <div v-if="!loading && !error" class="watchlist-controls">
+    <div v-if="!loading && !error && leftTab === 'watch'" class="watchlist-controls">
       <div class="group-bar">
         <button
           v-for="group in groups"
@@ -104,6 +104,7 @@ import { fmtPrice } from "../utils/formatters";
 
 const props = defineProps({
   groups: { type: Array, required: true },
+  marketItems: { type: Array, required: true },
   items: { type: Array, required: true },
   leftTab: { type: String, required: true },
   activeGroupId: { type: Number, default: null },
@@ -124,7 +125,6 @@ const emit = defineEmits([
   "select-ticker",
 ]);
 
-const marketCategories = ["ETF", "指數", "加密"];
 const createGroupOpen = ref(false);
 const newGroupName = ref("");
 const newTicker = ref("");
@@ -137,18 +137,18 @@ const selectedGroup = computed(
 
 const visibleItems = computed(() => {
   if (props.leftTab === "market") {
-    return props.items.filter((item) => marketCategories.includes(item.category));
+    return props.marketItems;
   }
   return selectedGroup.value?.items || [];
 });
 
 const sectionLabel = computed(() => {
-  if (props.leftTab === "market") return "市場觀察";
+  if (props.leftTab === "market") return "全球大盤與原物料";
   return selectedGroup.value?.name || "我的自選";
 });
 
 const emptyLabel = computed(() => {
-  if (props.leftTab === "market") return "目前沒有市場觀察標的";
+  if (props.leftTab === "market") return "目前沒有市場指標資料";
   if (!props.groups.length) return "尚未建立觀察群組";
   return "這個群組目前還沒有股票";
 });

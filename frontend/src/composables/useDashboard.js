@@ -29,6 +29,7 @@ const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
+const MARKET_GROUP_NAME = "全球大盤";
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
   ma20: true,
@@ -346,6 +347,13 @@ export function useDashboard() {
   const searchResults = ref([]);
   const searchOpen = ref(false);
   const watchlistGroups = ref([]);
+  const userWatchGroups = computed(() =>
+    watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME),
+  );
+  const marketWatchGroup = computed(() =>
+    watchlistGroups.value.find((group) => group.name === MARKET_GROUP_NAME) || null,
+  );
+  const marketWatchItems = computed(() => marketWatchGroup.value?.items || []);
   const activeWatchGroupId = ref(Number.isFinite(storedPrefs.activeWatchGroupId) ? storedPrefs.activeWatchGroupId : null);
   const compareTickers = ref(
     Array.isArray(storedPrefs.compareTickers)
@@ -463,7 +471,7 @@ export function useDashboard() {
   ));
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
-    () => watchlistGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
+    () => userWatchGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
   );
   const activeWorkspacePreset = computed(
     () => workspacePresets.value.find((item) => item.id === activeWorkspacePresetId.value) || null,
@@ -632,11 +640,12 @@ export function useDashboard() {
     try {
       const payload = await apiFetch("/api/watchlist", { retries: 12, retryDelayMs: 1500 });
       watchlistGroups.value = payload.groups || [];
+      const currentUserGroups = watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME);
       if (
         !activeWatchGroupId.value
-        || !watchlistGroups.value.some((group) => group.id === activeWatchGroupId.value)
+        || !currentUserGroups.some((group) => group.id === activeWatchGroupId.value)
       ) {
-        activeWatchGroupId.value = watchlistGroups.value[0]?.id ?? null;
+        activeWatchGroupId.value = currentUserGroups[0]?.id ?? null;
       }
       const current = watchlist.value.find((item) => item.ticker === currentTicker.value);
       if (current) currentName.value = current.name || current.ticker;
@@ -714,7 +723,7 @@ export function useDashboard() {
     try {
       await apiFetch(`/api/watchlist/groups/${groupId}`, { method: "DELETE" });
       if (activeWatchGroupId.value === groupId) {
-        activeWatchGroupId.value = watchlistGroups.value.find((group) => group.id !== groupId)?.id ?? null;
+        activeWatchGroupId.value = userWatchGroups.value.find((group) => group.id !== groupId)?.id ?? null;
       }
       await loadWatchlist();
       pushNotification({
@@ -1607,6 +1616,8 @@ export function useDashboard() {
     searchResults,
     searchOpen,
     watchlistGroups,
+    userWatchGroups,
+    marketWatchItems,
     activeWatchGroup,
     activeWatchGroupId,
     workspacePresets,

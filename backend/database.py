@@ -373,6 +373,97 @@ class Database:
                             (group_id, ticker, sort_order),
                         )
 
+    async def ensure_watchlist_group_items(
+        self,
+        group_name: str,
+        tickers: List[str],
+        sort_order: int = 0,
+    ) -> Optional[Dict]:
+        clean_name = (group_name or "").strip()
+        clean_tickers = list(dict.fromkeys((ticker or "").strip() for ticker in tickers if (ticker or "").strip()))
+        if not clean_name or not clean_tickers:
+            return None
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`, `name`, `sort_order`, `created_at`
+                        FROM `watchlist_groups`
+                        WHERE `name`=%s
+                        LIMIT 1
+                        """,
+                        (clean_name,),
+                    )
+                    group = await cur.fetchone()
+
+                async with conn.cursor() as cur:
+                    if group:
+                        group_id = group["id"]
+                        await cur.execute(
+                            """
+                            UPDATE `watchlist_groups`
+                            SET `sort_order`=%s
+                            WHERE `id`=%s
+                            """,
+                            (sort_order, group_id),
+                        )
+                    else:
+                        await cur.execute(
+                            """
+                            INSERT INTO `watchlist_groups` (`name`, `sort_order`)
+                            VALUES (%s, %s)
+                            """,
+                            (clean_name, sort_order),
+                        )
+                        group_id = cur.lastrowid
+
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    await cur.execute(
+                        """
+                        SELECT `id`, `ticker`
+                        FROM `watchlist_items`
+                        WHERE `group_id`=%s
+                        ORDER BY `sort_order` ASC, `id` ASC
+                        """,
+                        (group_id,),
+                    )
+                    existing_items = list(await cur.fetchall())
+
+                existing_by_ticker = {row["ticker"]: row for row in existing_items}
+                expected_set = set(clean_tickers)
+
+                async with conn.cursor() as cur:
+                    for index, ticker in enumerate(clean_tickers):
+                        existing = existing_by_ticker.get(ticker)
+                        if existing:
+                            await cur.execute(
+                                """
+                                UPDATE `watchlist_items`
+                                SET `sort_order`=%s
+                                WHERE `id`=%s
+                                """,
+                                (index, existing["id"]),
+                            )
+                        else:
+                            await cur.execute(
+                                """
+                                INSERT INTO `watchlist_items` (`group_id`, `ticker`, `sort_order`)
+                                VALUES (%s, %s, %s)
+                                """,
+                                (group_id, ticker, index),
+                            )
+
+                    stale_ids = [row["id"] for row in existing_items if row["ticker"] not in expected_set]
+                    if stale_ids:
+                        await cur.executemany(
+                            "DELETE FROM `watchlist_items` WHERE `id`=%s",
+                            [(item_id,) for item_id in stale_ids],
+                        )
+
+        return await self.get_watchlist_group(group_id)
+
     async def get_watchlist_group(self, group_id: int) -> Optional[Dict]:
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:

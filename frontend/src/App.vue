@@ -20,7 +20,8 @@
 
     <div class="main">
       <WatchlistPanel
-        :groups="watchlistGroups"
+        :groups="userWatchGroups"
+        :market-items="marketWatchItems"
         :active-group-id="activeWatchGroupId"
         :items="watchlist"
         :left-tab="leftTab"
@@ -160,6 +161,8 @@ const {
   searchResults,
   searchOpen,
   watchlistGroups,
+  userWatchGroups,
+  marketWatchItems,
   activeWatchGroupId,
   workspacePresets,
   activeWorkspacePresetId,
