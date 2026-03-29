@@ -31,6 +31,7 @@ const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional"];
+const INSTITUTIONAL_HISTORY_OPTIONS = [10, 20, 30, 60, 90];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
   ma20: true,
@@ -423,6 +424,15 @@ export function useDashboard() {
   const institutionalData = ref(null);
   const institutionalLoading = ref(false);
   const institutionalError = ref("");
+  const institutionalInsights = ref(null);
+  const institutionalInsightsLoading = ref(false);
+  const institutionalInsightsError = ref("");
+  const initialInstitutionalHistoryDays = INSTITUTIONAL_HISTORY_OPTIONS.includes(Number(storedPrefs.institutionalHistoryDays))
+    ? Number(storedPrefs.institutionalHistoryDays)
+    : 30;
+  const institutionalFuturesCommodity = ref(storedPrefs.institutionalFuturesCommodity || "");
+  const institutionalOptionsCommodity = ref(storedPrefs.institutionalOptionsCommodity || "");
+  const institutionalHistoryDays = ref(initialInstitutionalHistoryDays);
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
   const alertModalOpen = ref(false);
@@ -961,6 +971,7 @@ export function useDashboard() {
   async function loadInstitutionalData(dateValue = institutionalDate.value) {
     institutionalLoading.value = true;
     institutionalError.value = "";
+    institutionalInsightsError.value = "";
     try {
       const payload = await apiFetch(`/api/taifex/institutional?date=${dateValue}`, {
         retries: 3,
@@ -968,10 +979,52 @@ export function useDashboard() {
       });
       institutionalDate.value = dateValue;
       institutionalData.value = payload;
+      const nextFuturesCommodity = (payload?.futures_commodities || []).includes(institutionalFuturesCommodity.value)
+        ? institutionalFuturesCommodity.value
+        : (payload?.default_futures_commodity || payload?.futures_commodities?.[0] || "");
+      const nextOptionsCommodity = (payload?.options_commodities || []).includes(institutionalOptionsCommodity.value)
+        ? institutionalOptionsCommodity.value
+        : (payload?.default_options_commodity || payload?.options_commodities?.[0] || "");
+      institutionalFuturesCommodity.value = nextFuturesCommodity;
+      institutionalOptionsCommodity.value = nextOptionsCommodity;
+      await loadInstitutionalInsights(
+        dateValue,
+        nextFuturesCommodity,
+        nextOptionsCommodity,
+        institutionalHistoryDays.value,
+      );
     } catch (error) {
       institutionalError.value = error.message || "無法取得期權法人資料";
     } finally {
       institutionalLoading.value = false;
+    }
+  }
+
+  async function loadInstitutionalInsights(
+    dateValue = institutionalDate.value,
+    futuresCommodity = institutionalFuturesCommodity.value,
+    optionsCommodity = institutionalOptionsCommodity.value,
+    days = institutionalHistoryDays.value,
+  ) {
+    if (!futuresCommodity && !optionsCommodity) return;
+    institutionalInsightsLoading.value = true;
+    institutionalInsightsError.value = "";
+    try {
+      const params = new URLSearchParams({
+        date: dateValue,
+        days: String(days),
+      });
+      if (futuresCommodity) params.set("futures_commodity", futuresCommodity);
+      if (optionsCommodity) params.set("options_commodity", optionsCommodity);
+      const payload = await apiFetch(`/api/taifex/institutional/insights?${params.toString()}`, {
+        retries: 2,
+        retryDelayMs: 1200,
+      });
+      institutionalInsights.value = payload;
+    } catch (error) {
+      institutionalInsightsError.value = error.message || "無法取得法人歷史趨勢";
+    } finally {
+      institutionalInsightsLoading.value = false;
     }
   }
 
@@ -998,14 +1051,36 @@ export function useDashboard() {
 
   async function setWorkspaceTab(tab) {
     workspaceTab.value = tab === "institutional" ? "institutional" : "chart";
-    if (workspaceTab.value === "institutional" && !institutionalData.value && !institutionalLoading.value) {
-      await loadInstitutionalData();
+    if (workspaceTab.value === "institutional") {
+      if (!institutionalData.value && !institutionalLoading.value) {
+        await loadInstitutionalData();
+      } else if (!institutionalInsights.value && !institutionalInsightsLoading.value) {
+        await loadInstitutionalInsights();
+      }
     }
   }
 
   async function setInstitutionalDate(value) {
     if (!value) return;
     await loadInstitutionalData(value);
+  }
+
+  async function setInstitutionalFuturesCommodity(value) {
+    if (!value || value === institutionalFuturesCommodity.value) return;
+    institutionalFuturesCommodity.value = value;
+    await loadInstitutionalInsights();
+  }
+
+  async function setInstitutionalOptionsCommodity(value) {
+    if (!value || value === institutionalOptionsCommodity.value) return;
+    institutionalOptionsCommodity.value = value;
+    await loadInstitutionalInsights();
+  }
+
+  async function setInstitutionalHistoryDays(value) {
+    const nextValue = INSTITUTIONAL_HISTORY_OPTIONS.includes(Number(value)) ? Number(value) : 30;
+    institutionalHistoryDays.value = nextValue;
+    await loadInstitutionalInsights();
   }
 
   async function shiftInstitutionalDate(days) {
@@ -1617,6 +1692,9 @@ export function useDashboard() {
     leftTab: leftTab.value,
     rightTab: rightTab.value,
     workspaceTab: workspaceTab.value,
+    institutionalFuturesCommodity: institutionalFuturesCommodity.value,
+    institutionalOptionsCommodity: institutionalOptionsCommodity.value,
+    institutionalHistoryDays: institutionalHistoryDays.value,
     activeTool: activeTool.value,
     chartLayout: chartLayout.value,
     activeInd: { ...activeInd },
@@ -1702,6 +1780,12 @@ export function useDashboard() {
     institutionalData,
     institutionalLoading,
     institutionalError,
+    institutionalInsights,
+    institutionalInsightsLoading,
+    institutionalInsightsError,
+    institutionalFuturesCommodity,
+    institutionalOptionsCommodity,
+    institutionalHistoryDays,
     syncingCurrent,
     syncingAll,
     quote,
@@ -1738,8 +1822,12 @@ export function useDashboard() {
     setRightTab,
     setWorkspaceTab,
     setInstitutionalDate,
+    setInstitutionalFuturesCommodity,
+    setInstitutionalOptionsCommodity,
+    setInstitutionalHistoryDays,
     shiftInstitutionalDate,
     loadInstitutionalData,
+    loadInstitutionalInsights,
     setChartLayout,
     selectTicker,
     toggleIndicator,

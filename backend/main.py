@@ -524,6 +524,28 @@ async def get_taifex_institutional(
     return payload
 
 
+@app.get("/api/taifex/institutional/insights")
+async def get_taifex_institutional_insights(
+    date: str | None = Query(None, description="YYYY-MM-DD"),
+    futures_commodity: str | None = Query(None, description="期貨商品名稱"),
+    options_commodity: str | None = Query(None, description="選擇權商品名稱"),
+    days: int = Query(30, description="10 20 30 60 90"),
+):
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+
+    return await taifex_fetcher.fetch_insights(
+        target_date,
+        futures_commodity.strip() if futures_commodity else None,
+        options_commodity.strip() if options_commodity else None,
+        days,
+    )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
