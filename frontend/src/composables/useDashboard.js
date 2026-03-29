@@ -469,7 +469,9 @@ export function useDashboard() {
   const workspacePresets = ref([]);
   const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
   const alerts = ref([]);
-  const notifications = ref([]);
+  const localNotifications = ref([]);
+  const remoteNotifications = ref([]);
+  const notifications = computed(() => [...localNotifications.value, ...remoteNotifications.value]);
   const wsConnected = ref(false);
   const latency = ref("—");
   const lastUpdate = ref("—");
@@ -617,18 +619,29 @@ export function useDashboard() {
   let wsReconnectTimer = null;
   let clockTimer = null;
   let watchlistTimer = null;
+  let alertPollingTimer = null;
 
   function pushNotification({ icon, title, msg, type = "" }) {
     const id = `${Date.now()}-${Math.random()}`;
-    notifications.value = [
-      ...notifications.value,
+    localNotifications.value = [
+      ...localNotifications.value,
       { id, icon, title, msg, type, time: new Date().toLocaleTimeString("zh-TW") },
     ];
     window.setTimeout(() => dismissNotification(id), 6000);
   }
 
-  function dismissNotification(id) {
-    notifications.value = notifications.value.filter((item) => item.id !== id);
+  async function dismissNotification(id) {
+    const remoteTarget = remoteNotifications.value.find((item) => item.id === id);
+    if (remoteTarget?.remoteId != null) {
+      try {
+        await dashboardApi.markNotificationRead(remoteTarget.remoteId);
+      } catch (error) {
+        console.error(error);
+      }
+      remoteNotifications.value = remoteNotifications.value.filter((item) => item.id !== id);
+      return;
+    }
+    localNotifications.value = localNotifications.value.filter((item) => item.id !== id);
   }
 
   async function apiFetch(path, options = {}) {
@@ -665,6 +678,61 @@ export function useDashboard() {
       attempt += 1;
     }
     throw lastError;
+  }
+
+  function mapAlertRecord(alert) {
+    return {
+      ...alert,
+      cond: alert.condition || alert.cond,
+    };
+  }
+
+  function mapRemoteNotification(item) {
+    const iconByCategory = {
+      alert: "⚡",
+      system: "ℹ",
+    };
+    const iconByLevel = {
+      warning: "⚠️",
+      error: "⛔",
+      success: "✅",
+      info: "ℹ",
+    };
+    return {
+      id: `remote-${item.id}`,
+      remoteId: item.id,
+      icon: iconByCategory[item.category] || iconByLevel[item.level] || "ℹ",
+      title: item.title,
+      msg: item.message,
+      type: item.level || "",
+      time: formatQuoteTimestampLabel(item.created_at),
+    };
+  }
+
+  async function loadAlerts({ silent = true } = {}) {
+    try {
+      const response = await dashboardApi.listAlerts();
+      alerts.value = Array.isArray(response?.items) ? response.items.map((item) => mapAlertRecord(item)) : [];
+    } catch (error) {
+      console.error(error);
+      if (!silent) {
+        pushNotification({ icon: "⚠️", title: "警報載入失敗", msg: "請稍後再試", type: "error" });
+      }
+    }
+  }
+
+  async function loadNotifications({ silent = true } = {}) {
+    try {
+      const response = await dashboardApi.listNotifications({ unreadOnly: true, limit: 30 });
+      remoteNotifications.value = Array.isArray(response?.items)
+        ? response.items.map((item) => mapRemoteNotification(item))
+        : [];
+    } catch (error) {
+      console.error(error);
+      if (!silent) {
+        pushNotification({ icon: "⚠️", title: "通知載入失敗", msg: "請稍後再試", type: "error" });
+      }
+    }
   }
 
   function applyQuote(data) {
@@ -707,27 +775,6 @@ export function useDashboard() {
     });
   }
 
-  function checkAlerts(currentQuote) {
-    alerts.value = alerts.value.map((alert) => {
-      if (alert.triggered || alert.ticker !== currentQuote.ticker) return alert;
-      let triggered = false;
-      if (alert.type === "price") {
-        if (alert.cond === "大於" && currentQuote.price > alert.value) triggered = true;
-        if (alert.cond === "小於" && currentQuote.price < alert.value) triggered = true;
-      }
-      if (triggered) {
-        pushNotification({
-          icon: "⚡",
-          title: `警報觸發！${alert.ticker}`,
-          msg: `${alert.type} ${alert.cond} ${alert.value}`,
-          type: "alert",
-        });
-        return { ...alert, triggered: true };
-      }
-      return alert;
-    });
-  }
-
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
@@ -742,11 +789,10 @@ export function useDashboard() {
           high: data.high && data.high > last.high ? data.high : last.high,
           low: data.low && data.low < last.low ? data.low : last.low,
         };
-        rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
+          rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
+        }
       }
     }
-    checkAlerts(data);
-  }
 
   function wsSend(payload) {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(payload));
@@ -1878,24 +1924,47 @@ export function useDashboard() {
     alertForm[key] = value;
   }
 
-  function saveAlert() {
+  async function saveAlert() {
     const numericValue = Number(alertForm.value);
     if (!alertForm.ticker || Number.isNaN(numericValue)) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: "請完整填寫股票代號與數值", type: "error" });
       return;
     }
-    const record = {
+    const payload = {
       ticker: normalizeTicker(alertForm.ticker || currentTicker.value),
       type: alertForm.type,
-      cond: alertForm.cond,
+      condition: alertForm.cond,
       value: numericValue,
+      timeframe: "1d",
+      condition_payload: { operator: alertForm.cond },
       active: true,
-      triggered: false,
     };
-    alerts.value = [...alerts.value, record];
-    alertModalOpen.value = false;
-    alertForm.value = "";
-    pushNotification({ icon: "🔔", title: "警報已設定", msg: `${record.ticker} ${record.cond} ${record.value}`, type: "success" });
+    try {
+      const record = await dashboardApi.createAlert(payload);
+      alerts.value = [mapAlertRecord(record), ...alerts.value];
+      alertModalOpen.value = false;
+      alertForm.value = "";
+      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${record.ticker} ${record.condition} ${record.value}`, type: "success" });
+    } catch (error) {
+      pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
+  }
+
+  async function deleteAlert(alertId) {
+    if (alertId == null) return;
+    const target = alerts.value.find((item) => item.id === alertId);
+    try {
+      await dashboardApi.deleteAlert(alertId);
+      alerts.value = alerts.value.filter((item) => item.id !== alertId);
+      pushNotification({
+        icon: "🗑",
+        title: "警報已刪除",
+        msg: target ? `${target.ticker} ${target.condition || target.cond}` : "已移除警報",
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({ icon: "⚠️", title: "警報刪除失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
   }
 
   function updateBacktestField(key, value) {
@@ -1970,6 +2039,8 @@ export function useDashboard() {
     clockTimer = window.setInterval(updateClock, 1000);
     connectWs();
     await loadWorkspacePresets();
+    await loadAlerts();
+    await loadNotifications();
     await loadWatchlist();
     if (workspaceTab.value === "institutional") {
       await loadInstitutionalData();
@@ -1977,11 +2048,16 @@ export function useDashboard() {
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
     void ensureInstitutionalOverlayForTicker(currentTicker.value);
     watchlistTimer = window.setInterval(loadWatchlist, 60000);
+    alertPollingTimer = window.setInterval(() => {
+      void loadAlerts();
+      void loadNotifications();
+    }, 30000);
   });
 
   onBeforeUnmount(() => {
     if (clockTimer) clearInterval(clockTimer);
     if (watchlistTimer) clearInterval(watchlistTimer);
+    if (alertPollingTimer) clearInterval(alertPollingTimer);
     if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
     if (ws && ws.readyState < 2) ws.close();
   });
@@ -2112,6 +2188,7 @@ export function useDashboard() {
     closeAlertModal,
     updateAlertField,
     saveAlert,
+    deleteAlert,
     updateBacktestField,
     runBacktest,
     fmtPrice,

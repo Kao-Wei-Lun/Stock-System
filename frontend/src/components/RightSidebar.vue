@@ -78,15 +78,16 @@
       <div v-if="alerts.length">
         <div
           v-for="(alert, index) in alerts"
-          :key="`${alert.ticker}-${index}`"
+          :key="alert.id || `${alert.ticker}-${index}`"
           class="alert-card"
           :class="{ triggered: alert.triggered }"
         >
           <div class="alert-tk">{{ alert.ticker }}</div>
-          <div class="alert-cond">{{ alert.type }} {{ alert.cond }} {{ alert.value }}</div>
+          <div class="alert-cond">{{ alert.type }} {{ alert.condition || alert.cond }} {{ alert.value }}</div>
           <div class="alert-badge" :class="alert.triggered ? 'triggered' : 'active'">
-            {{ alert.triggered ? "已觸發" : "監控中" }}
+            {{ alert.triggered ? "已觸發" : (alert.active ? "監控中" : "已暫停") }}
           </div>
+          <button class="add-btn" style="margin-top:8px" @click="$emit('delete-alert', alert.id)">刪除</button>
         </div>
       </div>
       <div v-else style="color:var(--text3);font-size:11px;text-align:center;padding:16px">尚無警報</div>
@@ -173,6 +174,7 @@ defineEmits([
   "update-indicator-setting",
   "apply-indicator-preset",
   "open-alert-modal",
+  "delete-alert",
   "update-backtest-field",
   "run-backtest",
   "sync-all",

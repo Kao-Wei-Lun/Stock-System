@@ -20,6 +20,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from alert_engine import AlertEngine
 from data_fetcher import DataFetcher, normalize_ticker
 from database import DEFAULT_OWNER_ID, db, init_db
 from quote_provider import YahooFinanceQuoteProvider
@@ -33,6 +34,7 @@ load_dotenv()
 
 fetcher = DataFetcher()
 quote_provider = YahooFinanceQuoteProvider(fetcher)
+alert_engine = AlertEngine(db, quote_provider)
 ws_manager = ConnectionManager()
 
 STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
@@ -58,6 +60,13 @@ LATEST_DATA_SYNC_ON_STARTUP = os.getenv("LATEST_DATA_SYNC_ON_STARTUP", "true").s
     "yes",
     "on",
 }
+ALERT_EVALUATOR_ENABLED = os.getenv("ALERT_EVALUATOR_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+ALERT_POLL_INTERVAL_SECONDS = max(10, int(os.getenv("ALERT_POLL_INTERVAL_SECONDS", "30")))
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
 DAILY_LATEST_SYNC_TIME_RAW = os.getenv("DAILY_LATEST_SYNC_TIME", "18:10").strip() or "18:10"
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -339,6 +348,10 @@ async def lifespan(app: FastAPI):
         log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
     asyncio.create_task(daily_latest_sync_loop())
     asyncio.create_task(realtime_polling_loop())
+    if ALERT_EVALUATOR_ENABLED:
+        asyncio.create_task(alert_evaluator_loop())
+    else:
+        log.info("Alert evaluator skipped (ALERT_EVALUATOR_ENABLED=false).")
     yield
     await db.close()
     log.info("QuantVision Pro backend stopped")
@@ -529,6 +542,18 @@ async def realtime_polling_loop():
                     log.debug("quote error %s: %s", ticker, exc)
                 await asyncio.sleep(0.2)
         await asyncio.sleep(15)
+
+
+async def alert_evaluator_loop():
+    await asyncio.sleep(10)
+    while True:
+        try:
+            triggered = await alert_engine.evaluate_active_alerts()
+            if triggered:
+                log.info("Alert evaluator triggered %s alert(s)", triggered)
+        except Exception as exc:
+            log.warning("Alert evaluator loop failed: %s", exc)
+        await asyncio.sleep(ALERT_POLL_INTERVAL_SECONDS)
 
 
 async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
@@ -737,6 +762,14 @@ async def update_alert(alert_id: int, payload: AlertUpdatePayload):
     if not alert:
         raise HTTPException(404, "Alert not found")
     return alert
+
+
+@app.get("/api/alerts/{alert_id}/triggers")
+async def get_alert_trigger_logs(alert_id: int, limit: int = Query(20, ge=1, le=200)):
+    alert = await db.get_alert(alert_id, owner_id=DEFAULT_OWNER_ID)
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    return {"items": await db.list_alert_trigger_logs(alert_id, owner_id=DEFAULT_OWNER_ID, limit=limit)}
 
 
 @app.delete("/api/alerts/{alert_id}")

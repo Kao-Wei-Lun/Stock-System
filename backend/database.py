@@ -794,6 +794,18 @@ class Database:
         )
         return [_deserialize_alert(row) for row in rows]
 
+    async def list_active_alerts(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `alerts`
+            WHERE `owner_id`=%s AND `active`=1
+            ORDER BY `updated_at` ASC, `id` ASC
+            """,
+            (owner_id,),
+        )
+        return [_deserialize_alert(row) for row in rows]
+
     async def get_alert(self, alert_id: int, owner_id: int = DEFAULT_OWNER_ID) -> Optional[Dict[str, Any]]:
         row = await self._fetchone(
             """
@@ -900,6 +912,59 @@ class Database:
             (alert_id, owner_id),
         )
         return deleted > 0
+
+    async def create_alert_trigger_log(
+        self,
+        alert_id: int,
+        ticker: str,
+        payload: Optional[Dict[str, Any]] = None,
+        owner_id: int = DEFAULT_OWNER_ID,
+        trigger_value: Optional[float] = None,
+        threshold_value: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        record_id = await self._execute_insert(
+            """
+            INSERT INTO `alert_trigger_logs`
+                (`alert_id`, `owner_id`, `ticker`, `trigger_value`, `threshold_value`, `payload_json`)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                alert_id,
+                owner_id,
+                ticker,
+                trigger_value,
+                threshold_value,
+                _json_dumps(payload or {}),
+            ),
+        )
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `alert_trigger_logs`
+            WHERE `id`=%s
+            LIMIT 1
+            """,
+            (record_id,),
+        )
+        return _deserialize_alert_trigger_log(row)
+
+    async def list_alert_trigger_logs(
+        self,
+        alert_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `alert_trigger_logs`
+            WHERE `alert_id`=%s AND `owner_id`=%s
+            ORDER BY `created_at` DESC, `id` DESC
+            LIMIT %s
+            """,
+            (alert_id, owner_id, max(1, min(limit, 200))),
+        )
+        return [_deserialize_alert_trigger_log(row) for row in rows]
 
     async def create_notification(
         self,
@@ -1631,6 +1696,21 @@ def _deserialize_notification(row: Optional[Dict[str, Any]]) -> Optional[Dict[st
         "link_url": row.get("link_url"),
         "payload": _json_loads(row.get("payload_json"), {}),
         "read_at": _datetime_to_iso(row.get("read_at")),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+    }
+
+
+def _deserialize_alert_trigger_log(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "alert_id": row.get("alert_id"),
+        "owner_id": row.get("owner_id"),
+        "ticker": row.get("ticker"),
+        "trigger_value": row.get("trigger_value"),
+        "threshold_value": row.get("threshold_value"),
+        "payload": _json_loads(row.get("payload_json"), {}),
         "created_at": _datetime_to_iso(row.get("created_at")),
     }
 

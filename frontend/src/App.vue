@@ -121,6 +121,7 @@
                 @update-indicator-setting="updateIndicatorSetting"
                 @apply-indicator-preset="applyIndicatorPreset"
                 @open-alert-modal="openAlertModal"
+                @delete-alert="deleteAlert"
                 @update-backtest-field="handleBacktestField"
                 @run-backtest="runBacktest"
                 @sync-all="syncAll"
@@ -310,12 +311,13 @@ const {
   syncAll,
   dismissNotification,
   openAlertModal,
-  closeAlertModal,
-  updateAlertField,
-  saveAlert,
-  updateBacktestField,
-  runBacktest,
-} = useDashboard();
+    closeAlertModal,
+    updateAlertField,
+    saveAlert,
+    deleteAlert,
+    updateBacktestField,
+    runBacktest,
+  } = useDashboard();
 
 function syncChartFullscreenState() {
   chartFullscreen.value = pseudoFullscreen.value || document.fullscreenElement === workspaceStageRef.value;

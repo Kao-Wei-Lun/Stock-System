@@ -169,6 +169,7 @@ const dashboardMock = {
   closeAlertModal: noop,
   updateAlertField: noop,
   saveAlert: noop,
+  deleteAlert: noop,
   updateBacktestField: noop,
   runBacktest: noop,
 };
