@@ -36,6 +36,10 @@
     </div>
     <div v-else-if="error" class="institutional-error">{{ error }}</div>
     <template v-else-if="data">
+      <div v-if="data.cash_summary_warning" class="institutional-inline-error">
+        {{ data.cash_summary_warning }}
+      </div>
+
       <div class="institutional-grid">
         <div class="institutional-card">
           <div class="ind-group-title">現貨參考</div>

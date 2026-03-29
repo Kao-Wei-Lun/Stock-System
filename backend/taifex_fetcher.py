@@ -128,6 +128,8 @@ class TaifexFetcher:
         self._dashboard_cache: Dict[str, Tuple[float, Dict]] = {}
         self._page_cache: Dict[str, Tuple[float, Optional[pd.DataFrame]]] = {}
         self._history_cache: Dict[str, Tuple[float, Dict]] = {}
+        self._cash_summary_cache: Dict[str, List[Dict]] = {}
+        self._latest_cash_summary_snapshot: Optional[Tuple[str, List[Dict]]] = None
 
     async def fetch_dashboard(self, query_date: Optional[date] = None) -> Dict:
         target_date = query_date or datetime.now().date()
@@ -188,14 +190,14 @@ class TaifexFetcher:
         futures = self._fetch_contract_rows("futContractsDate", resolved_date)
         options = self._fetch_contract_rows("optContractsDate", resolved_date)
         call_puts = self._fetch_call_put_rows(resolved_date)
-        cash_summary = self._fetch_twse_cash_summary(resolved_date)
+        cash_summary, cash_summary_meta = self._fetch_twse_cash_summary(resolved_date)
         previous_date = self._find_previous_available_date(resolved_date)
 
         previous_overview = self._fetch_overview(previous_date) if previous_date else []
         previous_futures = self._fetch_contract_rows("futContractsDate", previous_date) if previous_date else []
         previous_options = self._fetch_contract_rows("optContractsDate", previous_date) if previous_date else []
         previous_call_puts = self._fetch_call_put_rows(previous_date) if previous_date else []
-        previous_cash_summary = self._fetch_twse_cash_summary(previous_date) if previous_date else []
+        previous_cash_summary = self._fetch_twse_cash_summary(previous_date)[0] if previous_date else []
 
         self._apply_changes(overview, previous_overview, ("institution",))
         self._apply_changes(futures, previous_futures, ("commodity", "institution"))
@@ -218,6 +220,8 @@ class TaifexFetcher:
             "call_puts": call_puts,
             "cash_summary": cash_summary,
             "cash_summary_aggregated": self._aggregate_cash_summary(cash_summary),
+            "cash_summary_source": cash_summary_meta["source"],
+            "cash_summary_warning": cash_summary_meta.get("warning"),
             "futures_commodities": futures_options,
             "options_commodities": options_options,
             "default_futures_commodity": default_futures,
@@ -501,9 +505,9 @@ class TaifexFetcher:
             )
         return rows
 
-    def _fetch_twse_cash_summary(self, target_date: Optional[date]) -> List[Dict]:
+    def _fetch_twse_cash_summary(self, target_date: Optional[date]) -> Tuple[List[Dict], Dict[str, Optional[str]]]:
         if not target_date:
-            return []
+            return [], {"source": "none", "warning": None}
         response = requests.get(
             TWSE_CASH_SUMMARY_URL,
             params={
@@ -514,29 +518,33 @@ class TaifexFetcher:
             timeout=20,
             verify=False,
         )
+        target_key = _format_iso_date(target_date)
         content_type = (response.headers.get("content-type") or "").lower()
         if response.status_code != 200 or "json" not in content_type:
             log.warning(
                 "TWSE cash summary unavailable for %s: status=%s content-type=%s",
-                _format_iso_date(target_date),
+                target_key,
                 response.status_code,
                 response.headers.get("content-type"),
             )
-            return []
+            return self._fallback_cash_summary(
+                target_key,
+                f"TWSE 主來源不可用（status={response.status_code}）",
+            )
         try:
             payload = response.json()
         except requests.exceptions.JSONDecodeError:
             log.warning(
                 "TWSE cash summary returned non-JSON body for %s",
-                _format_iso_date(target_date),
+                target_key,
             )
-            return []
+            return self._fallback_cash_summary(target_key, "TWSE 主來源回傳非 JSON 內容")
         if not isinstance(payload, dict):
             log.warning(
                 "TWSE cash summary returned unexpected payload type for %s",
-                _format_iso_date(target_date),
+                target_key,
             )
-            return []
+            return self._fallback_cash_summary(target_key, "TWSE 主來源回傳格式異常")
         rows = []
         for raw_row in payload.get("data") or []:
             if len(raw_row) < 4:
@@ -549,7 +557,25 @@ class TaifexFetcher:
                     "net_amount": _safe_int(raw_row[3]),
                 }
             )
-        return rows
+        if rows:
+            self._cash_summary_cache[target_key] = rows
+            self._latest_cash_summary_snapshot = (target_key, rows)
+            return rows, {"source": "twse", "warning": None}
+        return self._fallback_cash_summary(target_key, "TWSE 主來源未提供現貨三大法人資料")
+
+    def _fallback_cash_summary(self, target_key: str, reason: str) -> Tuple[List[Dict], Dict[str, Optional[str]]]:
+        cached = self._cash_summary_cache.get(target_key)
+        if cached:
+            warning = f"{reason}，已改用 {target_key} 的快取現貨摘要"
+            return cached, {"source": "twse-cache", "warning": warning}
+
+        if self._latest_cash_summary_snapshot:
+            snapshot_date, rows = self._latest_cash_summary_snapshot
+            warning = f"{reason}，已改用最近可用的現貨摘要（{snapshot_date}）"
+            return rows, {"source": "twse-last-known", "warning": warning}
+
+        warning = f"{reason}，目前無可用的現貨三大法人備援資料"
+        return [], {"source": "unavailable", "warning": warning}
 
     def _apply_changes(
         self,
