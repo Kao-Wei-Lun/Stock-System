@@ -74,6 +74,7 @@
                 :syncing-current="syncingCurrent"
                 :compare-series="compareSeries"
                 :comparison-mode="comparisonMode"
+                :institutional-overlay="institutionalOverlay"
                 :is-fullscreen="chartFullscreen"
                 @set-tool="setTool"
                 @add-signal="addSignal"
@@ -251,6 +252,7 @@ const {
   backtestForm,
   backtestResult,
   indicatorSnapshot,
+  institutionalOverlay,
   backendUrl,
   searchSymbols,
   closeSearch,

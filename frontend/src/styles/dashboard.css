@@ -303,18 +303,31 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .institutional-table th{position:sticky;top:0;background:rgba(11,17,28,.98);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;z-index:1;}
 .institutional-table tr:hover td{background:rgba(17,25,39,.7);}
 .institutional-empty{display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--text3);font-size:11px;}
+.institutional-empty-compact{min-height:88px;}
+.institutional-summary-list{display:flex;flex-direction:column;gap:10px;list-style:none;padding-left:0;color:var(--text2);font-size:11px;line-height:1.75;}
+.institutional-summary-list li{position:relative;padding-left:16px;}
+.institutional-summary-list li::before{content:"•";position:absolute;left:0;top:0;color:var(--cyan);}
+.institutional-alert-badge{display:inline-flex;align-items:center;justify-content:center;padding:2px 7px;border-radius:999px;font-size:9px;border:1px solid transparent;}
+.institutional-alert-badge.medium{color:var(--amber);background:rgba(245,166,35,.14);border-color:rgba(245,166,35,.32);}
+.institutional-alert-badge.high{color:var(--red);background:rgba(255,77,106,.14);border-color:rgba(255,77,106,.32);}
 
 .trend-card{background:rgba(13,20,32,.96);border:1px solid var(--border2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:250px;}
 .trend-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
 .trend-legend{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
 .trend-legend-item{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:rgba(8,12,18,.72);border:1px solid rgba(36,52,71,.85);font-size:10px;color:var(--text2);}
 .trend-legend-dot{width:8px;height:8px;border-radius:50%;}
+.trend-chart-wrap{position:relative;}
 .trend-chart{width:100%;height:210px;border-radius:8px;background:linear-gradient(180deg,rgba(8,12,18,.98) 0%,rgba(9,15,24,.98) 100%);}
 .trend-grid{stroke:rgba(36,52,71,.66);stroke-width:1;}
 .trend-grid-vertical{stroke-dasharray:4 4;}
 .trend-axis-text,.trend-date-text{fill:var(--text3);font-size:10px;font-family:'JetBrains Mono',monospace;}
 .trend-line{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}
 .trend-band{fill:rgba(59,139,255,.14);stroke:rgba(59,139,255,.55);stroke-width:1.2;}
+.trend-hover-line{stroke:rgba(255,209,102,.95);stroke-width:1.1;stroke-dasharray:5 4;}
+.trend-hover-dot{stroke:rgba(8,12,18,.95);stroke-width:1.2;}
+.trend-tooltip{position:absolute;min-width:156px;max-width:220px;padding:10px 12px;border-radius:10px;background:rgba(8,12,18,.96);border:1px solid rgba(255,209,102,.28);box-shadow:0 12px 28px rgba(0,0,0,.34);pointer-events:none;z-index:4;}
+.trend-tooltip-title{font-size:10px;color:var(--text3);margin-bottom:6px;}
+.trend-tooltip-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;color:var(--text2);line-height:1.5;}
 
 /* notifications */
 .notif-panel{position:fixed;top:56px;right:8px;width:300px;z-index:1000;display:flex;flex-direction:column;gap:5px;pointer-events:none;}

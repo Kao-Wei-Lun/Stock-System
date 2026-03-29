@@ -32,6 +32,19 @@ const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional"];
 const INSTITUTIONAL_HISTORY_OPTIONS = [10, 20, 30, 60, 90];
+const FUTURES_OVERLAY_TICKER_MAP = {
+  "^TWII": "臺股期貨",
+  "0050.TW": "臺股期貨",
+  "^TWOII": "櫃買指數期貨",
+};
+const FUTURES_DEFAULT_SPOT_TICKER_MAP = {
+  "臺股期貨": "^TWII",
+  "小型臺指期貨": "^TWII",
+  "微型臺指期貨": "^TWII",
+  "臺灣永續期貨": "^TWII",
+  "臺灣生技期貨": "^TWII",
+  "櫃買指數期貨": "^TWOII",
+};
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
   ma20: true,
@@ -486,6 +499,54 @@ export function useDashboard() {
     currentPeriod.value,
     klineDisplayMode.value,
   ));
+  const institutionalOverlay = computed(() => {
+    const mappedCommodity = FUTURES_OVERLAY_TICKER_MAP[currentTicker.value];
+    if (!mappedCommodity) return null;
+
+    const insightMatch = institutionalInsights.value?.futures_commodity === mappedCommodity
+      ? institutionalInsights.value
+      : null;
+    const dataMatch = institutionalData.value?.default_futures_commodity === mappedCommodity
+      ? institutionalData.value
+      : null;
+    const futuresCosts = insightMatch?.cost_estimates?.futures || dataMatch?.cost_estimates?.futures || null;
+    if (!futuresCosts) return null;
+
+    const bandLow = futuresCosts.band_low == null ? Number.NaN : Number(futuresCosts.band_low);
+    const bandHigh = futuresCosts.band_high == null ? Number.NaN : Number(futuresCosts.band_high);
+    const institutionPrice = futuresCosts.institution_estimate?.price == null
+      ? Number.NaN
+      : Number(futuresCosts.institution_estimate.price);
+    const retailPrice = futuresCosts.retail_estimate?.price == null
+      ? Number.NaN
+      : Number(futuresCosts.retail_estimate.price);
+    const values = [bandLow, bandHigh, institutionPrice, retailPrice].filter((value) => Number.isFinite(value));
+    if (!values.length) return null;
+
+    const spotTicker = FUTURES_DEFAULT_SPOT_TICKER_MAP[mappedCommodity];
+    const spot = (institutionalData.value?.spot_reference || []).find((item) => item.ticker === spotTicker) || null;
+    const spotPrice = spot?.price == null ? Number.NaN : Number(spot.price);
+    const basis = Number.isFinite(spotPrice) && Number.isFinite(institutionPrice)
+      ? institutionPrice - spotPrice
+      : null;
+
+    return {
+      commodity: mappedCommodity,
+      label: `${mappedCommodity} 主力成本帶`,
+      bandLow: Number.isFinite(bandLow) ? bandLow : null,
+      bandHigh: Number.isFinite(bandHigh) ? bandHigh : null,
+      institutionPrice: Number.isFinite(institutionPrice) ? institutionPrice : null,
+      retailPrice: Number.isFinite(retailPrice) ? retailPrice : null,
+      spotTicker: spot?.ticker || null,
+      spotLabel: spot?.label || null,
+      spotPrice: Number.isFinite(spotPrice) ? spotPrice : null,
+      basis,
+      basisPct: Number.isFinite(basis) && spotPrice
+        ? (basis / spotPrice) * 100
+        : null,
+      resolvedDate: insightMatch?.resolved_date || dataMatch?.resolved_date || null,
+    };
+  });
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
     () => userWatchGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
@@ -960,6 +1021,7 @@ export function useDashboard() {
     crosshair.visible = false;
     wsSend({ action: "subscribe", ticker: normalized });
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
+    void ensureInstitutionalOverlayForTicker(normalized);
   }
 
   function setTimeframe(timeframe) {
@@ -1026,6 +1088,28 @@ export function useDashboard() {
     } finally {
       institutionalInsightsLoading.value = false;
     }
+  }
+
+  async function ensureInstitutionalOverlayForTicker(ticker = currentTicker.value) {
+    const normalizedTicker = normalizeTicker(ticker);
+    const mappedCommodity = FUTURES_OVERLAY_TICKER_MAP[normalizedTicker];
+    if (!mappedCommodity) return;
+
+    if (!institutionalData.value && !institutionalLoading.value) {
+      await loadInstitutionalData(institutionalDate.value);
+    }
+
+    const hasMatchingInsights = institutionalInsights.value?.futures_commodity === mappedCommodity;
+    const hasMatchingDefault = institutionalData.value?.default_futures_commodity === mappedCommodity;
+    if (hasMatchingInsights || hasMatchingDefault || institutionalInsightsLoading.value) return;
+
+    institutionalFuturesCommodity.value = mappedCommodity;
+    await loadInstitutionalInsights(
+      institutionalDate.value,
+      mappedCommodity,
+      institutionalOptionsCommodity.value || institutionalData.value?.default_options_commodity || "",
+      institutionalHistoryDays.value,
+    );
   }
 
   async function setKlineDisplayMode(mode) {
@@ -1723,6 +1807,7 @@ export function useDashboard() {
       await loadInstitutionalData();
     }
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
+    void ensureInstitutionalOverlayForTicker(currentTicker.value);
     watchlistTimer = window.setInterval(loadWatchlist, 60000);
   });
 
@@ -1800,6 +1885,7 @@ export function useDashboard() {
     backtestForm,
     backtestResult,
     indicatorSnapshot,
+    institutionalOverlay,
     backendUrl,
     searchSymbols,
     closeSearch,

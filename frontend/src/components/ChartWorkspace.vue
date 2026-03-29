@@ -101,6 +101,10 @@
       <div class="meta-chip">{{ zoomLabel }}</div>
       <div class="meta-chip">{{ yScaleLabel }}</div>
       <div class="meta-chip">{{ priceScaleModeLabel }}</div>
+      <div v-if="institutionalOverlay" class="meta-chip">
+        {{ institutionalOverlay.label }} / Basis
+        {{ institutionalOverlay.basis == null ? "—" : `${institutionalOverlay.basis >= 0 ? "+" : ""}${fmtPrice(institutionalOverlay.basis)} (${institutionalOverlay.basisPct >= 0 ? "+" : ""}${Number(institutionalOverlay.basisPct || 0).toFixed(2)}%)` }}
+      </div>
       <div class="meta-chip is-hint">{{ interactionHint }}</div>
     </div>
 
@@ -333,6 +337,7 @@ const props = defineProps({
   syncingCurrent: { type: Boolean, required: true },
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
+  institutionalOverlay: { type: Object, default: null },
   isFullscreen: { type: Boolean, default: false },
 });
 

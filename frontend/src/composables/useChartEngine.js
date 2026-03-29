@@ -1013,6 +1013,60 @@ export function useChartEngine({
     ctx.fillText(`${prefix}${price.toFixed(2)}`, width - PAD.right + 3, y + 3);
   };
 
+  const drawInstitutionalCostBand = (ctx, canvas, scale, overlay) => {
+    if (!overlay) return;
+    const width = canvasWidth(canvas);
+    const plotWidth = width - PAD.left - PAD.right;
+    const bandLow = Number(overlay.bandLow);
+    const bandHigh = Number(overlay.bandHigh);
+    const institutionPrice = Number(overlay.institutionPrice);
+    const retailPrice = Number(overlay.retailPrice);
+
+    if (Number.isFinite(bandLow) && Number.isFinite(bandHigh)) {
+      const top = Math.min(scale(bandHigh), scale(bandLow));
+      const bottom = Math.max(scale(bandHigh), scale(bandLow));
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 209, 102, 0.10)";
+      ctx.strokeStyle = "rgba(255, 209, 102, 0.46)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.fillRect(PAD.left, top, plotWidth, Math.max(1, bottom - top));
+      ctx.strokeRect(PAD.left, top, plotWidth, Math.max(1, bottom - top));
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    if (Number.isFinite(institutionPrice)) {
+      drawPriceLabel(ctx, canvas, institutionPrice, scale, "#ffd166", "法 ");
+    }
+    if (Number.isFinite(retailPrice)) {
+      drawPriceLabel(ctx, canvas, retailPrice, scale, "#ff8c42", "散 ");
+    }
+
+    const basisText = Number.isFinite(Number(overlay.basis))
+      ? `Basis ${Number(overlay.basis) >= 0 ? "+" : ""}${Number(overlay.basis).toFixed(2)}`
+      : (overlay.resolvedDate ? `資料日 ${overlay.resolvedDate}` : "");
+    const badgeLines = [
+      overlay.label,
+      [overlay.spotLabel, basisText].filter(Boolean).join(" / "),
+    ].filter(Boolean);
+    const badgeHeight = 8 + badgeLines.length * 12;
+    const badgeWidth = Math.min(plotWidth - 12, Math.max(170, badgeLines.reduce((maxWidth, line) => Math.max(maxWidth, line.length * 7.2), 0) + 16));
+
+    ctx.save();
+    ctx.fillStyle = "rgba(13,20,32,0.82)";
+    ctx.strokeStyle = "rgba(255,209,102,0.34)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(PAD.left + 8, PAD.top + 8, badgeWidth, badgeHeight);
+    ctx.strokeRect(PAD.left + 8, PAD.top + 8, badgeWidth, badgeHeight);
+    ctx.font = "10px JetBrains Mono";
+    badgeLines.forEach((line, index) => {
+      ctx.fillStyle = index === 0 ? "#ffd166" : "#8ba3c0";
+      ctx.fillText(line, PAD.left + 16, PAD.top + 22 + index * 12);
+    });
+    ctx.restore();
+  };
+
   const drawTrendLine = (ctx, layout, drawing, scale, color = "#00d4ff", dash = []) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = getDrawingWidth(drawing, 1.5);
@@ -1556,6 +1610,14 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       overlayValues.push(donchianSlice.map((item) => item.l));
       overlayValues.push(donchianSlice.map((item) => item.m));
     }
+    if (props.institutionalOverlay) {
+      overlayValues.push([
+        props.institutionalOverlay.bandLow,
+        props.institutionalOverlay.bandHigh,
+        props.institutionalOverlay.institutionPrice,
+        props.institutionalOverlay.retailPrice,
+      ]);
+    }
     props.drawings.forEach((drawing) => {
       if (!isDrawingHidden(drawing)) overlayValues.push(getDrawingPriceValues(drawing));
     });
@@ -1673,6 +1735,8 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       drawLine(ctx, superTrendUp, layout.barX, scale, "#00d9a3", 1.7);
       drawLine(ctx, superTrendDown, layout.barX, scale, "#ff4d6a", 1.7);
     }
+
+    drawInstitutionalCostBand(ctx, canvas, scale, props.institutionalOverlay);
 
     props.drawings.forEach((drawing) => {
       if (isDrawingHidden(drawing)) return;

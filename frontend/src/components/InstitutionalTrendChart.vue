@@ -19,7 +19,14 @@
     </div>
 
     <div v-if="!points.length" class="institutional-empty">尚無趨勢資料</div>
-    <svg v-else class="trend-chart" viewBox="0 0 640 220" preserveAspectRatio="none">
+    <div
+      v-else
+      ref="chartWrapRef"
+      class="trend-chart-wrap"
+      @mousemove="handleMouseMove"
+      @mouseleave="clearHover"
+    >
+      <svg class="trend-chart" viewBox="0 0 640 220" preserveAspectRatio="none">
       <path
         v-if="bandPath"
         :d="bandPath"
@@ -54,6 +61,26 @@
         :style="{ stroke: series.color }"
       />
 
+      <g v-if="hoverIndex != null">
+        <line
+          :x1="scaleX(hoverIndex)"
+          y1="16"
+          :x2="scaleX(hoverIndex)"
+          y2="192"
+          class="trend-hover-line"
+        />
+        <circle
+          v-for="series in visibleSeries"
+          :key="`dot-${series.key}`"
+          v-if="hoverValue(series.key) != null"
+          :cx="scaleX(hoverIndex)"
+          :cy="scaleY(hoverValue(series.key))"
+          r="3.5"
+          class="trend-hover-dot"
+          :style="{ fill: series.color }"
+        />
+      </g>
+
       <g v-for="mark in dateMarks" :key="mark.index">
         <line
           :x1="scaleX(mark.index)"
@@ -71,12 +98,32 @@
           {{ mark.label }}
         </text>
       </g>
-    </svg>
+      </svg>
+
+      <div v-if="hoverPoint" class="trend-tooltip" :style="tooltipStyle">
+        <div class="trend-tooltip-title">{{ hoverPoint.date }}</div>
+        <div v-for="series in visibleSeries" :key="`tip-${series.key}`" class="trend-tooltip-row">
+          <span>
+            <span class="trend-legend-dot" :style="{ background: series.color }"></span>
+            {{ series.label }}
+          </span>
+          <strong>{{ formatValue(hoverPoint[series.key]) }}</strong>
+        </div>
+        <div v-if="bandMinKey && hoverPoint[bandMinKey] != null" class="trend-tooltip-row">
+          <span>成本帶低</span>
+          <strong>{{ formatValue(hoverPoint[bandMinKey]) }}</strong>
+        </div>
+        <div v-if="bandMaxKey && hoverPoint[bandMaxKey] != null" class="trend-tooltip-row">
+          <span>成本帶高</span>
+          <strong>{{ formatValue(hoverPoint[bandMaxKey]) }}</strong>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -87,6 +134,10 @@ const props = defineProps({
   bandMaxKey: { type: String, default: "" },
   valueFormat: { type: String, default: "number" },
 });
+
+const chartWrapRef = ref(null);
+const hoverIndex = ref(null);
+const hoverLeft = ref(0);
 
 const CHART_LEFT = 44;
 const CHART_RIGHT = 620;
@@ -178,6 +229,18 @@ const bandPath = computed(() => {
   return `M ${topPoints.join(" L ")} L ${bottomPoints.join(" L ")} Z`;
 });
 
+const hoverPoint = computed(() => (
+  hoverIndex.value == null ? null : (props.points[hoverIndex.value] || null)
+));
+
+const tooltipStyle = computed(() => {
+  const left = hoverLeft.value > 420 ? hoverLeft.value - 180 : hoverLeft.value + 14;
+  return {
+    left: `${Math.max(8, left)}px`,
+    top: "10px",
+  };
+});
+
 function scaleX(index) {
   if (props.points.length <= 1) return (CHART_LEFT + CHART_RIGHT) / 2;
   const width = CHART_RIGHT - CHART_LEFT;
@@ -202,6 +265,12 @@ function linePath(key) {
   return segments.join(" ");
 }
 
+function hoverValue(key) {
+  if (hoverIndex.value == null) return null;
+  const value = Number(props.points[hoverIndex.value]?.[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
 function formatDateLabel(value) {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
@@ -221,5 +290,18 @@ function formatValue(value) {
     return `${numeric >= 0 ? "+" : "-"}${Math.abs(numeric).toFixed(1)}百萬`;
   }
   return `${numeric >= 0 ? "+" : ""}${Math.round(numeric).toLocaleString()}`;
+}
+
+function handleMouseMove(event) {
+  const chart = chartWrapRef.value;
+  if (!chart || !props.points.length) return;
+  const rect = chart.getBoundingClientRect();
+  const ratio = Math.min(Math.max((event.clientX - rect.left) / Math.max(rect.width, 1), 0), 1);
+  hoverIndex.value = Math.min(props.points.length - 1, Math.max(0, Math.round(ratio * (props.points.length - 1))));
+  hoverLeft.value = event.clientX - rect.left;
+}
+
+function clearHover() {
+  hoverIndex.value = null;
 }
 </script>
