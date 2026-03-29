@@ -138,12 +138,12 @@
         </div>
         <div v-else style="color:var(--red);font-size:11px">{{ dbStatsError || "載入中..." }}</div>
       </div>
-      <button class="sync-btn" :disabled="syncingAll" @click="$emit('sync-all')">{{ syncingAll ? "↻ 同步中..." : "↻ 同步所有股票最新資料" }}</button>
+      <button class="sync-btn" :disabled="syncingAll" @click="$emit('sync-all')">{{ syncingAll ? "↻ 同步中..." : "↻ 同步股票與大盤最新資料" }}</button>
       <div style="margin-top:10px;font-size:10px;color:var(--text3);line-height:1.8">
         資料庫：<span style="color:var(--text2)">MySQL / quantvision</span><br>
         資料來源：<span style="color:var(--text2)">Yahoo Finance</span><br>
-        更新頻率：<span style="color:var(--text2)">每 15 秒輪詢</span><br>
-        歷史資料：<span style="color:var(--text2)">最多 2 年</span>
+        更新頻率：<span style="color:var(--text2)">即時輪詢 + 每日自動更新</span><br>
+        同步範圍：<span style="color:var(--text2)">自選股群組與全球大盤群組</span>
       </div>
     </div>
   </div>

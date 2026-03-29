@@ -8,8 +8,9 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, time as time_of_day, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import load_dotenv
@@ -47,6 +48,16 @@ INSTITUTIONAL_AUTO_SYNC_ENABLED = os.getenv("INSTITUTIONAL_AUTO_SYNC_ENABLED", "
     "yes",
     "on",
 }
+LATEST_DATA_SYNC_PERIOD = os.getenv("LATEST_DATA_SYNC_PERIOD", "1y").strip().lower() or "1y"
+LATEST_DATA_SYNC_INTERVAL = os.getenv("LATEST_DATA_SYNC_INTERVAL", "1d").strip().lower() or "1d"
+LATEST_DATA_SYNC_ON_STARTUP = os.getenv("LATEST_DATA_SYNC_ON_STARTUP", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
+DAILY_LATEST_SYNC_TIME_RAW = os.getenv("DAILY_LATEST_SYNC_TIME", "18:10").strip() or "18:10"
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
@@ -131,6 +142,8 @@ TAIFEX_SPOT_REFERENCE = [
 ]
 
 FULL_HISTORY_PERIODS = {"10y", "max"}
+APP_TZ = ZoneInfo(APP_TIMEZONE)
+TRACKED_SYNC_LOCK = asyncio.Lock()
 
 
 def _period_to_since(period: str):
@@ -146,6 +159,22 @@ def _period_to_since(period: str):
     if period.endswith("d") and period[:-1].isdigit():
         return datetime.utcnow() - timedelta(days=int(period[:-1]))
     return datetime.utcnow() - timedelta(days=365)
+
+
+def _parse_daily_sync_time(value: str) -> time_of_day:
+    try:
+        hour_text, minute_text = value.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return time_of_day(hour=hour, minute=minute)
+    except (TypeError, ValueError):
+        pass
+    log.warning("Invalid DAILY_LATEST_SYNC_TIME=%s, fallback to 18:10", value)
+    return time_of_day(hour=18, minute=10)
+
+
+DAILY_LATEST_SYNC_TIME = _parse_daily_sync_time(DAILY_LATEST_SYNC_TIME_RAW)
 
 
 def _row_date_to_datetime(row_date):
@@ -227,6 +256,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(startup_institutional_snapshot())
     else:
         log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
+    asyncio.create_task(daily_latest_sync_loop())
     asyncio.create_task(realtime_polling_loop())
     yield
     await db.close()
@@ -296,6 +326,104 @@ async def startup_institutional_snapshot():
         )
     except Exception as exc:
         log.warning("Institutional snapshot sync failed: %s", exc)
+
+
+async def get_tracked_sync_tickers() -> list[str]:
+    groups = await db.get_watchlist_groups()
+    tickers = [
+        normalize_ticker(item["ticker"])
+        for group in groups
+        for item in group.get("items", [])
+        if item.get("ticker")
+    ]
+    if not tickers:
+        return list(STARTUP_DOWNLOAD_TICKERS)
+    return list(dict.fromkeys(tickers))
+
+
+async def sync_tracked_market_data(
+    period: str = LATEST_DATA_SYNC_PERIOD,
+    interval: str = LATEST_DATA_SYNC_INTERVAL,
+    reason: str = "manual",
+) -> dict:
+    normalized_period = (period or LATEST_DATA_SYNC_PERIOD).lower()
+    normalized_interval = (interval or LATEST_DATA_SYNC_INTERVAL).lower()
+    tickers = await get_tracked_sync_tickers()
+
+    async with TRACKED_SYNC_LOCK:
+        log.info(
+            "Tracked market sync started: reason=%s tickers=%s period=%s interval=%s",
+            reason,
+            len(tickers),
+            normalized_period,
+            normalized_interval,
+        )
+        successes = []
+        failures = []
+        total_rows = 0
+        for index, ticker in enumerate(tickers):
+            try:
+                synced = await fetcher.fetch_and_store(
+                    ticker,
+                    period=normalized_period,
+                    interval=normalized_interval,
+                    include_info=False,
+                )
+                total_rows += synced
+                successes.append({"ticker": ticker, "synced": synced})
+                await db.log_sync(ticker, "success", synced, f"{reason}:{normalized_period}/{normalized_interval}")
+            except Exception as exc:
+                message = str(exc)
+                failures.append({"ticker": ticker, "message": message})
+                await db.log_sync(ticker, "error", 0, f"{reason}:{message[:500]}")
+                log.warning("Tracked sync failed for %s (%s): %s", ticker, reason, exc)
+            if index < len(tickers) - 1:
+                await asyncio.sleep(STARTUP_DOWNLOAD_DELAY_SECONDS)
+
+        log.info(
+            "Tracked market sync finished: reason=%s success=%s failure=%s rows=%s",
+            reason,
+            len(successes),
+            len(failures),
+            total_rows,
+        )
+        return {
+            "reason": reason,
+            "period": normalized_period,
+            "interval": normalized_interval,
+            "tickers": tickers,
+            "success_count": len(successes),
+            "failure_count": len(failures),
+            "total_rows": total_rows,
+            "results": successes,
+            "failures": failures,
+        }
+
+
+async def daily_latest_sync_loop():
+    await asyncio.sleep(15)
+
+    if LATEST_DATA_SYNC_ON_STARTUP:
+        try:
+            await sync_tracked_market_data(reason="startup-latest")
+        except Exception as exc:
+            log.warning("Startup latest market sync failed: %s", exc)
+
+    while True:
+        now = datetime.now(APP_TZ)
+        next_run_date = now.date()
+        next_run = datetime.combine(next_run_date, DAILY_LATEST_SYNC_TIME, tzinfo=APP_TZ)
+        if now >= next_run:
+            next_run_date += timedelta(days=1)
+            next_run = datetime.combine(next_run_date, DAILY_LATEST_SYNC_TIME, tzinfo=APP_TZ)
+
+        sleep_seconds = max(60, int((next_run - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+
+        try:
+            await sync_tracked_market_data(reason="daily-latest")
+        except Exception as exc:
+            log.warning("Daily latest market sync failed: %s", exc)
 
 
 async def realtime_polling_loop():
@@ -498,6 +626,14 @@ async def sync_ticker(
     interval = (interval or "1d").lower()
     count = await fetcher.fetch_and_store(ticker, period=period, interval=interval, include_info=False)
     return {"ticker": ticker, "synced": count, "period": period, "interval": interval}
+
+
+@app.post("/api/sync/all")
+async def sync_all_tracked(
+    period: str = Query(LATEST_DATA_SYNC_PERIOD, description="1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query(LATEST_DATA_SYNC_INTERVAL, description="1d 1wk 1mo"),
+):
+    return await sync_tracked_market_data(period=period, interval=interval, reason="manual-all")
 
 
 @app.get("/api/search")

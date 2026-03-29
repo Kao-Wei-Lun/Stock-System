@@ -1652,12 +1652,36 @@ export function useDashboard() {
     }
   }
 
-  function syncAll() {
+  async function syncAll() {
     syncingAll.value = true;
-    pushNotification({ icon: "📥", title: "全量同步開始", msg: "這可能需要幾分鐘，請稍候" });
-    window.setTimeout(() => {
+    pushNotification({ icon: "📥", title: "全量同步開始", msg: "正在同步股票與大盤最新資料，這可能需要幾分鐘" });
+    try {
+      const result = await apiFetch("/api/sync/all?period=1y&interval=1d", {
+        method: "POST",
+        retries: 1,
+        retryDelayMs: 1200,
+      });
+      await Promise.all([
+        loadWatchlist(),
+        loadDbStats(),
+        loadKline(currentTicker.value, currentPeriod.value, currentInterval.value),
+      ]);
+      pushNotification({
+        icon: result.failure_count ? "⚠️" : "✅",
+        title: result.failure_count ? "同步部分完成" : "同步完成",
+        msg: `已同步 ${result.success_count} 檔，失敗 ${result.failure_count} 檔，共更新 ${Number(result.total_rows || 0).toLocaleString()} 筆資料`,
+        type: result.failure_count ? "warning" : "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "⚠️",
+        title: "全量同步失敗",
+        msg: error.message || "請稍後再試",
+        type: "error",
+      });
+    } finally {
       syncingAll.value = false;
-    }, 30000);
+    }
   }
 
   async function searchSymbols(query) {
