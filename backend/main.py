@@ -25,6 +25,7 @@ from data_fetcher import DataFetcher, normalize_ticker
 from database import DEFAULT_OWNER_ID, db, init_db
 from quote_provider import YahooFinanceQuoteProvider
 from taifex_fetcher import taifex_fetcher
+from tw_symbol_lookup import get_taiwan_ticker_name, search_taiwan_tickers
 from ws_manager import ConnectionManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -564,16 +565,21 @@ async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
     return await db.upsert_market_quote(quote)
 
 
+def resolve_display_name(ticker: str, info: dict | None = None) -> str:
+    return (
+        DISPLAY_NAME_OVERRIDES.get(ticker)
+        or get_taiwan_ticker_name(ticker)
+        or (info.get("name") if info else None)
+        or ticker
+    )
+
+
 async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
     row = await db.get_latest_ohlcv(ticker)
     info = await db.get_stock_info(ticker)
     prev = await db.get_prev_close(ticker) if row else None
     chg_pct = ((row["close"] - prev) / prev * 100) if row and prev else 0
-    display_name = (
-        DISPLAY_NAME_OVERRIDES.get(ticker)
-        or (info.get("name") if info else None)
-        or ticker
-    )
+    display_name = resolve_display_name(ticker, info)
 
     return {
         "ticker": ticker,
@@ -864,7 +870,36 @@ async def sync_all_tracked(
 
 @app.get("/api/search")
 async def search(q: str = Query(..., min_length=1)):
-    return await db.search_tickers(q.upper())
+    results = []
+    seen = set()
+
+    for row in await db.search_tickers(q.upper()):
+        ticker = normalize_ticker(row.get("ticker", ""))
+        if not ticker or ticker in seen:
+            continue
+        results.append(
+            {
+                "ticker": ticker,
+                "name": resolve_display_name(ticker, row),
+            }
+        )
+        seen.add(ticker)
+
+    for row in search_taiwan_tickers(q):
+        ticker = normalize_ticker(row.get("ticker", ""))
+        if not ticker or ticker in seen:
+            continue
+        results.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name") or ticker,
+            }
+        )
+        seen.add(ticker)
+        if len(results) >= 20:
+            break
+
+    return results[:20]
 
 
 @app.get("/api/db/stats")

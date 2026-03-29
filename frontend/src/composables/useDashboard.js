@@ -1900,9 +1900,10 @@ export function useDashboard() {
   async function submitSearch() {
     const ticker = normalizeTicker(searchQuery.value);
     if (!ticker) return;
+    const matched = searchResults.value.find((item) => normalizeTicker(item.ticker) === ticker);
     searchQuery.value = "";
     searchOpen.value = false;
-    await selectTicker(ticker, ticker);
+    await selectTicker(ticker, matched?.name || ticker);
   }
 
   async function selectSearchResult(result) {
