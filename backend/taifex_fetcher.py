@@ -17,6 +17,7 @@ import urllib3
 
 TAIFEX_BASE_URL = "https://www.taifex.com.tw/cht/3"
 TWSE_CASH_SUMMARY_URL = "https://www.twse.com.tw/rwd/zh/fund/BFI82U"
+FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 CACHE_TTL_SECONDS = 300
 MAX_LOOKBACK_DAYS = 180
@@ -304,7 +305,7 @@ class TaifexFetcher:
                 row for row in self._fetch_call_put_rows(current_date)
                 if row["commodity"] == options_commodity
             ]
-            cash_rows = self._aggregate_cash_summary(self._fetch_twse_cash_summary(current_date))
+            cash_rows = self._aggregate_cash_summary(self._fetch_twse_cash_summary(current_date)[0])
             costs = self._build_cost_estimates(futures_commodity, options_commodity, futures_rows, call_put_rows)
 
             futures_oi_row = {"date": _format_iso_date(current_date)}
@@ -508,6 +509,7 @@ class TaifexFetcher:
     def _fetch_twse_cash_summary(self, target_date: Optional[date]) -> Tuple[List[Dict], Dict[str, Optional[str]]]:
         if not target_date:
             return [], {"source": "none", "warning": None}
+        target_key = _format_iso_date(target_date)
         response = requests.get(
             TWSE_CASH_SUMMARY_URL,
             params={
@@ -518,7 +520,6 @@ class TaifexFetcher:
             timeout=20,
             verify=False,
         )
-        target_key = _format_iso_date(target_date)
         content_type = (response.headers.get("content-type") or "").lower()
         if response.status_code != 200 or "json" not in content_type:
             log.warning(
@@ -527,10 +528,10 @@ class TaifexFetcher:
                 response.status_code,
                 response.headers.get("content-type"),
             )
-            return self._fallback_cash_summary(
-                target_key,
-                f"TWSE 主來源不可用（status={response.status_code}）",
-            )
+            finmind_rows, finmind_meta = self._fetch_finmind_cash_summary(target_date)
+            if finmind_rows:
+                return finmind_rows, finmind_meta
+            return self._fallback_cash_summary(target_key, f"TWSE 主來源不可用（status={response.status_code}）")
         try:
             payload = response.json()
         except requests.exceptions.JSONDecodeError:
@@ -538,12 +539,18 @@ class TaifexFetcher:
                 "TWSE cash summary returned non-JSON body for %s",
                 target_key,
             )
+            finmind_rows, finmind_meta = self._fetch_finmind_cash_summary(target_date)
+            if finmind_rows:
+                return finmind_rows, finmind_meta
             return self._fallback_cash_summary(target_key, "TWSE 主來源回傳非 JSON 內容")
         if not isinstance(payload, dict):
             log.warning(
                 "TWSE cash summary returned unexpected payload type for %s",
                 target_key,
             )
+            finmind_rows, finmind_meta = self._fetch_finmind_cash_summary(target_date)
+            if finmind_rows:
+                return finmind_rows, finmind_meta
             return self._fallback_cash_summary(target_key, "TWSE 主來源回傳格式異常")
         rows = []
         for raw_row in payload.get("data") or []:
@@ -561,7 +568,89 @@ class TaifexFetcher:
             self._cash_summary_cache[target_key] = rows
             self._latest_cash_summary_snapshot = (target_key, rows)
             return rows, {"source": "twse", "warning": None}
+        finmind_rows, finmind_meta = self._fetch_finmind_cash_summary(target_date)
+        if finmind_rows:
+            return finmind_rows, finmind_meta
         return self._fallback_cash_summary(target_key, "TWSE 主來源未提供現貨三大法人資料")
+
+    def _fetch_finmind_cash_summary(self, target_date: date) -> Tuple[List[Dict], Dict[str, Optional[str]]]:
+        target_key = _format_iso_date(target_date)
+        try:
+            response = requests.get(
+                FINMIND_API_URL,
+                params={
+                    "dataset": "TaiwanStockTotalInstitutionalInvestors",
+                    "start_date": target_key,
+                    "end_date": target_key,
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=20,
+                verify=False,
+            )
+        except requests.RequestException as exc:
+            log.warning("FinMind cash summary request failed for %s: %s", target_key, exc)
+            return [], {"source": "finmind-error", "warning": None}
+
+        content_type = (response.headers.get("content-type") or "").lower()
+        if response.status_code != 200 or "json" not in content_type:
+            log.warning(
+                "FinMind cash summary unavailable for %s: status=%s content-type=%s",
+                target_key,
+                response.status_code,
+                response.headers.get("content-type"),
+            )
+            return [], {"source": "finmind-error", "warning": None}
+        try:
+            payload = response.json()
+        except requests.exceptions.JSONDecodeError:
+            log.warning("FinMind cash summary returned non-JSON body for %s", target_key)
+            return [], {"source": "finmind-error", "warning": None}
+        if not isinstance(payload, dict) or str(payload.get("msg", "")).lower() != "success":
+            log.warning("FinMind cash summary returned unexpected payload for %s", target_key)
+            return [], {"source": "finmind-error", "warning": None}
+
+        buckets = {
+            "外資": {"buy_amount": 0, "sell_amount": 0},
+            "投信": {"buy_amount": 0, "sell_amount": 0},
+            "自營商": {"buy_amount": 0, "sell_amount": 0},
+        }
+        name_map = {
+            "Foreign_Investor": "外資",
+            "Foreign_Dealer_Self": "外資",
+            "Investment_Trust": "投信",
+            "Dealer_self": "自營商",
+            "Dealer_Hedging": "自營商",
+        }
+        for row in payload.get("data") or []:
+            normalized = name_map.get(str(row.get("name", "")).strip())
+            if not normalized:
+                continue
+            buckets[normalized]["buy_amount"] += _safe_int(row.get("buy"))
+            buckets[normalized]["sell_amount"] += _safe_int(row.get("sell"))
+
+        rows = []
+        for institution in INSTITUTION_ORDER:
+            buy_amount = buckets[institution]["buy_amount"]
+            sell_amount = buckets[institution]["sell_amount"]
+            if not buy_amount and not sell_amount:
+                continue
+            rows.append(
+                {
+                    "institution": institution,
+                    "buy_amount": buy_amount,
+                    "sell_amount": sell_amount,
+                    "net_amount": buy_amount - sell_amount,
+                }
+            )
+        if not rows:
+            return [], {"source": "finmind-empty", "warning": None}
+
+        self._cash_summary_cache[target_key] = rows
+        self._latest_cash_summary_snapshot = (target_key, rows)
+        return rows, {
+            "source": "finmind",
+            "warning": "TWSE 主來源暫時不可用，已改用 FinMind 現貨法人摘要",
+        }
 
     def _fallback_cash_summary(self, target_key: str, reason: str) -> Tuple[List[Dict], Dict[str, Optional[str]]]:
         cached = self._cash_summary_cache.get(target_key)
