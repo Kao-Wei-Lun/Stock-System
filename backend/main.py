@@ -41,6 +41,12 @@ STARTUP_DOWNLOAD_ENABLED = os.getenv("STARTUP_DOWNLOAD_ENABLED", "false").strip(
     "yes",
     "on",
 }
+INSTITUTIONAL_AUTO_SYNC_ENABLED = os.getenv("INSTITUTIONAL_AUTO_SYNC_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
@@ -217,6 +223,10 @@ async def lifespan(app: FastAPI):
             "Startup Yahoo history prefetch skipped "
             "(STARTUP_DOWNLOAD_ENABLED=false)."
         )
+    if INSTITUTIONAL_AUTO_SYNC_ENABLED:
+        asyncio.create_task(startup_institutional_snapshot())
+    else:
+        log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
     asyncio.create_task(realtime_polling_loop())
     yield
     await db.close()
@@ -274,6 +284,18 @@ async def startup_download():
         except Exception as exc:
             log.warning("  %s download failed: %s", ticker, exc)
     log.info("History download finished")
+
+
+async def startup_institutional_snapshot():
+    try:
+        payload = await taifex_fetcher.ensure_daily_snapshot()
+        log.info(
+            "Institutional snapshot ready: query=%s resolved=%s",
+            payload.get("query_date"),
+            payload.get("resolved_date"),
+        )
+    except Exception as exc:
+        log.warning("Institutional snapshot sync failed: %s", exc)
 
 
 async def realtime_polling_loop():
@@ -491,6 +513,7 @@ async def db_stats():
 @app.get("/api/taifex/institutional")
 async def get_taifex_institutional(
     date: str | None = Query(None, description="YYYY-MM-DD"),
+    refresh: bool = Query(False, description="Force refresh from remote sources"),
 ):
     target_date = None
     if date:
@@ -499,7 +522,7 @@ async def get_taifex_institutional(
         except ValueError as exc:
             raise HTTPException(400, "date must use YYYY-MM-DD") from exc
 
-    payload = await taifex_fetcher.fetch_dashboard(target_date)
+    payload = await taifex_fetcher.fetch_dashboard(target_date, force_refresh=refresh)
 
     spot_cards = []
     for item in TAIFEX_SPOT_REFERENCE:
@@ -530,6 +553,7 @@ async def get_taifex_institutional_insights(
     futures_commodity: str | None = Query(None, description="期貨商品名稱"),
     options_commodity: str | None = Query(None, description="選擇權商品名稱"),
     days: int = Query(30, description="10 20 30 60 90"),
+    refresh: bool = Query(False, description="Force refresh from remote sources"),
 ):
     target_date = None
     if date:
@@ -543,6 +567,7 @@ async def get_taifex_institutional_insights(
         futures_commodity.strip() if futures_commodity else None,
         options_commodity.strip() if options_commodity else None,
         days,
+        force_refresh=refresh,
     )
 
 

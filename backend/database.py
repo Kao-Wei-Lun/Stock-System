@@ -3,10 +3,11 @@ Database layer backed by MySQL.
 """
 
 import asyncio
+import json
 import logging
 import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
 from dotenv import load_dotenv
@@ -171,6 +172,17 @@ class Database:
                 CONSTRAINT `fk_watchlist_items_group`
                     FOREIGN KEY (`group_id`) REFERENCES `watchlist_groups` (`id`)
                     ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            "institutional_snapshots": """
+            CREATE TABLE `institutional_snapshots` (
+                `resolved_date` DATE NOT NULL,
+                `query_date` DATE NOT NULL,
+                `payload_json` LONGTEXT NOT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`resolved_date`),
+                KEY `idx_institutional_query_date` (`query_date`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
         }
@@ -698,6 +710,105 @@ class Database:
                 rows = await cur.fetchall()
         return list(rows)
 
+    async def upsert_institutional_snapshot(self, payload: Dict[str, Any]) -> None:
+        resolved_date = payload.get("resolved_date")
+        query_date = payload.get("query_date") or resolved_date
+        if not resolved_date or not query_date:
+            raise ValueError("Institutional snapshot requires query_date and resolved_date")
+
+        sql = """
+            INSERT INTO `institutional_snapshots`
+                (`resolved_date`, `query_date`, `payload_json`)
+            VALUES (%s, %s, %s)
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `query_date` = `incoming`.`query_date`,
+                `payload_json` = `incoming`.`payload_json`
+        """
+        params = (
+            resolved_date,
+            query_date,
+            json.dumps(payload, ensure_ascii=False),
+        )
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, params)
+
+    async def get_institutional_snapshot(self, target_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
+        if target_date:
+            sql = """
+                SELECT `resolved_date`, `query_date`, `payload_json`
+                FROM `institutional_snapshots`
+                WHERE `resolved_date`<=%s
+                ORDER BY `resolved_date` DESC
+                LIMIT 1
+            """
+            params = (target_date.isoformat(),)
+        else:
+            sql = """
+                SELECT `resolved_date`, `query_date`, `payload_json`
+                FROM `institutional_snapshots`
+                ORDER BY `resolved_date` DESC
+                LIMIT 1
+            """
+            params = ()
+
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                row = await cur.fetchone()
+        return self._deserialize_institutional_snapshot(row)
+
+    async def get_institutional_snapshot_exact(self, target_date: date) -> Optional[Dict[str, Any]]:
+        sql = """
+            SELECT `resolved_date`, `query_date`, `payload_json`
+            FROM `institutional_snapshots`
+            WHERE `resolved_date`=%s
+            LIMIT 1
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, (target_date.isoformat(),))
+                row = await cur.fetchone()
+        return self._deserialize_institutional_snapshot(row)
+
+    async def get_institutional_snapshots(self, target_date: date, limit: int) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        sql = """
+            SELECT `resolved_date`, `query_date`, `payload_json`
+            FROM `institutional_snapshots`
+            WHERE `resolved_date`<=%s
+            ORDER BY `resolved_date` DESC
+            LIMIT %s
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, (target_date.isoformat(), limit))
+                rows = await cur.fetchall()
+
+        snapshots = [
+            snapshot
+            for snapshot in (
+                self._deserialize_institutional_snapshot(row)
+                for row in rows
+            )
+            if snapshot
+        ]
+        snapshots.reverse()
+        return snapshots
+
+    def _deserialize_institutional_snapshot(self, row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        payload = json.loads(row["payload_json"])
+        payload.setdefault("resolved_date", _date_to_iso(row.get("resolved_date")))
+        payload.setdefault("query_date", _date_to_iso(row.get("query_date")))
+        return payload
+
     async def get_stats(self) -> Dict:
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -718,10 +829,14 @@ class Database:
                 )
                 top = list(await cur.fetchall())
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `institutional_snapshots`")
+                institutional_snapshots = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
             "top_tickers": top,
+            "institutional_snapshots": institutional_snapshots,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -791,3 +906,13 @@ def _build_mysql_error_message(exc: Exception) -> str:
 
 def _escape_identifier(value: str) -> str:
     return value.replace("`", "``")
+
+
+def _date_to_iso(value) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)

@@ -1030,12 +1030,14 @@ export function useDashboard() {
     loadKline(currentTicker.value, timeframe.tf, currentInterval.value);
   }
 
-  async function loadInstitutionalData(dateValue = institutionalDate.value) {
+  async function loadInstitutionalData(dateValue = institutionalDate.value, forceRefresh = false) {
     institutionalLoading.value = true;
     institutionalError.value = "";
     institutionalInsightsError.value = "";
     try {
-      const payload = await apiFetch(`/api/taifex/institutional?date=${dateValue}`, {
+      const params = new URLSearchParams({ date: dateValue });
+      if (forceRefresh) params.set("refresh", "1");
+      const payload = await apiFetch(`/api/taifex/institutional?${params.toString()}`, {
         retries: 3,
         retryDelayMs: 1200,
       });
@@ -1054,6 +1056,7 @@ export function useDashboard() {
         nextFuturesCommodity,
         nextOptionsCommodity,
         institutionalHistoryDays.value,
+        forceRefresh,
       );
     } catch (error) {
       institutionalError.value = error.message || "無法取得期權法人資料";
@@ -1067,6 +1070,7 @@ export function useDashboard() {
     futuresCommodity = institutionalFuturesCommodity.value,
     optionsCommodity = institutionalOptionsCommodity.value,
     days = institutionalHistoryDays.value,
+    forceRefresh = false,
   ) {
     if (!futuresCommodity && !optionsCommodity) return;
     institutionalInsightsLoading.value = true;
@@ -1078,6 +1082,7 @@ export function useDashboard() {
       });
       if (futuresCommodity) params.set("futures_commodity", futuresCommodity);
       if (optionsCommodity) params.set("options_commodity", optionsCommodity);
+      if (forceRefresh) params.set("refresh", "1");
       const payload = await apiFetch(`/api/taifex/institutional/insights?${params.toString()}`, {
         retries: 2,
         retryDelayMs: 1200,

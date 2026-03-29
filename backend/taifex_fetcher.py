@@ -14,6 +14,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 import requests
 import urllib3
+from database import db
 
 TAIFEX_BASE_URL = "https://www.taifex.com.tw/cht/3"
 TWSE_CASH_SUMMARY_URL = "https://www.twse.com.tw/rwd/zh/fund/BFI82U"
@@ -132,15 +133,26 @@ class TaifexFetcher:
         self._cash_summary_cache: Dict[str, List[Dict]] = {}
         self._latest_cash_summary_snapshot: Optional[Tuple[str, List[Dict]]] = None
 
-    async def fetch_dashboard(self, query_date: Optional[date] = None) -> Dict:
+    async def fetch_dashboard(self, query_date: Optional[date] = None, force_refresh: bool = False) -> Dict:
         target_date = query_date or datetime.now().date()
         cache_key = _format_iso_date(target_date)
-        cached = self._dashboard_cache.get(cache_key)
-        if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
-            return cached[1]
+        if not force_refresh:
+            cached = self._dashboard_cache.get(cache_key)
+            if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
+                return cached[1]
 
-        loop = asyncio.get_event_loop()
-        payload = await loop.run_in_executor(None, self._fetch_dashboard_sync, target_date)
+            exact_snapshot = await db.get_institutional_snapshot_exact(target_date)
+            if exact_snapshot:
+                self._dashboard_cache[cache_key] = (time.time(), exact_snapshot)
+                return exact_snapshot
+
+            if target_date.weekday() >= 5:
+                stored = await db.get_institutional_snapshot(target_date)
+                if stored:
+                    self._dashboard_cache[cache_key] = (time.time(), stored)
+                    return stored
+
+        payload = await self._fetch_and_store_dashboard(target_date)
         self._dashboard_cache[cache_key] = (time.time(), payload)
         return payload
 
@@ -150,6 +162,7 @@ class TaifexFetcher:
         futures_commodity: Optional[str] = None,
         options_commodity: Optional[str] = None,
         days: int = 30,
+        force_refresh: bool = False,
     ) -> Dict:
         target_date = query_date or datetime.now().date()
         normalized_days = self._normalize_history_days(days)
@@ -161,21 +174,59 @@ class TaifexFetcher:
                 str(normalized_days),
             ]
         )
-        cached = self._history_cache.get(cache_key)
-        if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
-            return cached[1]
+        if not force_refresh:
+            cached = self._history_cache.get(cache_key)
+            if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
+                return cached[1]
 
-        loop = asyncio.get_event_loop()
-        payload = await loop.run_in_executor(
-            None,
-            self._fetch_insights_sync,
-            target_date,
-            futures_commodity,
-            options_commodity,
-            normalized_days,
+        dashboard = await self.fetch_dashboard(target_date, force_refresh=force_refresh)
+        resolved_date = datetime.strptime(dashboard["resolved_date"], "%Y-%m-%d").date()
+
+        futures_choice = self._default_commodity(
+            dashboard.get("futures_commodities", []),
+            futures_commodity or dashboard.get("default_futures_commodity"),
         )
+        options_choice = self._default_commodity(
+            dashboard.get("options_commodities", []),
+            options_commodity or dashboard.get("default_options_commodity"),
+        )
+
+        snapshots = await self._load_history_snapshots(
+            resolved_date,
+            normalized_days,
+            force_refresh=force_refresh,
+        )
+
+        payload = {
+            "query_date": dashboard["query_date"],
+            "resolved_date": dashboard["resolved_date"],
+            "previous_date": dashboard["previous_date"],
+            "days": normalized_days,
+            "futures_commodity": futures_choice,
+            "options_commodity": options_choice,
+            "leaderboards": dashboard["leaderboards"],
+            "cost_estimates": self._build_cost_estimates(
+                futures_choice,
+                options_choice,
+                dashboard["futures"],
+                dashboard["call_puts"],
+            ),
+            "history": self._build_history_from_snapshots(
+                snapshots,
+                futures_choice,
+                options_choice,
+            ),
+        }
         self._history_cache[cache_key] = (time.time(), payload)
         return payload
+
+    async def ensure_daily_snapshot(self) -> Dict:
+        today = datetime.now().date()
+        latest = await db.get_institutional_snapshot(today)
+        if latest and (latest.get("resolved_date") == today.isoformat() or today.weekday() >= 5):
+            self._dashboard_cache[_format_iso_date(today)] = (time.time(), latest)
+            return latest
+        return await self.fetch_dashboard(today, force_refresh=True)
 
     def _normalize_history_days(self, days: int) -> int:
         try:
@@ -236,59 +287,46 @@ class TaifexFetcher:
             ),
         }
 
-    def _fetch_insights_sync(
+    async def _fetch_and_store_dashboard(self, target_date: date) -> Dict:
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, self._fetch_dashboard_sync, target_date)
+        await db.upsert_institutional_snapshot(payload)
+        self._history_cache.clear()
+        return payload
+
+    async def _load_history_snapshots(
         self,
         target_date: date,
-        futures_commodity: Optional[str],
-        options_commodity: Optional[str],
         days: int,
-    ) -> Dict:
-        dashboard = self._fetch_dashboard_sync(target_date)
-        resolved_date = datetime.strptime(dashboard["resolved_date"], "%Y-%m-%d").date()
+        force_refresh: bool = False,
+    ) -> List[Dict]:
+        existing_snapshots = await db.get_institutional_snapshots(target_date, days)
+        if len(existing_snapshots) >= days and not force_refresh:
+            return existing_snapshots
 
-        futures_choice = self._default_commodity(
-            dashboard.get("futures_commodities", []),
-            futures_commodity or dashboard.get("default_futures_commodity"),
-        )
-        options_choice = self._default_commodity(
-            dashboard.get("options_commodities", []),
-            options_commodity or dashboard.get("default_options_commodity"),
-        )
-
-        return {
-            "query_date": dashboard["query_date"],
-            "resolved_date": dashboard["resolved_date"],
-            "previous_date": dashboard["previous_date"],
-            "days": days,
-            "futures_commodity": futures_choice,
-            "options_commodity": options_choice,
-            "leaderboards": dashboard["leaderboards"],
-            "cost_estimates": self._build_cost_estimates(
-                futures_choice,
-                options_choice,
-                dashboard["futures"],
-                dashboard["call_puts"],
-            ),
-            "history": self._build_history(
-                self._collect_available_dates(resolved_date, days),
-                futures_choice,
-                options_choice,
-            ),
-        }
-
-    def _collect_available_dates(self, target_date: date, days: int) -> List[date]:
-        dates: List[date] = []
+        resolved_dates = {snapshot.get("resolved_date") for snapshot in existing_snapshots}
         cursor = target_date
         attempts = 0
-        while len(dates) < days and attempts < MAX_LOOKBACK_DAYS:
-            if self._fetch_overview(cursor):
-                dates.append(cursor)
+        while len(resolved_dates) < days and attempts < MAX_LOOKBACK_DAYS:
+            exact_snapshot = await db.get_institutional_snapshot_exact(cursor)
+            if exact_snapshot:
+                resolved_dates.add(exact_snapshot.get("resolved_date"))
+            elif cursor.weekday() >= 5:
+                nearest_snapshot = await db.get_institutional_snapshot(cursor)
+                if nearest_snapshot:
+                    resolved_dates.add(nearest_snapshot.get("resolved_date"))
+                else:
+                    payload = await self._fetch_and_store_dashboard(cursor)
+                    resolved_dates.add(payload.get("resolved_date"))
+            else:
+                payload = await self._fetch_and_store_dashboard(cursor)
+                resolved_dates.add(payload.get("resolved_date"))
             cursor -= timedelta(days=1)
             attempts += 1
-        dates.reverse()
-        return dates
 
-    def _build_history(self, dates: List[date], futures_commodity: str, options_commodity: str) -> Dict:
+        return await db.get_institutional_snapshots(target_date, days)
+
+    def _build_history_from_snapshots(self, snapshots: List[Dict], futures_commodity: str, options_commodity: str) -> Dict:
         futures_oi_series = []
         futures_trade_series = []
         options_oi_series = []
@@ -296,23 +334,29 @@ class TaifexFetcher:
         cash_net_series = []
         cost_band_series = []
 
-        for current_date in dates:
+        for snapshot in snapshots:
+            current_date = snapshot.get("resolved_date") or ""
             futures_rows = [
-                row for row in self._fetch_contract_rows("futContractsDate", current_date)
+                row for row in snapshot.get("futures", [])
                 if row["commodity"] == futures_commodity
             ]
             call_put_rows = [
-                row for row in self._fetch_call_put_rows(current_date)
+                row for row in snapshot.get("call_puts", [])
                 if row["commodity"] == options_commodity
             ]
-            cash_rows = self._aggregate_cash_summary(self._fetch_twse_cash_summary(current_date)[0])
-            costs = self._build_cost_estimates(futures_commodity, options_commodity, futures_rows, call_put_rows)
+            cash_rows = self._aggregate_cash_summary(snapshot.get("cash_summary", []))
+            costs = self._build_cost_estimates(
+                futures_commodity,
+                options_commodity,
+                snapshot.get("futures", []),
+                snapshot.get("call_puts", []),
+            )
 
-            futures_oi_row = {"date": _format_iso_date(current_date)}
-            futures_trade_row = {"date": _format_iso_date(current_date)}
-            options_oi_row = {"date": _format_iso_date(current_date)}
-            call_put_row = {"date": _format_iso_date(current_date)}
-            cash_row = {"date": _format_iso_date(current_date)}
+            futures_oi_row = {"date": current_date}
+            futures_trade_row = {"date": current_date}
+            options_oi_row = {"date": current_date}
+            call_put_row = {"date": current_date}
+            cash_row = {"date": current_date}
 
             futures_by_institution = {row["institution"]: row for row in futures_rows}
             options_totals = self._aggregate_option_call_put_rows(call_put_rows)
@@ -339,7 +383,7 @@ class TaifexFetcher:
             cash_net_series.append(cash_row)
             cost_band_series.append(
                 {
-                    "date": _format_iso_date(current_date),
+                    "date": current_date,
                     "法人合成": costs["futures"]["institution_estimate"]["price"],
                     "散戶推估": costs["futures"]["retail_estimate"]["price"],
                     "成本帶低": costs["futures"]["band_low"],
