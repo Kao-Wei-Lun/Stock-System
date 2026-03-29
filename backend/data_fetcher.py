@@ -23,6 +23,7 @@ QUOTE_CACHE_TTL = 30
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 TWSE_STOCK_DAY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
+FINMIND_DATA_URL = "https://api.finmindtrade.com/api/v4/data"
 FULL_HISTORY_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
 RANGE_MAP = {
     "5d": "5d",
@@ -112,8 +113,21 @@ class DataFetcher:
             )
             rows = self._rows_from_chart(chart, interval)
             if self._has_large_daily_gap(rows):
-                fallback_rows = self._fetch_twse_daily_rows(ticker, period1, period2)
-                rows = fallback_rows or self._fetch_chunked_daily_rows(ticker, period1, period2)
+                fallback_rows = self._merge_daily_rows(
+                    rows,
+                    self._fetch_finmind_daily_rows(ticker, period1, period2),
+                )
+                if self._has_large_daily_gap(fallback_rows):
+                    fallback_rows = self._merge_daily_rows(
+                        fallback_rows,
+                        self._fetch_twse_daily_rows(ticker, period1, period2),
+                    )
+                if self._has_large_daily_gap(fallback_rows):
+                    fallback_rows = self._merge_daily_rows(
+                        fallback_rows,
+                        self._fetch_chunked_daily_rows(ticker, period1, period2),
+                    )
+                rows = fallback_rows
         else:
             chart = self._fetch_chart_result(ticker, period=period, interval=interval)
             rows = self._rows_from_chart(chart, interval)
@@ -345,6 +359,51 @@ class DataFetcher:
 
         return [merged_rows[date] for date in sorted(merged_rows)]
 
+    def _fetch_finmind_daily_rows(self, ticker: str, period1: int, period2: int) -> List[Dict]:
+        if not ticker.endswith(".TW"):
+            return []
+
+        stock_no = ticker[:-3]
+        start_dt = datetime.fromtimestamp(period1, timezone.utc)
+        end_dt = datetime.fromtimestamp(period2, timezone.utc)
+
+        try:
+            response = requests.get(
+                FINMIND_DATA_URL,
+                params={
+                    "dataset": "TaiwanStockPrice",
+                    "data_id": stock_no,
+                    "start_date": start_dt.strftime("%Y-%m-%d"),
+                    "end_date": end_dt.strftime("%Y-%m-%d"),
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=20,
+            )
+            payload = response.json()
+        except Exception as exc:
+            log.debug("FinMind daily fallback %s failed: %s", ticker, exc)
+            return []
+
+        data = payload.get("data") or []
+        rows: List[Dict] = []
+        for raw_row in data:
+            date_value = raw_row.get("date")
+            close_price = _as_float(raw_row.get("close"))
+            if not date_value or close_price is None:
+                continue
+            rows.append(
+                {
+                    "date": str(date_value),
+                    "open": round(_as_float(raw_row.get("open")) or close_price, 4),
+                    "high": round(_as_float(raw_row.get("max")) or close_price, 4),
+                    "low": round(_as_float(raw_row.get("min")) or close_price, 4),
+                    "close": round(close_price, 4),
+                    "volume": _as_int(raw_row.get("Trading_Volume")) or 0,
+                    "adj_close": round(close_price, 4),
+                }
+            )
+        return rows
+
     def _fetch_chunked_daily_rows_with_size(
         self,
         ticker: str,
@@ -382,6 +441,20 @@ class DataFetcher:
         if last_error:
             raise last_error
         raise RuntimeError("Yahoo chart response returned no rows across chunked fetches")
+
+    def _merge_daily_rows(self, primary_rows: List[Dict], fallback_rows: List[Dict]) -> List[Dict]:
+        if not primary_rows:
+            return list(fallback_rows or [])
+        if not fallback_rows:
+            return list(primary_rows)
+
+        merged: Dict[str, Dict] = {row["date"]: row for row in primary_rows if row.get("date")}
+        for row in fallback_rows:
+            row_date = row.get("date")
+            if not row_date:
+                continue
+            merged[row_date] = row
+        return [merged[row_date] for row_date in sorted(merged)]
 
     def _resolve_period_bounds(self, period: str) -> Tuple[int, int]:
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
