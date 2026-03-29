@@ -6,6 +6,8 @@
     </div>
     <div>後端：<span style="color:var(--green)">{{ backendUrl }}</span></div>
     <div>延遲：<span style="color:var(--green)">{{ latency }}</span></div>
+    <div>來源：<span>{{ quoteSource }}</span></div>
+    <div>模式：<span>{{ quoteMode }}</span></div>
     <div style="margin-left:auto">更新：<span>{{ lastUpdate }}</span></div>
     <div>{{ clockTime }}</div>
   </div>
@@ -16,6 +18,8 @@ defineProps({
   connected: { type: Boolean, required: true },
   backendUrl: { type: String, required: true },
   latency: { type: String, required: true },
+  quoteSource: { type: String, required: true },
+  quoteMode: { type: String, required: true },
   lastUpdate: { type: String, required: true },
   clockTime: { type: String, required: true },
 });

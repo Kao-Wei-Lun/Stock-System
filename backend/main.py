@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from data_fetcher import DataFetcher, normalize_ticker
 from database import DEFAULT_OWNER_ID, db, init_db
+from quote_provider import YahooFinanceQuoteProvider
 from taifex_fetcher import taifex_fetcher
 from ws_manager import ConnectionManager
 
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 load_dotenv()
 
 fetcher = DataFetcher()
+quote_provider = YahooFinanceQuoteProvider(fetcher)
 ws_manager = ConnectionManager()
 
 STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
@@ -531,7 +533,7 @@ async def realtime_polling_loop():
 
 async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
     ticker = normalize_ticker(ticker)
-    quote = await fetcher.fetch_realtime_quote(ticker)
+    quote = await quote_provider.fetch_quote(ticker)
     if not quote:
         return None
     return await db.upsert_market_quote(quote)

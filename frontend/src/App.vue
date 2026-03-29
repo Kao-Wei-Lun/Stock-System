@@ -156,6 +156,8 @@
       :connected="wsConnected"
       :backend-url="backendUrl"
       :latency="latency"
+      :quote-source="quote.source || 'local_cache'"
+      :quote-mode="quote.is_delayed ? '延遲快照' : '即時報價'"
       :last-update="lastUpdate"
       :clock-time="clockTime"
     />

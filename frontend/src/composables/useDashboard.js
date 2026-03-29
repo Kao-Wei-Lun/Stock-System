@@ -6,7 +6,15 @@ import {
   normalizeIndicatorSettings,
   runBacktestSimulation,
 } from "../utils/indicatorUtils";
+import { createDashboardApi } from "../api/dashboardApi";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
+import {
+  buildWorkspacePayload,
+  clearLegacyWorkspacePresets,
+  normalizeWorkspaceRecord,
+  readLegacyWorkspacePresets,
+  toWorkspaceSaveRequest,
+} from "../utils/workspacePresets";
 
 const TIMEFRAME_OPTIONS = [
   { tf: "5d", iv: "1h", label: "5D" },
@@ -27,7 +35,6 @@ const KLINE_DISPLAY_OPTIONS = [
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
-const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional"];
@@ -84,7 +91,6 @@ const EXCHANGE_SCHEDULES = {
   hkex: { timeZone: "Asia/Hong_Kong", sessions: [[9 * 60 + 30, 12 * 60], [13 * 60, 16 * 60]] },
 };
 let drawingIdSeed = 1;
-let workspacePresetSeed = 1;
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -102,21 +108,6 @@ function readDashboardPrefs() {
 function writeDashboardPrefs(value) {
   if (!isBrowser()) return;
   window.localStorage.setItem(DASHBOARD_PREFS_KEY, JSON.stringify(value));
-}
-
-function readWorkspacePresets() {
-  if (!isBrowser()) return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(WORKSPACE_PRESETS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
-
-function writeWorkspacePresets(value) {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(WORKSPACE_PRESETS_KEY, JSON.stringify(value));
 }
 
 function getDrawingDefaults(type) {
@@ -192,6 +183,17 @@ function parseChartDate(value) {
   const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatQuoteTimestampLabel(value) {
+  const parsed = parseChartDate(value);
+  if (!parsed) return "—";
+  return parsed.toLocaleString("zh-TW", { hour12: false });
+}
+
+function sameWorkspaceId(left, right) {
+  if (left == null || right == null) return false;
+  return String(left) === String(right);
 }
 
 function formatDateOnly(date) {
@@ -387,6 +389,7 @@ export function useDashboard() {
   const apiBase = getApiBase();
   const wsUrl = `${getWsBase()}/ws`;
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
+  const dashboardApi = createDashboardApi({ baseUrl: apiBase });
   const storedPrefs = readDashboardPrefs();
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
     (option) => option.tf === storedPrefs.currentPeriod,
@@ -396,7 +399,6 @@ export function useDashboard() {
   const initialChartLayout = CHART_LAYOUT_OPTIONS.includes(storedPrefs.chartLayout) ? storedPrefs.chartLayout : "single";
   const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
   const initialWorkspaceTab = WORKSPACE_TAB_OPTIONS.includes(storedPrefs.workspaceTab) ? storedPrefs.workspaceTab : "chart";
-  const storedWorkspacePresets = readWorkspacePresets();
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
   const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
@@ -464,7 +466,7 @@ export function useDashboard() {
   const rawOhlcData = ref([]);
   const drawings = ref([]);
   const selectedDrawingId = ref(null);
-  const workspacePresets = ref(storedWorkspacePresets);
+  const workspacePresets = ref([]);
   const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
   const alerts = ref([]);
   const notifications = ref([]);
@@ -498,11 +500,17 @@ export function useDashboard() {
     open: null,
     high: null,
     low: null,
+    prev_close: null,
     volume: null,
     market_cap: null,
     change: 0,
     change_pct: 0,
     name: "載入中...",
+    source: null,
+    quote_type: null,
+    is_delayed: true,
+    quote_timestamp: null,
+    synced_at: null,
   });
 
   const marketStatus = reactive({
@@ -598,7 +606,7 @@ export function useDashboard() {
     () => userWatchGroups.value.find((group) => group.id === activeWatchGroupId.value) || null,
   );
   const activeWorkspacePreset = computed(
-    () => workspacePresets.value.find((item) => item.id === activeWorkspacePresetId.value) || null,
+    () => workspacePresets.value.find((item) => sameWorkspaceId(item.id, activeWorkspacePresetId.value)) || null,
   );
 
   if (storedPrefs.currentName) {
@@ -664,13 +672,19 @@ export function useDashboard() {
     quote.open = data.open ?? null;
     quote.high = data.high ?? null;
     quote.low = data.low ?? null;
+    quote.prev_close = data.prev_close ?? null;
     quote.volume = data.volume ?? null;
     quote.market_cap = data.market_cap ?? null;
     quote.change = data.change ?? 0;
     quote.change_pct = data.change_pct ?? 0;
     quote.name = data.name || currentName.value;
+    quote.source = data.source ?? quote.source ?? null;
+    quote.quote_type = data.quote_type ?? quote.quote_type ?? null;
+    quote.is_delayed = data.is_delayed ?? true;
+    quote.quote_timestamp = data.quote_timestamp ?? null;
+    quote.synced_at = data.synced_at ?? null;
     if (data.name) currentName.value = data.name;
-    lastUpdate.value = new Date().toLocaleTimeString("zh-TW");
+    lastUpdate.value = formatQuoteTimestampLabel(data.quote_timestamp || data.synced_at);
   }
 
   function resetQuote() {
@@ -679,11 +693,17 @@ export function useDashboard() {
       open: null,
       high: null,
       low: null,
+      prev_close: null,
       volume: null,
       market_cap: null,
       change: 0,
       change_pct: 0,
       name: currentName.value,
+      source: null,
+      quote_type: null,
+      is_delayed: true,
+      quote_timestamp: null,
+      synced_at: null,
     });
   }
 
@@ -1578,51 +1598,124 @@ export function useDashboard() {
     selectedDrawingId.value = drawingId;
   }
 
+  async function migrateLegacyWorkspacePresets() {
+    if (!isBrowser()) return false;
+    const legacyPresets = readLegacyWorkspacePresets(window.localStorage);
+    if (!legacyPresets.length) return false;
+
+    let migratedCount = 0;
+    for (const preset of legacyPresets.slice(0, 24)) {
+      const trimmedName = String(preset?.name || "").trim();
+      if (!trimmedName) continue;
+      try {
+        await dashboardApi.createWorkspace(toWorkspaceSaveRequest(trimmedName, preset));
+        migratedCount += 1;
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    if (migratedCount > 0) {
+      clearLegacyWorkspacePresets(window.localStorage);
+    }
+    return migratedCount > 0;
+  }
+
+  async function loadWorkspacePresets({ allowLegacyMigration = true, silent = true } = {}) {
+    try {
+      const response = await dashboardApi.listWorkspaces();
+      const items = Array.isArray(response?.items)
+        ? response.items.map((item) => normalizeWorkspaceRecord(item))
+        : [];
+
+      if (!items.length && allowLegacyMigration) {
+        const migrated = await migrateLegacyWorkspacePresets();
+        if (migrated) {
+          return await loadWorkspacePresets({ allowLegacyMigration: false, silent });
+        }
+      }
+
+      workspacePresets.value = items;
+      if (
+        activeWorkspacePresetId.value != null
+        && !items.some((item) => sameWorkspaceId(item.id, activeWorkspacePresetId.value))
+      ) {
+        activeWorkspacePresetId.value = null;
+      }
+      return items;
+    } catch (error) {
+      console.error(error);
+      workspacePresets.value = [];
+      if (!silent) {
+        pushNotification({ icon: "⚠️", title: "工作區載入失敗", msg: "請稍後再試", type: "error" });
+      }
+      return [];
+    }
+  }
+
   function buildWorkspaceSnapshot(name) {
     return {
-      id: `workspace-${Date.now()}-${workspacePresetSeed++}`,
       name,
       savedAt: new Date().toISOString(),
-      currentTicker: currentTicker.value,
-      currentName: currentName.value,
-      currentPeriod: currentPeriod.value,
-      currentInterval: currentInterval.value,
-      klineDisplayMode: klineDisplayMode.value,
-      cleanChartMode: cleanChartMode.value,
-      chartLayout: chartLayout.value,
-      compareTickers: [...compareTickers.value],
-      comparisonMode: comparisonMode.value,
-      activeTool: activeTool.value,
-      leftTab: leftTab.value,
-      rightTab: rightTab.value,
-      activeInd: { ...activeInd },
-      activePanels: { ...activePanels },
-      indicatorSettings: { ...indicatorSettings },
-      drawings: drawings.value.map(({ id, ...drawing }) => ({ ...drawing })),
+      ...buildWorkspacePayload({
+        currentTicker: currentTicker.value,
+        currentName: currentName.value,
+        currentPeriod: currentPeriod.value,
+        currentInterval: currentInterval.value,
+        klineDisplayMode: klineDisplayMode.value,
+        cleanChartMode: cleanChartMode.value,
+        chartLayout: chartLayout.value,
+        compareTickers: compareTickers.value,
+        comparisonMode: comparisonMode.value,
+        activeTool: activeTool.value,
+        leftTab: leftTab.value,
+        rightTab: rightTab.value,
+        workspaceTab: workspaceTab.value,
+        activeInd,
+        activePanels,
+        indicatorSettings,
+        drawings: drawings.value,
+      }),
     };
   }
 
   async function saveWorkspacePreset(name) {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
+
     const existing = workspacePresets.value.find((item) => item.name.toLowerCase() === trimmed.toLowerCase());
     const snapshot = buildWorkspaceSnapshot(trimmed);
-    if (existing) snapshot.id = existing.id;
-    workspacePresets.value = existing
-      ? workspacePresets.value.map((item) => (item.id === existing.id ? snapshot : item))
-      : [snapshot, ...workspacePresets.value].slice(0, 24);
-    activeWorkspacePresetId.value = snapshot.id;
-    pushNotification({
-      icon: existing ? "↻" : "💾",
-      title: existing ? "工作區已更新" : "工作區已儲存",
-      msg: trimmed,
-      type: "success",
-    });
+
+    try {
+      const persisted = existing
+        ? await dashboardApi.updateWorkspace(existing.id, toWorkspaceSaveRequest(trimmed, snapshot))
+        : await dashboardApi.createWorkspace(toWorkspaceSaveRequest(trimmed, snapshot));
+      const normalized = normalizeWorkspaceRecord(persisted);
+      workspacePresets.value = existing
+        ? workspacePresets.value.map((item) => (sameWorkspaceId(item.id, existing.id) ? normalized : item))
+        : [normalized, ...workspacePresets.value].slice(0, 24);
+      activeWorkspacePresetId.value = normalized.id;
+      pushNotification({
+        icon: existing ? "↻" : "💾",
+        title: existing ? "工作區已更新" : "工作區已儲存",
+        msg: trimmed,
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({ icon: "⚠️", title: "工作區儲存失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
   }
 
   async function loadWorkspacePreset(presetId) {
-    const preset = workspacePresets.value.find((item) => item.id === presetId);
-    if (!preset) return;
+    let preset = workspacePresets.value.find((item) => sameWorkspaceId(item.id, presetId));
+    if (!preset) {
+      try {
+        preset = normalizeWorkspaceRecord(await dashboardApi.getWorkspace(presetId));
+      } catch (error) {
+        pushNotification({ icon: "⚠️", title: "工作區載入失敗", msg: error.message || "請稍後再試", type: "error" });
+        return;
+      }
+    }
     const normalizedTicker = normalizeTicker(preset.currentTicker || currentTicker.value);
     wsSend({ action: "unsubscribe", ticker: normalizeTicker(currentTicker.value) });
     currentTicker.value = normalizedTicker;
@@ -1636,6 +1729,7 @@ export function useDashboard() {
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
     leftTab.value = preset.leftTab === "market" ? "market" : "watch";
     rightTab.value = ["indicators", "alerts", "backtest", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
+    workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(preset.workspaceTab) ? preset.workspaceTab : "chart";
     compareTickers.value = (preset.compareTickers || [])
       .map((ticker) => normalizeTicker(ticker))
       .filter((ticker) => ticker && ticker !== normalizedTicker);
@@ -1659,14 +1753,19 @@ export function useDashboard() {
     pushNotification({ icon: "📂", title: "工作區已載入", msg: preset.name, type: "success" });
   }
 
-  function deleteWorkspacePreset(presetId) {
-    const target = workspacePresets.value.find((item) => item.id === presetId);
+  async function deleteWorkspacePreset(presetId) {
+    const target = workspacePresets.value.find((item) => sameWorkspaceId(item.id, presetId));
     if (!target) return;
-    workspacePresets.value = workspacePresets.value.filter((item) => item.id !== presetId);
-    if (activeWorkspacePresetId.value === presetId) {
-      activeWorkspacePresetId.value = null;
+    try {
+      await dashboardApi.deleteWorkspace(presetId);
+      workspacePresets.value = workspacePresets.value.filter((item) => !sameWorkspaceId(item.id, presetId));
+      if (sameWorkspaceId(activeWorkspacePresetId.value, presetId)) {
+        activeWorkspacePresetId.value = null;
+      }
+      pushNotification({ icon: "🗑", title: "工作區已刪除", msg: target.name, type: "success" });
+    } catch (error) {
+      pushNotification({ icon: "⚠️", title: "工作區刪除失敗", msg: error.message || "請稍後再試", type: "error" });
     }
-    pushNotification({ icon: "🗑", title: "工作區已刪除", msg: target.name, type: "success" });
   }
 
   function updateCrosshair(payload) {
@@ -1866,16 +1965,11 @@ export function useDashboard() {
     { deep: true },
   );
 
-  watch(
-    workspacePresets,
-    (value) => writeWorkspacePresets(value),
-    { deep: true },
-  );
-
   onMounted(async () => {
     updateClock();
     clockTimer = window.setInterval(updateClock, 1000);
     connectWs();
+    await loadWorkspacePresets();
     await loadWatchlist();
     if (workspaceTab.value === "institutional") {
       await loadInstitutionalData();

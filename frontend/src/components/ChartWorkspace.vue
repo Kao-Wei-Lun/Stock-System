@@ -101,6 +101,9 @@
       <div class="meta-chip">{{ zoomLabel }}</div>
       <div class="meta-chip">{{ yScaleLabel }}</div>
       <div class="meta-chip">{{ priceScaleModeLabel }}</div>
+      <div class="meta-chip">{{ quoteTimestampLabel }}</div>
+      <div class="meta-chip">{{ quoteSourceLabel }}</div>
+      <div class="meta-chip" :class="{ up: !quote.is_delayed, dn: quote.is_delayed }">{{ quoteDelayLabel }}</div>
       <div v-if="institutionalOverlay" class="meta-chip">
         {{ institutionalOverlay.label }} / Basis
         {{ institutionalOverlay.basis == null ? "—" : `${institutionalOverlay.basis >= 0 ? "+" : ""}${fmtPrice(institutionalOverlay.basis)} (${institutionalOverlay.basisPct >= 0 ? "+" : ""}${Number(institutionalOverlay.basisPct || 0).toFixed(2)}%)` }}
@@ -333,7 +336,7 @@ const props = defineProps({
   drawings: { type: Array, required: true },
   selectedDrawingId: { type: String, default: null },
   workspacePresets: { type: Array, default: () => [] },
-  activeWorkspacePresetId: { type: String, default: null },
+  activeWorkspacePresetId: { type: [String, Number], default: null },
   syncingCurrent: { type: Boolean, required: true },
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
@@ -469,6 +472,17 @@ const displayChange = computed(() => {
   const sign = props.quote.change_pct >= 0 ? "+" : "";
   return `${sign}${(props.quote.change || 0).toFixed(2)} (${sign}${(props.quote.change_pct || 0).toFixed(2)}%)`;
 });
+
+const quoteTimestampLabel = computed(() => {
+  if (!props.quote.quote_timestamp && !props.quote.synced_at) return "資料時間：—";
+  const value = props.quote.quote_timestamp || props.quote.synced_at;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `資料時間：${value}`;
+  return `資料時間：${date.toLocaleString("zh-TW", { hour12: false })}`;
+});
+
+const quoteSourceLabel = computed(() => `來源：${props.quote.source || "local_cache"}`);
+const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "即時報價"));
 
 const rsiLabel = computed(() => `RSI(${props.indicatorSettings.rsiPeriod})`);
 const aroonLabel = computed(() => `Aroon(${props.indicatorSettings.aroonPeriod})`);
