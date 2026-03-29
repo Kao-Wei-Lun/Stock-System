@@ -30,6 +30,7 @@ const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const WORKSPACE_PRESETS_KEY = "quantvision.workspace.presets.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
+const WORKSPACE_TAB_OPTIONS = ["chart", "institutional"];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
   ma20: true,
@@ -339,6 +340,7 @@ export function useDashboard() {
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
   const initialChartLayout = CHART_LAYOUT_OPTIONS.includes(storedPrefs.chartLayout) ? storedPrefs.chartLayout : "single";
   const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
+  const initialWorkspaceTab = WORKSPACE_TAB_OPTIONS.includes(storedPrefs.workspaceTab) ? storedPrefs.workspaceTab : "chart";
   const storedWorkspacePresets = readWorkspacePresets();
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
@@ -394,6 +396,7 @@ export function useDashboard() {
   );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
   const rightTab = ref(["indicators", "alerts", "backtest", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
+  const workspaceTab = ref(initialWorkspaceTab);
   const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
   const currentPeriod = ref(storedTimeframe?.tf || "1y");
@@ -416,6 +419,10 @@ export function useDashboard() {
   const clockTime = ref("—");
   const dbStats = ref(null);
   const dbStatsError = ref("");
+  const institutionalDate = ref(new Date().toISOString().slice(0, 10));
+  const institutionalData = ref(null);
+  const institutionalLoading = ref(false);
+  const institutionalError = ref("");
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
   const alertModalOpen = ref(false);
@@ -951,6 +958,23 @@ export function useDashboard() {
     loadKline(currentTicker.value, timeframe.tf, currentInterval.value);
   }
 
+  async function loadInstitutionalData(dateValue = institutionalDate.value) {
+    institutionalLoading.value = true;
+    institutionalError.value = "";
+    try {
+      const payload = await apiFetch(`/api/taifex/institutional?date=${dateValue}`, {
+        retries: 3,
+        retryDelayMs: 1200,
+      });
+      institutionalDate.value = dateValue;
+      institutionalData.value = payload;
+    } catch (error) {
+      institutionalError.value = error.message || "無法取得期權法人資料";
+    } finally {
+      institutionalLoading.value = false;
+    }
+  }
+
   async function setKlineDisplayMode(mode) {
     const nextMode = normalizeKlineDisplayMode(mode);
     if (nextMode === klineDisplayMode.value) return;
@@ -970,6 +994,24 @@ export function useDashboard() {
   async function setRightTab(tab) {
     rightTab.value = tab;
     if (tab === "db") await loadDbStats();
+  }
+
+  async function setWorkspaceTab(tab) {
+    workspaceTab.value = tab === "institutional" ? "institutional" : "chart";
+    if (workspaceTab.value === "institutional" && !institutionalData.value && !institutionalLoading.value) {
+      await loadInstitutionalData();
+    }
+  }
+
+  async function setInstitutionalDate(value) {
+    if (!value) return;
+    await loadInstitutionalData(value);
+  }
+
+  async function shiftInstitutionalDate(days) {
+    const base = institutionalDate.value ? new Date(`${institutionalDate.value}T00:00:00`) : new Date();
+    base.setDate(base.getDate() + Number(days || 0));
+    await loadInstitutionalData(base.toISOString().slice(0, 10));
   }
 
   function setChartLayout(layout) {
@@ -1574,6 +1616,7 @@ export function useDashboard() {
     comparisonMode: comparisonMode.value,
     leftTab: leftTab.value,
     rightTab: rightTab.value,
+    workspaceTab: workspaceTab.value,
     activeTool: activeTool.value,
     chartLayout: chartLayout.value,
     activeInd: { ...activeInd },
@@ -1598,6 +1641,9 @@ export function useDashboard() {
     clockTimer = window.setInterval(updateClock, 1000);
     connectWs();
     await loadWatchlist();
+    if (workspaceTab.value === "institutional") {
+      await loadInstitutionalData();
+    }
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
     watchlistTimer = window.setInterval(loadWatchlist, 60000);
   });
@@ -1631,6 +1677,7 @@ export function useDashboard() {
     watchlistError,
     leftTab,
     rightTab,
+    workspaceTab,
     currentTicker,
     currentName,
     currentPeriod,
@@ -1651,6 +1698,10 @@ export function useDashboard() {
     clockTime,
     dbStats,
     dbStatsError,
+    institutionalDate,
+    institutionalData,
+    institutionalLoading,
+    institutionalError,
     syncingCurrent,
     syncingAll,
     quote,
@@ -1685,6 +1736,10 @@ export function useDashboard() {
     setLeftTab,
     setActiveWatchGroup,
     setRightTab,
+    setWorkspaceTab,
+    setInstitutionalDate,
+    shiftInstitutionalDate,
+    loadInstitutionalData,
     setChartLayout,
     selectTicker,
     toggleIndicator,

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from data_fetcher import DataFetcher, normalize_ticker
 from database import db, init_db
+from taifex_fetcher import taifex_fetcher
 from ws_manager import ConnectionManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -116,6 +117,12 @@ CATEGORY_OVERRIDES = {
     "BZ=F": "原物料",
     "NG=F": "原物料",
 }
+TAIFEX_SPOT_REFERENCE = [
+    {"ticker": "^TWII", "label": "台灣加權指數"},
+    {"ticker": "^TWOII", "label": "櫃買指數"},
+    {"ticker": "2330.TW", "label": "台積電"},
+    {"ticker": "0050.TW", "label": "元大台灣50"},
+]
 
 FULL_HISTORY_PERIODS = {"10y", "max"}
 
@@ -479,6 +486,42 @@ async def search(q: str = Query(..., min_length=1)):
 @app.get("/api/db/stats")
 async def db_stats():
     return await db.get_stats()
+
+
+@app.get("/api/taifex/institutional")
+async def get_taifex_institutional(
+    date: str | None = Query(None, description="YYYY-MM-DD"),
+):
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+
+    payload = await taifex_fetcher.fetch_dashboard(target_date)
+
+    spot_cards = []
+    for item in TAIFEX_SPOT_REFERENCE:
+        quote = await fetcher.fetch_realtime_quote(item["ticker"])
+        if not quote:
+            continue
+        spot_cards.append(
+            {
+                "ticker": item["ticker"],
+                "label": item["label"],
+                "price": quote.get("price"),
+                "change": quote.get("change"),
+                "change_pct": quote.get("change_pct"),
+                "open": quote.get("open"),
+                "high": quote.get("high"),
+                "low": quote.get("low"),
+                "volume": quote.get("volume"),
+            }
+        )
+
+    payload["spot_reference"] = spot_cards
+    return payload
 
 
 @app.websocket("/ws")

@@ -44,78 +44,98 @@
         class="workspace-stage"
         :class="{ 'is-pseudo-fullscreen': pseudoFullscreen }"
       >
-        <ChartWorkspace
-          :current-ticker="currentTicker"
-          :current-name="currentName"
-          :quote="quote"
-          :active-tool="activeTool"
-          :active-panels="activePanels"
-          :kline-display-mode="klineDisplayMode"
-          :clean-chart-mode="cleanChartMode"
-          :chart-layout="chartLayout"
-          :loading="chartLoading"
-          :loading-message="loadingMessage"
-          :crosshair="crosshair"
-          :ohlc-data="ohlcData"
-          :active-ind="activeInd"
-          :indicator-settings="indicatorSettings"
-          :drawings="drawings"
-          :selected-drawing-id="selectedDrawingId"
-          :workspace-presets="workspacePresets"
-          :active-workspace-preset-id="activeWorkspacePresetId"
-          :syncing-current="syncingCurrent"
-          :compare-series="compareSeries"
-          :comparison-mode="comparisonMode"
-          :is-fullscreen="chartFullscreen"
-          @set-tool="setTool"
-          @add-signal="addSignal"
-          @clear-drawings="clearDrawings"
-          @remove-last-drawing="removeLastDrawing"
-          @sync-current="syncCurrentTicker"
-          @add-horizontal-line="addHorizontalLine"
-          @add-drawing="addDrawing"
-          @select-drawing="selectDrawing"
-          @remove-drawing="removeDrawing"
-          @update-drawing="updateDrawing"
-          @toggle-drawing-visibility="toggleDrawingVisibility"
-          @toggle-drawing-lock="toggleDrawingLock"
-          @save-workspace="saveWorkspacePreset"
-          @load-workspace="loadWorkspacePreset"
-          @delete-workspace="deleteWorkspacePreset"
-          @update-crosshair="updateCrosshair"
-          @hide-crosshair="hideCrosshair"
-          @add-compare="addCompareTicker"
-          @remove-compare="removeCompareTicker"
-          @clear-compare="clearCompareTickers"
-          @set-compare-mode="setComparisonMode"
-          @set-kline-display-mode="setKlineDisplayMode"
-          @set-chart-layout="setChartLayout"
-          @clear-indicators="clearIndicators"
-          @toggle-fullscreen="toggleChartFullscreen"
-        />
+        <div class="workspace-shell">
+          <div class="workspace-mode-tabs">
+            <button class="tool-btn" :class="{ active: workspaceTab === 'chart' }" @click="setWorkspaceTab('chart')">圖表分析</button>
+            <button class="tool-btn" :class="{ active: workspaceTab === 'institutional' }" @click="setWorkspaceTab('institutional')">法人籌碼</button>
+          </div>
 
-        <RightSidebar
-          :right-tab="rightTab"
-          :indicator-snapshot="indicatorSnapshot"
-          :active-ind="activeInd"
-          :active-panels="activePanels"
-          :indicator-settings="indicatorSettings"
-          :alerts="alerts"
-          :backtest-form="backtestForm"
-          :backtest-result="backtestResult"
-          :db-stats="dbStats"
-          :db-stats-error="dbStatsError"
-          :syncing-all="syncingAll"
-          @set-right-tab="setRightTab"
-          @toggle-indicator="toggleIndicator"
-          @toggle-panel="togglePanel"
-          @update-indicator-setting="updateIndicatorSetting"
-          @apply-indicator-preset="applyIndicatorPreset"
-          @open-alert-modal="openAlertModal"
-          @update-backtest-field="handleBacktestField"
-          @run-backtest="runBacktest"
-          @sync-all="syncAll"
-        />
+          <template v-if="workspaceTab === 'chart'">
+            <ChartWorkspace
+              :current-ticker="currentTicker"
+              :current-name="currentName"
+              :quote="quote"
+              :active-tool="activeTool"
+              :active-panels="activePanels"
+              :kline-display-mode="klineDisplayMode"
+              :clean-chart-mode="cleanChartMode"
+              :chart-layout="chartLayout"
+              :loading="chartLoading"
+              :loading-message="loadingMessage"
+              :crosshair="crosshair"
+              :ohlc-data="ohlcData"
+              :active-ind="activeInd"
+              :indicator-settings="indicatorSettings"
+              :drawings="drawings"
+              :selected-drawing-id="selectedDrawingId"
+              :workspace-presets="workspacePresets"
+              :active-workspace-preset-id="activeWorkspacePresetId"
+              :syncing-current="syncingCurrent"
+              :compare-series="compareSeries"
+              :comparison-mode="comparisonMode"
+              :is-fullscreen="chartFullscreen"
+              @set-tool="setTool"
+              @add-signal="addSignal"
+              @clear-drawings="clearDrawings"
+              @remove-last-drawing="removeLastDrawing"
+              @sync-current="syncCurrentTicker"
+              @add-horizontal-line="addHorizontalLine"
+              @add-drawing="addDrawing"
+              @select-drawing="selectDrawing"
+              @remove-drawing="removeDrawing"
+              @update-drawing="updateDrawing"
+              @toggle-drawing-visibility="toggleDrawingVisibility"
+              @toggle-drawing-lock="toggleDrawingLock"
+              @save-workspace="saveWorkspacePreset"
+              @load-workspace="loadWorkspacePreset"
+              @delete-workspace="deleteWorkspacePreset"
+              @update-crosshair="updateCrosshair"
+              @hide-crosshair="hideCrosshair"
+              @add-compare="addCompareTicker"
+              @remove-compare="removeCompareTicker"
+              @clear-compare="clearCompareTickers"
+              @set-compare-mode="setComparisonMode"
+              @set-kline-display-mode="setKlineDisplayMode"
+              @set-chart-layout="setChartLayout"
+              @clear-indicators="clearIndicators"
+              @toggle-fullscreen="toggleChartFullscreen"
+            />
+
+            <RightSidebar
+              :right-tab="rightTab"
+              :indicator-snapshot="indicatorSnapshot"
+              :active-ind="activeInd"
+              :active-panels="activePanels"
+              :indicator-settings="indicatorSettings"
+              :alerts="alerts"
+              :backtest-form="backtestForm"
+              :backtest-result="backtestResult"
+              :db-stats="dbStats"
+              :db-stats-error="dbStatsError"
+              :syncing-all="syncingAll"
+              @set-right-tab="setRightTab"
+              @toggle-indicator="toggleIndicator"
+              @toggle-panel="togglePanel"
+              @update-indicator-setting="updateIndicatorSetting"
+              @apply-indicator-preset="applyIndicatorPreset"
+              @open-alert-modal="openAlertModal"
+              @update-backtest-field="handleBacktestField"
+              @run-backtest="runBacktest"
+              @sync-all="syncAll"
+            />
+          </template>
+
+          <InstitutionalDashboard
+            v-else
+            :data="institutionalData"
+            :loading="institutionalLoading"
+            :error="institutionalError"
+            :selected-date="institutionalDate"
+            @set-date="setInstitutionalDate"
+            @shift-date="shiftInstitutionalDate"
+            @refresh="loadInstitutionalData(institutionalDate)"
+          />
+        </div>
       </div>
     </div>
 
@@ -145,6 +165,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import AlertModal from "./components/AlertModal.vue";
 import ChartWorkspace from "./components/ChartWorkspace.vue";
 import DashboardTopbar from "./components/DashboardTopbar.vue";
+import InstitutionalDashboard from "./components/InstitutionalDashboard.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import RightSidebar from "./components/RightSidebar.vue";
 import StatusBar from "./components/StatusBar.vue";
@@ -173,6 +194,7 @@ const {
   watchlistError,
   leftTab,
   rightTab,
+  workspaceTab,
   currentTicker,
   currentName,
   currentPeriod,
@@ -193,6 +215,10 @@ const {
   clockTime,
   dbStats,
   dbStatsError,
+  institutionalDate,
+  institutionalData,
+  institutionalLoading,
+  institutionalError,
   syncingCurrent,
   syncingAll,
   quote,
@@ -227,6 +253,10 @@ const {
   setLeftTab,
   setActiveWatchGroup,
   setRightTab,
+  setWorkspaceTab,
+  setInstitutionalDate,
+  shiftInstitutionalDate,
+  loadInstitutionalData,
   setChartLayout,
   selectTicker,
   toggleIndicator,
@@ -305,10 +335,12 @@ function handleWindowKeydown(event) {
 
 function handleSelectTicker(item) {
   if (!item) return;
+  setWorkspaceTab("chart");
   selectTicker(item.ticker, item.name || item.ticker);
 }
 
 function handleOpenDbTab() {
+  setWorkspaceTab("chart");
   setRightTab("db");
 }
 
