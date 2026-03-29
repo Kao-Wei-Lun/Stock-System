@@ -38,8 +38,8 @@
     </div>
 
     <div class="market-pills">
-      <div class="mpill"><div class="dot live"></div>NYSE</div>
-      <div class="mpill"><div class="dot live"></div>NASDAQ</div>
+      <div class="mpill"><div class="dot" :class="marketStatus.nyseOpen ? 'live' : 'closed'"></div>NYSE</div>
+      <div class="mpill"><div class="dot" :class="marketStatus.nasdaqOpen ? 'live' : 'closed'"></div>NASDAQ</div>
       <div class="mpill"><div class="dot" :class="marketStatus.tseOpen ? 'live' : 'closed'"></div>TSE</div>
       <div class="mpill"><div class="dot" :class="marketStatus.hkOpen ? 'live' : 'closed'"></div>HKEX</div>
     </div>

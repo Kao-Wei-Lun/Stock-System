@@ -42,7 +42,7 @@ def normalize_ticker(ticker: str) -> str:
     raw = (ticker or "").strip().upper()
     if not raw:
         return raw
-    if raw.startswith("^") or "." in raw or "-" in raw:
+    if raw.startswith("^") or "." in raw or "-" in raw or "=" in raw:
         return raw
     # When the input is not a pure English ticker, default to Taiwan suffix.
     if not raw.isalpha():

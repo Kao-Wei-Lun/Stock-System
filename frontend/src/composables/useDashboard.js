@@ -77,6 +77,12 @@ const DEFAULT_ACTIVE_PANELS = {
   cmf: false,
 };
 const TOOL_OPTIONS = ["cursor", "hline", "vline", "tline", "arrow", "fib", "rect", "measure", "note", "boxzoom"];
+const EXCHANGE_SCHEDULES = {
+  nyse: { timeZone: "America/New_York", sessions: [[9 * 60 + 30, 16 * 60]] },
+  nasdaq: { timeZone: "America/New_York", sessions: [[9 * 60 + 30, 16 * 60]] },
+  tse: { timeZone: "Asia/Taipei", sessions: [[9 * 60, 13 * 60 + 30]] },
+  hkex: { timeZone: "Asia/Hong_Kong", sessions: [[9 * 60 + 30, 12 * 60], [13 * 60, 16 * 60]] },
+};
 let drawingIdSeed = 1;
 let workspacePresetSeed = 1;
 
@@ -337,9 +343,44 @@ function aggregateOhlcRows(rows, mode) {
 
 export function normalizeTicker(ticker) {
   const raw = (ticker || "").trim().toUpperCase();
-  if (!raw || raw.startsWith("^") || raw.includes(".") || raw.includes("-")) return raw;
+  if (!raw || raw.startsWith("^") || raw.includes(".") || raw.includes("-") || raw.includes("=")) return raw;
   if (!/^[A-Z]+$/.test(raw)) return `${raw}.TW`;
   return raw;
+}
+
+function getExchangeClockParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const parsed = {};
+  parts.forEach((part) => {
+    if (part.type !== "literal") {
+      parsed[part.type] = part.value;
+    }
+  });
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return {
+    weekday: weekdayMap[parsed.weekday] ?? 0,
+    minutesOfDay: Number(parsed.hour || 0) * 60 + Number(parsed.minute || 0),
+  };
+}
+
+function isExchangeOpen(date, schedule) {
+  const { weekday, minutesOfDay } = getExchangeClockParts(date, schedule.timeZone);
+  if (weekday < 1 || weekday > 5) return false;
+  return schedule.sessions.some(([start, end]) => minutesOfDay >= start && minutesOfDay < end);
 }
 
 export function useDashboard() {
@@ -464,7 +505,12 @@ export function useDashboard() {
     name: "載入中...",
   });
 
-  const marketStatus = reactive({ tseOpen: false, hkOpen: false });
+  const marketStatus = reactive({
+    nyseOpen: false,
+    nasdaqOpen: false,
+    tseOpen: false,
+    hkOpen: false,
+  });
   const activeInd = reactive({ ...DEFAULT_ACTIVE_IND, ...(storedPrefs.activeInd || {}) });
   const activePanels = reactive({ ...DEFAULT_ACTIVE_PANELS, ...(storedPrefs.activePanels || {}) });
   const indicatorSettings = reactive(normalizeIndicatorSettings(storedPrefs.indicatorSettings || {}));
@@ -1784,11 +1830,10 @@ export function useDashboard() {
   function updateClock() {
     const now = new Date();
     clockTime.value = now.toLocaleString("zh-TW", { hour12: false });
-    const hours = now.getUTCHours() + 8;
-    const minutesOfDay = hours * 60 + now.getUTCMinutes();
-    const weekday = now.getDay();
-    marketStatus.tseOpen = minutesOfDay >= 9 * 60 && minutesOfDay < 13 * 60 + 30 && weekday >= 1 && weekday <= 5;
-    marketStatus.hkOpen = minutesOfDay >= 9 * 60 + 30 && minutesOfDay < 16 * 60 && weekday >= 1 && weekday <= 5;
+    marketStatus.nyseOpen = isExchangeOpen(now, EXCHANGE_SCHEDULES.nyse);
+    marketStatus.nasdaqOpen = isExchangeOpen(now, EXCHANGE_SCHEDULES.nasdaq);
+    marketStatus.tseOpen = isExchangeOpen(now, EXCHANGE_SCHEDULES.tse);
+    marketStatus.hkOpen = isExchangeOpen(now, EXCHANGE_SCHEDULES.hkex);
   }
 
   const persistedDashboardState = computed(() => ({
