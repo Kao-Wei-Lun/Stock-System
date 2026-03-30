@@ -113,6 +113,7 @@
                 :backtest-form="backtestForm"
                 :backtest-result="backtestResult"
                 :db-stats="dbStats"
+                :db-stats-loading="dbStatsLoading"
                 :db-stats-error="dbStatsError"
                 :syncing-all="syncingAll"
                 @set-right-tab="setRightTab"
@@ -230,6 +231,7 @@ const {
   lastUpdate,
   clockTime,
   dbStats,
+  dbStatsLoading,
   dbStatsError,
   institutionalDate,
   institutionalData,

@@ -26,6 +26,7 @@ describe("RightSidebar", () => {
         backtestForm: {},
         backtestResult: null,
         dbStats: null,
+        dbStatsLoading: false,
         dbStatsError: "",
         syncingAll: false,
       },

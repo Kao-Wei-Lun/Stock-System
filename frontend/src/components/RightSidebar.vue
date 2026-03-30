@@ -137,7 +137,8 @@
           <div class="db-stat-row"><span>股票數量</span><span>{{ dbStats.total_tickers }}</span></div>
           <div v-for="item in dbStats.top_tickers || []" :key="item.ticker" class="db-stat-row"><span>{{ item.ticker }}</span><span>{{ item.rows }} 筆</span></div>
         </div>
-        <div v-else style="color:var(--red);font-size:11px">{{ dbStatsError || "載入中..." }}</div>
+        <div v-else-if="dbStatsLoading" style="color:var(--text2);font-size:11px">載入中...</div>
+        <div v-else style="color:var(--red);font-size:11px">{{ dbStatsError || "尚未載入資料庫統計" }}</div>
       </div>
       <button class="sync-btn" :disabled="syncingAll" @click="$emit('sync-all')">{{ syncingAll ? "↻ 同步中..." : "↻ 同步股票與大盤最新資料" }}</button>
       <div style="margin-top:10px;font-size:10px;color:var(--text3);line-height:1.8">
@@ -163,6 +164,7 @@ const props = defineProps({
   backtestForm: { type: Object, required: true },
   backtestResult: { type: Object, default: null },
   dbStats: { type: Object, default: null },
+  dbStatsLoading: { type: Boolean, required: true },
   dbStatsError: { type: String, default: "" },
   syncingAll: { type: Boolean, required: true },
 });

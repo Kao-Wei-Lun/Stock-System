@@ -477,6 +477,7 @@ export function useDashboard() {
   const lastUpdate = ref("—");
   const clockTime = ref("—");
   const dbStats = ref(null);
+  const dbStatsLoading = ref(false);
   const dbStatsError = ref("");
   const institutionalDate = ref(new Date().toISOString().slice(0, 10));
   const institutionalData = ref(null);
@@ -1112,12 +1113,16 @@ export function useDashboard() {
   }
 
   async function loadDbStats() {
+    if (dbStatsLoading.value) return;
+    dbStatsLoading.value = true;
     dbStatsError.value = "";
     try {
       dbStats.value = await apiFetch("/api/db/stats");
     } catch (error) {
       dbStats.value = null;
       dbStatsError.value = "無法取得 DB 統計";
+    } finally {
+      dbStatsLoading.value = false;
     }
   }
 
@@ -1794,6 +1799,9 @@ export function useDashboard() {
     activeWorkspacePresetId.value = preset.id;
     rawOhlcData.value = [];
     crosshair.visible = false;
+    if (rightTab.value === "db") {
+      await loadDbStats();
+    }
     wsSend({ action: "subscribe", ticker: normalizedTicker });
     await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
     pushNotification({ icon: "📂", title: "工作區已載入", msg: preset.name, type: "success" });
@@ -2043,6 +2051,9 @@ export function useDashboard() {
     await loadAlerts();
     await loadNotifications();
     await loadWatchlist();
+    if (rightTab.value === "db") {
+      await loadDbStats();
+    }
     if (workspaceTab.value === "institutional") {
       await loadInstitutionalData();
     }
@@ -2105,6 +2116,7 @@ export function useDashboard() {
     lastUpdate,
     clockTime,
     dbStats,
+    dbStatsLoading,
     dbStatsError,
     institutionalDate,
     institutionalData,

@@ -41,6 +41,7 @@ const dashboardMock = {
   lastUpdate: "—",
   clockTime: "—",
   dbStats: null,
+  dbStatsLoading: false,
   dbStatsError: "",
   institutionalDate: "2026-03-29",
   institutionalData: null,
