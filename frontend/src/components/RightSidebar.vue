@@ -135,7 +135,13 @@
         <div v-if="dbStats">
           <div class="db-stat-row"><span>總 K 線筆數</span><span style="color:var(--green)">{{ dbStats.total_rows?.toLocaleString() }}</span></div>
           <div class="db-stat-row"><span>股票數量</span><span>{{ dbStats.total_tickers }}</span></div>
-          <div v-for="item in dbStats.top_tickers || []" :key="item.ticker" class="db-stat-row"><span>{{ item.ticker }}</span><span>{{ item.rows }} 筆</span></div>
+          <div v-for="item in dbStats.top_tickers || []" :key="item.ticker" class="db-stat-row">
+            <span>
+              <div>{{ item.ticker }}</div>
+              <div v-if="item.name && item.name !== item.ticker" class="db-stat-name">{{ item.name }}</div>
+            </span>
+            <span>{{ item.rows }} 筆</span>
+          </div>
         </div>
         <div v-else-if="dbStatsLoading" style="color:var(--text2);font-size:11px">載入中...</div>
         <div v-else style="color:var(--red);font-size:11px">{{ dbStatsError || "尚未載入資料庫統計" }}</div>

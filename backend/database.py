@@ -13,6 +13,8 @@ import aiomysql
 from dotenv import load_dotenv
 from pymysql.err import OperationalError
 
+from display_name_resolver import resolve_display_name
+
 log = logging.getLogger(__name__)
 
 load_dotenv()
@@ -1581,14 +1583,31 @@ class Database:
 
                 await cur.execute(
                     """
-                    SELECT `ticker`, COUNT(*) AS `rows`
-                    FROM `ohlcv`
-                    GROUP BY `ticker`
+                    SELECT
+                        o.`ticker`,
+                        COUNT(*) AS `rows`,
+                        MAX(si.`name`) AS `info_name`,
+                        MAX(mq.`name`) AS `quote_name`
+                    FROM `ohlcv` AS o
+                    LEFT JOIN `stock_info` AS si ON si.`ticker` = o.`ticker`
+                    LEFT JOIN `market_quotes_latest` AS mq ON mq.`ticker` = o.`ticker`
+                    GROUP BY o.`ticker`
                     ORDER BY `rows` DESC
                     LIMIT 10
                     """
                 )
-                top = list(await cur.fetchall())
+                top = [
+                    {
+                        "ticker": row["ticker"],
+                        "name": resolve_display_name(
+                            row["ticker"],
+                            {"name": row.get("info_name")} if row.get("info_name") else None,
+                            {"name": row.get("quote_name")} if row.get("quote_name") else None,
+                        ),
+                        "rows": row["rows"],
+                    }
+                    for row in await cur.fetchall()
+                ]
 
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `institutional_snapshots`")
                 institutional_snapshots = (await cur.fetchone())["c"]

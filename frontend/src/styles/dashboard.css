@@ -252,8 +252,9 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .bt-metric span:first-child{color:var(--text3);}
 
 /* DB status panel */
-.db-stat-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px;}
-.db-stat-row span:first-child{color:var(--text3);}
+.db-stat-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px;}
+.db-stat-row span:first-child{color:var(--text3);display:flex;flex-direction:column;min-width:0;}
+.db-stat-name{font-size:10px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sync-btn{width:100%;margin-top:8px;padding:7px;background:rgba(0,217,163,.1);border:1px solid var(--green2);border-radius:5px;color:var(--green);font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;transition:all .15s;}
 .sync-btn:hover{background:rgba(0,217,163,.2);}
 .sync-btn:disabled{opacity:.4;cursor:not-allowed;}

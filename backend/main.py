@@ -23,9 +23,10 @@ from pydantic import BaseModel, Field
 from alert_engine import AlertEngine
 from data_fetcher import DataFetcher, normalize_ticker
 from database import DEFAULT_OWNER_ID, db, init_db
+from display_name_resolver import resolve_display_name
 from quote_provider import YahooFinanceQuoteProvider
 from taifex_fetcher import taifex_fetcher
-from tw_symbol_lookup import get_taiwan_ticker_name, search_taiwan_tickers
+from tw_symbol_lookup import search_taiwan_tickers
 from ws_manager import ConnectionManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -110,24 +111,6 @@ MARKET_OVERVIEW_TICKERS = [
     "NG=F",
 ]
 STARTUP_DOWNLOAD_TICKERS = list(dict.fromkeys(DEFAULT_WATCHLIST + MARKET_OVERVIEW_TICKERS))
-DISPLAY_NAME_OVERRIDES = {
-    "^TWII": "台灣加權指數",
-    "^TWOII": "櫃買指數",
-    "^GSPC": "S&P 500",
-    "^IXIC": "NASDAQ 指數",
-    "^SOX": "費城半導體",
-    "^DJI": "道瓊工業指數",
-    "^N225": "日經 225",
-    "^HSI": "恆生指數",
-    "000001.SS": "上證綜合指數",
-    "^STOXX50E": "Euro Stoxx 50",
-    "GC=F": "黃金",
-    "SI=F": "白銀",
-    "HG=F": "銅",
-    "CL=F": "WTI 原油",
-    "BZ=F": "布蘭特原油",
-    "NG=F": "天然氣",
-}
 CATEGORY_OVERRIDES = {
     "^TWII": "台灣指數",
     "^TWOII": "台灣指數",
@@ -563,15 +546,6 @@ async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
     if not quote:
         return None
     return await db.upsert_market_quote(quote)
-
-
-def resolve_display_name(ticker: str, info: dict | None = None) -> str:
-    return (
-        DISPLAY_NAME_OVERRIDES.get(ticker)
-        or get_taiwan_ticker_name(ticker)
-        or (info.get("name") if info else None)
-        or ticker
-    )
 
 
 async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
