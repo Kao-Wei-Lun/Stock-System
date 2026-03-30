@@ -13,6 +13,7 @@ import requests
 import urllib3
 
 from database import db
+from tw_symbol_lookup import resolve_taiwan_ticker
 
 log = logging.getLogger(__name__)
 
@@ -42,12 +43,27 @@ def normalize_ticker(ticker: str) -> str:
     raw = (ticker or "").strip().upper()
     if not raw:
         return raw
-    if raw.startswith("^") or "." in raw or "-" in raw or "=" in raw:
+    if raw.startswith("^") or "-" in raw or "=" in raw:
+        return raw
+    resolved_taiwan = resolve_taiwan_ticker(raw)
+    if resolved_taiwan:
+        return resolved_taiwan
+    if "." in raw:
         return raw
     # When the input is not a pure English ticker, default to Taiwan suffix.
     if not raw.isalpha():
         return f"{raw}.TW"
     return raw
+
+
+def ticker_candidates(ticker: str) -> List[str]:
+    normalized = normalize_ticker(ticker)
+    candidates = [normalized]
+    if normalized.endswith(".TW"):
+        candidates.append(f"{normalized[:-3]}.TWO")
+    elif normalized.endswith(".TWO"):
+        candidates.append(f"{normalized[:-4]}.TW")
+    return list(dict.fromkeys(candidates))
 
 
 class DataFetcher:
@@ -61,39 +77,51 @@ class DataFetcher:
         interval: str = "1d",
         include_info: bool = False,
     ) -> int:
-        ticker = normalize_ticker(ticker)
+        candidates = ticker_candidates(ticker)
         async with self._semaphore:
             loop = asyncio.get_event_loop()
-            try:
-                rows, info = await loop.run_in_executor(
-                    None,
-                    self._download_sync,
-                    ticker,
-                    period,
-                    interval,
-                    include_info,
-                )
-            except Exception as exc:
-                log.warning("download %s failed: %s", ticker, exc)
-                await db.log_sync(ticker, "error", 0, str(exc))
+            rows = []
+            info = {}
+            resolved_ticker = candidates[0]
+            last_exc = None
+            for candidate in candidates:
+                try:
+                    rows, info = await loop.run_in_executor(
+                        None,
+                        self._download_sync,
+                        candidate,
+                        period,
+                        interval,
+                        include_info,
+                    )
+                    resolved_ticker = candidate
+                    if rows or info:
+                        break
+                except Exception as exc:
+                    last_exc = exc
+                    log.debug("download candidate %s failed: %s", candidate, exc)
+                    rows, info = [], {}
+            if not rows and not info and last_exc:
+                log.warning("download %s failed: %s", candidates[0], last_exc)
+                await db.log_sync(candidates[0], "error", 0, str(last_exc))
                 return 0
 
         if interval == "1d" and rows:
             sorted_rows = sorted(rows, key=lambda item: item["date"])
             await db.delete_ohlcv_range(
-                ticker,
+                resolved_ticker,
                 interval=interval,
                 start_date=sorted_rows[0]["date"],
                 end_date=sorted_rows[-1]["date"],
             )
             rows = sorted_rows
-        count = await db.upsert_ohlcv_batch(ticker, rows, interval)
+        count = await db.upsert_ohlcv_batch(resolved_ticker, rows, interval)
         if info:
-            await db.upsert_stock_info(ticker, info)
+            await db.upsert_stock_info(resolved_ticker, info)
 
         status = "ok" if count else "empty"
         message = "" if count else "No rows returned from Yahoo Finance"
-        await db.log_sync(ticker, status, count, message)
+        await db.log_sync(resolved_ticker, status, count, message)
         return count
 
     def _download_sync(
@@ -135,23 +163,27 @@ class DataFetcher:
         return rows, info
 
     async def fetch_realtime_quote(self, ticker: str) -> Optional[Dict]:
-        ticker = normalize_ticker(ticker)
         now = time.time()
-        if ticker in _quote_cache:
-            ts, data = _quote_cache[ticker]
-            if now - ts < QUOTE_CACHE_TTL:
-                return data
+        candidates = ticker_candidates(ticker)
+        for candidate in candidates:
+            if candidate in _quote_cache:
+                ts, data = _quote_cache[candidate]
+                if now - ts < QUOTE_CACHE_TTL:
+                    return data
 
         async with self._semaphore:
             loop = asyncio.get_event_loop()
-            try:
-                data = await loop.run_in_executor(None, self._quote_sync, ticker)
-            except Exception as exc:
-                log.debug("quote %s: %s", ticker, exc)
-                return None
+            data = None
+            for candidate in candidates:
+                try:
+                    data = await loop.run_in_executor(None, self._quote_sync, candidate)
+                    if data:
+                        break
+                except Exception as exc:
+                    log.debug("quote %s: %s", candidate, exc)
 
         if data:
-            _quote_cache[ticker] = (now, data)
+            _quote_cache[data.get("ticker") or candidates[0]] = (now, data)
         return data
 
     def _quote_sync(self, ticker: str) -> Optional[Dict]:
@@ -202,16 +234,16 @@ class DataFetcher:
         }
 
     async def fetch_and_store_info(self, ticker: str) -> Optional[Dict]:
-        ticker = normalize_ticker(ticker)
         async with self._semaphore:
             loop = asyncio.get_event_loop()
-            try:
-                info = await loop.run_in_executor(None, self._info_sync, ticker)
-                if info:
-                    await db.upsert_stock_info(ticker, info)
-                    return await db.get_stock_info(ticker)
-            except Exception as exc:
-                log.warning("info %s: %s", ticker, exc)
+            for candidate in ticker_candidates(ticker):
+                try:
+                    info = await loop.run_in_executor(None, self._info_sync, candidate)
+                    if info:
+                        await db.upsert_stock_info(candidate, info)
+                        return await db.get_stock_info(candidate)
+                except Exception as exc:
+                    log.warning("info %s: %s", candidate, exc)
         return None
 
     async def incremental_update(self, ticker: str) -> int:

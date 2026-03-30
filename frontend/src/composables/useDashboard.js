@@ -350,6 +350,15 @@ export function normalizeTicker(ticker) {
   return raw;
 }
 
+function resolveSearchInputTicker(rawInput, searchResults) {
+  const raw = (rawInput || "").trim().toUpperCase();
+  if (!raw) return null;
+  const exact = searchResults.find((item) => item?.ticker?.toUpperCase() === raw);
+  if (exact) return exact;
+  const byStockCode = searchResults.find((item) => item?.ticker?.toUpperCase().startsWith(`${raw}.`));
+  return byStockCode || null;
+}
+
 function getExchangeClockParts(date, timeZone) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -1100,10 +1109,16 @@ export function useDashboard() {
         retries: 12,
         retryDelayMs: 1500,
       });
+      const resolvedTicker = normalizeTicker(data?.ticker || normalized);
+      if (resolvedTicker !== currentTicker.value) {
+        wsSend({ action: "unsubscribe", ticker: currentTicker.value });
+        currentTicker.value = resolvedTicker;
+        wsSend({ action: "subscribe", ticker: resolvedTicker });
+      }
       rawOhlcData.value = data.data || [];
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
-      if (rawOhlcData.value.length > 0) await loadQuote(normalized);
+      if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker);
       else resetQuote();
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "載入失敗", msg: `無法取得 ${normalized} 資料`, type: "error" });
@@ -1906,9 +1921,9 @@ export function useDashboard() {
   }
 
   async function submitSearch() {
-    const ticker = normalizeTicker(searchQuery.value);
+    const matched = resolveSearchInputTicker(searchQuery.value, searchResults.value);
+    const ticker = matched?.ticker || normalizeTicker(searchQuery.value);
     if (!ticker) return;
-    const matched = searchResults.value.find((item) => normalizeTicker(item.ticker) === ticker);
     searchQuery.value = "";
     searchOpen.value = false;
     await selectTicker(ticker, matched?.name || ticker);

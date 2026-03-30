@@ -12,6 +12,7 @@ LOOKUP_CACHE_TTL_SECONDS = 60 * 60 * 12
 _lookup_cache = {
     "expires_at": 0.0,
     "names": {},
+    "canonical": {},
     "rows": [],
 }
 
@@ -20,19 +21,20 @@ def _build_ticker_aliases(stock_id: str, market_type: str) -> tuple[str, List[st
     primary_ticker = f"{stock_id}.TW"
     aliases = [stock_id, primary_ticker]
 
-    if market_type == "tpex":
+    if market_type in {"tpex", "emerging"}:
         primary_ticker = f"{stock_id}.TWO"
         aliases.insert(1, primary_ticker)
 
     return primary_ticker, aliases
 
 
-def _load_lookup(force: bool = False) -> tuple[Dict[str, str], List[Dict[str, str]]]:
+def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], List[Dict[str, str]]]:
     now = time.time()
     cached_names = _lookup_cache["names"]
+    cached_canonical = _lookup_cache["canonical"]
     cached_rows = _lookup_cache["rows"]
     if not force and cached_names and now < _lookup_cache["expires_at"]:
-        return cached_names, cached_rows
+        return cached_names, cached_canonical, cached_rows
 
     try:
         response = requests.get(
@@ -46,6 +48,7 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], List[Dict[str, st
             raise RuntimeError(payload.get("msg") or "FinMind lookup failed")
 
         names: Dict[str, str] = {}
+        canonical: Dict[str, str] = {}
         rows: List[Dict[str, str]] = []
         primary_seen = set()
         for item in payload.get("data", []):
@@ -58,6 +61,7 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], List[Dict[str, st
             primary_ticker, aliases = _build_ticker_aliases(stock_id, market_type)
             for alias in aliases:
                 names.setdefault(alias, stock_name)
+                canonical.setdefault(alias, primary_ticker)
             if primary_ticker in primary_seen:
                 continue
             primary_seen.add(primary_ticker)
@@ -72,22 +76,31 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], List[Dict[str, st
 
         _lookup_cache["expires_at"] = now + LOOKUP_CACHE_TTL_SECONDS
         _lookup_cache["names"] = names
+        _lookup_cache["canonical"] = canonical
         _lookup_cache["rows"] = rows
-        return names, rows
+        return names, canonical, rows
     except Exception as exc:
         if cached_names:
             log.warning("taiwan symbol lookup refresh failed, using cached data: %s", exc)
-            return cached_names, cached_rows
+            return cached_names, cached_canonical, cached_rows
         log.warning("taiwan symbol lookup failed: %s", exc)
-        return {}, []
+        return {}, {}, []
 
 
 def get_taiwan_ticker_name(ticker: str) -> str | None:
     raw = (ticker or "").strip().upper()
     if not raw:
         return None
-    names, _ = _load_lookup()
+    names, _, _ = _load_lookup()
     return names.get(raw)
+
+
+def resolve_taiwan_ticker(ticker: str) -> str | None:
+    raw = (ticker or "").strip().upper()
+    if not raw:
+        return None
+    _, canonical, _ = _load_lookup()
+    return canonical.get(raw)
 
 
 def search_taiwan_tickers(query: str, limit: int = 20) -> List[Dict[str, str]]:
@@ -95,7 +108,7 @@ def search_taiwan_tickers(query: str, limit: int = 20) -> List[Dict[str, str]]:
     if not keyword:
         return []
 
-    _, rows = _load_lookup()
+    _, _, rows = _load_lookup()
     upper_keyword = keyword.upper()
 
     def score(row: Dict[str, str]) -> tuple[int, str]:
