@@ -971,7 +971,7 @@ async def websocket_endpoint(websocket: WebSocket):
 def categorize(ticker: str) -> str:
     if ticker in CATEGORY_OVERRIDES:
         return CATEGORY_OVERRIDES[ticker]
-    if ticker.endswith(".TW"):
+    if ticker.endswith(".TW") or ticker.endswith(".TWO"):
         return "台股"
     if ticker.endswith(".HK"):
         return "港股"
