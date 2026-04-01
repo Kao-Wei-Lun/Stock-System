@@ -100,10 +100,15 @@ function importanceLabel(value) {
 
 <style scoped>
 .intel-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 16px;
+  overflow: auto;
+  background: linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(12, 18, 28, 0.98) 100%);
 }
 
 .intel-panel,

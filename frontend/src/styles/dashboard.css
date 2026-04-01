@@ -53,9 +53,15 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .workspace-stage:fullscreen .center,
 .workspace-stage:fullscreen .right-panel,
 .workspace-stage:fullscreen .institutional-shell,
+.workspace-stage:fullscreen .intel-shell,
+.workspace-stage:fullscreen .macro-shell,
+.workspace-stage:fullscreen .screen-shell,
 .workspace-stage.is-pseudo-fullscreen .center,
 .workspace-stage.is-pseudo-fullscreen .right-panel,
-.workspace-stage.is-pseudo-fullscreen .institutional-shell{height:100%;max-height:none;}
+.workspace-stage.is-pseudo-fullscreen .institutional-shell,
+.workspace-stage.is-pseudo-fullscreen .intel-shell,
+.workspace-stage.is-pseudo-fullscreen .macro-shell,
+.workspace-stage.is-pseudo-fullscreen .screen-shell{height:100%;max-height:none;}
 
 /* ─ LEFT ─ */
 .left-panel{width:280px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
