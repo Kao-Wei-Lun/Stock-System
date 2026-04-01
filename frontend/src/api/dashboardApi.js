@@ -65,6 +65,42 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     markNotificationRead(notificationId) {
       return request(`/api/notifications/${notificationId}/read`, { method: "POST" });
     },
+    setNotificationReadState(notificationId, read) {
+      return request(`/api/notifications/${notificationId}/read`, buildJsonRequest("PATCH", { read }));
+    },
+    listJournalTrades(options = {}) {
+      const params = new URLSearchParams();
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.market) params.set("market", String(options.market));
+      if (options.strategy_code) params.set("strategy_code", String(options.strategy_code));
+      if (options.tag) params.set("tag", String(options.tag));
+      if (options.search) params.set("search", String(options.search));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/journal/trades${query ? `?${query}` : ""}`);
+    },
+    getJournalTrade(entryId) {
+      return request(`/api/journal/trades/${entryId}`);
+    },
+    createJournalTrade(payload) {
+      return request("/api/journal/trades", buildJsonRequest("POST", payload));
+    },
+    updateJournalTrade(entryId, payload) {
+      return request(`/api/journal/trades/${entryId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteJournalTrade(entryId) {
+      return request(`/api/journal/trades/${entryId}`, { method: "DELETE" });
+    },
+    getJournalTradeStats(options = {}) {
+      const params = new URLSearchParams();
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.market) params.set("market", String(options.market));
+      if (options.strategy_code) params.set("strategy_code", String(options.strategy_code));
+      if (options.tag) params.set("tag", String(options.tag));
+      if (options.search) params.set("search", String(options.search));
+      const query = params.toString();
+      return request(`/api/journal/trades/stats${query ? `?${query}` : ""}`);
+    },
     listBacktestStrategies() {
       return request("/api/backtests/strategies");
     },

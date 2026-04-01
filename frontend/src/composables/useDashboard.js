@@ -349,6 +349,20 @@ export function normalizeTicker(ticker) {
   return raw;
 }
 
+function inferMarketFromTicker(ticker) {
+  const normalized = normalizeTicker(ticker);
+  if (normalized.endsWith(".TW") || normalized.endsWith(".TWO")) return "TW";
+  if (normalized.endsWith(".HK")) return "HK";
+  if (normalized.startsWith("^")) return "INDEX";
+  return "US";
+}
+
+function getCurrentDateTimeInputValue() {
+  const now = new Date();
+  const timezoneOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 16);
+}
+
 function resolveSearchInputTicker(rawInput, searchResults) {
   const raw = (rawInput || "").trim().toUpperCase();
   if (!raw) return null;
@@ -460,7 +474,7 @@ export function useDashboard() {
       .filter((series) => (series.data || []).length),
   );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
-  const rightTab = ref(["indicators", "alerts", "backtest", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
+  const rightTab = ref(["indicators", "alerts", "backtest", "journal", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
   const workspaceTab = ref(initialWorkspaceTab);
   const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
@@ -507,6 +521,16 @@ export function useDashboard() {
   const backtestResult = ref(null);
   const backtestHistory = ref([]);
   const backtestLoading = ref(false);
+  const journalEntries = ref([]);
+  const journalStats = ref(null);
+  const journalLoading = ref(false);
+  const journalFilterScope = ref("ticker");
+  const journalFilters = reactive({
+    market: "",
+    strategy_code: "",
+    tag: "",
+    search: "",
+  });
 
   const quote = reactive({
     price: null,
@@ -560,6 +584,28 @@ export function useDashboard() {
     slippage: 0,
     sl: 5,
     tp: 10,
+  });
+  const journalForm = reactive({
+    id: null,
+    ticker: "AAPL",
+    market: inferMarketFromTicker("AAPL"),
+    direction: "long",
+    strategy_code: "",
+    entry_time: getCurrentDateTimeInputValue(),
+    entry_price: "",
+    exit_time: "",
+    exit_price: "",
+    size: 1,
+    stop_loss: "",
+    take_profit: "",
+    entry_reason: "",
+    exit_reason: "",
+    emotion_tag: "",
+    review_notes: "",
+    tags_text: "",
+    attachment_path: "",
+    attachment_type: "",
+    attachments: [],
   });
 
   const ohlcData = computed(() => filterRowsForDisplayPeriod(
@@ -748,6 +794,53 @@ export function useDashboard() {
     };
   }
 
+  function mapJournalEntry(item) {
+    if (!item) return null;
+    return {
+      ...item,
+      id: item.id,
+      ticker: normalizeTicker(item.ticker),
+      tags: Array.isArray(item.tags) ? item.tags : [],
+      attachments: Array.isArray(item.attachments) ? item.attachments : [],
+      result: item.result || {},
+    };
+  }
+
+  function applyJournalEntryToForm(entry = null) {
+    const normalized = mapJournalEntry(entry);
+    journalForm.id = normalized?.id ?? null;
+    journalForm.ticker = normalized?.ticker || currentTicker.value;
+    journalForm.market = normalized?.market || inferMarketFromTicker(normalized?.ticker || currentTicker.value);
+    journalForm.direction = normalized?.direction || "long";
+    journalForm.strategy_code = normalized?.strategy_code || "";
+    journalForm.entry_time = normalized?.entry_time ? String(normalized.entry_time).slice(0, 16) : getCurrentDateTimeInputValue();
+    journalForm.entry_price = normalized?.entry_price ?? quote.price ?? "";
+    journalForm.exit_time = normalized?.exit_time ? String(normalized.exit_time).slice(0, 16) : "";
+    journalForm.exit_price = normalized?.exit_price ?? "";
+    journalForm.size = normalized?.size ?? 1;
+    journalForm.stop_loss = normalized?.stop_loss ?? "";
+    journalForm.take_profit = normalized?.take_profit ?? "";
+    journalForm.entry_reason = normalized?.entry_reason || "";
+    journalForm.exit_reason = normalized?.exit_reason || "";
+    journalForm.emotion_tag = normalized?.emotion_tag || "";
+    journalForm.review_notes = normalized?.review_notes || "";
+    journalForm.tags_text = (normalized?.tags || []).join(", ");
+    journalForm.attachment_path = "";
+    journalForm.attachment_type = "";
+    journalForm.attachments = Array.isArray(normalized?.attachments) ? [...normalized.attachments] : [];
+  }
+
+  function buildJournalQueryOptions() {
+    return {
+      ticker: journalFilterScope.value === "ticker" ? currentTicker.value : undefined,
+      market: journalFilters.market || undefined,
+      strategy_code: journalFilters.strategy_code || undefined,
+      tag: journalFilters.tag || undefined,
+      search: journalFilters.search || undefined,
+      limit: 50,
+    };
+  }
+
   async function loadAlerts({ silent = true } = {}) {
     try {
       const response = await dashboardApi.listAlerts();
@@ -799,6 +892,165 @@ export function useDashboard() {
       pushNotification({ icon: "⚠️", title: "回測紀錄讀取失敗", msg: error.message || "請稍後再試", type: "error" });
     } finally {
       backtestLoading.value = false;
+    }
+  }
+
+  async function loadJournalData({ silent = true } = {}) {
+    journalLoading.value = !silent;
+    try {
+      const options = buildJournalQueryOptions();
+      const [entriesResponse, statsResponse] = await Promise.all([
+        dashboardApi.listJournalTrades(options),
+        dashboardApi.getJournalTradeStats(options),
+      ]);
+      journalEntries.value = Array.isArray(entriesResponse?.items)
+        ? entriesResponse.items.map((item) => mapJournalEntry(item)).filter(Boolean)
+        : [];
+      journalStats.value = statsResponse || null;
+    } catch (error) {
+      console.error(error);
+      if (!silent) {
+        pushNotification({ icon: "⚠️", title: "交易日誌載入失敗", msg: "請稍後再試", type: "error" });
+      }
+    } finally {
+      journalLoading.value = false;
+    }
+  }
+
+  function updateJournalField(key, value) {
+    journalForm[key] = ["entry_price", "exit_price", "size", "stop_loss", "take_profit"].includes(key)
+      ? (value === "" ? "" : Number(value))
+      : value;
+    if (key === "ticker" && value) {
+      journalForm.market = inferMarketFromTicker(value);
+    }
+  }
+
+  async function updateJournalFilter(key, value) {
+    if (key === "scope") {
+      journalFilterScope.value = value === "all" ? "all" : "ticker";
+    } else if (Object.prototype.hasOwnProperty.call(journalFilters, key)) {
+      journalFilters[key] = value;
+    }
+    await loadJournalData();
+  }
+
+  function resetJournalForm() {
+    applyJournalEntryToForm({
+      ticker: currentTicker.value,
+      market: inferMarketFromTicker(currentTicker.value),
+      entry_price: quote.price ?? "",
+      size: 1,
+    });
+  }
+
+  function addJournalAttachment() {
+    if (!journalForm.attachment_path) return;
+    journalForm.attachments = [
+      ...journalForm.attachments,
+      {
+        file_path: journalForm.attachment_path,
+        file_type: journalForm.attachment_type || null,
+      },
+    ];
+    journalForm.attachment_path = "";
+    journalForm.attachment_type = "";
+  }
+
+  function removeJournalAttachment(index) {
+    journalForm.attachments = journalForm.attachments.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  function startJournalEntry(seed = {}) {
+    rightTab.value = "journal";
+    applyJournalEntryToForm({
+      ticker: seed.ticker || currentTicker.value,
+      market: seed.market || inferMarketFromTicker(seed.ticker || currentTicker.value),
+      entry_price: seed.entry_price ?? quote.price ?? "",
+      strategy_code: seed.strategy_code || backtestResult.value?.strategy_key || "",
+      size: 1,
+    });
+    void loadJournalData();
+  }
+
+  async function selectJournalEntry(entryId) {
+    if (!entryId) return;
+    journalLoading.value = true;
+    try {
+      const entry = await dashboardApi.getJournalTrade(entryId);
+      applyJournalEntryToForm(entry);
+      rightTab.value = "journal";
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "交易紀錄讀取失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      journalLoading.value = false;
+    }
+  }
+
+  async function saveJournalEntry() {
+    journalLoading.value = true;
+    try {
+      const isEditing = Boolean(journalForm.id);
+      const payload = {
+        ticker: normalizeTicker(journalForm.ticker),
+        market: journalForm.market || inferMarketFromTicker(journalForm.ticker),
+        direction: journalForm.direction,
+        strategy_code: journalForm.strategy_code || null,
+        entry_time: journalForm.entry_time,
+        entry_price: Number(journalForm.entry_price),
+        exit_time: journalForm.exit_time || null,
+        exit_price: journalForm.exit_price === "" ? null : Number(journalForm.exit_price),
+        size: Number(journalForm.size),
+        stop_loss: journalForm.stop_loss === "" ? null : Number(journalForm.stop_loss),
+        take_profit: journalForm.take_profit === "" ? null : Number(journalForm.take_profit),
+        entry_reason: journalForm.entry_reason || null,
+        exit_reason: journalForm.exit_reason || null,
+        emotion_tag: journalForm.emotion_tag || null,
+        review_notes: journalForm.review_notes || null,
+        tags: journalForm.tags_text
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        attachments: journalForm.attachments.map((item) => ({
+          file_path: item.file_path,
+          file_type: item.file_type || null,
+        })),
+      };
+      const record = journalForm.id
+        ? await dashboardApi.updateJournalTrade(journalForm.id, payload)
+        : await dashboardApi.createJournalTrade(payload);
+      applyJournalEntryToForm(record);
+      await loadJournalData();
+      pushNotification({
+        icon: "📝",
+        title: isEditing ? "交易日誌已更新" : "交易日誌已建立",
+        msg: `${record.ticker} · ${record.direction}`,
+        type: "success",
+      });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "交易日誌儲存失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      journalLoading.value = false;
+    }
+  }
+
+  async function deleteJournalEntry(entryId = journalForm.id) {
+    if (!entryId) return;
+    journalLoading.value = true;
+    try {
+      await dashboardApi.deleteJournalTrade(entryId);
+      if (journalForm.id === entryId) {
+        resetJournalForm();
+      }
+      await loadJournalData();
+      pushNotification({ icon: "🗑", title: "交易紀錄已刪除", msg: String(entryId), type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "交易紀錄刪除失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      journalLoading.value = false;
     }
   }
 
@@ -1211,6 +1463,7 @@ export function useDashboard() {
     wsSend({ action: "subscribe", ticker: normalized });
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
     void loadBacktestHistory({ ticker: normalized });
+    void loadJournalData();
     void ensureInstitutionalOverlayForTicker(normalized);
   }
 
@@ -1327,6 +1580,7 @@ export function useDashboard() {
     rightTab.value = tab;
     if (tab === "db") await loadDbStats();
     if (tab === "backtest") await loadBacktestHistory({ ticker: currentTicker.value });
+    if (tab === "journal") await loadJournalData({ silent: false });
   }
 
   async function setWorkspaceTab(tab) {
@@ -1853,7 +2107,7 @@ export function useDashboard() {
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
     leftTab.value = preset.leftTab === "market" ? "market" : "watch";
-    rightTab.value = ["indicators", "alerts", "backtest", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
+    rightTab.value = ["indicators", "alerts", "backtest", "journal", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
     workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(preset.workspaceTab) ? preset.workspaceTab : "chart";
     compareTickers.value = (preset.compareTickers || [])
       .map((ticker) => normalizeTicker(ticker))
@@ -2132,6 +2386,8 @@ export function useDashboard() {
     await loadAlerts();
     await loadNotifications();
     await loadBacktestHistory({ ticker: currentTicker.value });
+    applyJournalEntryToForm();
+    await loadJournalData();
     await loadWatchlist();
     if (rightTab.value === "db") {
       await loadDbStats();
@@ -2225,6 +2481,12 @@ export function useDashboard() {
     backtestResult,
     backtestHistory,
     backtestLoading,
+    journalForm,
+    journalEntries,
+    journalStats,
+    journalLoading,
+    journalFilterScope,
+    journalFilters,
     indicatorSnapshot,
     institutionalOverlay,
     backendUrl,
@@ -2289,6 +2551,15 @@ export function useDashboard() {
     updateBacktestField,
     runBacktest,
     selectBacktestRun,
+    updateJournalField,
+    saveJournalEntry,
+    deleteJournalEntry,
+    selectJournalEntry,
+    resetJournalForm,
+    updateJournalFilter,
+    addJournalAttachment,
+    removeJournalAttachment,
+    startJournalEntry,
     fmtPrice,
     fmtVol,
     fmtMktCap,

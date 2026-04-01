@@ -110,4 +110,40 @@ describe("dashboardApi", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/backtests/runs?ticker=AAPL&limit=10", {});
   });
+
+  it("creates journal trades with JSON payloads", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ id: 11, ticker: "AAPL" }));
+    const api = createDashboardApi();
+
+    await api.createJournalTrade({
+      ticker: "AAPL",
+      entry_time: "2026-04-01T09:00",
+      entry_price: 200,
+      size: 10,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/journal/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker: "AAPL",
+        entry_time: "2026-04-01T09:00",
+        entry_price: 200,
+        size: 10,
+      }),
+    });
+  });
+
+  it("patches notification read state", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ id: 5, read_at: null }));
+    const api = createDashboardApi();
+
+    await api.setNotificationReadState(5, false);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/notifications/5/read", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ read: false }),
+    });
+  });
 });

@@ -131,4 +131,14 @@ describe("ChartWorkspace", () => {
     expect(wrapper.emitted("save-workspace")[0]).toEqual(["Momentum Desk"]);
     expect(wrapper.emitted("load-workspace")[0]).toEqual([1]);
   });
+
+  it("emits journal creation from the chart toolbar", async () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+    const toolbarButtons = wrapper.findAll(".chart-toolbar .tool-btn");
+    await toolbarButtons[toolbarButtons.length - 1].trigger("click");
+
+    expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
+      { ticker: "AAPL", entry_price: 210.5 },
+    ]);
+  });
 });

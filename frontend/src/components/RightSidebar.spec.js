@@ -27,6 +27,38 @@ describe("RightSidebar", () => {
         backtestResult: null,
         backtestHistory: [],
         backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
         dbStats: null,
         dbStatsLoading: false,
         dbStatsError: "",
@@ -98,6 +130,38 @@ describe("RightSidebar", () => {
           },
         ],
         backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
         dbStats: null,
         dbStatsLoading: false,
         dbStatsError: "",
@@ -112,5 +176,86 @@ describe("RightSidebar", () => {
     await wrapper.find(".bt-history-row").trigger("click");
 
     expect(wrapper.emitted("load-backtest")[0]).toEqual([21]);
+  });
+
+  it("emits journal actions", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: 210,
+          exit_time: "",
+          exit_price: "",
+          size: 10,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "breakout",
+          attachment_path: "C:/shots/aapl.png",
+          attachment_type: "image/png",
+          attachments: [],
+        },
+        journalEntries: [
+          {
+            id: 5,
+            ticker: "AAPL",
+            direction: "long",
+            strategy_code: "breakout",
+            entry_time: "2026-04-01T09:00",
+            tags: ["breakout"],
+            result: { pnl: 500 },
+          },
+        ],
+        journalStats: {
+          total_entries: 1,
+          closed_entries: 1,
+          open_entries: 0,
+          win_rate: 100,
+          net_pnl: 500,
+          avg_return_pct: 2.5,
+        },
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("交易日誌");
+    expect(wrapper.text()).toContain("統計摘要");
+
+    await wrapper.find(".journal-card .add-btn").trigger("click");
+    await wrapper.findAll(".bt-history-row")[0].trigger("click");
+    await wrapper.find(".journal-action-row .run-btn").trigger("click");
+
+    expect(wrapper.emitted("add-journal-attachment")).toBeTruthy();
+    expect(wrapper.emitted("select-journal-entry")[0]).toEqual([5]);
+    expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
 });

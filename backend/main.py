@@ -324,6 +324,57 @@ class BacktestRunCreatePayload(BaseModel):
     position_sizing: str = Field("full_equity", max_length=32)
 
 
+class NotificationReadStatePayload(BaseModel):
+    read: bool = True
+
+
+class TradeJournalAttachmentPayload(BaseModel):
+    file_path: str = Field(..., min_length=1, max_length=512)
+    file_type: str | None = Field(None, max_length=64)
+
+
+class TradeJournalEntryCreatePayload(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=32)
+    market: str | None = Field(None, max_length=32)
+    direction: str = Field("long", max_length=16)
+    strategy_code: str | None = Field(None, max_length=64)
+    entry_time: str = Field(..., min_length=10, max_length=64)
+    entry_price: float = Field(..., gt=0)
+    exit_time: str | None = Field(None, max_length=64)
+    exit_price: float | None = None
+    size: float = Field(..., gt=0)
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    entry_reason: str | None = None
+    exit_reason: str | None = None
+    emotion_tag: str | None = Field(None, max_length=64)
+    review_notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    attachments: list[TradeJournalAttachmentPayload] = Field(default_factory=list)
+    result: dict = Field(default_factory=dict)
+
+
+class TradeJournalEntryUpdatePayload(BaseModel):
+    ticker: str | None = Field(None, min_length=1, max_length=32)
+    market: str | None = Field(None, max_length=32)
+    direction: str | None = Field(None, max_length=16)
+    strategy_code: str | None = Field(None, max_length=64)
+    entry_time: str | None = Field(None, min_length=10, max_length=64)
+    entry_price: float | None = Field(None, gt=0)
+    exit_time: str | None = Field(None, max_length=64)
+    exit_price: float | None = None
+    size: float | None = Field(None, gt=0)
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    entry_reason: str | None = None
+    exit_reason: str | None = None
+    emotion_tag: str | None = Field(None, max_length=64)
+    review_notes: str | None = None
+    tags: list[str] | None = None
+    attachments: list[TradeJournalAttachmentPayload] | None = None
+    result: dict | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
@@ -795,6 +846,95 @@ async def mark_notification_read(notification_id: int):
     if not notification:
         raise HTTPException(404, "Notification not found")
     return notification
+
+
+@app.patch("/api/notifications/{notification_id}/read")
+async def patch_notification_read_state(notification_id: int, payload: NotificationReadStatePayload):
+    notification = await db.set_notification_read_state(notification_id, payload.read, owner_id=DEFAULT_OWNER_ID)
+    if not notification:
+        raise HTTPException(404, "Notification not found")
+    return notification
+
+
+@app.get("/api/journal/trades")
+async def list_trade_journal_entries(
+    ticker: str | None = Query(None),
+    market: str | None = Query(None),
+    strategy_code: str | None = Query(None),
+    tag: str | None = Query(None),
+    search: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+):
+    normalized_ticker = normalize_ticker(ticker) if ticker else None
+    return {
+        "items": await db.list_trade_journal_entries(
+            owner_id=DEFAULT_OWNER_ID,
+            ticker=normalized_ticker,
+            market=market.strip() if market else None,
+            strategy_code=strategy_code.strip() if strategy_code else None,
+            tag=tag.strip() if tag else None,
+            search=search.strip() if search else None,
+            limit=limit,
+        )
+    }
+
+
+@app.get("/api/journal/trades/stats")
+async def get_trade_journal_stats(
+    ticker: str | None = Query(None),
+    market: str | None = Query(None),
+    strategy_code: str | None = Query(None),
+    tag: str | None = Query(None),
+    search: str | None = Query(None),
+):
+    normalized_ticker = normalize_ticker(ticker) if ticker else None
+    return await db.get_trade_journal_stats(
+        owner_id=DEFAULT_OWNER_ID,
+        ticker=normalized_ticker,
+        market=market.strip() if market else None,
+        strategy_code=strategy_code.strip() if strategy_code else None,
+        tag=tag.strip() if tag else None,
+        search=search.strip() if search else None,
+    )
+
+
+@app.post("/api/journal/trades")
+async def create_trade_journal_entry(payload: TradeJournalEntryCreatePayload):
+    try:
+        return await db.create_trade_journal_entry(payload.model_dump(), owner_id=DEFAULT_OWNER_ID)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/journal/trades/{entry_id}")
+async def get_trade_journal_entry(entry_id: int):
+    entry = await db.get_trade_journal_entry(entry_id, owner_id=DEFAULT_OWNER_ID)
+    if not entry:
+        raise HTTPException(404, "Trade journal entry not found")
+    return entry
+
+
+@app.patch("/api/journal/trades/{entry_id}")
+async def update_trade_journal_entry(entry_id: int, payload: TradeJournalEntryUpdatePayload):
+    try:
+        entry = await db.update_trade_journal_entry(
+            entry_id,
+            payload.model_dump(exclude_unset=True),
+            owner_id=DEFAULT_OWNER_ID,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not entry:
+        raise HTTPException(404, "Trade journal entry not found")
+    return entry
+
+
+@app.delete("/api/journal/trades/{entry_id}")
+async def delete_trade_journal_entry(entry_id: int):
+    deleted = await db.delete_trade_journal_entry(entry_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Trade journal entry not found")
+    return {"ok": True, "entry_id": entry_id}
 
 
 @app.get("/api/backtests/strategies")

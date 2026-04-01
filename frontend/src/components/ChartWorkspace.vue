@@ -92,6 +92,7 @@
       <button class="tool-btn" :disabled="syncingCurrent" @click="$emit('sync-current')">
         {{ syncingCurrent ? "↻ 同步中..." : "↻ 同步" }}
       </button>
+      <button class="tool-btn" @click="$emit('open-journal-entry', { ticker: currentTicker, entry_price: quote.price })">✎ 寫日誌</button>
     </div>
 
     <div class="chart-meta">
@@ -370,6 +371,7 @@ const emit = defineEmits([
   "set-chart-layout",
   "clear-indicators",
   "toggle-fullscreen",
+  "open-journal-entry",
 ]);
 
 const chartAreaRef = ref(null);

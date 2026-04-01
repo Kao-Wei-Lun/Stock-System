@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
 from dotenv import load_dotenv
+from journal_service import build_journal_stats, compute_trade_result
 from pymysql.err import OperationalError
 
 from display_name_resolver import resolve_display_name
@@ -355,6 +356,60 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_backtest_equity_points_run_date` (`backtest_run_id`, `point_date`),
             CONSTRAINT `fk_backtest_equity_points_run`
                 FOREIGN KEY (`backtest_run_id`) REFERENCES `backtest_runs` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "trade_journal_entries": """
+        CREATE TABLE `trade_journal_entries` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `ticker` VARCHAR(32) NOT NULL,
+            `market` VARCHAR(32) NULL,
+            `direction` VARCHAR(16) NOT NULL DEFAULT 'long',
+            `strategy_code` VARCHAR(64) NULL,
+            `entry_time` DATETIME NOT NULL,
+            `entry_price` DOUBLE NOT NULL,
+            `exit_time` DATETIME NULL,
+            `exit_price` DOUBLE NULL,
+            `size` DOUBLE NOT NULL DEFAULT 0,
+            `stop_loss` DOUBLE NULL,
+            `take_profit` DOUBLE NULL,
+            `entry_reason` TEXT NULL,
+            `exit_reason` TEXT NULL,
+            `emotion_tag` VARCHAR(64) NULL,
+            `review_notes` LONGTEXT NULL,
+            `result_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_trade_journal_owner_created` (`owner_id`, `created_at`),
+            KEY `idx_trade_journal_ticker_entry` (`ticker`, `entry_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "trade_journal_tags": """
+        CREATE TABLE `trade_journal_tags` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `entry_id` BIGINT NOT NULL,
+            `tag` VARCHAR(64) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_trade_journal_tags_entry_tag` (`entry_id`, `tag`),
+            KEY `idx_trade_journal_tags_tag` (`tag`),
+            CONSTRAINT `fk_trade_journal_tags_entry`
+                FOREIGN KEY (`entry_id`) REFERENCES `trade_journal_entries` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "trade_journal_attachments": """
+        CREATE TABLE `trade_journal_attachments` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `entry_id` BIGINT NOT NULL,
+            `file_path` VARCHAR(512) NOT NULL,
+            `file_type` VARCHAR(64) NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_trade_journal_attachments_entry` (`entry_id`, `created_at`),
+            CONSTRAINT `fk_trade_journal_attachments_entry`
+                FOREIGN KEY (`entry_id`) REFERENCES `trade_journal_entries` (`id`)
                 ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -1139,17 +1194,7 @@ class Database:
         notification_id: int,
         owner_id: int = DEFAULT_OWNER_ID,
     ) -> Optional[Dict[str, Any]]:
-        updated = await self._execute(
-            """
-            UPDATE `notifications`
-            SET `read_at`=%s
-            WHERE `id`=%s AND `owner_id`=%s
-            """,
-            (datetime.now(timezone.utc).replace(tzinfo=None), notification_id, owner_id),
-        )
-        if not updated:
-            return None
-        return await self.get_notification(notification_id, owner_id=owner_id)
+        return await self.set_notification_read_state(notification_id, True, owner_id=owner_id)
 
     async def create_backtest_run(
         self,
@@ -1324,6 +1369,329 @@ class Database:
         run["trades"] = [_deserialize_backtest_trade(item) for item in trade_rows]
         run["equity_curve"] = [_deserialize_backtest_equity_point(item) for item in equity_rows]
         return run
+
+    async def list_trade_journal_entries(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        ticker: Optional[str] = None,
+        market: Optional[str] = None,
+        strategy_code: Optional[str] = None,
+        tag: Optional[str] = None,
+        search: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 200))
+        filters = ["e.`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+
+        if ticker:
+            filters.append("e.`ticker`=%s")
+            params.append(ticker)
+        if market:
+            filters.append("e.`market`=%s")
+            params.append(market)
+        if strategy_code:
+            filters.append("e.`strategy_code`=%s")
+            params.append(strategy_code)
+        if tag:
+            filters.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM `trade_journal_tags` AS tjt
+                    WHERE tjt.`entry_id` = e.`id` AND tjt.`tag`=%s
+                )
+                """.strip()
+            )
+            params.append(tag)
+        if search:
+            filters.append(
+                """
+                (
+                    e.`ticker` LIKE %s OR
+                    e.`entry_reason` LIKE %s OR
+                    e.`exit_reason` LIKE %s OR
+                    e.`review_notes` LIKE %s
+                )
+                """.strip()
+            )
+            pattern = f"%{search}%"
+            params.extend([pattern, pattern, pattern, pattern])
+
+        rows = await self._fetchall(
+            f"""
+            SELECT e.*
+            FROM `trade_journal_entries` AS e
+            WHERE {' AND '.join(filters)}
+            ORDER BY e.`entry_time` DESC, e.`id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return await self._hydrate_trade_journal_entries(rows)
+
+    async def get_trade_journal_entry(
+        self,
+        entry_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `trade_journal_entries`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (entry_id, owner_id),
+        )
+        if not row:
+            return None
+        hydrated = await self._hydrate_trade_journal_entries([row])
+        return hydrated[0] if hydrated else None
+
+    async def create_trade_journal_entry(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_trade_journal_payload(payload)
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        INSERT INTO `trade_journal_entries`
+                            (`owner_id`, `ticker`, `market`, `direction`, `strategy_code`,
+                             `entry_time`, `entry_price`, `exit_time`, `exit_price`, `size`,
+                             `stop_loss`, `take_profit`, `entry_reason`, `exit_reason`,
+                             `emotion_tag`, `review_notes`, `result_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            owner_id,
+                            normalized["ticker"],
+                            normalized["market"],
+                            normalized["direction"],
+                            normalized["strategy_code"],
+                            _parse_datetime_value(normalized["entry_time"]),
+                            normalized["entry_price"],
+                            _parse_datetime_value(normalized.get("exit_time")),
+                            normalized["exit_price"],
+                            normalized["size"],
+                            normalized["stop_loss"],
+                            normalized["take_profit"],
+                            normalized["entry_reason"],
+                            normalized["exit_reason"],
+                            normalized["emotion_tag"],
+                            normalized["review_notes"],
+                            _json_dumps(normalized["result"]),
+                        ),
+                    )
+                    entry_id = cur.lastrowid
+                await self._replace_trade_journal_children(conn, entry_id, normalized["tags"], normalized["attachments"])
+
+        entry = await self.get_trade_journal_entry(entry_id, owner_id=owner_id)
+        if not entry:
+            raise RuntimeError("Trade journal entry was not persisted")
+        return entry
+
+    async def update_trade_journal_entry(
+        self,
+        entry_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_trade_journal_entry(entry_id, owner_id=owner_id)
+        if not existing:
+            return None
+
+        normalized = _normalize_trade_journal_payload(payload, existing=existing)
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE `trade_journal_entries`
+                        SET `ticker`=%s,
+                            `market`=%s,
+                            `direction`=%s,
+                            `strategy_code`=%s,
+                            `entry_time`=%s,
+                            `entry_price`=%s,
+                            `exit_time`=%s,
+                            `exit_price`=%s,
+                            `size`=%s,
+                            `stop_loss`=%s,
+                            `take_profit`=%s,
+                            `entry_reason`=%s,
+                            `exit_reason`=%s,
+                            `emotion_tag`=%s,
+                            `review_notes`=%s,
+                            `result_json`=%s
+                        WHERE `id`=%s AND `owner_id`=%s
+                        """,
+                        (
+                            normalized["ticker"],
+                            normalized["market"],
+                            normalized["direction"],
+                            normalized["strategy_code"],
+                            _parse_datetime_value(normalized["entry_time"]),
+                            normalized["entry_price"],
+                            _parse_datetime_value(normalized.get("exit_time")),
+                            normalized["exit_price"],
+                            normalized["size"],
+                            normalized["stop_loss"],
+                            normalized["take_profit"],
+                            normalized["entry_reason"],
+                            normalized["exit_reason"],
+                            normalized["emotion_tag"],
+                            normalized["review_notes"],
+                            _json_dumps(normalized["result"]),
+                            entry_id,
+                            owner_id,
+                        ),
+                    )
+                await self._replace_trade_journal_children(conn, entry_id, normalized["tags"], normalized["attachments"])
+
+        return await self.get_trade_journal_entry(entry_id, owner_id=owner_id)
+
+    async def delete_trade_journal_entry(
+        self,
+        entry_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `trade_journal_entries` WHERE `id`=%s AND `owner_id`=%s",
+            (entry_id, owner_id),
+        )
+        return deleted > 0
+
+    async def get_trade_journal_stats(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        ticker: Optional[str] = None,
+        market: Optional[str] = None,
+        strategy_code: Optional[str] = None,
+        tag: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        entries = await self.list_trade_journal_entries(
+            owner_id=owner_id,
+            ticker=ticker,
+            market=market,
+            strategy_code=strategy_code,
+            tag=tag,
+            search=search,
+            limit=500,
+        )
+        return build_journal_stats(entries)
+
+    async def set_notification_read_state(
+        self,
+        notification_id: int,
+        read: bool,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        updated = await self._execute(
+            """
+            UPDATE `notifications`
+            SET `read_at`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                datetime.now(timezone.utc).replace(tzinfo=None) if read else None,
+                notification_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_notification(notification_id, owner_id=owner_id)
+
+    async def _replace_trade_journal_children(
+        self,
+        conn,
+        entry_id: int,
+        tags: List[str],
+        attachments: List[Dict[str, Any]],
+    ) -> None:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM `trade_journal_tags` WHERE `entry_id`=%s", (entry_id,))
+            await cur.execute("DELETE FROM `trade_journal_attachments` WHERE `entry_id`=%s", (entry_id,))
+
+            if tags:
+                await cur.executemany(
+                    """
+                    INSERT INTO `trade_journal_tags` (`entry_id`, `tag`)
+                    VALUES (%s, %s)
+                    """,
+                    [(entry_id, tag) for tag in tags],
+                )
+
+            if attachments:
+                await cur.executemany(
+                    """
+                    INSERT INTO `trade_journal_attachments` (`entry_id`, `file_path`, `file_type`)
+                    VALUES (%s, %s, %s)
+                    """,
+                    [
+                        (
+                            entry_id,
+                            attachment["file_path"],
+                            attachment.get("file_type"),
+                        )
+                        for attachment in attachments
+                    ],
+                )
+
+    async def _hydrate_trade_journal_entries(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        entries = [_deserialize_trade_journal_entry(row) for row in rows]
+        entries = [entry for entry in entries if entry]
+        if not entries:
+            return []
+
+        entry_ids = [entry["id"] for entry in entries]
+        placeholders = ", ".join(["%s"] * len(entry_ids))
+        tag_rows = await self._fetchall(
+            f"""
+            SELECT `id`, `entry_id`, `tag`
+            FROM `trade_journal_tags`
+            WHERE `entry_id` IN ({placeholders})
+            ORDER BY `tag` ASC, `id` ASC
+            """,
+            tuple(entry_ids),
+        )
+        attachment_rows = await self._fetchall(
+            f"""
+            SELECT `id`, `entry_id`, `file_path`, `file_type`, `created_at`
+            FROM `trade_journal_attachments`
+            WHERE `entry_id` IN ({placeholders})
+            ORDER BY `created_at` ASC, `id` ASC
+            """,
+            tuple(entry_ids),
+        )
+
+        tags_by_entry: Dict[int, List[str]] = {}
+        for row in tag_rows:
+            tags_by_entry.setdefault(row["entry_id"], []).append(row["tag"])
+
+        attachments_by_entry: Dict[int, List[Dict[str, Any]]] = {}
+        for row in attachment_rows:
+            attachments_by_entry.setdefault(row["entry_id"], []).append(
+                {
+                    "id": row["id"],
+                    "file_path": row["file_path"],
+                    "file_type": row.get("file_type"),
+                    "created_at": _datetime_to_iso(row.get("created_at")),
+                }
+            )
+
+        for entry in entries:
+            entry["tags"] = tags_by_entry.get(entry["id"], [])
+            entry["attachments"] = attachments_by_entry.get(entry["id"], [])
+        return entries
 
     async def upsert_market_quote(self, quote: Dict[str, Any]) -> Dict[str, Any]:
         normalized = _normalize_quote_payload(quote)
@@ -1896,6 +2264,9 @@ class Database:
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `backtest_trades`")
                 backtest_trades = (await cur.fetchone())["c"]
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `trade_journal_entries`")
+                trade_journal_entries = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
@@ -1906,6 +2277,7 @@ class Database:
             "notifications": notifications,
             "backtest_runs": backtest_runs,
             "backtest_trades": backtest_trades,
+            "trade_journal_entries": trade_journal_entries,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -2114,6 +2486,35 @@ def _deserialize_backtest_equity_point(row: Optional[Dict[str, Any]]) -> Optiona
     }
 
 
+def _deserialize_trade_journal_entry(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "ticker": row.get("ticker"),
+        "market": row.get("market"),
+        "direction": row.get("direction"),
+        "strategy_code": row.get("strategy_code"),
+        "entry_time": _datetime_to_iso(row.get("entry_time")),
+        "entry_price": row.get("entry_price"),
+        "exit_time": _datetime_to_iso(row.get("exit_time")),
+        "exit_price": row.get("exit_price"),
+        "size": row.get("size"),
+        "stop_loss": row.get("stop_loss"),
+        "take_profit": row.get("take_profit"),
+        "entry_reason": row.get("entry_reason"),
+        "exit_reason": row.get("exit_reason"),
+        "emotion_tag": row.get("emotion_tag"),
+        "review_notes": row.get("review_notes"),
+        "result": _json_loads(row.get("result_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+        "tags": [],
+        "attachments": [],
+    }
+
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -2265,6 +2666,78 @@ def _normalize_backtest_run_payload(payload: Optional[Dict[str, Any]]) -> Dict[s
         "position_sizing": _optional_string(source.get("position_sizing"), max_length=32) or "full_equity",
         "summary": summary,
     }
+
+
+def _normalize_trade_journal_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    tags = source.get("tags")
+    if tags is None:
+        tags = (existing or {}).get("tags", [])
+    attachments = source.get("attachments")
+    if attachments is None:
+        attachments = (existing or {}).get("attachments", [])
+
+    normalized_tags = [
+        tag
+        for tag in dict.fromkeys(
+            _optional_string(item, max_length=64)
+            for item in (tags or [])
+        )
+        if tag
+    ]
+
+    normalized_attachments = []
+    for item in attachments or []:
+        if not isinstance(item, dict):
+            raise ValueError("Trade journal attachments must be objects")
+        file_path = _required_string(item.get("file_path"), "Attachment file_path is required", max_length=512)
+        normalized_attachments.append(
+            {
+                "file_path": file_path,
+                "file_type": _optional_string(item.get("file_type"), max_length=64),
+            }
+        )
+
+    ticker = _required_string(source.get("ticker"), "Trade journal ticker is required", max_length=32).upper()
+    entry_time = source.get("entry_time") or (existing or {}).get("entry_time")
+    entry_price = source.get("entry_price") if "entry_price" in source else (existing or {}).get("entry_price")
+    size = source.get("size") if "size" in source else (existing or {}).get("size", 0)
+    entry_price_value = _optional_float(entry_price)
+    size_value = _optional_float(size)
+    if entry_price_value is None or entry_price_value <= 0:
+        raise ValueError("Trade journal entry_price must be greater than 0")
+    if size_value is None or size_value <= 0:
+        raise ValueError("Trade journal size must be greater than 0")
+
+    normalized = {
+        "ticker": ticker,
+        "market": _optional_string(source.get("market"), max_length=32),
+        "direction": _optional_string(source.get("direction"), max_length=16) or "long",
+        "strategy_code": _optional_string(source.get("strategy_code"), max_length=64),
+        "entry_time": _required_string(entry_time, "Trade journal entry_time is required", max_length=64),
+        "entry_price": entry_price_value,
+        "exit_time": _optional_string(source.get("exit_time"), max_length=64),
+        "exit_price": _optional_float(source.get("exit_price")),
+        "size": size_value,
+        "stop_loss": _optional_float(source.get("stop_loss")),
+        "take_profit": _optional_float(source.get("take_profit")),
+        "entry_reason": _optional_string(source.get("entry_reason"), max_length=8000),
+        "exit_reason": _optional_string(source.get("exit_reason"), max_length=8000),
+        "emotion_tag": _optional_string(source.get("emotion_tag"), max_length=64),
+        "review_notes": _optional_string(source.get("review_notes"), max_length=20000),
+        "tags": normalized_tags,
+        "attachments": normalized_attachments,
+    }
+    explicit_result = source.get("result")
+    if explicit_result is not None and not isinstance(explicit_result, dict):
+        raise ValueError("Trade journal result must be an object")
+    normalized["result"] = dict(explicit_result or compute_trade_result(normalized))
+    return normalized
 
 
 def _required_string(value: Any, error_message: str, max_length: Optional[int] = None) -> str:

@@ -100,6 +100,7 @@
                 @set-kline-display-mode="setKlineDisplayMode"
                 @set-chart-layout="setChartLayout"
                 @clear-indicators="clearIndicators"
+                @open-journal-entry="startJournalEntry"
                 @toggle-fullscreen="toggleChartFullscreen"
               />
 
@@ -114,6 +115,12 @@
                 :backtest-result="backtestResult"
                 :backtest-history="backtestHistory"
                 :backtest-loading="backtestLoading"
+                :journal-form="journalForm"
+                :journal-entries="journalEntries"
+                :journal-stats="journalStats"
+                :journal-loading="journalLoading"
+                :journal-filter-scope="journalFilterScope"
+                :journal-filters="journalFilters"
                 :db-stats="dbStats"
                 :db-stats-loading="dbStatsLoading"
                 :db-stats-error="dbStatsError"
@@ -128,6 +135,14 @@
                 @update-backtest-field="handleBacktestField"
                 @run-backtest="runBacktest"
                 @load-backtest="selectBacktestRun"
+                @update-journal-field="handleJournalField"
+                @update-journal-filter="handleJournalFilter"
+                @save-journal-entry="saveJournalEntry"
+                @delete-journal-entry="deleteJournalEntry"
+                @select-journal-entry="selectJournalEntry"
+                @reset-journal-form="resetJournalForm"
+                @add-journal-attachment="addJournalAttachment"
+                @remove-journal-attachment="removeJournalAttachment"
                 @sync-all="syncAll"
               />
             </div>
@@ -261,6 +276,12 @@ const {
   backtestResult,
   backtestHistory,
   backtestLoading,
+  journalForm,
+  journalEntries,
+  journalStats,
+  journalLoading,
+  journalFilterScope,
+  journalFilters,
   indicatorSnapshot,
   institutionalOverlay,
   backendUrl,
@@ -325,6 +346,15 @@ const {
     updateBacktestField,
     runBacktest,
     selectBacktestRun,
+    updateJournalField,
+    updateJournalFilter,
+    saveJournalEntry,
+    deleteJournalEntry,
+    selectJournalEntry,
+    resetJournalForm,
+    addJournalAttachment,
+    removeJournalAttachment,
+    startJournalEntry,
   } = useDashboard();
 
 function syncChartFullscreenState() {
@@ -388,6 +418,16 @@ function handleAlertField(payload) {
 function handleBacktestField(payload) {
   if (!payload?.key) return;
   updateBacktestField(payload.key, payload.value);
+}
+
+function handleJournalField(payload) {
+  if (!payload?.key) return;
+  updateJournalField(payload.key, payload.value);
+}
+
+function handleJournalFilter(payload) {
+  if (!payload?.key) return;
+  updateJournalFilter(payload.key, payload.value);
 }
 
 onMounted(() => {
