@@ -104,10 +104,13 @@ const dashboardMock = {
     end: "2026-03-29",
     capital: 100000,
     fee: 0.1,
+    slippage: 0,
     sl: 5,
     tp: 10,
   },
   backtestResult: null,
+  backtestHistory: [],
+  backtestLoading: false,
   indicatorSnapshot: {
     techSummaryHtml: "",
   },
@@ -173,6 +176,7 @@ const dashboardMock = {
   deleteAlert: noop,
   updateBacktestField: noop,
   runBacktest: noop,
+  selectBacktestRun: noop,
 };
 
 vi.mock("./composables/useDashboard", () => ({

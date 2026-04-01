@@ -65,6 +65,22 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     markNotificationRead(notificationId) {
       return request(`/api/notifications/${notificationId}/read`, { method: "POST" });
     },
+    listBacktestStrategies() {
+      return request("/api/backtests/strategies");
+    },
+    listBacktestRuns(options = {}) {
+      const params = new URLSearchParams();
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/backtests/runs${query ? `?${query}` : ""}`);
+    },
+    getBacktestRun(runId) {
+      return request(`/api/backtests/runs/${runId}`);
+    },
+    createBacktestRun(payload) {
+      return request("/api/backtests/runs", buildJsonRequest("POST", payload));
+    },
     getQuote(ticker) {
       return request(`/api/quote/${encodeURIComponent(ticker)}`);
     },

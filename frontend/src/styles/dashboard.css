@@ -248,8 +248,20 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .bt-sel option{background:var(--bg2);}
 .run-btn{width:100%;margin-top:8px;padding:8px;background:linear-gradient(135deg,var(--blue2),var(--purple));border:none;border-radius:6px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s;}
 .run-btn:hover{opacity:.85;}
+.run-btn:disabled{opacity:.55;cursor:not-allowed;}
 .bt-metric{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px;}
 .bt-metric span:first-child{color:var(--text3);}
+.bt-section-title{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
+.bt-equity-card,.bt-trade-card,.bt-history-card{margin-top:12px;padding:10px;border:1px solid var(--border2);border-radius:8px;background:rgba(8,12,18,.62);}
+.bt-equity-chart{width:100%;height:90px;display:block;border-radius:6px;background:rgba(13,20,32,.92);}
+.bt-equity-grid{stroke:rgba(36,52,71,.58);stroke-width:1;fill:none;}
+.bt-equity-line{fill:none;stroke:#7be7ff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;}
+.bt-trade-row,.bt-history-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(36,52,71,.55);font-size:11px;}
+.bt-trade-row:last-child,.bt-history-row:last-child{border-bottom:none;}
+.bt-trade-sub{font-size:10px;color:var(--text3);margin-top:3px;}
+.bt-history-row{width:100%;background:none;border:none;color:var(--text);padding:8px 0;text-align:left;cursor:pointer;font-family:inherit;}
+.bt-history-row:hover{opacity:.86;}
+.bt-history-empty{font-size:11px;color:var(--text3);}
 
 /* DB status panel */
 .db-stat-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px;}

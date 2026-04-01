@@ -112,6 +112,8 @@
                 :alerts="alerts"
                 :backtest-form="backtestForm"
                 :backtest-result="backtestResult"
+                :backtest-history="backtestHistory"
+                :backtest-loading="backtestLoading"
                 :db-stats="dbStats"
                 :db-stats-loading="dbStatsLoading"
                 :db-stats-error="dbStatsError"
@@ -125,6 +127,7 @@
                 @delete-alert="deleteAlert"
                 @update-backtest-field="handleBacktestField"
                 @run-backtest="runBacktest"
+                @load-backtest="selectBacktestRun"
                 @sync-all="syncAll"
               />
             </div>
@@ -256,6 +259,8 @@ const {
   alertForm,
   backtestForm,
   backtestResult,
+  backtestHistory,
+  backtestLoading,
   indicatorSnapshot,
   institutionalOverlay,
   backendUrl,
@@ -319,6 +324,7 @@ const {
     deleteAlert,
     updateBacktestField,
     runBacktest,
+    selectBacktestRun,
   } = useDashboard();
 
 function syncChartFullscreenState() {

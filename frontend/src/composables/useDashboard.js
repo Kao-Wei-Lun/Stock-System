@@ -4,7 +4,6 @@ import {
   DEFAULT_INDICATOR_SETTINGS,
   buildIndicatorSnapshot,
   normalizeIndicatorSettings,
-  runBacktestSimulation,
 } from "../utils/indicatorUtils";
 import { createDashboardApi } from "../api/dashboardApi";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
@@ -506,6 +505,8 @@ export function useDashboard() {
   const alertModalOpen = ref(false);
   const activeTool = ref(initialTool);
   const backtestResult = ref(null);
+  const backtestHistory = ref([]);
+  const backtestLoading = ref(false);
 
   const quote = reactive({
     price: null,
@@ -556,6 +557,7 @@ export function useDashboard() {
     end: new Date().toISOString().slice(0, 10),
     capital: 100000,
     fee: 0.1,
+    slippage: 0,
     sl: 5,
     tp: 10,
   });
@@ -719,6 +721,33 @@ export function useDashboard() {
     };
   }
 
+  function mapBacktestRun(item) {
+    if (!item) return null;
+    return {
+      ...item,
+      id: item.id,
+      strategy: item.strategy || item.strategy_name || item.strategyKey || item.strategy_key,
+      strategy_key: item.strategy_key || item.strategyKey || "",
+      start: item.start || item.start_date || "",
+      end: item.end || item.end_date || "",
+      capital: Number(item.capital ?? item.initial_capital ?? 0),
+      finalEquity: Number(item.finalEquity ?? item.final_equity ?? 0),
+      totalReturn: Number(item.totalReturn ?? item.total_return_pct ?? 0),
+      sellTrades: Number(item.sellTrades ?? item.trade_count ?? 0),
+      winRate: Number(item.winRate ?? item.win_rate_pct ?? 0),
+      maxDrawdown: Number(item.maxDrawdown ?? item.max_drawdown_pct ?? 0),
+      sharpe: Number(item.sharpe ?? item.sharpe_ratio ?? 0),
+      bars: Number(item.bars ?? item.bars_count ?? 0),
+      feeRate: Number(item.feeRate ?? item.fee_rate ?? 0),
+      slippageRate: Number(item.slippageRate ?? item.slippage_rate ?? 0),
+      stopLoss: item.stopLoss ?? item.stop_loss_pct ?? null,
+      takeProfit: item.takeProfit ?? item.take_profit_pct ?? null,
+      trades: Array.isArray(item.trades) ? item.trades : [],
+      equity_curve: Array.isArray(item.equity_curve) ? item.equity_curve : [],
+      created_at: item.created_at || null,
+    };
+  }
+
   async function loadAlerts({ silent = true } = {}) {
     try {
       const response = await dashboardApi.listAlerts();
@@ -742,6 +771,34 @@ export function useDashboard() {
       if (!silent) {
         pushNotification({ icon: "⚠️", title: "通知載入失敗", msg: "請稍後再試", type: "error" });
       }
+    }
+  }
+
+  async function loadBacktestHistory({ ticker = currentTicker.value, silent = true } = {}) {
+    try {
+      const response = await dashboardApi.listBacktestRuns({ ticker, limit: 20 });
+      backtestHistory.value = Array.isArray(response?.items)
+        ? response.items.map((item) => mapBacktestRun(item)).filter(Boolean)
+        : [];
+    } catch (error) {
+      console.error(error);
+      if (!silent) {
+        pushNotification({ icon: "⚠️", title: "回測紀錄載入失敗", msg: "請稍後再試", type: "error" });
+      }
+    }
+  }
+
+  async function selectBacktestRun(runId) {
+    if (!runId) return;
+    backtestLoading.value = true;
+    try {
+      const record = await dashboardApi.getBacktestRun(runId);
+      backtestResult.value = mapBacktestRun(record);
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "回測紀錄讀取失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      backtestLoading.value = false;
     }
   }
 
@@ -1153,6 +1210,7 @@ export function useDashboard() {
     crosshair.visible = false;
     wsSend({ action: "subscribe", ticker: normalized });
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
+    void loadBacktestHistory({ ticker: normalized });
     void ensureInstitutionalOverlayForTicker(normalized);
   }
 
@@ -1268,6 +1326,7 @@ export function useDashboard() {
   async function setRightTab(tab) {
     rightTab.value = tab;
     if (tab === "db") await loadDbStats();
+    if (tab === "backtest") await loadBacktestHistory({ ticker: currentTicker.value });
   }
 
   async function setWorkspaceTab(tab) {
@@ -1992,31 +2051,38 @@ export function useDashboard() {
   }
 
   function updateBacktestField(key, value) {
-    backtestForm[key] = ["capital", "fee", "sl", "tp"].includes(key) ? Number(value) : value;
+    backtestForm[key] = ["capital", "fee", "slippage", "sl", "tp"].includes(key) ? Number(value) : value;
   }
 
-  function runBacktest() {
-    const result = runBacktestSimulation(ohlcData.value, {
-      strategy: backtestForm.strategy,
-      start: backtestForm.start,
-      end: backtestForm.end,
-      capital: Number(backtestForm.capital),
-      fee: Number(backtestForm.fee) / 100,
-      sl: Number(backtestForm.sl) / 100,
-      tp: Number(backtestForm.tp) / 100,
-    });
-    if (result.error) {
+  async function runBacktest() {
+    backtestLoading.value = true;
+    try {
+      const result = await dashboardApi.createBacktestRun({
+        ticker: currentTicker.value,
+        strategy: backtestForm.strategy,
+        start: backtestForm.start,
+        end: backtestForm.end,
+        interval: currentInterval.value,
+        capital: Number(backtestForm.capital),
+        fee: Number(backtestForm.fee),
+        slippage: Number(backtestForm.slippage),
+        sl: Number(backtestForm.sl),
+        tp: Number(backtestForm.tp),
+      });
+      backtestResult.value = mapBacktestRun(result);
+      await loadBacktestHistory({ ticker: currentTicker.value });
+      pushNotification({
+        icon: "📊",
+        title: "回測完成",
+        msg: `${backtestResult.value.strategy} — ${backtestResult.value.totalReturn >= 0 ? "+" : ""}${backtestResult.value.totalReturn.toFixed(2)}%`,
+        type: "success",
+      });
+    } catch (error) {
       backtestResult.value = null;
-      pushNotification({ icon: "⚠️", title: "資料不足", msg: result.error, type: "error" });
-      return;
+      pushNotification({ icon: "⚠️", title: "回測失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      backtestLoading.value = false;
     }
-    backtestResult.value = result;
-    pushNotification({
-      icon: "📊",
-      title: "回測完成",
-      msg: `${result.strategy} — ${result.totalReturn >= 0 ? "+" : ""}${result.totalReturn.toFixed(2)}%`,
-      type: "success",
-    });
   }
 
   function updateClock() {
@@ -2065,6 +2131,7 @@ export function useDashboard() {
     await loadWorkspacePresets();
     await loadAlerts();
     await loadNotifications();
+    await loadBacktestHistory({ ticker: currentTicker.value });
     await loadWatchlist();
     if (rightTab.value === "db") {
       await loadDbStats();
@@ -2156,6 +2223,8 @@ export function useDashboard() {
     alertForm,
     backtestForm,
     backtestResult,
+    backtestHistory,
+    backtestLoading,
     indicatorSnapshot,
     institutionalOverlay,
     backendUrl,
@@ -2219,6 +2288,7 @@ export function useDashboard() {
     deleteAlert,
     updateBacktestField,
     runBacktest,
+    selectBacktestRun,
     fmtPrice,
     fmtVol,
     fmtMktCap,

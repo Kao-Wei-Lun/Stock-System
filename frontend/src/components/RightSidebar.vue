@@ -109,9 +109,10 @@
       <div class="bt-row"><div class="bt-label">結束日期</div><input class="bt-inp" type="date" :value="backtestForm.end" @input="$emit('update-backtest-field', { key: 'end', value: $event.target.value })"></div>
       <div class="bt-row"><div class="bt-label">初始資金</div><input class="bt-inp" type="number" :value="backtestForm.capital" @input="$emit('update-backtest-field', { key: 'capital', value: $event.target.value })"></div>
       <div class="bt-row"><div class="bt-label">手續費</div><input class="bt-inp" type="number" :value="backtestForm.fee" step="0.01" @input="$emit('update-backtest-field', { key: 'fee', value: $event.target.value })"><span style="font-size:10px;color:var(--text3)">%</span></div>
+      <div class="bt-row"><div class="bt-label">滑價</div><input class="bt-inp" type="number" :value="backtestForm.slippage" step="0.01" @input="$emit('update-backtest-field', { key: 'slippage', value: $event.target.value })"><span style="font-size:10px;color:var(--text3)">%</span></div>
       <div class="bt-row"><div class="bt-label">停損</div><input class="bt-inp" type="number" :value="backtestForm.sl" step="0.5" @input="$emit('update-backtest-field', { key: 'sl', value: $event.target.value })"><span style="font-size:10px;color:var(--text3)">%</span></div>
       <div class="bt-row"><div class="bt-label">停利</div><input class="bt-inp" type="number" :value="backtestForm.tp" step="0.5" @input="$emit('update-backtest-field', { key: 'tp', value: $event.target.value })"><span style="font-size:10px;color:var(--text3)">%</span></div>
-      <button class="run-btn" @click="$emit('run-backtest')">▶ 執行回測</button>
+      <button class="run-btn" :disabled="backtestLoading" @click="$emit('run-backtest')">{{ backtestLoading ? "回測中..." : "▶ 執行回測" }}</button>
 
       <div v-if="backtestResult" style="margin-top:12px">
         <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;margin-bottom:10px">{{ backtestResult.strategy }}</div>
@@ -123,9 +124,50 @@
         <div class="bt-metric"><span>勝率</span><span :class="backtestResult.winRate >= 50 ? 'up' : 'dn'">{{ backtestResult.winRate.toFixed(1) }}%</span></div>
         <div class="bt-metric"><span>最大回撤</span><span class="dn">-{{ backtestResult.maxDrawdown.toFixed(2) }}%</span></div>
         <div class="bt-metric"><span>夏普比率</span><span :class="backtestResult.sharpe >= 1 ? 'up' : ''">{{ backtestResult.sharpe.toFixed(2) }}</span></div>
+        <div class="bt-metric"><span>滑價</span><span>{{ ((backtestResult.slippageRate || 0) * 100).toFixed(2) }}%</span></div>
+        <div class="bt-metric"><span>停損 / 停利</span><span>{{ formatPct(backtestResult.stopLoss) }} / {{ formatPct(backtestResult.takeProfit) }}</span></div>
+        <div v-if="backtestEquityPath" class="bt-equity-card">
+          <div class="bt-section-title">權益曲線</div>
+          <svg class="bt-equity-chart" viewBox="0 0 240 90" preserveAspectRatio="none" aria-label="backtest equity curve">
+            <path class="bt-equity-grid" d="M0 15 H240 M0 45 H240 M0 75 H240"></path>
+            <path :d="backtestEquityPath" class="bt-equity-line"></path>
+          </svg>
+        </div>
+        <div v-if="backtestTradeRows.length" class="bt-trade-card">
+          <div class="bt-section-title">交易明細</div>
+          <div v-for="trade in backtestTradeRows" :key="trade.id || `${trade.entry_date}-${trade.exit_date}`" class="bt-trade-row">
+            <div>
+              <div>{{ trade.entry_date }} → {{ trade.exit_date }}</div>
+              <div class="bt-trade-sub">{{ trade.exit_reason || "strategy_exit" }} · {{ Number(trade.quantity || 0).toLocaleString() }} 股</div>
+            </div>
+            <div :class="Number(trade.net_pnl) >= 0 ? 'up' : 'dn'">
+              {{ Number(trade.net_pnl) >= 0 ? "+" : "" }}${{ Math.round(Number(trade.net_pnl || 0)).toLocaleString() }}
+            </div>
+          </div>
+        </div>
         <div style="margin-top:8px;padding:6px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.2);border-radius:4px;font-size:10px;color:var(--text3)">
           基於 {{ backtestResult.bars }} 根 K 線真實歷史資料 · 回測結果僅供參考
         </div>
+      </div>
+
+      <div class="bt-history-card">
+        <div class="bt-section-title">歷史回測</div>
+        <div v-if="backtestHistory.length">
+          <button
+            v-for="item in backtestHistoryRows"
+            :key="item.id"
+            type="button"
+            class="bt-history-row"
+            @click="$emit('load-backtest', item.id)"
+          >
+            <span>
+              <div>{{ item.strategy }}</div>
+              <div class="bt-trade-sub">{{ item.start }} ~ {{ item.end }}</div>
+            </span>
+            <span :class="item.totalReturn >= 0 ? 'up' : 'dn'">{{ item.totalReturn >= 0 ? "+" : "" }}{{ item.totalReturn.toFixed(2) }}%</span>
+          </button>
+        </div>
+        <div v-else class="bt-history-empty">尚無回測紀錄</div>
       </div>
     </div>
 
@@ -169,6 +211,8 @@ const props = defineProps({
   alerts: { type: Array, required: true },
   backtestForm: { type: Object, required: true },
   backtestResult: { type: Object, default: null },
+  backtestHistory: { type: Array, default: () => [] },
+  backtestLoading: { type: Boolean, required: true },
   dbStats: { type: Object, default: null },
   dbStatsLoading: { type: Boolean, required: true },
   dbStatsError: { type: String, default: "" },
@@ -185,8 +229,31 @@ defineEmits([
   "delete-alert",
   "update-backtest-field",
   "run-backtest",
+  "load-backtest",
   "sync-all",
 ]);
+
+function buildSparklinePath(points) {
+  if (!Array.isArray(points) || points.length < 2) return "";
+  const values = points.map((item) => Number(item?.equity ?? 0)).filter((value) => Number.isFinite(value));
+  if (values.length < 2) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const width = 240;
+  const height = 90;
+  const xStep = width / Math.max(values.length - 1, 1);
+  return values.map((value, index) => {
+    const x = Number((index * xStep).toFixed(2));
+    const ratio = max === min ? 0.5 : (value - min) / (max - min);
+    const y = Number((height - (ratio * (height - 12)) - 6).toFixed(2));
+    return `${index === 0 ? "M" : "L"}${x} ${y}`;
+  }).join(" ");
+}
+
+function formatPct(value) {
+  if (value == null || value === "") return "—";
+  return `${(Number(value) * 100).toFixed(2)}%`;
+}
 
 const overlayRows = computed(() => [
   { key: "cycleMa", label: "周 / 月 / 季 / 年線", value: "MA 5 / 20 / 60 / 240", color: "#7be7ff", hint: "清指標模式下仍會保留的核心均線組" },
@@ -267,4 +334,8 @@ const settingSections = computed(() => [
     ],
   },
 ]);
+
+const backtestEquityPath = computed(() => buildSparklinePath(props.backtestResult?.equity_curve || []));
+const backtestTradeRows = computed(() => (props.backtestResult?.trades || []).slice(-5).reverse());
+const backtestHistoryRows = computed(() => (props.backtestHistory || []).slice(0, 8));
 </script>

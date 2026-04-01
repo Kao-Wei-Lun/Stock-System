@@ -282,6 +282,82 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_institutional_query_date` (`query_date`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "backtest_runs": """
+        CREATE TABLE `backtest_runs` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `ticker` VARCHAR(32) NOT NULL,
+            `strategy_key` VARCHAR(64) NOT NULL,
+            `strategy_name` VARCHAR(128) NOT NULL,
+            `interval` VARCHAR(16) NOT NULL DEFAULT '1d',
+            `start_date` DATE NOT NULL,
+            `end_date` DATE NOT NULL,
+            `initial_capital` DOUBLE NOT NULL,
+            `final_equity` DOUBLE NOT NULL,
+            `total_return_pct` DOUBLE NOT NULL DEFAULT 0,
+            `max_drawdown_pct` DOUBLE NOT NULL DEFAULT 0,
+            `sharpe_ratio` DOUBLE NOT NULL DEFAULT 0,
+            `trade_count` INT NOT NULL DEFAULT 0,
+            `win_rate_pct` DOUBLE NOT NULL DEFAULT 0,
+            `bars_count` INT NOT NULL DEFAULT 0,
+            `fee_rate` DOUBLE NOT NULL DEFAULT 0,
+            `slippage_rate` DOUBLE NOT NULL DEFAULT 0,
+            `stop_loss_pct` DOUBLE NULL,
+            `take_profit_pct` DOUBLE NULL,
+            `position_sizing` VARCHAR(32) NOT NULL DEFAULT 'full_equity',
+            `summary_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_backtest_runs_owner_created` (`owner_id`, `created_at`),
+            KEY `idx_backtest_runs_ticker_created` (`ticker`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "backtest_trades": """
+        CREATE TABLE `backtest_trades` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `backtest_run_id` BIGINT NOT NULL,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `ticker` VARCHAR(32) NOT NULL,
+            `side` VARCHAR(16) NOT NULL DEFAULT 'long',
+            `entry_date` DATETIME NOT NULL,
+            `entry_price` DOUBLE NOT NULL,
+            `exit_date` DATETIME NOT NULL,
+            `exit_price` DOUBLE NOT NULL,
+            `quantity` DOUBLE NOT NULL,
+            `gross_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `net_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `return_pct` DOUBLE NOT NULL DEFAULT 0,
+            `fee_amount` DOUBLE NOT NULL DEFAULT 0,
+            `holding_bars` INT NOT NULL DEFAULT 0,
+            `exit_reason` VARCHAR(64) NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_backtest_trades_run_entry` (`backtest_run_id`, `entry_date`),
+            CONSTRAINT `fk_backtest_trades_run`
+                FOREIGN KEY (`backtest_run_id`) REFERENCES `backtest_runs` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "backtest_equity_points": """
+        CREATE TABLE `backtest_equity_points` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `backtest_run_id` BIGINT NOT NULL,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `point_date` DATETIME NOT NULL,
+            `equity` DOUBLE NOT NULL,
+            `cash` DOUBLE NOT NULL,
+            `position_qty` DOUBLE NOT NULL DEFAULT 0,
+            `close_price` DOUBLE NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_backtest_equity_points_run_date` (`backtest_run_id`, `point_date`),
+            CONSTRAINT `fk_backtest_equity_points_run`
+                FOREIGN KEY (`backtest_run_id`) REFERENCES `backtest_runs` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {
@@ -580,6 +656,25 @@ class Database:
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, (ticker, interval, since))
+                rows = await cur.fetchall()
+        return list(rows)
+
+    async def get_ohlcv_range(
+        self,
+        ticker: str,
+        start_date: str,
+        end_date: str,
+        interval: str = "1d",
+    ) -> List[Dict]:
+        sql = """
+            SELECT `date`, `open`, `high`, `low`, `close`, `volume`, `adj_close`, `source`, `updated_at`
+            FROM `ohlcv`
+            WHERE `ticker`=%s AND `interval`=%s AND `date`>=%s AND `date`<=%s
+            ORDER BY `date` ASC
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, (ticker, interval, start_date, end_date))
                 rows = await cur.fetchall()
         return list(rows)
 
@@ -1055,6 +1150,180 @@ class Database:
         if not updated:
             return None
         return await self.get_notification(notification_id, owner_id=owner_id)
+
+    async def create_backtest_run(
+        self,
+        payload: Dict[str, Any],
+        trades: List[Dict[str, Any]],
+        equity_points: List[Dict[str, Any]],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_backtest_run_payload(payload)
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        INSERT INTO `backtest_runs`
+                            (`owner_id`, `ticker`, `strategy_key`, `strategy_name`, `interval`,
+                             `start_date`, `end_date`, `initial_capital`, `final_equity`,
+                             `total_return_pct`, `max_drawdown_pct`, `sharpe_ratio`, `trade_count`,
+                             `win_rate_pct`, `bars_count`, `fee_rate`, `slippage_rate`,
+                             `stop_loss_pct`, `take_profit_pct`, `position_sizing`, `summary_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            owner_id,
+                            normalized["ticker"],
+                            normalized["strategy_key"],
+                            normalized["strategy_name"],
+                            normalized["interval"],
+                            normalized["start_date"],
+                            normalized["end_date"],
+                            normalized["initial_capital"],
+                            normalized["final_equity"],
+                            normalized["total_return_pct"],
+                            normalized["max_drawdown_pct"],
+                            normalized["sharpe_ratio"],
+                            normalized["trade_count"],
+                            normalized["win_rate_pct"],
+                            normalized["bars_count"],
+                            normalized["fee_rate"],
+                            normalized["slippage_rate"],
+                            normalized["stop_loss_pct"],
+                            normalized["take_profit_pct"],
+                            normalized["position_sizing"],
+                            _json_dumps(normalized["summary"]),
+                        ),
+                    )
+                    run_id = cur.lastrowid
+
+                    if trades:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `backtest_trades`
+                                (`backtest_run_id`, `owner_id`, `ticker`, `side`, `entry_date`,
+                                 `entry_price`, `exit_date`, `exit_price`, `quantity`, `gross_pnl`,
+                                 `net_pnl`, `return_pct`, `fee_amount`, `holding_bars`, `exit_reason`,
+                                 `payload_json`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    run_id,
+                                    owner_id,
+                                    normalized["ticker"],
+                                    _optional_string(trade.get("side"), max_length=16) or "long",
+                                    _parse_datetime_value(trade.get("entry_date")),
+                                    _optional_float(trade.get("entry_price")) or 0.0,
+                                    _parse_datetime_value(trade.get("exit_date")),
+                                    _optional_float(trade.get("exit_price")) or 0.0,
+                                    _optional_float(trade.get("quantity")) or 0.0,
+                                    _optional_float(trade.get("gross_pnl")) or 0.0,
+                                    _optional_float(trade.get("net_pnl")) or 0.0,
+                                    _optional_float(trade.get("return_pct")) or 0.0,
+                                    _optional_float(trade.get("fee_amount")) or 0.0,
+                                    _optional_int(trade.get("holding_bars")) or 0,
+                                    _optional_string(trade.get("exit_reason"), max_length=64),
+                                    _json_dumps(trade.get("payload") or {}),
+                                )
+                                for trade in trades
+                            ],
+                        )
+
+                    if equity_points:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `backtest_equity_points`
+                                (`backtest_run_id`, `owner_id`, `point_date`, `equity`, `cash`,
+                                 `position_qty`, `close_price`, `payload_json`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    run_id,
+                                    owner_id,
+                                    _parse_datetime_value(point.get("date")),
+                                    _optional_float(point.get("equity")) or 0.0,
+                                    _optional_float(point.get("cash")) or 0.0,
+                                    _optional_float(point.get("position_qty")) or 0.0,
+                                    _optional_float(point.get("close_price")),
+                                    _json_dumps(point.get("payload") or {}),
+                                )
+                                for point in equity_points
+                            ],
+                        )
+
+        run = await self.get_backtest_run(run_id, owner_id=owner_id)
+        if not run:
+            raise RuntimeError("Backtest run was not persisted")
+        return run
+
+    async def list_backtest_runs(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        ticker: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 200))
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(ticker)
+
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `backtest_runs`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `created_at` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_backtest_run(row) for row in rows]
+
+    async def get_backtest_run(
+        self,
+        run_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `backtest_runs`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (run_id, owner_id),
+        )
+        run = _deserialize_backtest_run(row)
+        if not run:
+            return None
+
+        trade_rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `backtest_trades`
+            WHERE `backtest_run_id`=%s AND `owner_id`=%s
+            ORDER BY `entry_date` ASC, `id` ASC
+            """,
+            (run_id, owner_id),
+        )
+        equity_rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `backtest_equity_points`
+            WHERE `backtest_run_id`=%s AND `owner_id`=%s
+            ORDER BY `point_date` ASC, `id` ASC
+            """,
+            (run_id, owner_id),
+        )
+        run["trades"] = [_deserialize_backtest_trade(item) for item in trade_rows]
+        run["equity_curve"] = [_deserialize_backtest_equity_point(item) for item in equity_rows]
+        return run
 
     async def upsert_market_quote(self, quote: Dict[str, Any]) -> Dict[str, Any]:
         normalized = _normalize_quote_payload(quote)
@@ -1621,6 +1890,12 @@ class Database:
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `notifications`")
                 notifications = (await cur.fetchone())["c"]
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `backtest_runs`")
+                backtest_runs = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `backtest_trades`")
+                backtest_trades = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
@@ -1629,6 +1904,8 @@ class Database:
             "workspace_presets": workspace_presets,
             "alerts": alerts,
             "notifications": notifications,
+            "backtest_runs": backtest_runs,
+            "backtest_trades": backtest_trades,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -1762,6 +2039,81 @@ def _deserialize_market_quote(row: Optional[Dict[str, Any]]) -> Optional[Dict[st
     return payload
 
 
+def _deserialize_backtest_run(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    summary = _json_loads(row.get("summary_json"), {})
+    summary.update(
+        {
+            "id": row.get("id"),
+            "owner_id": row.get("owner_id"),
+            "ticker": row.get("ticker"),
+            "strategy_key": row.get("strategy_key"),
+            "strategy": row.get("strategy_name"),
+            "interval": row.get("interval") or "1d",
+            "start": _date_to_iso(row.get("start_date")),
+            "end": _date_to_iso(row.get("end_date")),
+            "capital": row.get("initial_capital"),
+            "finalEquity": row.get("final_equity"),
+            "totalReturn": row.get("total_return_pct"),
+            "maxDrawdown": row.get("max_drawdown_pct"),
+            "sharpe": row.get("sharpe_ratio"),
+            "sellTrades": row.get("trade_count"),
+            "winRate": row.get("win_rate_pct"),
+            "bars": row.get("bars_count"),
+            "feeRate": row.get("fee_rate"),
+            "slippageRate": row.get("slippage_rate"),
+            "stopLoss": row.get("stop_loss_pct"),
+            "takeProfit": row.get("take_profit_pct"),
+            "positionSizing": row.get("position_sizing"),
+            "created_at": _datetime_to_iso(row.get("created_at")),
+        }
+    )
+    return summary
+
+
+def _deserialize_backtest_trade(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "backtest_run_id": row.get("backtest_run_id"),
+        "owner_id": row.get("owner_id"),
+        "ticker": row.get("ticker"),
+        "side": row.get("side"),
+        "entry_date": _datetime_to_iso(row.get("entry_date")),
+        "entry_price": row.get("entry_price"),
+        "exit_date": _datetime_to_iso(row.get("exit_date")),
+        "exit_price": row.get("exit_price"),
+        "quantity": row.get("quantity"),
+        "gross_pnl": row.get("gross_pnl"),
+        "net_pnl": row.get("net_pnl"),
+        "return_pct": row.get("return_pct"),
+        "fee_amount": row.get("fee_amount"),
+        "holding_bars": row.get("holding_bars"),
+        "exit_reason": row.get("exit_reason"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+    }
+
+
+def _deserialize_backtest_equity_point(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "backtest_run_id": row.get("backtest_run_id"),
+        "owner_id": row.get("owner_id"),
+        "date": _datetime_to_iso(row.get("point_date")),
+        "equity": row.get("equity"),
+        "cash": row.get("cash"),
+        "position_qty": row.get("position_qty"),
+        "close_price": row.get("close_price"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+    }
+
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -1879,11 +2231,75 @@ def _normalize_quote_payload(quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _normalize_backtest_run_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    summary = source.get("summary") or {}
+    if not isinstance(summary, dict):
+        raise ValueError("Backtest summary must be an object")
+
+    ticker = _required_string(source.get("ticker"), "Backtest ticker is required", max_length=32).upper()
+    strategy_key = _required_string(source.get("strategy_key"), "Backtest strategy key is required", max_length=64)
+    strategy_name = _required_string(source.get("strategy_name"), "Backtest strategy name is required", max_length=128)
+    start_date = _required_date_string(source.get("start_date"), "Backtest start date is required")
+    end_date = _required_date_string(source.get("end_date"), "Backtest end date is required")
+
+    return {
+        "ticker": ticker,
+        "strategy_key": strategy_key,
+        "strategy_name": strategy_name,
+        "interval": _optional_string(source.get("interval"), max_length=16) or "1d",
+        "start_date": start_date,
+        "end_date": end_date,
+        "initial_capital": _optional_float(source.get("initial_capital")) or 0.0,
+        "final_equity": _optional_float(source.get("final_equity")) or 0.0,
+        "total_return_pct": _optional_float(source.get("total_return_pct")) or 0.0,
+        "max_drawdown_pct": _optional_float(source.get("max_drawdown_pct")) or 0.0,
+        "sharpe_ratio": _optional_float(source.get("sharpe_ratio")) or 0.0,
+        "trade_count": _optional_int(source.get("trade_count")) or 0,
+        "win_rate_pct": _optional_float(source.get("win_rate_pct")) or 0.0,
+        "bars_count": _optional_int(source.get("bars_count")) or 0,
+        "fee_rate": _optional_float(source.get("fee_rate")) or 0.0,
+        "slippage_rate": _optional_float(source.get("slippage_rate")) or 0.0,
+        "stop_loss_pct": _optional_float(source.get("stop_loss_pct")),
+        "take_profit_pct": _optional_float(source.get("take_profit_pct")),
+        "position_sizing": _optional_string(source.get("position_sizing"), max_length=32) or "full_equity",
+        "summary": summary,
+    }
+
+
 def _required_string(value: Any, error_message: str, max_length: Optional[int] = None) -> str:
     normalized = _optional_string(value, max_length=max_length)
     if not normalized:
         raise ValueError(error_message)
     return normalized
+
+
+def _required_date_string(value: Any, error_message: str) -> str:
+    normalized = _optional_date_string(value)
+    if not normalized:
+        raise ValueError(error_message)
+    return normalized
+
+
+def _optional_date_string(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return datetime.fromisoformat(normalized).date().isoformat()
+        except ValueError:
+            try:
+                return date.fromisoformat(normalized).isoformat()
+            except ValueError:
+                return None
+    return None
 
 
 def _optional_string(value: Any, max_length: Optional[int] = None) -> Optional[str]:

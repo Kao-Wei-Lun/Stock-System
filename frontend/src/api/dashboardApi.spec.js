@@ -80,4 +80,34 @@ describe("dashboardApi", () => {
     expect(result.quote_type).toBe("delayed_snapshot");
     expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/quote/AAPL", {});
   });
+
+  it("creates persisted backtest runs", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ id: 21, strategy_key: "ma_cross" }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    const payload = {
+      ticker: "AAPL",
+      strategy: "MA 黃金/死亡交叉",
+      start: "2024-01-01",
+      end: "2024-12-31",
+      capital: 100000,
+    };
+    const result = await api.createBacktestRun(payload);
+
+    expect(result.id).toBe(21);
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/backtests/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  });
+
+  it("builds backtest history query strings", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ items: [] }));
+    const api = createDashboardApi();
+
+    await api.listBacktestRuns({ ticker: "AAPL", limit: 10 });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/backtests/runs?ticker=AAPL&limit=10", {});
+  });
 });
