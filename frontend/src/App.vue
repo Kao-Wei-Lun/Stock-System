@@ -45,10 +45,13 @@
         :class="{ 'is-pseudo-fullscreen': pseudoFullscreen }"
       >
         <div class="workspace-shell">
-          <div class="workspace-mode-tabs">
-            <button class="tool-btn" :class="{ active: workspaceTab === 'chart' }" @click="setWorkspaceTab('chart')">圖表分析</button>
-            <button class="tool-btn" :class="{ active: workspaceTab === 'institutional' }" @click="setWorkspaceTab('institutional')">法人籌碼</button>
-          </div>
+            <div class="workspace-mode-tabs">
+              <button class="tool-btn" :class="{ active: workspaceTab === 'chart' }" @click="setWorkspaceTab('chart')">圖表分析</button>
+              <button class="tool-btn" :class="{ active: workspaceTab === 'institutional' }" @click="setWorkspaceTab('institutional')">法人籌碼</button>
+              <button class="tool-btn" :class="{ active: workspaceTab === 'events' }" @click="setWorkspaceTab('events')">事件中心</button>
+              <button class="tool-btn" :class="{ active: workspaceTab === 'macro' }" @click="setWorkspaceTab('macro')">宏觀風險</button>
+              <button class="tool-btn" :class="{ active: workspaceTab === 'screener' }" @click="setWorkspaceTab('screener')">選股器</button>
+            </div>
 
           <template v-if="workspaceTab === 'chart'">
             <div class="workspace-content">
@@ -75,6 +78,10 @@
                 :compare-series="compareSeries"
                 :comparison-mode="comparisonMode"
                 :institutional-overlay="institutionalOverlay"
+                :ticker-events="tickerEvents"
+                :ticker-news="tickerNews"
+                :fundamentals-summary="fundamentalsSummary"
+                :taiwan-chip-summary="taiwanChipSummary"
                 :is-fullscreen="chartFullscreen"
                 @set-tool="setTool"
                 @add-signal="addSignal"
@@ -147,9 +154,8 @@
               />
             </div>
           </template>
-
           <InstitutionalDashboard
-            v-else
+            v-else-if="workspaceTab === 'institutional'"
             :data="institutionalData"
             :insights="institutionalInsights"
             :loading="institutionalLoading"
@@ -167,6 +173,40 @@
             @set-futures-commodity="setInstitutionalFuturesCommodity"
             @set-options-commodity="setInstitutionalOptionsCommodity"
             @set-history-days="setInstitutionalHistoryDays"
+          />
+
+          <EventCenter
+            v-else-if="workspaceTab === 'events'"
+            :current-ticker="currentTicker"
+            :current-name="currentName"
+            :calendar-events="calendarEvents"
+            :ticker-events="tickerEvents"
+            :ticker-news="tickerNews"
+            @refresh-events="loadEventCalendar(true)"
+            @refresh-news="loadTickerIntelligence(currentTicker, true)"
+            @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
+          />
+
+          <MacroDashboard
+            v-else-if="workspaceTab === 'macro'"
+            :macro-dashboard="macroDashboard"
+            @refresh="loadMacroDashboard(true)"
+          />
+
+          <ScreenerWorkspace
+            v-else
+            :filters="screenerFilters"
+            :results="screenerResults"
+            :presets="screenerPresets"
+            :loading="screenerLoading"
+            :current-ticker="currentTicker"
+            @update-filter="handleScreenerFilter"
+            @run-screen="runScreener"
+            @save-preset="saveScreenerPreset"
+            @load-preset="loadScreenerPreset"
+            @delete-preset="deleteScreenerPreset"
+            @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
+            @add-watchlist="addTickerToWatchlist"
           />
         </div>
       </div>
@@ -200,9 +240,12 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import AlertModal from "./components/AlertModal.vue";
 import ChartWorkspace from "./components/ChartWorkspace.vue";
 import DashboardTopbar from "./components/DashboardTopbar.vue";
+import EventCenter from "./components/EventCenter.vue";
 import InstitutionalDashboard from "./components/InstitutionalDashboard.vue";
+import MacroDashboard from "./components/MacroDashboard.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import RightSidebar from "./components/RightSidebar.vue";
+import ScreenerWorkspace from "./components/ScreenerWorkspace.vue";
 import StatusBar from "./components/StatusBar.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
 import { useDashboard } from "./composables/useDashboard";
@@ -261,6 +304,16 @@ const {
   institutionalFuturesCommodity,
   institutionalOptionsCommodity,
   institutionalHistoryDays,
+  calendarEvents,
+  tickerEvents,
+  tickerNews,
+  macroDashboard,
+  fundamentalsSummary,
+  taiwanChipSummary,
+  screenerFilters,
+  screenerResults,
+  screenerPresets,
+  screenerLoading,
   syncingCurrent,
   syncingAll,
   quote,
@@ -312,6 +365,9 @@ const {
   shiftInstitutionalDate,
   loadInstitutionalData,
   loadInstitutionalInsights,
+  loadEventCalendar,
+  loadMacroDashboard,
+  loadTickerIntelligence,
   setChartLayout,
   selectTicker,
   toggleIndicator,
@@ -353,8 +409,13 @@ const {
     selectJournalEntry,
     resetJournalForm,
     addJournalAttachment,
-    removeJournalAttachment,
-    startJournalEntry,
+  removeJournalAttachment,
+  startJournalEntry,
+  updateScreenerFilter,
+  runScreener,
+  saveScreenerPreset,
+  loadScreenerPreset,
+  deleteScreenerPreset,
   } = useDashboard();
 
 function syncChartFullscreenState() {
@@ -428,6 +489,11 @@ function handleJournalField(payload) {
 function handleJournalFilter(payload) {
   if (!payload?.key) return;
   updateJournalFilter(payload.key, payload.value);
+}
+
+function handleScreenerFilter(payload) {
+  if (!payload?.key) return;
+  updateScreenerFilter(payload.key, payload.value);
 }
 
 onMounted(() => {

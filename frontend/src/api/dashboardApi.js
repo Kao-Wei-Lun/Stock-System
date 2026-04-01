@@ -120,6 +120,72 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     getQuote(ticker) {
       return request(`/api/quote/${encodeURIComponent(ticker)}`);
     },
+    listEventCalendar(options = {}) {
+      const params = new URLSearchParams();
+      if (options.days != null) params.set("days", String(options.days));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/events/calendar${query ? `?${query}` : ""}`);
+    },
+    getTickerEvents(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/events/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    listNews(options = {}) {
+      const params = new URLSearchParams();
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/news${query ? `?${query}` : ""}`);
+    },
+    getTickerNews(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/news/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    getMacroDashboard(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/market/macro${query ? `?${query}` : ""}`);
+    },
+    getFundamentals(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fundamentals/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    getFundamentalEvents(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fundamentals/${encodeURIComponent(ticker)}/events${query ? `?${query}` : ""}`);
+    },
+    getTaiwanChips(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/tw/chips/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    listScreenerPresets() {
+      return request("/api/screener/presets");
+    },
+    createScreenerPreset(payload) {
+      return request("/api/screener/presets", buildJsonRequest("POST", payload));
+    },
+    updateScreenerPreset(presetId, payload) {
+      return request(`/api/screener/presets/${presetId}`, buildJsonRequest("PUT", payload));
+    },
+    deleteScreenerPreset(presetId) {
+      return request(`/api/screener/presets/${presetId}`, { method: "DELETE" });
+    },
+    runScreener(payload) {
+      return request("/api/screener/run", buildJsonRequest("POST", payload));
+    },
   };
 }
 

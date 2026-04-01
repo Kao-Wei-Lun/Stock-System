@@ -25,8 +25,12 @@ from backtest_engine import list_backtest_strategies, run_backtest
 from data_fetcher import DataFetcher, normalize_ticker
 from database import DEFAULT_OWNER_ID, db, init_db
 from display_name_resolver import resolve_display_name
+from fundamentals_provider import FundamentalsProvider, build_fundamental_summary
+from market_intelligence import MarketEventProvider, MacroSnapshotProvider, NewsProvider
 from quote_provider import YahooFinanceQuoteProvider
+from screener_engine import ScreenerEngine, build_screener_presets, normalize_screener_filters
 from taifex_fetcher import taifex_fetcher
+from taiwan_chip_provider import TaiwanChipProvider, build_taiwan_chip_summary
 from tw_symbol_lookup import search_taiwan_tickers
 from ws_manager import ConnectionManager
 
@@ -38,6 +42,12 @@ load_dotenv()
 fetcher = DataFetcher()
 quote_provider = YahooFinanceQuoteProvider(fetcher)
 alert_engine = AlertEngine(db, quote_provider)
+market_event_provider = MarketEventProvider()
+news_provider = NewsProvider()
+macro_snapshot_provider = MacroSnapshotProvider(fetcher)
+fundamentals_provider = FundamentalsProvider()
+taiwan_chip_provider = TaiwanChipProvider(fetcher)
+screener_engine = ScreenerEngine()
 ws_manager = ConnectionManager()
 
 STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
@@ -70,6 +80,18 @@ ALERT_EVALUATOR_ENABLED = os.getenv("ALERT_EVALUATOR_ENABLED", "true").strip().l
     "on",
 }
 ALERT_POLL_INTERVAL_SECONDS = max(10, int(os.getenv("ALERT_POLL_INTERVAL_SECONDS", "30")))
+MARKET_INTELLIGENCE_SYNC_ENABLED = os.getenv("MARKET_INTELLIGENCE_SYNC_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+MARKET_INTELLIGENCE_STARTUP_SYNC = os.getenv("MARKET_INTELLIGENCE_STARTUP_SYNC", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
 DAILY_LATEST_SYNC_TIME_RAW = os.getenv("DAILY_LATEST_SYNC_TIME", "18:10").strip() or "18:10"
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -375,6 +397,22 @@ class TradeJournalEntryUpdatePayload(BaseModel):
     result: dict | None = None
 
 
+class ScreenerPresetCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=512)
+    filters: dict = Field(default_factory=dict)
+
+
+class ScreenerPresetUpdatePayload(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=512)
+    filters: dict | None = None
+
+
+class ScreenerRunPayload(BaseModel):
+    filters: dict = Field(default_factory=dict)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
@@ -402,6 +440,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(alert_evaluator_loop())
     else:
         log.info("Alert evaluator skipped (ALERT_EVALUATOR_ENABLED=false).")
+    if MARKET_INTELLIGENCE_SYNC_ENABLED:
+        asyncio.create_task(market_intelligence_sync_loop())
+    else:
+        log.info("Market intelligence sync skipped (MARKET_INTELLIGENCE_SYNC_ENABLED=false).")
     yield
     await db.close()
     log.info("QuantVision Pro backend stopped")
@@ -606,12 +648,105 @@ async def alert_evaluator_loop():
         await asyncio.sleep(ALERT_POLL_INTERVAL_SECONDS)
 
 
+async def market_intelligence_sync_loop():
+    await asyncio.sleep(12)
+    if MARKET_INTELLIGENCE_STARTUP_SYNC:
+        try:
+            summary = await sync_market_intelligence_snapshot(reason="startup-market-intelligence")
+            log.info("Market intelligence startup sync finished: %s", summary)
+        except Exception as exc:
+            log.warning("Market intelligence startup sync failed: %s", exc)
+
+    while True:
+        await asyncio.sleep(6 * 60 * 60)
+        try:
+            summary = await sync_market_intelligence_snapshot(reason="scheduled-market-intelligence")
+            log.info("Market intelligence scheduled sync finished: %s", summary)
+        except Exception as exc:
+            log.warning("Market intelligence scheduled sync failed: %s", exc)
+
+
 async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
     ticker = normalize_ticker(ticker)
     quote = await quote_provider.fetch_quote(ticker)
     if not quote:
         return None
     return await db.upsert_market_quote(quote)
+
+
+def build_macro_dashboard_payload(items: list[dict]) -> dict:
+    if not items:
+        return {"snapshot_date": None, "items": [], "summary": {"overall_risk": "unknown", "drivers": []}}
+
+    item_map = {item.get("metric_code"): item for item in items}
+    drivers = []
+    risk_score = 0
+
+    vix = item_map.get("VIX")
+    if vix and vix.get("value") is not None:
+        vix_value = float(vix["value"])
+        if vix_value >= 25:
+            drivers.append({"tone": "risk", "label": "VIX 偏高", "value": f"{vix_value:.2f}"})
+            risk_score += 2
+        elif vix_value >= 18:
+            drivers.append({"tone": "caution", "label": "VIX 升溫", "value": f"{vix_value:.2f}"})
+            risk_score += 1
+
+    us10y = item_map.get("US10Y")
+    if us10y and us10y.get("value") is not None and float(us10y["value"]) >= 4.5:
+        drivers.append({"tone": "caution", "label": "美債殖利率偏高", "value": f"{float(us10y['value']):.2f}"})
+        risk_score += 1
+
+    dxy = item_map.get("DXY")
+    dxy_change_pct = ((dxy or {}).get("change_pct"))
+    if dxy_change_pct is not None and float(dxy_change_pct) >= 0.7:
+        drivers.append({"tone": "caution", "label": "美元走強", "value": f"{float(dxy_change_pct):+.2f}%"})
+        risk_score += 1
+
+    sox = item_map.get("SOX")
+    sox_change_pct = ((sox or {}).get("change_pct"))
+    if sox_change_pct is not None and float(sox_change_pct) <= -1.5:
+        drivers.append({"tone": "risk", "label": "費半轉弱", "value": f"{float(sox_change_pct):+.2f}%"})
+        risk_score += 1
+    elif sox_change_pct is not None and float(sox_change_pct) >= 1.5:
+        drivers.append({"tone": "positive", "label": "費半偏強", "value": f"{float(sox_change_pct):+.2f}%"})
+
+    twii = item_map.get("TWII")
+    twii_change_pct = ((twii or {}).get("change_pct"))
+    if twii_change_pct is not None and float(twii_change_pct) <= -1.2:
+        drivers.append({"tone": "risk", "label": "台股指數承壓", "value": f"{float(twii_change_pct):+.2f}%"})
+        risk_score += 1
+
+    overall_risk = "high" if risk_score >= 3 else "medium" if risk_score >= 1 else "low"
+    return {
+        "snapshot_date": items[0].get("date"),
+        "items": items,
+        "summary": {
+            "overall_risk": overall_risk,
+            "drivers": drivers[:6],
+            "updated_at": max((item.get("quote_timestamp") or item.get("created_at") or "") for item in items),
+        },
+    }
+
+
+async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
+    tickers = await get_tracked_sync_tickers()
+    macro_items = await macro_snapshot_provider.sync_macro_snapshots()
+    event_count = await market_event_provider.sync_events_for_tickers(tickers)
+    news_count = 0
+    for ticker in tickers[:20]:
+        try:
+            articles = await news_provider.sync_ticker_news(ticker, limit=6)
+            news_count += len(articles)
+        except Exception as exc:
+            log.debug("news sync failed for %s (%s): %s", ticker, reason, exc)
+    return {
+        "reason": reason,
+        "macro_count": len(macro_items),
+        "event_count": event_count,
+        "news_count": news_count,
+        "tracked_tickers": len(tickers),
+    }
 
 
 async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
@@ -1139,6 +1274,179 @@ async def search(q: str = Query(..., min_length=1)):
 @app.get("/api/db/stats")
 async def db_stats():
     return await db.get_stats()
+
+
+@app.get("/api/events/calendar")
+async def get_events_calendar(
+    days: int = Query(21, ge=1, le=180),
+    limit: int = Query(100, ge=1, le=500),
+    refresh: bool = Query(False),
+):
+    today = datetime.now(APP_TZ).date()
+    date_from = today.isoformat()
+    date_to = (today + timedelta(days=days)).isoformat()
+    items = await db.list_market_events(date_from=date_from, date_to=date_to, limit=limit)
+    if refresh or not items:
+        await sync_market_intelligence_snapshot(reason="events-calendar")
+        items = await db.list_market_events(date_from=date_from, date_to=date_to, limit=limit)
+    return {"items": items, "date_from": date_from, "date_to": date_to}
+
+
+@app.get("/api/events/{ticker}")
+async def get_ticker_events(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_market_events(ticker=normalized, limit=20)
+    if refresh or not items:
+        try:
+            items = await market_event_provider.sync_ticker_events(normalized)
+        except Exception as exc:
+            log.warning("ticker events sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+@app.get("/api/news")
+async def get_news_feed(
+    limit: int = Query(20, ge=1, le=100),
+):
+    items = await db.list_news_articles(limit=limit)
+    return {"items": items}
+
+
+@app.get("/api/news/{ticker}")
+async def get_ticker_news(
+    ticker: str,
+    limit: int = Query(10, ge=1, le=30),
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_news_articles(ticker=normalized, limit=limit)
+    if refresh or not items:
+        try:
+            items = await news_provider.sync_ticker_news(normalized, limit=limit)
+        except Exception as exc:
+            log.warning("ticker news sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+@app.get("/api/market/macro")
+async def get_macro_dashboard(
+    refresh: bool = Query(False),
+):
+    items = await db.list_macro_snapshots()
+    if refresh or not items:
+        items = await macro_snapshot_provider.sync_macro_snapshots()
+    return build_macro_dashboard_payload(items)
+
+
+@app.get("/api/fundamentals/{ticker}")
+async def get_fundamentals_detail(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    info = await db.get_stock_info(normalized)
+    if refresh or not info or not info.get("sector") or not info.get("industry"):
+        try:
+            info = await fundamentals_provider.sync_ticker_fundamentals(normalized)
+        except Exception as exc:
+            log.warning("fundamentals sync failed for %s: %s", normalized, exc)
+            info = await db.get_stock_info(normalized)
+    events = await db.list_market_events(ticker=normalized, limit=10)
+    return {
+        "ticker": normalized,
+        "detail": info,
+        "summary": build_fundamental_summary(info, events),
+    }
+
+
+@app.get("/api/fundamentals/{ticker}/events")
+async def get_fundamental_events(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_market_events(ticker=normalized, limit=20)
+    if refresh or not items:
+        try:
+            items = await market_event_provider.sync_ticker_events(normalized)
+        except Exception as exc:
+            log.warning("fundamental event sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+@app.get("/api/tw/chips/{ticker}")
+async def get_taiwan_chip_detail(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    snapshot = await db.get_taiwan_chip_snapshot(normalized)
+    if refresh or not snapshot:
+        try:
+            snapshot = await taiwan_chip_provider.sync_ticker_snapshot(normalized)
+        except Exception as exc:
+            log.warning("taiwan chip sync failed for %s: %s", normalized, exc)
+            snapshot = await db.get_taiwan_chip_snapshot(normalized)
+    return {
+        "ticker": normalized,
+        "detail": snapshot,
+        "summary": build_taiwan_chip_summary(snapshot),
+    }
+
+
+@app.get("/api/screener/presets")
+async def list_screener_presets():
+    presets = await db.list_screener_presets()
+    built_in = [
+        {
+            "id": f"builtin-{index + 1}",
+            "owner_id": 0,
+            "name": preset["name"],
+            "description": preset.get("description"),
+            "filters": normalize_screener_filters(preset.get("filters")),
+            "created_at": None,
+            "updated_at": None,
+            "builtin": True,
+        }
+        for index, preset in enumerate(build_screener_presets())
+    ]
+    return {"items": built_in + presets}
+
+
+@app.post("/api/screener/presets")
+async def create_screener_preset(payload: ScreenerPresetCreatePayload):
+    try:
+        created = await db.create_screener_preset(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return created
+
+
+@app.put("/api/screener/presets/{preset_id}")
+async def update_screener_preset(preset_id: int, payload: ScreenerPresetUpdatePayload):
+    try:
+        updated = await db.update_screener_preset(preset_id, payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not updated:
+        raise HTTPException(404, "Screener preset not found")
+    return updated
+
+
+@app.delete("/api/screener/presets/{preset_id}")
+async def delete_screener_preset(preset_id: int):
+    deleted = await db.delete_screener_preset(preset_id)
+    if not deleted:
+        raise HTTPException(404, "Screener preset not found")
+    return {"ok": True}
+
+
+@app.post("/api/screener/run")
+async def run_screener(payload: ScreenerRunPayload):
+    return await screener_engine.run(payload.filters)
 
 
 @app.get("/api/taifex/institutional")

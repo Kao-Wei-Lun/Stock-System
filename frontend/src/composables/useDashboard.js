@@ -36,7 +36,7 @@ const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
-const WORKSPACE_TAB_OPTIONS = ["chart", "institutional"];
+const WORKSPACE_TAB_OPTIONS = ["chart", "institutional", "events", "macro", "screener"];
 const INSTITUTIONAL_HISTORY_OPTIONS = [10, 20, 30, 60, 90];
 const FUTURES_OVERLAY_TICKER_MAP = {
   "^TWII": "臺股期貨",
@@ -524,6 +524,34 @@ export function useDashboard() {
   const journalEntries = ref([]);
   const journalStats = ref(null);
   const journalLoading = ref(false);
+  const calendarEvents = ref([]);
+  const tickerEvents = ref([]);
+  const tickerNews = ref([]);
+  const macroDashboard = ref({ items: [], summary: {}, snapshot_date: null });
+  const fundamentalsDetail = ref(null);
+  const fundamentalsSummary = ref(null);
+  const taiwanChipDetail = ref(null);
+  const taiwanChipSummary = ref(null);
+  const screenerResults = ref({ items: [], total: 0, filters: {}, generated_at: null });
+  const screenerPresets = ref([]);
+  const screenerLoading = ref(false);
+  const screenerFilters = reactive({
+    search: "",
+    market: "ALL",
+    sector: "",
+    min_price: "",
+    max_price: "",
+    min_volume_ratio: "",
+    max_pe_ratio: "",
+    min_dividend_yield: "",
+    near_52w_high_pct: "",
+    upcoming_event_days: "",
+    chip_bias: "any",
+    ma_alignment: "any",
+    sort_by: "score",
+    limit: 50,
+    ...(storedPrefs.screenerFilters || {}),
+  });
   const journalFilterScope = ref("ticker");
   const journalFilters = reactive({
     market: "",
@@ -841,6 +869,35 @@ export function useDashboard() {
     };
   }
 
+  function buildScreenerPayload() {
+    const payload = {};
+    Object.entries(screenerFilters).forEach(([key, value]) => {
+      if (value === "" || value == null) return;
+      if (["min_price", "max_price", "min_volume_ratio", "max_pe_ratio", "min_dividend_yield", "near_52w_high_pct", "upcoming_event_days", "limit"].includes(key)) {
+        payload[key] = Number(value);
+        return;
+      }
+      payload[key] = value;
+    });
+    return payload;
+  }
+
+  function applyScreenerFilters(filters = {}) {
+    Object.keys(screenerFilters).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(filters, key)) {
+        screenerFilters[key] = filters[key] ?? "";
+      }
+    });
+  }
+
+  function normalizeMacroDashboard(payload) {
+    return {
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      summary: payload?.summary || {},
+      snapshot_date: payload?.snapshot_date || null,
+    };
+  }
+
   async function loadAlerts({ silent = true } = {}) {
     try {
       const response = await dashboardApi.listAlerts();
@@ -914,6 +971,117 @@ export function useDashboard() {
       }
     } finally {
       journalLoading.value = false;
+    }
+  }
+
+  async function loadEventCalendar(forceRefresh = false) {
+    try {
+      const response = await dashboardApi.listEventCalendar({ days: 30, limit: 120, refresh: forceRefresh });
+      calendarEvents.value = Array.isArray(response?.items) ? response.items : [];
+    } catch (error) {
+      console.error(error);
+      if (forceRefresh) {
+        pushNotification({ icon: "⚠️", title: "事件日曆載入失敗", msg: error.message || "請稍後再試", type: "error" });
+      }
+    }
+  }
+
+  async function loadMacroDashboard(forceRefresh = false) {
+    try {
+      const response = await dashboardApi.getMacroDashboard({ refresh: forceRefresh });
+      macroDashboard.value = normalizeMacroDashboard(response);
+    } catch (error) {
+      console.error(error);
+      if (forceRefresh) {
+        pushNotification({ icon: "⚠️", title: "宏觀儀表板載入失敗", msg: error.message || "請稍後再試", type: "error" });
+      }
+    }
+  }
+
+  async function loadTickerIntelligence(ticker = currentTicker.value, forceRefresh = false) {
+    const normalizedTicker = normalizeTicker(ticker);
+    try {
+      const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse] = await Promise.all([
+        dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
+        dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
+        dashboardApi.getFundamentals(normalizedTicker, { refresh: forceRefresh }),
+        dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null),
+      ]);
+      tickerEvents.value = Array.isArray(eventsResponse?.items) ? eventsResponse.items : [];
+      tickerNews.value = Array.isArray(newsResponse?.items) ? newsResponse.items : [];
+      fundamentalsDetail.value = fundamentalsResponse?.detail || null;
+      fundamentalsSummary.value = fundamentalsResponse?.summary || null;
+      taiwanChipDetail.value = chipsResponse?.detail || null;
+      taiwanChipSummary.value = chipsResponse?.summary || null;
+    } catch (error) {
+      console.error(error);
+      if (forceRefresh) {
+        pushNotification({ icon: "⚠️", title: "標的資訊載入失敗", msg: error.message || "請稍後再試", type: "error" });
+      }
+    }
+  }
+
+  async function loadScreenerPresets() {
+    try {
+      const response = await dashboardApi.listScreenerPresets();
+      screenerPresets.value = Array.isArray(response?.items) ? response.items : [];
+    } catch (error) {
+      console.error(error);
+      screenerPresets.value = [];
+    }
+  }
+
+  function updateScreenerFilter(key, value) {
+    if (!Object.prototype.hasOwnProperty.call(screenerFilters, key)) return;
+    screenerFilters[key] = value;
+  }
+
+  async function runScreener() {
+    screenerLoading.value = true;
+    try {
+      const payload = await dashboardApi.runScreener({ filters: buildScreenerPayload() });
+      screenerResults.value = payload || { items: [], total: 0, filters: {}, generated_at: null };
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "選股器執行失敗", msg: error.message || "請稍後再試", type: "error" });
+    } finally {
+      screenerLoading.value = false;
+    }
+  }
+
+  async function saveScreenerPreset(name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return;
+    try {
+      await dashboardApi.createScreenerPreset({
+        name: trimmed,
+        description: "由選股器工作區儲存",
+        filters: buildScreenerPayload(),
+      });
+      await loadScreenerPresets();
+      pushNotification({ icon: "💾", title: "選股模板已儲存", msg: trimmed, type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "選股模板儲存失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
+  }
+
+  function loadScreenerPreset(preset) {
+    if (!preset?.filters) return;
+    applyScreenerFilters(preset.filters);
+    pushNotification({ icon: "🧭", title: "已載入選股模板", msg: preset.name || "preset", type: "success" });
+    void runScreener();
+  }
+
+  async function deleteScreenerPreset(presetId) {
+    if (!presetId || String(presetId).startsWith("builtin-")) return;
+    try {
+      await dashboardApi.deleteScreenerPreset(presetId);
+      await loadScreenerPresets();
+      pushNotification({ icon: "🗑", title: "選股模板已刪除", msg: String(presetId), type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "選股模板刪除失敗", msg: error.message || "請稍後再試", type: "error" });
     }
   }
 
@@ -1464,6 +1632,7 @@ export function useDashboard() {
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
     void loadBacktestHistory({ ticker: normalized });
     void loadJournalData();
+    void loadTickerIntelligence(normalized);
     void ensureInstitutionalOverlayForTicker(normalized);
   }
 
@@ -1584,12 +1753,32 @@ export function useDashboard() {
   }
 
   async function setWorkspaceTab(tab) {
-    workspaceTab.value = tab === "institutional" ? "institutional" : "chart";
+    workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(tab) ? tab : "chart";
     if (workspaceTab.value === "institutional") {
       if (!institutionalData.value && !institutionalLoading.value) {
         await loadInstitutionalData();
       } else if (!institutionalInsights.value && !institutionalInsightsLoading.value) {
         await loadInstitutionalInsights();
+      }
+      return;
+    }
+    if (workspaceTab.value === "events") {
+      await Promise.all([
+        loadEventCalendar(),
+        loadTickerIntelligence(currentTicker.value),
+      ]);
+      return;
+    }
+    if (workspaceTab.value === "macro") {
+      await loadMacroDashboard();
+      return;
+    }
+    if (workspaceTab.value === "screener") {
+      if (!screenerPresets.value.length) {
+        await loadScreenerPresets();
+      }
+      if (!screenerResults.value.items?.length) {
+        await runScreener();
       }
     }
   }
@@ -2050,6 +2239,7 @@ export function useDashboard() {
         leftTab: leftTab.value,
         rightTab: rightTab.value,
         workspaceTab: workspaceTab.value,
+        screenerFilters,
         activeInd,
         activePanels,
         indicatorSettings,
@@ -2112,6 +2302,7 @@ export function useDashboard() {
     compareTickers.value = (preset.compareTickers || [])
       .map((ticker) => normalizeTicker(ticker))
       .filter((ticker) => ticker && ticker !== normalizedTicker);
+    applyScreenerFilters(preset.screenerFilters || {});
     Object.keys(DEFAULT_ACTIVE_IND).forEach((key) => {
       activeInd[key] = preset.activeInd?.[key] ?? DEFAULT_ACTIVE_IND[key];
     });
@@ -2132,6 +2323,16 @@ export function useDashboard() {
     }
     wsSend({ action: "subscribe", ticker: normalizedTicker });
     await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
+    if (workspaceTab.value === "events") {
+      await loadEventCalendar();
+      await loadTickerIntelligence(normalizedTicker);
+    } else if (workspaceTab.value === "macro") {
+      await loadMacroDashboard();
+    } else if (workspaceTab.value === "screener") {
+      await runScreener();
+    } else {
+      void loadTickerIntelligence(normalizedTicker);
+    }
     pushNotification({ icon: "📂", title: "工作區已載入", msg: preset.name, type: "success" });
   }
 
@@ -2192,6 +2393,9 @@ export function useDashboard() {
         loadWatchlist(),
         loadDbStats(),
         loadKline(currentTicker.value, currentPeriod.value, currentInterval.value),
+        loadEventCalendar(true),
+        loadMacroDashboard(true),
+        loadTickerIntelligence(currentTicker.value, true),
       ]);
       pushNotification({
         icon: result.failure_count ? "⚠️" : "✅",
@@ -2367,6 +2571,7 @@ export function useDashboard() {
     institutionalHistoryDays: institutionalHistoryDays.value,
     activeTool: activeTool.value,
     chartLayout: chartLayout.value,
+    screenerFilters: { ...screenerFilters },
     activeInd: { ...activeInd },
     activePanels: { ...activePanels },
     indicatorSettings: { ...indicatorSettings },
@@ -2388,6 +2593,7 @@ export function useDashboard() {
     await loadBacktestHistory({ ticker: currentTicker.value });
     applyJournalEntryToForm();
     await loadJournalData();
+    await loadScreenerPresets();
     await loadWatchlist();
     if (rightTab.value === "db") {
       await loadDbStats();
@@ -2395,7 +2601,17 @@ export function useDashboard() {
     if (workspaceTab.value === "institutional") {
       await loadInstitutionalData();
     }
+    if (workspaceTab.value === "events") {
+      await loadEventCalendar();
+    }
+    if (workspaceTab.value === "macro") {
+      await loadMacroDashboard();
+    }
+    if (workspaceTab.value === "screener") {
+      await runScreener();
+    }
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
+    void loadTickerIntelligence(currentTicker.value);
     void ensureInstitutionalOverlayForTicker(currentTicker.value);
     watchlistTimer = window.setInterval(loadWatchlist, 60000);
     alertPollingTimer = window.setInterval(() => {
@@ -2466,6 +2682,18 @@ export function useDashboard() {
     institutionalFuturesCommodity,
     institutionalOptionsCommodity,
     institutionalHistoryDays,
+    calendarEvents,
+    tickerEvents,
+    tickerNews,
+    macroDashboard,
+    fundamentalsDetail,
+    fundamentalsSummary,
+    taiwanChipDetail,
+    taiwanChipSummary,
+    screenerFilters,
+    screenerResults,
+    screenerPresets,
+    screenerLoading,
     syncingCurrent,
     syncingAll,
     quote,
@@ -2517,6 +2745,9 @@ export function useDashboard() {
     shiftInstitutionalDate,
     loadInstitutionalData,
     loadInstitutionalInsights,
+    loadEventCalendar,
+    loadMacroDashboard,
+    loadTickerIntelligence,
     setChartLayout,
     selectTicker,
     toggleIndicator,
@@ -2560,6 +2791,11 @@ export function useDashboard() {
     addJournalAttachment,
     removeJournalAttachment,
     startJournalEntry,
+    updateScreenerFilter,
+    runScreener,
+    saveScreenerPreset,
+    loadScreenerPreset,
+    deleteScreenerPreset,
     fmtPrice,
     fmtVol,
     fmtMktCap,

@@ -413,6 +413,98 @@ CREATE_TABLE_STATEMENTS = {
                 ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "market_events": """
+        CREATE TABLE `market_events` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `event_type` VARCHAR(64) NOT NULL,
+            `market` VARCHAR(32) NULL,
+            `ticker` VARCHAR(32) NULL,
+            `title` VARCHAR(255) NOT NULL,
+            `description` TEXT NULL,
+            `event_date` DATE NOT NULL,
+            `event_time` DATETIME NULL,
+            `importance` VARCHAR(32) NULL,
+            `source` VARCHAR(128) NULL,
+            `url` VARCHAR(512) NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_market_events_identity` (`event_type`, `ticker`, `event_date`, `title`),
+            KEY `idx_market_events_event_date` (`event_date`, `ticker`),
+            KEY `idx_market_events_ticker` (`ticker`, `event_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "news_articles": """
+        CREATE TABLE `news_articles` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ticker` VARCHAR(32) NULL,
+            `market` VARCHAR(32) NULL,
+            `title` VARCHAR(255) NOT NULL,
+            `summary` TEXT NULL,
+            `published_at` DATETIME NOT NULL,
+            `source` VARCHAR(128) NULL,
+            `url` VARCHAR(512) NULL,
+            `sentiment` VARCHAR(32) NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_news_articles_identity` (`ticker`, `published_at`, `title`),
+            KEY `idx_news_articles_published_at` (`published_at`, `ticker`),
+            KEY `idx_news_articles_ticker` (`ticker`, `published_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "macro_snapshots": """
+        CREATE TABLE `macro_snapshots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `metric_code` VARCHAR(64) NOT NULL,
+            `metric_name` VARCHAR(128) NOT NULL,
+            `value` DOUBLE NULL,
+            `snapshot_date` DATE NOT NULL,
+            `source` VARCHAR(128) NULL,
+            `payload_json` LONGTEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_macro_snapshots_metric_date` (`metric_code`, `snapshot_date`),
+            KEY `idx_macro_snapshots_snapshot_date` (`snapshot_date`, `metric_code`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "taiwan_chip_snapshots": """
+        CREATE TABLE `taiwan_chip_snapshots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ticker` VARCHAR(32) NOT NULL,
+            `market` VARCHAR(32) NULL,
+            `snapshot_date` DATE NOT NULL,
+            `margin_balance` BIGINT NULL,
+            `short_balance` BIGINT NULL,
+            `securities_lending_balance` BIGINT NULL,
+            `institutional_net_buy_sell` BIGINT NULL,
+            `source` VARCHAR(128) NULL,
+            `branch_payload_json` JSON NULL,
+            `summary_json` JSON NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_taiwan_chip_snapshots_ticker_date` (`ticker`, `snapshot_date`),
+            KEY `idx_taiwan_chip_snapshots_ticker` (`ticker`, `snapshot_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "screener_presets": """
+        CREATE TABLE `screener_presets` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NOT NULL,
+            `description` VARCHAR(512) NULL,
+            `filters_json` JSON NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_screener_presets_owner_name` (`owner_id`, `name`),
+            KEY `idx_screener_presets_owner_updated` (`owner_id`, `updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {
@@ -513,6 +605,8 @@ class Database:
             )
         except OperationalError as exc:
             raise RuntimeError(_build_mysql_error_message(exc)) from exc
+        except Exception as exc:
+            raise RuntimeError(_build_mysql_connection_error_message(exc)) from exc
         try:
             async with server_pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -534,17 +628,22 @@ class Database:
             server_pool.close()
             await server_pool.wait_closed()
 
-        self._pool = await aiomysql.create_pool(
-            host=MYSQL_HOST,
-            port=MYSQL_PORT,
-            user=MYSQL_USER,
-            password=MYSQL_PASSWORD,
-            db=MYSQL_DATABASE,
-            charset=MYSQL_CHARSET,
-            autocommit=True,
-            minsize=1,
-            maxsize=10,
-        )
+        try:
+            self._pool = await aiomysql.create_pool(
+                host=MYSQL_HOST,
+                port=MYSQL_PORT,
+                user=MYSQL_USER,
+                password=MYSQL_PASSWORD,
+                db=MYSQL_DATABASE,
+                charset=MYSQL_CHARSET,
+                autocommit=True,
+                minsize=1,
+                maxsize=10,
+            )
+        except OperationalError as exc:
+            raise RuntimeError(_build_mysql_error_message(exc)) from exc
+        except Exception as exc:
+            raise RuntimeError(_build_mysql_connection_error_message(exc)) from exc
 
     async def close(self):
         if self._pool:
@@ -810,6 +909,70 @@ class Database:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute("SELECT * FROM `stock_info` WHERE `ticker`=%s", (ticker,))
                 return await cur.fetchone()
+
+    async def list_screenable_tickers(self, limit: int = 400) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 1000))
+        rows = await self._fetchall(
+            """
+            SELECT
+                o.`ticker`,
+                o.`date`,
+                o.`open`,
+                o.`high`,
+                o.`low`,
+                o.`close`,
+                o.`volume`,
+                si.`name`,
+                si.`sector`,
+                si.`industry`,
+                si.`market_cap`,
+                si.`pe_ratio`,
+                si.`dividend_yield`,
+                si.`week_52_high`,
+                si.`week_52_low`,
+                si.`avg_volume`,
+                si.`exchange`,
+                si.`country`,
+                mq.`change_pct` AS `quote_change_pct`,
+                mq.`quote_timestamp`,
+                mq.`source` AS `quote_source`
+            FROM `ohlcv` AS o
+            INNER JOIN (
+                SELECT `ticker`, MAX(`date`) AS `latest_date`
+                FROM `ohlcv`
+                WHERE `interval`='1d'
+                GROUP BY `ticker`
+            ) AS latest
+                ON latest.`ticker` = o.`ticker`
+               AND latest.`latest_date` = o.`date`
+            LEFT JOIN `stock_info` AS si ON si.`ticker` = o.`ticker`
+            LEFT JOIN `market_quotes_latest` AS mq ON mq.`ticker` = o.`ticker`
+            WHERE o.`interval`='1d'
+            ORDER BY o.`date` DESC, o.`ticker` ASC
+            LIMIT %s
+            """,
+            (clean_limit,),
+        )
+        return list(rows)
+
+    async def get_recent_ohlcv_rows(
+        self,
+        ticker: str,
+        limit: int = 260,
+        interval: str = "1d",
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(2, min(limit, 1000))
+        rows = await self._fetchall(
+            """
+            SELECT `date`, `open`, `high`, `low`, `close`, `volume`, `adj_close`, `source`, `updated_at`
+            FROM `ohlcv`
+            WHERE `ticker`=%s AND `interval`=%s
+            ORDER BY `date` DESC
+            LIMIT %s
+            """,
+            (ticker, interval, clean_limit),
+        )
+        return list(reversed(rows))
 
     async def list_workspace_presets(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
         rows = await self._fetchall(
@@ -1610,6 +1773,394 @@ class Database:
             return None
         return await self.get_notification(notification_id, owner_id=owner_id)
 
+    async def upsert_market_events(self, events: List[Dict[str, Any]]) -> int:
+        if not events:
+            return 0
+        normalized_events = [_normalize_market_event_payload(item) for item in events]
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO `market_events`
+                            (`event_type`, `market`, `ticker`, `title`, `description`,
+                             `event_date`, `event_time`, `importance`, `source`, `url`, `payload_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        AS `incoming`
+                        ON DUPLICATE KEY UPDATE
+                            `market`=`incoming`.`market`,
+                            `description`=`incoming`.`description`,
+                            `event_time`=`incoming`.`event_time`,
+                            `importance`=`incoming`.`importance`,
+                            `source`=`incoming`.`source`,
+                            `url`=`incoming`.`url`,
+                            `payload_json`=`incoming`.`payload_json`
+                        """,
+                        [
+                            (
+                                item["event_type"],
+                                item["market"],
+                                item["ticker"],
+                                item["title"],
+                                item["description"],
+                                item["event_date"],
+                                _parse_datetime_value(item.get("event_time")),
+                                item["importance"],
+                                item["source"],
+                                item["url"],
+                                _json_dumps(item.get("payload") or {}),
+                            )
+                            for item in normalized_events
+                        ],
+                    )
+        return len(normalized_events)
+
+    async def list_market_events(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 500))
+        filters = ["1=1"]
+        params: List[Any] = []
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(ticker)
+        if date_from:
+            filters.append("`event_date`>=%s")
+            params.append(date_from)
+        if date_to:
+            filters.append("`event_date`<=%s")
+            params.append(date_to)
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `market_events`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `event_date` ASC, `event_time` ASC, `id` ASC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_market_event(item) for item in rows]
+
+    async def upsert_news_articles(self, articles: List[Dict[str, Any]]) -> int:
+        if not articles:
+            return 0
+        normalized_articles = [_normalize_news_article_payload(item) for item in articles]
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO `news_articles`
+                            (`ticker`, `market`, `title`, `summary`, `published_at`, `source`, `url`, `sentiment`, `payload_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        AS `incoming`
+                        ON DUPLICATE KEY UPDATE
+                            `market`=`incoming`.`market`,
+                            `summary`=`incoming`.`summary`,
+                            `source`=`incoming`.`source`,
+                            `url`=`incoming`.`url`,
+                            `sentiment`=`incoming`.`sentiment`,
+                            `payload_json`=`incoming`.`payload_json`
+                        """,
+                        [
+                            (
+                                item["ticker"],
+                                item["market"],
+                                item["title"],
+                                item["summary"],
+                                _parse_datetime_value(item["published_at"]),
+                                item["source"],
+                                item["url"],
+                                item["sentiment"],
+                                _json_dumps(item.get("payload") or {}),
+                            )
+                            for item in normalized_articles
+                        ],
+                    )
+        return len(normalized_articles)
+
+    async def list_news_articles(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 200))
+        filters = ["1=1"]
+        params: List[Any] = []
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(ticker)
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `news_articles`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `published_at` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_news_article(item) for item in rows]
+
+    async def upsert_macro_snapshots(self, snapshots: List[Dict[str, Any]]) -> int:
+        if not snapshots:
+            return 0
+        normalized_snapshots = [_normalize_macro_snapshot_payload(item) for item in snapshots]
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO `macro_snapshots`
+                            (`metric_code`, `metric_name`, `value`, `snapshot_date`, `source`, `payload_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        AS `incoming`
+                        ON DUPLICATE KEY UPDATE
+                            `metric_name`=`incoming`.`metric_name`,
+                            `value`=`incoming`.`value`,
+                            `source`=`incoming`.`source`,
+                            `payload_json`=`incoming`.`payload_json`
+                        """,
+                        [
+                            (
+                                item["metric_code"],
+                                item["metric_name"],
+                                item["value"],
+                                item["snapshot_date"],
+                                item["source"],
+                                _json_dumps(item.get("payload") or {}),
+                            )
+                            for item in normalized_snapshots
+                        ],
+                    )
+        return len(normalized_snapshots)
+
+    async def list_macro_snapshots(
+        self,
+        snapshot_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if snapshot_date:
+            rows = await self._fetchall(
+                """
+                SELECT *
+                FROM `macro_snapshots`
+                WHERE `snapshot_date`=%s
+                ORDER BY `metric_code` ASC
+                """,
+                (snapshot_date,),
+            )
+        else:
+            row = await self._fetchone(
+                """
+                SELECT MAX(`snapshot_date`) AS `snapshot_date`
+                FROM `macro_snapshots`
+                """
+            )
+            latest_date = row.get("snapshot_date") if row else None
+            if not latest_date:
+                return []
+            rows = await self._fetchall(
+                """
+                SELECT *
+                FROM `macro_snapshots`
+                WHERE `snapshot_date`=%s
+                ORDER BY `metric_code` ASC
+                """,
+                (_date_to_iso(latest_date),),
+            )
+        return [_deserialize_macro_snapshot(item) for item in rows]
+
+    async def upsert_taiwan_chip_snapshots(self, snapshots: List[Dict[str, Any]]) -> int:
+        if not snapshots:
+            return 0
+        normalized_snapshots = [_normalize_taiwan_chip_snapshot_payload(item) for item in snapshots]
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO `taiwan_chip_snapshots`
+                            (`ticker`, `market`, `snapshot_date`, `margin_balance`, `short_balance`,
+                             `securities_lending_balance`, `institutional_net_buy_sell`, `source`,
+                             `branch_payload_json`, `summary_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        AS `incoming`
+                        ON DUPLICATE KEY UPDATE
+                            `market`=`incoming`.`market`,
+                            `margin_balance`=`incoming`.`margin_balance`,
+                            `short_balance`=`incoming`.`short_balance`,
+                            `securities_lending_balance`=`incoming`.`securities_lending_balance`,
+                            `institutional_net_buy_sell`=`incoming`.`institutional_net_buy_sell`,
+                            `source`=`incoming`.`source`,
+                            `branch_payload_json`=`incoming`.`branch_payload_json`,
+                            `summary_json`=`incoming`.`summary_json`
+                        """,
+                        [
+                            (
+                                item["ticker"],
+                                item["market"],
+                                item["snapshot_date"],
+                                item["margin_balance"],
+                                item["short_balance"],
+                                item["securities_lending_balance"],
+                                item["institutional_net_buy_sell"],
+                                item["source"],
+                                _json_dumps(item.get("branch_payload") or {}),
+                                _json_dumps(item.get("summary") or {}),
+                            )
+                            for item in normalized_snapshots
+                        ],
+                    )
+        return len(normalized_snapshots)
+
+    async def get_taiwan_chip_snapshot(
+        self,
+        ticker: str,
+        snapshot_date: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if snapshot_date:
+            row = await self._fetchone(
+                """
+                SELECT *
+                FROM `taiwan_chip_snapshots`
+                WHERE `ticker`=%s AND `snapshot_date`=%s
+                LIMIT 1
+                """,
+                (ticker, snapshot_date),
+            )
+        else:
+            row = await self._fetchone(
+                """
+                SELECT *
+                FROM `taiwan_chip_snapshots`
+                WHERE `ticker`=%s
+                ORDER BY `snapshot_date` DESC, `id` DESC
+                LIMIT 1
+                """,
+                (ticker,),
+            )
+        return _deserialize_taiwan_chip_snapshot(row)
+
+    async def list_taiwan_chip_snapshots(
+        self,
+        ticker: Optional[str] = None,
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        clean_limit = max(1, min(limit, 200))
+        filters = ["1=1"]
+        params: List[Any] = []
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(ticker)
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `taiwan_chip_snapshots`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `snapshot_date` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_taiwan_chip_snapshot(item) for item in rows]
+
+    async def list_screener_presets(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `screener_presets`
+            WHERE `owner_id`=%s
+            ORDER BY `updated_at` DESC, `id` DESC
+            """,
+            (owner_id,),
+        )
+        return [_deserialize_screener_preset(row) for row in rows]
+
+    async def get_screener_preset(
+        self,
+        preset_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `screener_presets`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (preset_id, owner_id),
+        )
+        return _deserialize_screener_preset(row)
+
+    async def create_screener_preset(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_screener_preset_payload(payload)
+        preset_id = await self._execute_insert(
+            """
+            INSERT INTO `screener_presets` (`owner_id`, `name`, `description`, `filters_json`)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["name"],
+                normalized["description"],
+                _json_dumps(normalized["filters"]),
+            ),
+        )
+        preset = await self.get_screener_preset(preset_id, owner_id=owner_id)
+        if not preset:
+            raise RuntimeError("Screener preset was not persisted")
+        return preset
+
+    async def update_screener_preset(
+        self,
+        preset_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_screener_preset(preset_id, owner_id=owner_id)
+        if not existing:
+            return None
+        normalized = _normalize_screener_preset_payload(payload, existing=existing)
+        updated = await self._execute(
+            """
+            UPDATE `screener_presets`
+            SET `name`=%s, `description`=%s, `filters_json`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["name"],
+                normalized["description"],
+                _json_dumps(normalized["filters"]),
+                preset_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_screener_preset(preset_id, owner_id=owner_id)
+
+    async def delete_screener_preset(
+        self,
+        preset_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `screener_presets` WHERE `id`=%s AND `owner_id`=%s",
+            (preset_id, owner_id),
+        )
+        return bool(deleted)
+
     async def _replace_trade_journal_children(
         self,
         conn,
@@ -2267,6 +2818,21 @@ class Database:
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `trade_journal_entries`")
                 trade_journal_entries = (await cur.fetchone())["c"]
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `market_events`")
+                market_events = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `news_articles`")
+                news_articles = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `macro_snapshots`")
+                macro_snapshots = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `taiwan_chip_snapshots`")
+                taiwan_chip_snapshots = (await cur.fetchone())["c"]
+
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `screener_presets`")
+                screener_presets = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
@@ -2278,6 +2844,11 @@ class Database:
             "backtest_runs": backtest_runs,
             "backtest_trades": backtest_trades,
             "trade_journal_entries": trade_journal_entries,
+            "market_events": market_events,
+            "news_articles": news_articles,
+            "macro_snapshots": macro_snapshots,
+            "taiwan_chip_snapshots": taiwan_chip_snapshots,
+            "screener_presets": screener_presets,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -2515,6 +3086,99 @@ def _deserialize_trade_journal_entry(row: Optional[Dict[str, Any]]) -> Optional[
     }
 
 
+def _deserialize_market_event(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "event_type": row.get("event_type"),
+        "market": row.get("market"),
+        "ticker": row.get("ticker"),
+        "title": row.get("title"),
+        "description": row.get("description"),
+        "event_date": _date_to_iso(row.get("event_date")),
+        "event_time": _datetime_to_iso(row.get("event_time")),
+        "importance": row.get("importance"),
+        "source": row.get("source"),
+        "url": row.get("url"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_news_article(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "ticker": row.get("ticker"),
+        "market": row.get("market"),
+        "title": row.get("title"),
+        "summary": row.get("summary"),
+        "published_at": _datetime_to_iso(row.get("published_at")),
+        "source": row.get("source"),
+        "url": row.get("url"),
+        "sentiment": row.get("sentiment"),
+        "payload": _json_loads(row.get("payload_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_macro_snapshot(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    payload = _json_loads(row.get("payload_json"), {})
+    payload.update(
+        {
+            "id": row.get("id"),
+            "metric_code": row.get("metric_code"),
+            "metric_name": row.get("metric_name"),
+            "value": row.get("value"),
+            "date": _date_to_iso(row.get("snapshot_date")),
+            "source": row.get("source"),
+            "created_at": _datetime_to_iso(row.get("created_at")),
+            "updated_at": _datetime_to_iso(row.get("updated_at")),
+        }
+    )
+    return payload
+
+
+def _deserialize_taiwan_chip_snapshot(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "ticker": row.get("ticker"),
+        "market": row.get("market"),
+        "snapshot_date": _date_to_iso(row.get("snapshot_date")),
+        "margin_balance": row.get("margin_balance"),
+        "short_balance": row.get("short_balance"),
+        "securities_lending_balance": row.get("securities_lending_balance"),
+        "institutional_net_buy_sell": row.get("institutional_net_buy_sell"),
+        "source": row.get("source"),
+        "branch_payload": _json_loads(row.get("branch_payload_json"), {}),
+        "summary": _json_loads(row.get("summary_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _deserialize_screener_preset(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "name": row.get("name"),
+        "description": row.get("description"),
+        "filters": _json_loads(row.get("filters_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -2740,6 +3404,88 @@ def _normalize_trade_journal_payload(
     return normalized
 
 
+def _normalize_market_event_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    return {
+        "event_type": _required_string(source.get("event_type"), "Market event type is required", max_length=64),
+        "market": _optional_string(source.get("market"), max_length=32),
+        "ticker": _optional_string(source.get("ticker"), max_length=32),
+        "title": _required_string(source.get("title"), "Market event title is required", max_length=255),
+        "description": _optional_string(source.get("description"), max_length=4000),
+        "event_date": _required_date_string(source.get("event_date"), "Market event date is required"),
+        "event_time": source.get("event_time"),
+        "importance": _optional_string(source.get("importance"), max_length=32),
+        "source": _optional_string(source.get("source"), max_length=128),
+        "url": _optional_string(source.get("url"), max_length=512),
+        "payload": source.get("payload") if isinstance(source.get("payload"), dict) else {},
+    }
+
+
+def _normalize_news_article_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    return {
+        "ticker": _optional_string(source.get("ticker"), max_length=32),
+        "market": _optional_string(source.get("market"), max_length=32),
+        "title": _required_string(source.get("title"), "News article title is required", max_length=255),
+        "summary": _optional_string(source.get("summary"), max_length=4000),
+        "published_at": _required_string(source.get("published_at"), "News article published_at is required", max_length=64),
+        "source": _optional_string(source.get("source"), max_length=128),
+        "url": _optional_string(source.get("url"), max_length=512),
+        "sentiment": _optional_string(source.get("sentiment"), max_length=32),
+        "payload": source.get("payload") if isinstance(source.get("payload"), dict) else {},
+    }
+
+
+def _normalize_macro_snapshot_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    return {
+        "metric_code": _required_string(source.get("metric_code"), "Macro snapshot metric_code is required", max_length=64),
+        "metric_name": _required_string(source.get("metric_name"), "Macro snapshot metric_name is required", max_length=128),
+        "value": _optional_float(source.get("value")),
+        "snapshot_date": _required_date_string(source.get("date") or source.get("snapshot_date"), "Macro snapshot date is required"),
+        "source": _optional_string(source.get("source"), max_length=128),
+        "payload": source.get("payload") if isinstance(source.get("payload"), dict) else {
+            key: value
+            for key, value in source.items()
+            if key not in {"metric_code", "metric_name", "value", "date", "snapshot_date", "source"}
+        },
+    }
+
+
+def _normalize_taiwan_chip_snapshot_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    source = dict(payload or {})
+    return {
+        "ticker": _required_string(source.get("ticker"), "Taiwan chip ticker is required", max_length=32).upper(),
+        "market": _optional_string(source.get("market"), max_length=32),
+        "snapshot_date": _required_date_string(source.get("snapshot_date") or source.get("date"), "Taiwan chip snapshot date is required"),
+        "margin_balance": _optional_int(source.get("margin_balance")),
+        "short_balance": _optional_int(source.get("short_balance")),
+        "securities_lending_balance": _optional_int(source.get("securities_lending_balance")),
+        "institutional_net_buy_sell": _optional_int(source.get("institutional_net_buy_sell")),
+        "source": _optional_string(source.get("source"), max_length=128),
+        "branch_payload": source.get("branch_payload") if isinstance(source.get("branch_payload"), dict) else {},
+        "summary": source.get("summary") if isinstance(source.get("summary"), dict) else {},
+    }
+
+
+def _normalize_screener_preset_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+    filters = source.get("filters")
+    if filters is None:
+        filters = (existing or {}).get("filters", {})
+    if not isinstance(filters, dict):
+        raise ValueError("Screener preset filters must be an object")
+    return {
+        "name": _required_string(source.get("name"), "Screener preset name is required", max_length=128),
+        "description": _optional_string(source.get("description"), max_length=512),
+        "filters": filters,
+    }
+
+
 def _required_string(value: Any, error_message: str, max_length: Optional[int] = None) -> str:
     normalized = _optional_string(value, max_length=max_length)
     if not normalized:
@@ -2917,6 +3663,19 @@ def _build_mysql_error_message(exc: Exception) -> str:
         "你可以直接複製 `.env.example` 成 `.env` 再修改。\n"
         f"原始錯誤: {exc}"
     )
+
+
+def _build_mysql_connection_error_message(exc: Exception) -> str:
+    message = str(exc)
+    if "cryptography" in message and ("caching_sha2_password" in message or "sha256_password" in message):
+        return (
+            "MySQL 連線失敗：目前 MySQL 使用 `caching_sha2_password` / `sha256_password` 驗證，"
+            "但 Python 環境缺少 `cryptography` 套件。\n"
+            "請重新安裝 backend dependencies，或手動執行：\n"
+            "`venv\\Scripts\\python.exe -m pip install cryptography`\n"
+            f"原始錯誤: {exc}"
+        )
+    return _build_mysql_error_message(exc)
 
 
 def _escape_identifier(value: str) -> str:

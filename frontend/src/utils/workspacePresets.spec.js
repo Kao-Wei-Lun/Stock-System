@@ -25,6 +25,7 @@ describe("workspacePresets", () => {
       leftTab: "watch",
       rightTab: "alerts",
       workspaceTab: "chart",
+      screenerFilters: { market: "US" },
       activeInd: { ma20: true },
       activePanels: { macd: true },
       indicatorSettings: { macdFast: 12 },
@@ -53,6 +54,7 @@ describe("workspacePresets", () => {
         leftTab: "watch",
         rightTab: "alerts",
         workspaceTab: "chart",
+        screenerFilters: { market: "US" },
         activeInd: { ma20: true },
         activePanels: { macd: true },
         indicatorSettings: { macdFast: 12 },
@@ -75,6 +77,7 @@ describe("workspacePresets", () => {
         currentTicker: "2330.TW",
         currentName: "TSMC",
         drawings: [{ type: "hline", price: 950 }],
+        screenerFilters: { market: "TW" },
       },
       created_at: "2026-03-29T01:00:00+00:00",
       updated_at: "2026-03-29T02:00:00+00:00",
@@ -85,6 +88,7 @@ describe("workspacePresets", () => {
     expect(workspace.currentName).toBe("TSMC");
     expect(workspace.chartLayout).toBe("quad");
     expect(workspace.drawings).toEqual([{ type: "hline", price: 950 }]);
+    expect(workspace.screenerFilters).toEqual({ market: "TW" });
     expect(workspace.isDefault).toBe(true);
   });
 
@@ -110,5 +114,6 @@ describe("workspacePresets", () => {
     });
 
     expect(payload.drawings).toEqual([{ type: "rect", startPrice: 10, endPrice: 20 }]);
+    expect(payload.screenerFilters).toEqual({});
   });
 });

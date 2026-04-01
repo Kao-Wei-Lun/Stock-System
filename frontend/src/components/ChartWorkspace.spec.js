@@ -8,7 +8,11 @@ vi.mock("../composables/useChartEngine", () => ({
   useChartEngine: () => ({
     chartMode: ref("candles"),
     priceScaleMode: ref("linear"),
-    visibleData: ref([]),
+    visibleData: ref([
+      { date: "2026-04-01", close: 200, high: 205, low: 198, open: 199, volume: 1000 },
+      { date: "2026-04-02", close: 204, high: 206, low: 201, open: 202, volume: 1200 },
+      { date: "2026-04-03", close: 210, high: 212, low: 203, open: 204, volume: 1300 },
+    ]),
     viewportStartIndex: ref(0),
     canvasClass: computed(() => ""),
     visibleRangeLabel: computed(() => "可視範圍"),
@@ -76,7 +80,11 @@ function createProps() {
     loading: false,
     loadingMessage: "loading",
     crosshair: { visible: false, absoluteIndex: null },
-    ohlcData: [],
+    ohlcData: [
+      { date: "2026-04-01", close: 200, high: 205, low: 198, open: 199, volume: 1000 },
+      { date: "2026-04-02", close: 204, high: 206, low: 201, open: 202, volume: 1200 },
+      { date: "2026-04-03", close: 210, high: 212, low: 203, open: 204, volume: 1300 },
+    ],
     activeInd: { ma20: true },
     indicatorSettings: {
       rsiPeriod: 14,
@@ -105,6 +113,10 @@ function createProps() {
     compareSeries: [],
     comparisonMode: "percent",
     institutionalOverlay: null,
+    tickerEvents: [],
+    tickerNews: [],
+    fundamentalsSummary: null,
+    taiwanChipSummary: null,
     isFullscreen: false,
   };
 }
@@ -139,6 +151,32 @@ describe("ChartWorkspace", () => {
 
     expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
       { ticker: "AAPL", entry_price: 210.5 },
+    ]);
+  });
+
+  it("renders event markers and links event rows to vertical lines", async () => {
+    const wrapper = mount(ChartWorkspace, {
+      props: {
+        ...createProps(),
+        tickerEvents: [
+          { event_type: "earnings", title: "AAPL Earnings", event_date: "2026-04-02", importance: "high" },
+        ],
+        tickerNews: [
+          { title: "Apple AI rollout", published_at: "2026-04-02T00:00:00+00:00", url: "https://example.com/apple" },
+        ],
+        fundamentalsSummary: {
+          headline: "Apple / Technology / Consumer Electronics",
+          signals: [{ label: "近期事件", value: "2026-04-02" }],
+          updated_at: "2026-04-02T00:00:00+00:00",
+        },
+      },
+    });
+
+    expect(wrapper.find(".chart-event-marker").exists()).toBe(true);
+    await wrapper.find(".intel-mini-row").trigger("click");
+
+    expect(wrapper.emitted("add-drawing")[0]).toEqual([
+      { type: "vline", index: 1, label: "AAPL Earnings" },
     ]);
   });
 });

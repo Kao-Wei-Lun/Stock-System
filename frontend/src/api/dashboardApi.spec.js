@@ -146,4 +146,36 @@ describe("dashboardApi", () => {
       body: JSON.stringify({ read: false }),
     });
   });
+
+  it("builds event and macro query strings", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ items: [] }));
+    const api = createDashboardApi();
+
+    await api.listEventCalendar({ days: 14, limit: 10, refresh: true });
+    await api.getMacroDashboard({ refresh: true });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/events/calendar?days=14&limit=10&refresh=true", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/market/macro?refresh=true", {});
+  });
+
+  it("posts screener runs and manages screener presets", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ total: 1, items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ id: 3, name: "Momentum" }));
+    const api = createDashboardApi();
+
+    await api.runScreener({ filters: { market: "US" } });
+    await api.createScreenerPreset({ name: "Momentum", filters: { market: "US" } });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/screener/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters: { market: "US" } }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/screener/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Momentum", filters: { market: "US" } }),
+    });
+  });
 });

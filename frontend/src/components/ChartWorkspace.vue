@@ -277,6 +277,84 @@
         <div class="ci-row"><span class="ci-label">漲跌</span><span>{{ crosshair.change }} ({{ crosshair.changePct }})</span></div>
         <div class="ci-row"><span class="ci-label">成交量</span><span>{{ crosshair.volume }}</span></div>
       </div>
+
+      <div v-if="visibleEventMarkers.length" class="chart-event-overlay">
+        <button
+          v-for="marker in visibleEventMarkers"
+          :key="marker.key"
+          type="button"
+          class="chart-event-marker"
+          :class="[marker.importance || 'medium', { active: focusedEventKey === marker.key }]"
+          :style="{ left: marker.left }"
+          :title="`${marker.title} / ${marker.event_date}`"
+          @click="jumpToEvent(marker)"
+        >
+          <span class="chart-event-line"></span>
+          <span class="chart-event-dot"></span>
+        </button>
+      </div>
+    </div>
+
+    <div v-if="showIntelStrip" class="intel-strip">
+      <section class="intel-mini-card">
+        <div class="intel-mini-head">
+          <strong>事件焦點</strong>
+          <span>{{ tickerEvents.length }} 筆</span>
+        </div>
+        <button
+          v-for="item in tickerEvents.slice(0, 4)"
+          :key="`${item.event_type}-${item.event_date}`"
+          type="button"
+          class="intel-mini-row"
+          @click="jumpToEvent(item)"
+        >
+          <span>{{ item.title }}</span>
+          <small>{{ item.event_date }}</small>
+        </button>
+      </section>
+
+      <section v-if="fundamentalsSummary" class="intel-mini-card">
+        <div class="intel-mini-head">
+          <strong>基本面摘要</strong>
+          <span>{{ fundamentalsSummary.updated_at ? "已同步" : "local" }}</span>
+        </div>
+        <div class="intel-mini-title">{{ fundamentalsSummary.headline }}</div>
+        <div class="intel-badge-row">
+          <span v-for="signal in fundamentalsSummary.signals || []" :key="`${signal.label}-${signal.value}`" class="intel-badge">
+            {{ signal.label }} · {{ signal.value }}
+          </span>
+        </div>
+      </section>
+
+      <section v-if="taiwanChipSummary" class="intel-mini-card">
+        <div class="intel-mini-head">
+          <strong>台股籌碼</strong>
+          <span :class="`bias-${taiwanChipSummary.bias || 'neutral'}`">{{ taiwanChipSummary.bias || "neutral" }}</span>
+        </div>
+        <div class="intel-badge-row">
+          <span v-for="signal in taiwanChipSummary.signals || []" :key="`${signal.label}-${signal.value}`" class="intel-badge">
+            {{ signal.label }} · {{ signal.value }}
+          </span>
+        </div>
+      </section>
+
+      <section class="intel-mini-card">
+        <div class="intel-mini-head">
+          <strong>新聞快照</strong>
+          <span>{{ tickerNews.length }} 則</span>
+        </div>
+        <a
+          v-for="article in tickerNews.slice(0, 3)"
+          :key="`${article.title}-${article.published_at}`"
+          class="intel-mini-row link"
+          :href="article.url"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span>{{ article.title }}</span>
+          <small>{{ formatTimestamp(article.published_at) }}</small>
+        </a>
+      </section>
     </div>
 
     <div v-if="layoutPanes.length" class="sync-layout-grid" :class="`is-${chartLayout}`">
@@ -342,6 +420,10 @@ const props = defineProps({
   compareSeries: { type: Array, default: () => [] },
   comparisonMode: { type: String, default: "percent" },
   institutionalOverlay: { type: Object, default: null },
+  tickerEvents: { type: Array, default: () => [] },
+  tickerNews: { type: Array, default: () => [] },
+  fundamentalsSummary: { type: Object, default: null },
+  taiwanChipSummary: { type: Object, default: null },
   isFullscreen: { type: Boolean, default: false },
 });
 
@@ -396,6 +478,7 @@ const cmfCanvas = ref(null);
 const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
+const focusedEventKey = ref("");
 const syncPaneRefs = reactive({});
 let syncPaneFrame = 0;
 
@@ -485,6 +568,32 @@ const quoteTimestampLabel = computed(() => {
 
 const quoteSourceLabel = computed(() => `來源：${props.quote.source || "local_cache"}`);
 const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "即時報價"));
+const showIntelStrip = computed(() => Boolean(
+  (props.tickerEvents || []).length
+  || (props.tickerNews || []).length
+  || props.fundamentalsSummary
+  || props.taiwanChipSummary,
+));
+const visibleEventMarkers = computed(() => {
+  const rows = visibleData.value || [];
+  if (!rows.length || !(props.tickerEvents || []).length) return [];
+  const lastIndex = Math.max(rows.length - 1, 1);
+  return (props.tickerEvents || [])
+    .map((item) => {
+      const absoluteIndex = findEventAbsoluteIndex(item.event_date);
+      if (absoluteIndex < viewportStartIndex.value || absoluteIndex >= viewportStartIndex.value + rows.length) {
+        return null;
+      }
+      const localIndex = absoluteIndex - viewportStartIndex.value;
+      return {
+        ...item,
+        key: `${item.event_type}-${item.event_date}-${item.title}`,
+        absoluteIndex,
+        left: `${(localIndex / lastIndex) * 100}%`,
+      };
+    })
+    .filter(Boolean);
+});
 
 const rsiLabel = computed(() => `RSI(${props.indicatorSettings.rsiPeriod})`);
 const aroonLabel = computed(() => `Aroon(${props.indicatorSettings.aroonPeriod})`);
@@ -567,6 +676,34 @@ function drawingLabel(drawing) {
   if (drawing.type === "measure") return `${Math.abs(drawing.endIndex - drawing.startIndex) + 1} 根`;
   if (drawing.type === "note") return drawing.text || drawing.label || "註記";
   return drawing.type;
+}
+
+function findEventAbsoluteIndex(eventDate) {
+  if (!eventDate || !Array.isArray(props.ohlcData) || !props.ohlcData.length) return -1;
+  const target = String(eventDate).slice(0, 10);
+  const exactIndex = props.ohlcData.findIndex((row) => String(row?.date || "").slice(0, 10) === target);
+  if (exactIndex >= 0) return exactIndex;
+  const fallbackIndex = props.ohlcData.findLastIndex((row) => String(row?.date || "").slice(0, 10) <= target);
+  return fallbackIndex >= 0 ? fallbackIndex : -1;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-TW", { hour12: false });
+}
+
+function jumpToEvent(eventItem) {
+  const eventKey = `${eventItem.event_type}-${eventItem.event_date}-${eventItem.title}`;
+  focusedEventKey.value = eventKey;
+  const absoluteIndex = findEventAbsoluteIndex(eventItem.event_date);
+  if (absoluteIndex < 0) return;
+  emit("add-drawing", {
+    type: "vline",
+    index: absoluteIndex,
+    label: eventItem.title || eventItem.event_type || "event",
+  });
 }
 
 function updateSelectedDrawing(patch) {
@@ -872,3 +1009,147 @@ onBeforeUnmount(() => {
   if (syncPaneFrame) cancelAnimationFrame(syncPaneFrame);
 });
 </script>
+
+<style scoped>
+.chart-event-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.chart-event-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  margin-left: -9px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.chart-event-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: rgba(255, 209, 102, 0.45);
+}
+
+.chart-event-dot {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #ffd166;
+  box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.12);
+}
+
+.chart-event-marker.high .chart-event-dot {
+  background: #ff7b72;
+  box-shadow: 0 0 0 4px rgba(255, 123, 114, 0.12);
+}
+
+.chart-event-marker.low .chart-event-dot {
+  background: #86d98f;
+  box-shadow: 0 0 0 4px rgba(134, 217, 143, 0.12);
+}
+
+.chart-event-marker.active .chart-event-line {
+  background: rgba(0, 212, 255, 0.7);
+}
+
+.chart-event-marker.active .chart-event-dot {
+  background: #00d4ff;
+  box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.14);
+}
+
+.intel-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.intel-mini-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 18, 0.82);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.intel-mini-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text2);
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.intel-mini-title {
+  color: var(--text1);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.intel-mini-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-decoration: none;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.intel-mini-row span {
+  color: var(--text1);
+  text-align: left;
+}
+
+.intel-mini-row small {
+  color: var(--text3);
+}
+
+.intel-mini-row.link {
+  cursor: pointer;
+}
+
+.intel-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intel-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.bias-bullish {
+  color: var(--green);
+}
+
+.bias-bearish {
+  color: var(--red);
+}
+</style>
