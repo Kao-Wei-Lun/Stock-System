@@ -395,82 +395,130 @@
 
         <div v-if="journalStats.source_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">來源拆解</div>
-          <button
+          <div
             v-for="item in topSourceBreakdown"
             :key="`source-${item.key}`"
-            type="button"
-            class="journal-analytics-row"
-            :data-testid="`journal-source-${item.key}`"
-            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`來源:${item.key}`))"
+            class="journal-analytics-row-wrap"
           >
-            <div>
-              <div>{{ item.key }}</div>
-              <div class="bt-trade-sub">{{ item.closed_count }} 筆平倉 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-            </div>
-            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-            </div>
-          </button>
+            <button
+              type="button"
+              class="journal-analytics-row"
+              :data-testid="`journal-source-${item.key}`"
+              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`來源:${item.key}`))"
+            >
+              <div>
+                <div>{{ item.key }}</div>
+                <div class="bt-trade-sub">{{ item.closed_count }} 筆平倉 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+              </div>
+              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+              </div>
+            </button>
+            <button
+              type="button"
+              class="journal-analytics-save"
+              :data-testid="`journal-source-save-${item.key}`"
+              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`來源：${item.key}`, buildJournalTagPreset(`來源:${item.key}`), '由來源拆解快速建立'))"
+            >
+              存
+            </button>
+          </div>
         </div>
 
         <div v-if="journalStats.strategy_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">策略拆解</div>
-          <button
+          <div
             v-for="item in topStrategyBreakdown"
             :key="`strategy-${item.key}`"
-            type="button"
-            class="journal-analytics-row"
-            :data-testid="`journal-strategy-${item.key}`"
-            @click="$emit('apply-journal-filter-preset', buildJournalStrategyPreset(item.key))"
+            class="journal-analytics-row-wrap"
           >
-            <div>
-              <div>{{ item.key }}</div>
-              <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-            </div>
-            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-            </div>
-          </button>
+            <button
+              type="button"
+              class="journal-analytics-row"
+              :data-testid="`journal-strategy-${item.key}`"
+              @click="$emit('apply-journal-filter-preset', buildJournalStrategyPreset(item.key))"
+            >
+              <div>
+                <div>{{ item.key }}</div>
+                <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+              </div>
+              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+              </div>
+            </button>
+            <button
+              type="button"
+              class="journal-analytics-save"
+              :data-testid="`journal-strategy-save-${item.key}`"
+              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`策略：${item.key}`, buildJournalStrategyPreset(item.key), '由策略拆解快速建立'))"
+            >
+              存
+            </button>
+          </div>
         </div>
 
         <div v-if="journalStats.market_posture_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">市場情境</div>
-          <button
+          <div
             v-for="item in topMarketPostureBreakdown"
             :key="`posture-${item.key}`"
-            type="button"
-            class="journal-analytics-row"
-            :data-testid="`journal-posture-${item.key}`"
-            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`市場:${item.key}`))"
+            class="journal-analytics-row-wrap"
           >
-            <div>
-              <div>{{ item.key }}</div>
-              <div class="bt-trade-sub">{{ item.count }} 筆 · 平均報酬 {{ Number(item.avg_return_pct || 0).toFixed(2) }}%</div>
-            </div>
-            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-            </div>
-          </button>
+            <button
+              type="button"
+              class="journal-analytics-row"
+              :data-testid="`journal-posture-${item.key}`"
+              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`市場:${item.key}`))"
+            >
+              <div>
+                <div>{{ item.key }}</div>
+                <div class="bt-trade-sub">{{ item.count }} 筆 · 平均報酬 {{ Number(item.avg_return_pct || 0).toFixed(2) }}%</div>
+              </div>
+              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+              </div>
+            </button>
+            <button
+              type="button"
+              class="journal-analytics-save"
+              :data-testid="`journal-posture-save-${item.key}`"
+              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`市場：${item.key}`, buildJournalTagPreset(`市場:${item.key}`), '由市場情境快速建立'))"
+            >
+              存
+            </button>
+          </div>
         </div>
 
         <div v-if="journalStats.tag_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">高頻標籤</div>
-          <button
+          <div
             v-for="item in topTagBreakdown"
             :key="`tag-${item.key}`"
-            type="button"
-            class="journal-analytics-row"
-            :data-testid="`journal-tag-${item.key}`"
-            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(item.key))"
+            class="journal-analytics-row-wrap"
           >
-            <div>
-              <div>{{ item.key }}</div>
-              <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-            </div>
-            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-            </div>
-          </button>
+            <button
+              type="button"
+              class="journal-analytics-row"
+              :data-testid="`journal-tag-${item.key}`"
+              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(item.key))"
+            >
+              <div>
+                <div>{{ item.key }}</div>
+                <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+              </div>
+              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+              </div>
+            </button>
+            <button
+              type="button"
+              class="journal-analytics-save"
+              :data-testid="`journal-tag-save-${item.key}`"
+              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`標籤：${item.key}`, buildJournalTagPreset(item.key), '由高頻標籤快速建立'))"
+            >
+              存
+            </button>
+          </div>
         </div>
       </div>
 
@@ -622,6 +670,32 @@ function buildJournalStrategyPreset(strategyCode) {
   return {
     strategy_code: strategyCode,
     search: "",
+  };
+}
+
+function buildJournalQuickSaveDraft(name, partialPreset, description) {
+  const filters = {
+    market: props.journalFilters?.market || "",
+    strategy_code: props.journalFilters?.strategy_code || "",
+    tag: props.journalFilters?.tag || "",
+    search: props.journalFilters?.search || "",
+  };
+  const source = partialPreset && typeof partialPreset === "object" ? partialPreset : {};
+  const mergedFilters = source.filters && typeof source.filters === "object"
+    ? { ...filters, ...source.filters }
+    : { ...filters, ...source };
+  return {
+    name,
+    description,
+    scope: Object.prototype.hasOwnProperty.call(source, "scope")
+      ? (source.scope === "all" ? "all" : "ticker")
+      : (props.journalFilterScope === "all" ? "all" : "ticker"),
+    filters: {
+      market: mergedFilters.market || "",
+      strategy_code: mergedFilters.strategy_code || "",
+      tag: mergedFilters.tag || "",
+      search: mergedFilters.search || "",
+    },
   };
 }
 
@@ -1124,10 +1198,17 @@ const activeJournalFilters = computed(() => {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.journal-analytics-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .journal-analytics-row {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  flex: 1;
   width: 100%;
   padding: 8px 0;
   border: 0;
@@ -1137,7 +1218,20 @@ const activeJournalFilters = computed(() => {
   cursor: pointer;
 }
 
-.journal-analytics-row + .journal-analytics-row {
+.journal-analytics-save {
+  flex-shrink: 0;
+  align-self: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+  font-size: 10px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.journal-analytics-row-wrap + .journal-analytics-row-wrap {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 

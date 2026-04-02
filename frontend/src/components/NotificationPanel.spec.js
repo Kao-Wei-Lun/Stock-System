@@ -114,6 +114,7 @@ describe("NotificationPanel", () => {
     await wrapper.findAll(".notif-chip").find((node) => node.text() === "全部類別").trigger("click");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "開啟 AAPL").trigger("click");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "寫入日誌").trigger("click");
+    await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "存成模板").trigger("click");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "關閉").trigger("click");
 
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
@@ -124,6 +125,19 @@ describe("NotificationPanel", () => {
         entry_reason: "通知回寫：AAPL alert",
         review_notes: "AAPL price breakout | 門檻:210 | 觸發:212 | 來源：觀察池 | 風險：中 | 選擇性出手 | 環境偏震盪，只做最強標的。",
         tags: ["優先候選", "Q4", "市場:選擇性出手", "來源:警報通知"],
+      },
+    ]);
+    expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual([
+      {
+        name: "通知：AAPL",
+        description: "由通知中心快速建立",
+        scope: "all",
+        filters: {
+          market: "",
+          strategy_code: "",
+          tag: "市場:選擇性出手",
+          search: "AAPL",
+        },
       },
     ]);
     expect(wrapper.emitted("dismiss")[0]).toEqual(["local-1"]);

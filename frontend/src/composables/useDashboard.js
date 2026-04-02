@@ -1280,6 +1280,30 @@ export function useDashboard() {
     };
   }
 
+  function normalizeJournalFilterPresetDraft(input) {
+    if (input && typeof input === "object" && !Array.isArray(input)) {
+      const filters = input.filters && typeof input.filters === "object" ? input.filters : {};
+      return {
+        name: String(input.name || "").trim(),
+        description: input.description || "由交易日誌工作區儲存",
+        scope: input.scope === "all" ? "all" : "ticker",
+        filters: {
+          market: filters.market || "",
+          strategy_code: filters.strategy_code || "",
+          tag: filters.tag || "",
+          search: filters.search || "",
+        },
+      };
+    }
+
+    const name = String(input || "").trim();
+    return {
+      name,
+      description: "由交易日誌工作區儲存",
+      ...buildJournalFilterPresetPayload(),
+    };
+  }
+
   async function applyJournalFilterPreset(preset = {}) {
     const source = preset && typeof preset === "object" ? preset : {};
     const filters = source.filters && typeof source.filters === "object" ? source.filters : source;
@@ -1295,16 +1319,22 @@ export function useDashboard() {
   }
 
   async function saveJournalFilterPreset(name) {
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return;
+    const draft = normalizeJournalFilterPresetDraft(name);
+    if (!draft.name) return;
     try {
-      await dashboardApi.createJournalFilterPreset({
-        name: trimmed,
-        description: "由交易日誌工作區儲存",
-        ...buildJournalFilterPresetPayload(),
-      });
+      const existing = journalFilterPresets.value.find((item) => String(item?.name || "").trim() === draft.name);
+      if (existing?.id) {
+        await dashboardApi.updateJournalFilterPreset(existing.id, draft);
+      } else {
+        await dashboardApi.createJournalFilterPreset(draft);
+      }
       await loadJournalFilterPresets();
-      pushNotification({ icon: "💾", title: "日誌篩選模板已儲存", msg: trimmed, type: "success" });
+      pushNotification({
+        icon: existing?.id ? "♻️" : "💾",
+        title: existing?.id ? "日誌篩選模板已更新" : "日誌篩選模板已儲存",
+        msg: draft.name,
+        type: "success",
+      });
     } catch (error) {
       console.error(error);
       pushNotification({ icon: "⚠️", title: "日誌篩選模板儲存失敗", msg: error.message || "請稍後再試", type: "error" });

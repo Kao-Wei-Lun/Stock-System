@@ -425,9 +425,13 @@ describe("RightSidebar", () => {
     await wrapper.find(".journal-card .add-btn").trigger("click");
     await wrapper.findAll(".bt-history-row")[0].trigger("click");
     await wrapper.get('[data-testid="journal-source-警報通知"]').trigger("click");
+    await wrapper.get('[data-testid="journal-source-save-警報通知"]').trigger("click");
     await wrapper.get('[data-testid="journal-strategy-breakout"]').trigger("click");
+    await wrapper.get('[data-testid="journal-strategy-save-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-posture-選擇性出手"]').trigger("click");
+    await wrapper.get('[data-testid="journal-posture-save-選擇性出手"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
+    await wrapper.get('[data-testid="journal-tag-save-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-tag-5-breakout"]').trigger("click");
     await wrapper.find(".journal-action-row .run-btn").trigger("click");
 
@@ -438,6 +442,50 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[3]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[4]).toEqual([{ tag: "breakout", search: "" }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual([{
+      name: "來源：警報通知",
+      description: "由來源拆解快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "",
+        tag: "來源:警報通知",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[1]).toEqual([{
+      name: "策略：breakout",
+      description: "由策略拆解快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "breakout",
+        tag: "",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[2]).toEqual([{
+      name: "市場：選擇性出手",
+      description: "由市場情境快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "",
+        tag: "市場:選擇性出手",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[3]).toEqual([{
+      name: "標籤：breakout",
+      description: "由高頻標籤快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "",
+        tag: "breakout",
+        search: "",
+      },
+    }]);
     expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
 
@@ -585,5 +633,90 @@ describe("RightSidebar", () => {
       filters: { tag: "市場:防守控倉" },
     }]);
     expect(wrapper.emitted("delete-journal-filter-preset")[0]).toEqual([7]);
+  });
+
+  it("merges active journal filters into quick-save preset drafts", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: {
+          total_entries: 1,
+          closed_entries: 1,
+          open_entries: 0,
+          win_rate: 100,
+          net_pnl: 500,
+          avg_return_pct: 2.5,
+          source_breakdown: [
+            {
+              key: "警報通知",
+              count: 1,
+              closed_count: 1,
+              win_rate: 100,
+              net_pnl: 500,
+              avg_return_pct: 2.5,
+            },
+          ],
+        },
+        journalLoading: false,
+        journalFilterPresets: [],
+        journalFilterScope: "all",
+        journalFilters: {
+          market: "TW",
+          strategy_code: "pullback",
+          tag: "",
+          search: "macro",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    await wrapper.get('[data-testid="journal-source-save-警報通知"]').trigger("click");
+
+    expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual([{
+      name: "來源：警報通知",
+      description: "由來源拆解快速建立",
+      scope: "all",
+      filters: {
+        market: "TW",
+        strategy_code: "pullback",
+        tag: "來源:警報通知",
+        search: "",
+      },
+    }]);
   });
 });

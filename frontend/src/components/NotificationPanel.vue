@@ -100,6 +100,13 @@
             寫入日誌
           </button>
           <button
+            v-if="item.category === 'alert' && (item.ticker || item.macroSummary || item.contextTags?.length)"
+            class="notif-action-btn"
+            @click="$emit('save-journal-filter-preset', buildJournalPresetDraft(item))"
+          >
+            存成模板
+          </button>
+          <button
             v-if="item.workspaceTarget"
             class="notif-action-btn"
             @click="$emit('open-workspace', item.workspaceTarget)"
@@ -134,7 +141,7 @@ const props = defineProps({
   notifications: { type: Array, required: true },
 });
 
-defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace", "open-journal-entry"]);
+defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace", "open-journal-entry", "save-journal-filter-preset"]);
 
 const viewMode = ref("all");
 const categoryFilter = ref("all");
@@ -241,6 +248,22 @@ function buildJournalSeed(item) {
     entry_reason: `通知回寫：${item.title || item.ticker}`,
     review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}${macroContext ? ` | ${macroContext}` : ""}${item.macroSummary?.decision_hint ? ` | ${item.macroSummary.decision_hint}` : ""}`,
     tags,
+  };
+}
+
+function buildJournalPresetDraft(item) {
+  const postureLabel = item?.macroSummary?.trade_posture ? formatMacroPosture(item.macroSummary.trade_posture) : "";
+  const nameBase = item?.ticker || item?.title || "通知";
+  return {
+    name: `通知：${nameBase}`,
+    description: "由通知中心快速建立",
+    scope: "all",
+    filters: {
+      market: "",
+      strategy_code: "",
+      tag: postureLabel ? `市場:${postureLabel}` : "來源:警報通知",
+      search: item?.ticker || "",
+    },
   };
 }
 </script>

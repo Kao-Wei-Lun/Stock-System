@@ -248,6 +248,7 @@
       @open-ticker="handleOpenNotificationTicker"
       @open-workspace="handleOpenNotificationWorkspace"
       @open-journal-entry="handleNotificationJournalEntry"
+      @save-journal-filter-preset="saveJournalFilterPreset"
     />
 
     <AlertModal
