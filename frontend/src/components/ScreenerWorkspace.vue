@@ -155,6 +155,7 @@
                 <div class="action-row">
                   <button class="tiny-btn" @click="$emit('open-ticker', item.ticker)">開圖</button>
                   <button class="tiny-btn" @click="$emit('add-watchlist', item.ticker)">自選</button>
+                  <button class="tiny-btn" @click="$emit('add-alert', item.ticker)">警報</button>
                 </div>
               </td>
             </tr>
@@ -185,6 +186,7 @@ const emit = defineEmits([
   "delete-preset",
   "open-ticker",
   "add-watchlist",
+  "add-alert",
 ]);
 
 const presetName = ref("");

@@ -213,6 +213,7 @@
             @delete-preset="deleteScreenerPreset"
             @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
             @add-watchlist="addTickerToWatchlist"
+            @add-alert="openAlertModal($event)"
           />
         </div>
       </div>

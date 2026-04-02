@@ -121,7 +121,11 @@ describe("Market workspaces", () => {
     await wrapper.find(".preset-chip").trigger("click");
     expect(wrapper.emitted("load-preset")[0][0].name).toBe("量增突破");
 
-    await wrapper.find(".tiny-btn").trigger("click");
+    const actionButtons = wrapper.findAll(".tiny-btn");
+    await actionButtons[0].trigger("click");
+    await actionButtons[2].trigger("click");
+
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
+    expect(wrapper.emitted("add-alert")[0]).toEqual(["AAPL"]);
   });
 });

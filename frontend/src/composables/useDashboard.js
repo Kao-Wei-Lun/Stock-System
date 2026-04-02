@@ -2552,9 +2552,9 @@ export function useDashboard() {
     await selectTicker(result.ticker, result.name || result.ticker);
   }
 
-  function openAlertModal() {
+  function openAlertModal(ticker = currentTicker.value) {
     resetAlertForm();
-    alertForm.ticker = currentTicker.value;
+    alertForm.ticker = normalizeTicker(ticker || currentTicker.value || "AAPL");
     alertModalOpen.value = true;
   }
 
