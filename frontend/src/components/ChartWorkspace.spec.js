@@ -69,8 +69,8 @@ function createProps() {
       change_pct: 2.68,
       source: "yahoo_finance",
       is_delayed: true,
-      quote_timestamp: "2026-03-29T04:00:00+00:00",
-      synced_at: "2026-03-29T04:00:05+00:00",
+      quote_timestamp: "2020-03-29T04:00:00+00:00",
+      synced_at: "2020-03-29T04:00:05+00:00",
     },
     activeTool: "cursor",
     activePanels: { macd: true, stoch: true },
@@ -128,6 +128,12 @@ describe("ChartWorkspace", () => {
     expect(wrapper.text()).toContain("資料時間：");
     expect(wrapper.text()).toContain("來源：yahoo_finance");
     expect(wrapper.text()).toContain("延遲快照");
+  });
+
+  it("warns when quote data is stale", () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+
+    expect(wrapper.text()).toContain("資料較舊");
   });
 
   it("emits workspace save and load actions", async () => {

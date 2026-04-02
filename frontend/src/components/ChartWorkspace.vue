@@ -6,6 +6,9 @@
           <div class="ch-ticker">{{ currentTicker || "—" }}</div>
           <div style="font-size: 11px; color: var(--text3)">{{ currentName || "載入中..." }}</div>
         </div>
+        <div v-if="quoteFreshnessState !== 'live'" class="quote-risk-banner" :class="quoteFreshnessState">
+          {{ quoteFreshnessHint }}
+        </div>
       </div>
       <div class="ch-price" :class="quote.change_pct >= 0 ? 'up' : 'dn'">{{ displayPrice }}</div>
       <div class="ch-chg" :class="quote.change_pct >= 0 ? 'up' : 'dn'">{{ displayChange }}</div>
@@ -105,6 +108,7 @@
       <div class="meta-chip">{{ quoteTimestampLabel }}</div>
       <div class="meta-chip">{{ quoteSourceLabel }}</div>
       <div class="meta-chip" :class="{ up: !quote.is_delayed, dn: quote.is_delayed }">{{ quoteDelayLabel }}</div>
+      <div class="meta-chip" :class="quoteFreshnessChipClass">{{ quoteFreshnessLabel }}</div>
       <div v-if="institutionalOverlay" class="meta-chip">
         {{ institutionalOverlay.label }} / Basis
         {{ institutionalOverlay.basis == null ? "—" : `${institutionalOverlay.basis >= 0 ? "+" : ""}${fmtPrice(institutionalOverlay.basis)} (${institutionalOverlay.basisPct >= 0 ? "+" : ""}${Number(institutionalOverlay.basisPct || 0).toFixed(2)}%)` }}
@@ -568,6 +572,30 @@ const quoteTimestampLabel = computed(() => {
 
 const quoteSourceLabel = computed(() => `來源：${props.quote.source || "local_cache"}`);
 const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "即時報價"));
+const quoteFreshnessState = computed(() => {
+  const rawValue = props.quote.quote_timestamp || props.quote.synced_at;
+  if (!rawValue) return "missing";
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) return "missing";
+  const ageMs = Date.now() - parsed.getTime();
+  if (ageMs > 24 * 60 * 60 * 1000) return "stale";
+  return props.quote.is_delayed ? "delayed" : "live";
+});
+const quoteFreshnessLabel = computed(() => {
+  if (quoteFreshnessState.value === "missing") return "無時間戳";
+  if (quoteFreshnessState.value === "stale") return "資料較舊";
+  return quoteFreshnessState.value === "live" ? "可用即時資料" : "盤中延遲資料";
+});
+const quoteFreshnessHint = computed(() => {
+  if (quoteFreshnessState.value === "missing") return "目前報價缺少時間戳，請先確認資料來源";
+  if (quoteFreshnessState.value === "stale") return "目前顯示資料已超過 24 小時，建議先同步再下判斷";
+  return "盤中請留意本畫面為延遲快照，不適合超短線即時判斷";
+});
+const quoteFreshnessChipClass = computed(() => ({
+  up: quoteFreshnessState.value === "live",
+  dn: quoteFreshnessState.value === "stale" || quoteFreshnessState.value === "missing",
+  warn: quoteFreshnessState.value === "delayed",
+}));
 const showIntelStrip = computed(() => Boolean(
   (props.tickerEvents || []).length
   || (props.tickerNews || []).length
@@ -1011,6 +1039,32 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.quote-risk-banner {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.quote-risk-banner.delayed {
+  background: rgba(255, 209, 102, 0.14);
+  color: #ffd166;
+}
+
+.quote-risk-banner.stale,
+.quote-risk-banner.missing {
+  background: rgba(255, 77, 106, 0.14);
+  color: #ff8a9d;
+}
+
+.meta-chip.warn {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.24);
+}
+
 .chart-event-overlay {
   position: absolute;
   inset: 0;
