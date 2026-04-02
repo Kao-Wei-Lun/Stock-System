@@ -248,6 +248,7 @@ class WatchlistGroupUpdate(BaseModel):
 class WatchlistItemCreate(BaseModel):
     group_id: int
     ticker: str = Field(..., min_length=1, max_length=32)
+    tags: list[str] = Field(default_factory=list)
 
 
 class WatchlistItemsOrderUpdate(BaseModel):
@@ -695,7 +696,7 @@ async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
     }
 
 
-async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
+async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = None) -> dict:
     row = await db.get_latest_ohlcv(ticker)
     quote = await db.get_market_quote(ticker)
     info = await db.get_stock_info(ticker)
@@ -729,6 +730,7 @@ async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
         "is_delayed": (quote or {}).get("is_delayed", True),
         "quote_timestamp": (quote or {}).get("quote_timestamp"),
         "synced_at": (quote or {}).get("synced_at") or (row.get("updated_at") if row else None),
+        "tags": item.get("tags") if isinstance(item, dict) and isinstance(item.get("tags"), list) else [],
         "category": categorize(ticker),
         "group_id": group["id"],
         "group_name": group["name"],
@@ -748,7 +750,7 @@ async def get_watchlist():
     for group in groups:
         hydrated_items = []
         for item in group.get("items", []):
-            hydrated = await hydrate_watchlist_item(item["ticker"], group)
+            hydrated = await hydrate_watchlist_item(item["ticker"], group, item)
             hydrated["id"] = item["id"]
             hydrated["sort_order"] = item["sort_order"]
             hydrated_items.append(hydrated)
@@ -794,7 +796,7 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
 
     ticker = normalize_ticker(payload.ticker)
     try:
-        item = await db.add_watchlist_item(payload.group_id, ticker)
+        item = await db.add_watchlist_item(payload.group_id, ticker, tags=payload.tags)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -808,7 +810,7 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
     except Exception as exc:
         log.warning("watchlist info %s failed: %s", ticker, exc)
 
-    hydrated = await hydrate_watchlist_item(ticker, group)
+    hydrated = await hydrate_watchlist_item(ticker, group, item)
     hydrated["id"] = item["id"]
     hydrated["sort_order"] = item["sort_order"]
     return hydrated

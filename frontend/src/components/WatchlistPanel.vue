@@ -83,6 +83,15 @@
               <span class="wl-meta-text">{{ formatSourceLabel(item.source) }}</span>
               <span class="wl-meta-text">{{ formatWatchTimestamp(item) }}</span>
             </div>
+            <div v-if="getWatchTags(item).length" class="wl-tag-row">
+              <span
+                v-for="tag in getWatchTags(item)"
+                :key="`${item.ticker}-${tag}`"
+                class="wl-tag-pill"
+              >
+                {{ tag }}
+              </span>
+            </div>
           </div>
           <div class="wl-side">
             <div v-if="leftTab === 'watch' && selectedGroup" class="wl-ops">
@@ -205,6 +214,10 @@ function getFreshnessClass(item) {
   return item?.is_delayed === false ? "live" : "delayed";
 }
 
+function getWatchTags(item) {
+  return Array.isArray(item?.tags) ? item.tags.slice(0, 3) : [];
+}
+
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
   if (!createGroupOpen.value) newGroupName.value = "";
@@ -302,5 +315,21 @@ function removeItem(item) {
   font-size: 9px;
   line-height: 1.6;
   color: var(--text3);
+}
+
+.wl-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wl-tag-pill {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  background: rgba(123, 231, 255, 0.12);
+  color: #bfefff;
 }
 </style>

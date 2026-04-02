@@ -184,7 +184,7 @@
                 <td>
                   <div class="action-row">
                     <button class="tiny-btn" @click="$emit('open-ticker', item.ticker)">開圖</button>
-                    <button class="tiny-btn" @click="$emit('add-watchlist', item.ticker)">自選</button>
+                    <button class="tiny-btn" @click="$emit('add-watchlist', buildWatchlistPayload(item))">自選</button>
                     <button class="tiny-btn" @click="$emit('add-alert', item.ticker)">警報</button>
                   </div>
                 </td>
@@ -347,6 +347,19 @@ function buildFallbackDecisionCard(item) {
 
 function getDecisionCard(item) {
   return item?.decision_card || buildFallbackDecisionCard(item);
+}
+
+function buildWatchlistPayload(item) {
+  const decisionCard = getDecisionCard(item);
+  const tags = [
+    decisionCard?.verdict,
+    item?.setup_quality != null ? `Q${item.setup_quality}` : "",
+    marketContext.value?.trade_posture ? `市場:${postureLabel.value}` : "",
+  ].filter(Boolean);
+  return {
+    ticker: item?.ticker,
+    tags,
+  };
 }
 
 function isDecisionCardOpen(ticker) {

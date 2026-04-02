@@ -2454,12 +2454,12 @@ class Database:
 
                 await cur.execute(
                     """
-                    SELECT `id`, `group_id`, `ticker`, `sort_order`, `created_at`
+                    SELECT `id`, `group_id`, `ticker`, `tags_json`, `sort_order`, `created_at`
                     FROM `watchlist_items`
                     ORDER BY `group_id` ASC, `sort_order` ASC, `id` ASC
                     """
                 )
-                items = list(await cur.fetchall())
+                items = [_deserialize_watchlist_item(row) for row in await cur.fetchall()]
 
         grouped_items: Dict[int, List[Dict]] = {}
         for item in items:
@@ -2552,7 +2552,8 @@ class Database:
                     await cur.execute("DELETE FROM `watchlist_groups` WHERE `id`=%s", (group_id,))
                     return cur.rowcount > 0
 
-    async def add_watchlist_item(self, group_id: int, ticker: str) -> Dict:
+    async def add_watchlist_item(self, group_id: int, ticker: str, tags: Optional[List[str]] = None) -> Dict:
+        normalized_tags = _normalize_watchlist_tags(tags)
         async with self._lock:
             async with self._pool.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -2578,23 +2579,23 @@ class Database:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        INSERT INTO `watchlist_items` (`group_id`, `ticker`, `sort_order`)
-                        VALUES (%s, %s, %s)
+                        INSERT INTO `watchlist_items` (`group_id`, `ticker`, `tags_json`, `sort_order`)
+                        VALUES (%s, %s, %s, %s)
                         """,
-                        (group_id, ticker, next_sort),
+                        (group_id, ticker, _json_dumps(normalized_tags), next_sort),
                     )
                     item_id = cur.lastrowid
 
                 async with conn.cursor(aiomysql.DictCursor) as cur:
                     await cur.execute(
                         """
-                        SELECT `id`, `group_id`, `ticker`, `sort_order`, `created_at`
+                        SELECT `id`, `group_id`, `ticker`, `tags_json`, `sort_order`, `created_at`
                         FROM `watchlist_items`
                         WHERE `id`=%s
                         """,
                         (item_id,),
                     )
-                    return await cur.fetchone()
+                    return _deserialize_watchlist_item(await cur.fetchone())
 
     async def delete_watchlist_item(self, item_id: int) -> bool:
         async with self._lock:
@@ -2892,6 +2893,28 @@ def _deserialize_workspace_preset(row: Optional[Dict[str, Any]]) -> Optional[Dic
         "is_default": bool(row.get("is_default", False)),
         "created_at": _datetime_to_iso(row.get("created_at")),
         "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
+def _normalize_watchlist_tags(tags: Any) -> List[str]:
+    source = tags if isinstance(tags, list) else []
+    normalized: List[str] = []
+    seen = set()
+    for item in source:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value[:48])
+    return normalized[:6]
+
+
+def _deserialize_watchlist_item(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        **row,
+        "tags": _normalize_watchlist_tags(_json_loads(row.get("tags_json"), [])),
     }
 
 

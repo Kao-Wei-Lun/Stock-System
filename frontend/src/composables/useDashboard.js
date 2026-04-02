@@ -1549,20 +1549,27 @@ export function useDashboard() {
     }
   }
 
-  async function addTickerToWatchlist(ticker, groupId = activeWatchGroupId.value) {
-    const normalized = normalizeTicker(ticker);
-    if (!normalized || !groupId) return;
+  async function addTickerToWatchlist(input, groupId = activeWatchGroupId.value) {
+    const request = input && typeof input === "object" && !Array.isArray(input)
+      ? input
+      : { ticker: input, groupId };
+    const normalized = normalizeTicker(request.ticker);
+    const targetGroupId = request.groupId || groupId;
+    const tags = Array.isArray(request.tags)
+      ? request.tags.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 6)
+      : [];
+    if (!normalized || !targetGroupId) return;
     try {
       const added = await apiFetch("/api/watchlist/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: groupId, ticker: normalized }),
+        body: JSON.stringify({ group_id: targetGroupId, ticker: normalized, tags }),
       });
       await loadWatchlist();
       pushNotification({
         icon: "⭐",
         title: "已加入自選股",
-        msg: `${added.ticker} → ${added.group_name}`,
+        msg: `${added.ticker} → ${added.group_name}${tags.length ? ` · ${tags[0]}` : ""}`,
         type: "success",
       });
     } catch (error) {

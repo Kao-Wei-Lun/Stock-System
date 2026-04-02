@@ -23,6 +23,7 @@ function buildPanelProps(overrides = {}) {
             is_delayed: true,
             quote_timestamp: freshTimestamp,
             synced_at: freshTimestamp,
+            tags: ["優先候選", "Q4", "市場:選擇性出手"],
           },
         ],
       },
@@ -46,6 +47,8 @@ describe("WatchlistPanel", () => {
 
     expect(wrapper.text()).toContain("Yahoo Finance");
     expect(wrapper.text()).toContain("延遲快照");
+    expect(wrapper.text()).toContain("優先候選");
+    expect(wrapper.text()).toContain("Q4");
     expect(wrapper.text()).not.toContain("無時間戳");
   });
 

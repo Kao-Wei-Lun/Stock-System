@@ -150,9 +150,16 @@ describe("Market workspaces", () => {
 
     const actionButtons = wrapper.findAll(".tiny-btn");
     await actionButtons[0].trigger("click");
+    await actionButtons[1].trigger("click");
     await actionButtons[2].trigger("click");
 
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
+    expect(wrapper.emitted("add-watchlist")[0]).toEqual([
+      {
+        ticker: "AAPL",
+        tags: ["優先候選", "Q4", "市場:選擇性出手"],
+      },
+    ]);
     expect(wrapper.emitted("add-alert")[0]).toEqual(["AAPL"]);
   });
 });
