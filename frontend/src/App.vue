@@ -242,6 +242,7 @@
       @toggle-read="handleNotificationReadToggle"
       @open-ticker="handleOpenNotificationTicker"
       @open-workspace="handleOpenNotificationWorkspace"
+      @open-journal-entry="handleNotificationJournalEntry"
     />
 
     <AlertModal
@@ -511,6 +512,13 @@ function handleOpenNotificationTicker(ticker) {
 function handleOpenNotificationWorkspace(workspace) {
   if (!workspace) return;
   setWorkspaceTab(workspace);
+}
+
+function handleNotificationJournalEntry(payload) {
+  if (!payload?.ticker) return;
+  setWorkspaceTab("chart");
+  void selectTicker(payload.ticker, payload.name || payload.ticker);
+  startJournalEntry(payload);
 }
 
 function handleMacroAlertShortcut(payload) {

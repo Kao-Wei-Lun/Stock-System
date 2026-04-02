@@ -898,6 +898,7 @@ export function useDashboard() {
     const quote = item.payload?.quote || {};
     const rawTicker = quote.ticker || item.payload?.ticker || null;
     const isMacroNotification = String(rawTicker || "").toUpperCase() === "MARKET" || Boolean(quote.macro_summary);
+    const contextTags = Array.isArray(item.payload?.context_tags) ? item.payload.context_tags.filter(Boolean).slice(0, 4) : [];
     return {
       id: `remote-${item.id}`,
       remoteId: item.id,
@@ -912,6 +913,10 @@ export function useDashboard() {
       source: quote.source || item.payload?.source || "local_db",
       ticker: isMacroNotification ? null : rawTicker,
       workspaceTarget: isMacroNotification ? "macro" : null,
+      contextSource: item.payload?.context_source || "",
+      contextTags,
+      triggerValue: item.payload?.trigger_value ?? null,
+      thresholdValue: item.payload?.threshold_value ?? null,
       payload: item.payload || {},
       relatedEntityType: item.related_entity_type || null,
       relatedEntityId: item.related_entity_id || null,

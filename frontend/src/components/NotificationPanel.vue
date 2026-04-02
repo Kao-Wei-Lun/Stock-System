@@ -67,6 +67,17 @@
           <span>{{ item.time || "—" }}</span>
         </div>
 
+        <div v-if="item.contextSource || item.contextTags?.length" class="notif-context-row">
+          <span v-if="item.contextSource">{{ formatContextSource(item.contextSource) }}</span>
+          <span
+            v-for="tag in item.contextTags || []"
+            :key="`${item.id}-${tag}`"
+            class="notif-context-tag"
+          >
+            {{ tag }}
+          </span>
+        </div>
+
         <div v-if="item.ticker || item.workspaceTarget || item.persisted || item.category === 'session'" class="notif-action-row">
           <button
             v-if="item.ticker"
@@ -74,6 +85,13 @@
             @click="$emit('open-ticker', item.ticker)"
           >
             開啟 {{ item.ticker }}
+          </button>
+          <button
+            v-if="item.category === 'alert' && item.ticker"
+            class="notif-action-btn"
+            @click="$emit('open-journal-entry', buildJournalSeed(item))"
+          >
+            寫入日誌
           </button>
           <button
             v-if="item.workspaceTarget"
@@ -110,7 +128,7 @@ const props = defineProps({
   notifications: { type: Array, required: true },
 });
 
-defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace"]);
+defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace", "open-journal-entry"]);
 
 const viewMode = ref("all");
 const categoryFilter = ref("all");
@@ -150,7 +168,7 @@ const visibleNotifications = computed(() => {
     if (viewMode.value === "unread" && item.read) return false;
     if (categoryFilter.value !== "all" && item.category !== categoryFilter.value) return false;
     if (!keyword) return true;
-    return [item.title, item.msg, item.ticker, item.workspaceTarget]
+    return [item.title, item.msg, item.ticker, item.workspaceTarget, ...(item.contextTags || [])]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword));
   });
@@ -162,6 +180,25 @@ function formatCategory(value) {
 
 function formatSource(value) {
   return SOURCE_LABELS[value] || value || "Unknown";
+}
+
+function formatContextSource(value) {
+  if (String(value || "").toLowerCase() === "watchlist") return "來源：觀察池";
+  if (!value) return "";
+  return `來源：${value}`;
+}
+
+function buildJournalSeed(item) {
+  const tags = [...new Set([...(item.contextTags || []), "來源:警報通知"])];
+  const thresholdText = item.thresholdValue == null ? "—" : String(item.thresholdValue);
+  const triggerText = item.triggerValue == null ? "—" : String(item.triggerValue);
+  return {
+    ticker: item.ticker,
+    name: item.ticker,
+    entry_reason: `通知回寫：${item.title || item.ticker}`,
+    review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}`,
+    tags,
+  };
 }
 </script>
 
@@ -361,6 +398,21 @@ function formatSource(value) {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+.notif-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.notif-context-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.1);
+  color: #7be7ff;
+  font-size: 10px;
 }
 
 .notif-action-btn {

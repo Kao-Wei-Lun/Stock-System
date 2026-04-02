@@ -20,6 +20,7 @@ describe("NotificationPanel", () => {
             category: "alert",
             source: "yahoo_finance",
             ticker: "AAPL",
+            contextTags: ["優先候選", "Q4"],
           },
           {
             id: "remote-2",
@@ -45,6 +46,9 @@ describe("NotificationPanel", () => {
     expect(wrapper.text()).toContain("AAPL alert");
     expect(wrapper.text()).not.toContain("Bootstrap");
 
+    await wrapper.find(".notif-search").setValue("Q4");
+    expect(wrapper.text()).toContain("AAPL alert");
+
     await wrapper.find(".notif-search").setValue("breakout");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "標記已讀").trigger("click");
 
@@ -67,6 +71,10 @@ describe("NotificationPanel", () => {
             category: "alert",
             source: "yahoo_finance",
             ticker: "AAPL",
+            contextSource: "watchlist",
+            contextTags: ["優先候選", "Q4"],
+            thresholdValue: 210,
+            triggerValue: 212,
           },
           {
             id: "local-1",
@@ -92,9 +100,19 @@ describe("NotificationPanel", () => {
     await wrapper.find(".notif-search").setValue("");
     await wrapper.findAll(".notif-chip").find((node) => node.text() === "全部類別").trigger("click");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "開啟 AAPL").trigger("click");
+    await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "寫入日誌").trigger("click");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "關閉").trigger("click");
 
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
+    expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
+      {
+        ticker: "AAPL",
+        name: "AAPL",
+        entry_reason: "通知回寫：AAPL alert",
+        review_notes: "AAPL price breakout | 門檻:210 | 觸發:212 | 來源：觀察池",
+        tags: ["優先候選", "Q4", "來源:警報通知"],
+      },
+    ]);
     expect(wrapper.emitted("dismiss")[0]).toEqual(["local-1"]);
   });
 
@@ -123,5 +141,33 @@ describe("NotificationPanel", () => {
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "開啟宏觀").trigger("click");
 
     expect(wrapper.emitted("open-workspace")[0]).toEqual(["macro"]);
+  });
+
+  it("shows notification context tags for persisted alert cards", () => {
+    const wrapper = mount(NotificationPanel, {
+      props: {
+        notifications: [
+          {
+            id: "remote-4",
+            icon: "!",
+            title: "Watchlist alert",
+            msg: "AAPL price breakout",
+            time: "2026/04/02 10:45",
+            createdAt: "2026-04-02T10:45:00+08:00",
+            read: false,
+            persisted: true,
+            category: "alert",
+            source: "yahoo_finance",
+            ticker: "AAPL",
+            contextSource: "watchlist",
+            contextTags: ["優先候選", "Q4"],
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.text()).toContain("來源：觀察池");
+    expect(wrapper.text()).toContain("優先候選");
+    expect(wrapper.text()).toContain("Q4");
   });
 });
