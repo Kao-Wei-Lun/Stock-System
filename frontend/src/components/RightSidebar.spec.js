@@ -416,6 +416,7 @@ describe("RightSidebar", () => {
     await wrapper.get('[data-testid="journal-source-警報通知"]').trigger("click");
     await wrapper.get('[data-testid="journal-posture-選擇性出手"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-tag-5-breakout"]').trigger("click");
     await wrapper.find(".journal-action-row .run-btn").trigger("click");
 
     expect(wrapper.emitted("add-journal-attachment")).toBeTruthy();
@@ -423,6 +424,7 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("apply-journal-filter-preset")[0]).toEqual([{ tag: "來源:警報通知", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[1]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[3]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
 

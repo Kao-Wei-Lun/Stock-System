@@ -418,7 +418,19 @@
           <button v-for="entry in journalEntryRows" :key="entry.id" type="button" class="bt-history-row" @click="$emit('select-journal-entry', entry.id)">
             <span>
               <div>{{ entry.ticker }} · {{ entry.direction }} · {{ entry.strategy_code || "manual" }}</div>
-              <div class="bt-trade-sub">{{ entry.entry_time }} · {{ (entry.tags || []).join(", ") || "無標籤" }}</div>
+              <div class="bt-trade-sub">{{ entry.entry_time }}</div>
+              <div v-if="entry.tags?.length" class="journal-entry-tags">
+                <span
+                  v-for="tag in entry.tags.slice(0, 4)"
+                  :key="`${entry.id}-${tag}`"
+                  class="journal-entry-tag"
+                  :data-testid="`journal-entry-tag-${entry.id}-${tag}`"
+                  @click.stop="$emit('apply-journal-filter-preset', buildJournalTagPreset(tag))"
+                >
+                  {{ tag }}
+                </span>
+              </div>
+              <div v-else class="bt-trade-sub">無標籤</div>
             </span>
             <span :class="Number(entry.result?.pnl || 0) >= 0 ? 'up' : 'dn'">
               {{ Number(entry.result?.pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(entry.result?.pnl || 0)).toLocaleString() }}
@@ -1083,5 +1095,22 @@ const activeJournalFilters = computed(() => {
 .journal-filter-reset {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text2);
+}
+
+.journal-entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.journal-entry-tag {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.12);
+  color: #ffe1a0;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
 }
 </style>
