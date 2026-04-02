@@ -177,6 +177,10 @@ describe("WatchlistPanel", () => {
     expect(payload.condition).toBe("大於");
     expect(payload.value).toBe(210.5);
     expect(payload.context_tags).toEqual(["優先候選", "Q4", "市場:選擇性出手"]);
+    expect(payload.context_source).toBe("watchlist");
+    expect(payload.snapshot_price).toBe(210.5);
+    expect(payload.snapshot_source).toBe("yahoo_finance");
+    expect(typeof payload.snapshot_timestamp).toBe("string");
     expect(payload.prefill_hint).toContain("觀察池快捷警報：以 210.50 為基準");
     expect(payload.prefill_hint).toContain("資料源 Yahoo Finance");
   });

@@ -21,6 +21,11 @@ describe("RightSidebar", () => {
             value: 210,
             active: true,
             triggered: false,
+            condition_payload: {
+              context_source: "watchlist",
+              context_tags: ["優先候選", "Q4"],
+              snapshot_price: 210.5,
+            },
           },
         ],
         alertTriggerLogs: {
@@ -86,6 +91,10 @@ describe("RightSidebar", () => {
 
     expect(wrapper.text()).toContain("AAPL");
     expect(wrapper.text()).toContain("MySQL / alerts");
+    expect(wrapper.text()).toContain("來源：觀察池");
+    expect(wrapper.text()).toContain("優先候選");
+    expect(wrapper.text()).toContain("Q4");
+    expect(wrapper.text()).toContain("快照 210.5");
     expect(wrapper.text()).toContain("yahoo_finance");
     expect(wrapper.text()).toContain("監控中");
 

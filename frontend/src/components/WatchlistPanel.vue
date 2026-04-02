@@ -523,6 +523,7 @@ function openAlertShortcut(item) {
   const latestPrice = hasPrice ? Number(item.close) : null;
   const latestPriceLabel = hasPrice ? fmtPrice(item.close) : "—";
   const latestTimeLabel = formatWatchTimestamp(item);
+  const latestTimestamp = resolveWatchTimestamp(item) || "";
   emit("open-alert-modal", {
     ticker: item.ticker,
     type: "price",
@@ -530,6 +531,10 @@ function openAlertShortcut(item) {
     value: latestPrice,
     prefill_hint: `觀察池快捷警報：以 ${latestPriceLabel} 為基準，資料源 ${formatSourceLabel(item.source)}，時間 ${latestTimeLabel}。`,
     context_tags: contextTags,
+    context_source: "watchlist",
+    snapshot_price: latestPrice,
+    snapshot_source: item.source || "",
+    snapshot_timestamp: latestTimestamp,
   });
 }
 

@@ -116,6 +116,22 @@
             </div>
           </div>
 
+          <div v-if="getAlertContextSource(alert) || getAlertContextTags(alert).length" class="alert-context-card">
+            <div class="alert-context-head">
+              <span>{{ getAlertContextSource(alert) || "研究上下文" }}</span>
+              <span v-if="getAlertSnapshotLabel(alert)">{{ getAlertSnapshotLabel(alert) }}</span>
+            </div>
+            <div v-if="getAlertContextTags(alert).length" class="alert-context-tags">
+              <span
+                v-for="tag in getAlertContextTags(alert)"
+                :key="`${alert.id}-${tag}`"
+                class="alert-context-tag"
+              >
+                {{ tag }}
+              </span>
+            </div>
+          </div>
+
           <div class="alert-actions">
             <button class="alert-action-btn pause" @click="$emit('toggle-alert-active', alert.id)">
               {{ alert.active ? "暫停" : "恢復" }}
@@ -533,6 +549,25 @@ function formatLogSource(log) {
   return log?.payload?.quote?.source || "local_db";
 }
 
+function getAlertContextSource(alert) {
+  const source = String(alert?.condition_payload?.context_source || "").toLowerCase();
+  if (source === "watchlist") return "來源：觀察池";
+  if (!source) return "";
+  return `來源：${source}`;
+}
+
+function getAlertContextTags(alert) {
+  return Array.isArray(alert?.condition_payload?.context_tags)
+    ? alert.condition_payload.context_tags.filter(Boolean).slice(0, 4)
+    : [];
+}
+
+function getAlertSnapshotLabel(alert) {
+  const snapshotPrice = alert?.condition_payload?.snapshot_price;
+  if (snapshotPrice == null || snapshotPrice === "") return "";
+  return `快照 ${formatAlertMetricValue({ type: "price" }, snapshotPrice)}`;
+}
+
 const overlayRows = computed(() => [
   { key: "cycleMa", label: "周 / 月 / 季 / 年線", value: "MA 5 / 20 / 60 / 240", color: "#7be7ff", hint: "清指標模式下仍會保留的核心均線組" },
   { key: "ma20", label: `MA ${props.indicatorSettings.ma20Period}`, value: props.indicatorSnapshot.ma20, color: "#3b8bff" },
@@ -805,5 +840,38 @@ const journalEntryRows = computed(() => (props.journalEntries || []).slice(0, 12
   margin-top: 8px;
   font-size: 10px;
   color: var(--text3);
+}
+
+.alert-context-card {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(123, 231, 255, 0.05);
+  border: 1px solid rgba(123, 231, 255, 0.12);
+}
+
+.alert-context-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+
+.alert-context-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.alert-context-tag {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.12);
+  color: #bfefff;
+  font-size: 10px;
+  line-height: 1.4;
 }
 </style>

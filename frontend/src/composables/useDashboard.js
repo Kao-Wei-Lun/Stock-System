@@ -620,6 +620,10 @@ export function useDashboard() {
     value: "",
     prefill_hint: "",
     context_tags: [],
+    context_source: "",
+    snapshot_price: null,
+    snapshot_source: "",
+    snapshot_timestamp: "",
   });
   const backtestForm = reactive({
     strategy: "MA 黃金/死亡交叉",
@@ -853,6 +857,10 @@ export function useDashboard() {
     alertForm.value = "";
     alertForm.prefill_hint = "";
     alertForm.context_tags = [];
+    alertForm.context_source = "";
+    alertForm.snapshot_price = null;
+    alertForm.snapshot_source = "";
+    alertForm.snapshot_timestamp = "";
   }
 
   function formatAlertConditionLabel(condition) {
@@ -2618,6 +2626,10 @@ export function useDashboard() {
     }
     alertForm.prefill_hint = options.prefill_hint || "";
     alertForm.context_tags = Array.isArray(options.context_tags) ? options.context_tags.filter(Boolean) : [];
+    alertForm.context_source = options.context_source || "";
+    alertForm.snapshot_price = options.snapshot_price ?? null;
+    alertForm.snapshot_source = options.snapshot_source || "";
+    alertForm.snapshot_timestamp = options.snapshot_timestamp || "";
     alertModalOpen.value = true;
   }
 
@@ -2673,6 +2685,12 @@ export function useDashboard() {
       condition_payload: {
         operator: alertForm.cond,
         metric: alertForm.type === "volume" ? "volume_ratio" : null,
+        context_source: alertForm.context_source || null,
+        context_tags: alertForm.context_tags.length ? alertForm.context_tags : null,
+        snapshot_price: alertForm.snapshot_price ?? null,
+        snapshot_source: alertForm.snapshot_source || null,
+        snapshot_timestamp: alertForm.snapshot_timestamp || null,
+        prefill_hint: alertForm.prefill_hint || null,
       },
       active: true,
     };
