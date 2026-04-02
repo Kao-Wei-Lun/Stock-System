@@ -356,6 +356,36 @@ describe("RightSidebar", () => {
           win_rate: 100,
           net_pnl: 500,
           avg_return_pct: 2.5,
+          source_breakdown: [
+            {
+              key: "警報通知",
+              count: 1,
+              closed_count: 1,
+              win_rate: 100,
+              net_pnl: 500,
+              avg_return_pct: 2.5,
+            },
+          ],
+          market_posture_breakdown: [
+            {
+              key: "選擇性出手",
+              count: 1,
+              closed_count: 1,
+              win_rate: 100,
+              net_pnl: 500,
+              avg_return_pct: 2.5,
+            },
+          ],
+          tag_breakdown: [
+            {
+              key: "breakout",
+              count: 1,
+              closed_count: 1,
+              win_rate: 100,
+              net_pnl: 500,
+              avg_return_pct: 2.5,
+            },
+          ],
         },
         journalLoading: false,
         journalFilterScope: "ticker",
@@ -374,6 +404,12 @@ describe("RightSidebar", () => {
 
     expect(wrapper.text()).toContain("交易日誌");
     expect(wrapper.text()).toContain("統計摘要");
+    expect(wrapper.text()).toContain("來源拆解");
+    expect(wrapper.text()).toContain("警報通知");
+    expect(wrapper.text()).toContain("市場情境");
+    expect(wrapper.text()).toContain("選擇性出手");
+    expect(wrapper.text()).toContain("高頻標籤");
+    expect(wrapper.text()).toContain("breakout");
 
     await wrapper.find(".journal-card .add-btn").trigger("click");
     await wrapper.findAll(".bt-history-row")[0].trigger("click");

@@ -76,6 +76,9 @@ def build_journal_stats(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         "markets": _aggregate_by_key(entries, "market"),
         "strategies": _aggregate_by_key(entries, "strategy_code"),
         "emotions": _aggregate_by_key(entries, "emotion_tag"),
+        "tag_breakdown": _aggregate_tag_breakdown(entries),
+        "source_breakdown": _aggregate_prefixed_tags(entries, "來源:"),
+        "market_posture_breakdown": _aggregate_prefixed_tags(entries, "市場:"),
     }
 
 
@@ -90,6 +93,67 @@ def _aggregate_by_key(entries: List[Dict[str, Any]], key: str) -> List[Dict[str,
         {"key": bucket_key, "count": count}
         for bucket_key, count in sorted(buckets.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _aggregate_tag_breakdown(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        for tag in _extract_tags(entry):
+            if tag.startswith("來源:") or tag.startswith("市場:"):
+                continue
+            buckets.setdefault(tag, []).append(entry)
+    return _summarize_entry_buckets(buckets)
+
+
+def _aggregate_prefixed_tags(entries: List[Dict[str, Any]], prefix: str) -> List[Dict[str, Any]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        for tag in _extract_tags(entry):
+            if not tag.startswith(prefix):
+                continue
+            label = tag[len(prefix):].strip() or tag
+            buckets.setdefault(label, []).append(entry)
+    return _summarize_entry_buckets(buckets)
+
+
+def _extract_tags(entry: Dict[str, Any]) -> List[str]:
+    return [
+        str(tag).strip()
+        for tag in (entry.get("tags") or [])
+        if str(tag or "").strip()
+    ]
+
+
+def _summarize_entry_buckets(buckets: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    summaries = []
+    for bucket_key, bucket_entries in buckets.items():
+        closed_entries = [entry for entry in bucket_entries if (entry.get("result") or {}).get("closed")]
+        win_entries = [entry for entry in closed_entries if ((entry.get("result") or {}).get("pnl") or 0) > 0]
+        net_pnl = sum(((entry.get("result") or {}).get("pnl") or 0) for entry in closed_entries)
+        avg_return_pct = (
+            sum(((entry.get("result") or {}).get("pnl_pct") or 0) for entry in closed_entries) / len(closed_entries)
+            if closed_entries
+            else 0.0
+        )
+        summaries.append(
+            {
+                "key": bucket_key,
+                "count": len(bucket_entries),
+                "closed_count": len(closed_entries),
+                "win_rate": (len(win_entries) / len(closed_entries) * 100) if closed_entries else 0.0,
+                "net_pnl": net_pnl,
+                "avg_return_pct": avg_return_pct,
+            }
+        )
+
+    return sorted(
+        summaries,
+        key=lambda item: (
+            -item["count"],
+            -item["net_pnl"],
+            item["key"],
+        ),
+    )
 
 
 def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:

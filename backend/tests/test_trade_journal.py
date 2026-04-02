@@ -196,18 +196,21 @@ def test_trade_journal_statistics_aggregation():
             "market": "US",
             "strategy_code": "breakout",
             "emotion_tag": "calm",
+            "tags": ["來源:警報通知", "市場:選擇性出手", "breakout"],
             "result": {"closed": True, "pnl": 1500, "pnl_pct": 5.0},
         },
         {
             "market": "TW",
             "strategy_code": "pullback",
             "emotion_tag": "hesitant",
+            "tags": ["來源:觀察池", "市場:防守控倉", "pullback"],
             "result": {"closed": True, "pnl": -500, "pnl_pct": -1.5},
         },
         {
             "market": "US",
             "strategy_code": "breakout",
             "emotion_tag": "calm",
+            "tags": ["來源:警報通知", "市場:選擇性出手", "watchlist"],
             "result": {"closed": False, "pnl": None, "pnl_pct": None},
         },
     ]
@@ -219,6 +222,13 @@ def test_trade_journal_statistics_aggregation():
     assert stats["win_rate"] == 50.0
     assert stats["net_pnl"] == 1000
     assert stats["markets"][0]["key"] == "US"
+    assert stats["source_breakdown"][0]["key"] == "警報通知"
+    assert stats["source_breakdown"][0]["count"] == 2
+    assert stats["source_breakdown"][0]["closed_count"] == 1
+    assert stats["source_breakdown"][0]["win_rate"] == 100.0
+    assert stats["market_posture_breakdown"][0]["key"] == "選擇性出手"
+    assert stats["market_posture_breakdown"][0]["net_pnl"] == 1500
+    assert stats["tag_breakdown"][0]["key"] == "breakout"
 
 
 def test_notification_read_unread_patch(client, trade_journal_store):

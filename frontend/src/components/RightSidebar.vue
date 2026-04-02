@@ -325,6 +325,57 @@
         <div class="bt-metric"><span>勝率</span><span :class="journalStats.win_rate >= 50 ? 'up' : 'dn'">{{ Number(journalStats.win_rate || 0).toFixed(1) }}%</span></div>
         <div class="bt-metric"><span>淨損益</span><span :class="Number(journalStats.net_pnl || 0) >= 0 ? 'up' : 'dn'">${{ Math.round(Number(journalStats.net_pnl || 0)).toLocaleString() }}</span></div>
         <div class="bt-metric"><span>平均報酬</span><span :class="Number(journalStats.avg_return_pct || 0) >= 0 ? 'up' : 'dn'">{{ Number(journalStats.avg_return_pct || 0).toFixed(2) }}%</span></div>
+
+        <div v-if="journalStats.source_breakdown?.length" class="journal-analytics-card">
+          <div class="bt-section-title">來源拆解</div>
+          <div
+            v-for="item in topSourceBreakdown"
+            :key="`source-${item.key}`"
+            class="journal-analytics-row"
+          >
+            <div>
+              <div>{{ item.key }}</div>
+              <div class="bt-trade-sub">{{ item.closed_count }} 筆平倉 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+            </div>
+            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="journalStats.market_posture_breakdown?.length" class="journal-analytics-card">
+          <div class="bt-section-title">市場情境</div>
+          <div
+            v-for="item in topMarketPostureBreakdown"
+            :key="`posture-${item.key}`"
+            class="journal-analytics-row"
+          >
+            <div>
+              <div>{{ item.key }}</div>
+              <div class="bt-trade-sub">{{ item.count }} 筆 · 平均報酬 {{ Number(item.avg_return_pct || 0).toFixed(2) }}%</div>
+            </div>
+            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="journalStats.tag_breakdown?.length" class="journal-analytics-card">
+          <div class="bt-section-title">高頻標籤</div>
+          <div
+            v-for="item in topTagBreakdown"
+            :key="`tag-${item.key}`"
+            class="journal-analytics-row"
+          >
+            <div>
+              <div>{{ item.key }}</div>
+              <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+            </div>
+            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="journal-card">
@@ -663,6 +714,13 @@ const backtestEquityPath = computed(() => buildSparklinePath(props.backtestResul
 const backtestTradeRows = computed(() => (props.backtestResult?.trades || []).slice(-5).reverse());
 const backtestHistoryRows = computed(() => (props.backtestHistory || []).slice(0, 8));
 const journalEntryRows = computed(() => (props.journalEntries || []).slice(0, 12));
+const topSourceBreakdown = computed(() => (props.journalStats?.source_breakdown || []).slice(0, 3));
+const topMarketPostureBreakdown = computed(() => (props.journalStats?.market_posture_breakdown || []).slice(0, 3));
+const topTagBreakdown = computed(() => (
+  (props.journalStats?.tag_breakdown || [])
+    .filter((item) => !String(item.key || "").startsWith("來源:") && !String(item.key || "").startsWith("市場:"))
+    .slice(0, 4)
+));
 </script>
 
 <style scoped>
@@ -884,5 +942,23 @@ const journalEntryRows = computed(() => (props.journalEntries || []).slice(0, 12
   color: #bfefff;
   font-size: 10px;
   line-height: 1.4;
+}
+
+.journal-analytics-card {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.journal-analytics-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 11px;
+}
+
+.journal-analytics-row + .journal-analytics-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 </style>
