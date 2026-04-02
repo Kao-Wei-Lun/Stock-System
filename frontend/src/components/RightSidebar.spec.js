@@ -425,4 +425,75 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
+
+  it("shows active journal filters and lets the user clear them", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "all",
+        journalFilters: {
+          market: "TW",
+          strategy_code: "breakout",
+          tag: "來源:警報通知",
+          search: "selective",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("目前篩選");
+    expect(wrapper.text()).toContain("範圍：全部紀錄");
+    expect(wrapper.text()).toContain("標籤：來源:警報通知");
+
+    await wrapper.get('[data-testid="journal-filter-scope"]').trigger("click");
+    await wrapper.get('[data-testid="journal-filter-tag"]').trigger("click");
+    await wrapper.get('[data-testid="journal-filter-reset"]').trigger("click");
+
+    expect(wrapper.emitted("update-journal-filter")[0]).toEqual([{ key: "scope", value: "ticker" }]);
+    expect(wrapper.emitted("update-journal-filter")[1]).toEqual([{ key: "tag", value: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[0]).toEqual([{
+      scope: "ticker",
+      market: "",
+      strategy_code: "",
+      tag: "",
+      search: "",
+    }]);
+  });
 });

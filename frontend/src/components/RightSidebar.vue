@@ -263,6 +263,31 @@
       <div class="bt-row"><div class="bt-label">標籤篩選</div><input class="bt-inp" :value="journalFilters.tag" @input="$emit('update-journal-filter', { key: 'tag', value: $event.target.value })" placeholder="swing"></div>
       <div class="bt-row"><div class="bt-label">關鍵字</div><input class="bt-inp" :value="journalFilters.search" @input="$emit('update-journal-filter', { key: 'search', value: $event.target.value })" placeholder="review / note"></div>
 
+      <div v-if="activeJournalFilters.length" class="journal-filter-summary">
+        <div class="bt-section-title">目前篩選</div>
+        <div class="journal-filter-chip-list">
+          <button
+            v-for="item in activeJournalFilters"
+            :key="item.key"
+            type="button"
+            class="journal-filter-chip"
+            :data-testid="`journal-filter-${item.key}`"
+            @click="$emit('update-journal-filter', { key: item.key, value: item.clearValue })"
+          >
+            <span>{{ item.label }}：{{ item.valueLabel }}</span>
+            <span>×</span>
+          </button>
+          <button
+            type="button"
+            class="journal-filter-reset"
+            data-testid="journal-filter-reset"
+            @click="$emit('apply-journal-filter-preset', resetJournalFilterPreset)"
+          >
+            清除全部篩選
+          </button>
+        </div>
+      </div>
+
       <div class="journal-card">
         <div class="bt-section-title">{{ journalForm.id ? "編輯紀錄" : "新增紀錄" }}</div>
         <div class="bt-row"><div class="bt-label">Ticker</div><input class="bt-inp" :value="journalForm.ticker" @input="$emit('update-journal-field', { key: 'ticker', value: $event.target.value })"></div>
@@ -738,6 +763,44 @@ const topTagBreakdown = computed(() => (
     .filter((item) => !String(item.key || "").startsWith("來源:") && !String(item.key || "").startsWith("市場:"))
     .slice(0, 4)
 ));
+const resetJournalFilterPreset = {
+  scope: "ticker",
+  market: "",
+  strategy_code: "",
+  tag: "",
+  search: "",
+};
+const activeJournalFilters = computed(() => {
+  const chips = [];
+  if (props.journalFilterScope === "all") {
+    chips.push({
+      key: "scope",
+      label: "範圍",
+      valueLabel: "全部紀錄",
+      clearValue: "ticker",
+    });
+  }
+
+  const filterLabels = {
+    market: "市場",
+    strategy_code: "策略",
+    tag: "標籤",
+    search: "關鍵字",
+  };
+
+  Object.entries(filterLabels).forEach(([key, label]) => {
+    const value = String(props.journalFilters?.[key] || "").trim();
+    if (!value) return;
+    chips.push({
+      key,
+      label,
+      valueLabel: value,
+      clearValue: "",
+    });
+  });
+
+  return chips;
+});
 </script>
 
 <style scoped>
@@ -982,5 +1045,43 @@ const topTagBreakdown = computed(() => (
 
 .journal-analytics-row + .journal-analytics-row {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.journal-filter-summary {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(123, 231, 255, 0.05);
+  border: 1px solid rgba(123, 231, 255, 0.12);
+}
+
+.journal-filter-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.journal-filter-chip,
+.journal-filter-reset {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.journal-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(123, 231, 255, 0.14);
+  color: #c9f6ff;
+}
+
+.journal-filter-reset {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
 }
 </style>
