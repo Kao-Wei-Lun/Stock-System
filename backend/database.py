@@ -505,6 +505,21 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_screener_presets_owner_updated` (`owner_id`, `updated_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "journal_filter_presets": """
+        CREATE TABLE `journal_filter_presets` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NOT NULL,
+            `description` VARCHAR(512) NULL,
+            `scope` VARCHAR(32) NOT NULL DEFAULT 'ticker',
+            `filters_json` JSON NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_journal_filter_presets_owner_name` (`owner_id`, `name`),
+            KEY `idx_journal_filter_presets_owner_updated` (`owner_id`, `updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {
@@ -2161,6 +2176,98 @@ class Database:
         )
         return bool(deleted)
 
+    async def list_journal_filter_presets(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `journal_filter_presets`
+            WHERE `owner_id`=%s
+            ORDER BY `updated_at` DESC, `id` DESC
+            """,
+            (owner_id,),
+        )
+        return [_deserialize_journal_filter_preset(row) for row in rows]
+
+    async def get_journal_filter_preset(
+        self,
+        preset_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `journal_filter_presets`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (preset_id, owner_id),
+        )
+        return _deserialize_journal_filter_preset(row)
+
+    async def create_journal_filter_preset(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_journal_filter_preset_payload(payload)
+        preset_id = await self._execute_insert(
+            """
+            INSERT INTO `journal_filter_presets` (`owner_id`, `name`, `description`, `scope`, `filters_json`)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["name"],
+                normalized["description"],
+                normalized["scope"],
+                _json_dumps(normalized["filters"]),
+            ),
+        )
+        preset = await self.get_journal_filter_preset(preset_id, owner_id=owner_id)
+        if not preset:
+            raise RuntimeError("Journal filter preset was not persisted")
+        return preset
+
+    async def update_journal_filter_preset(
+        self,
+        preset_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_journal_filter_preset(preset_id, owner_id=owner_id)
+        if not existing:
+            return None
+        normalized = _normalize_journal_filter_preset_payload(payload, existing=existing)
+        updated = await self._execute(
+            """
+            UPDATE `journal_filter_presets`
+            SET `name`=%s, `description`=%s, `scope`=%s, `filters_json`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["name"],
+                normalized["description"],
+                normalized["scope"],
+                _json_dumps(normalized["filters"]),
+                preset_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_journal_filter_preset(preset_id, owner_id=owner_id)
+
+    async def delete_journal_filter_preset(
+        self,
+        preset_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `journal_filter_presets` WHERE `id`=%s AND `owner_id`=%s",
+            (preset_id, owner_id),
+        )
+        return bool(deleted)
+
     async def _replace_trade_journal_children(
         self,
         conn,
@@ -2834,6 +2941,9 @@ class Database:
                 await cur.execute("SELECT COUNT(*) AS `c` FROM `screener_presets`")
                 screener_presets = (await cur.fetchone())["c"]
 
+                await cur.execute("SELECT COUNT(*) AS `c` FROM `journal_filter_presets`")
+                journal_filter_presets = (await cur.fetchone())["c"]
+
         return {
             "total_rows": total_rows,
             "total_tickers": total_tickers,
@@ -2850,6 +2960,7 @@ class Database:
             "macro_snapshots": macro_snapshots,
             "taiwan_chip_snapshots": taiwan_chip_snapshots,
             "screener_presets": screener_presets,
+            "journal_filter_presets": journal_filter_presets,
         }
 
     async def log_sync(self, ticker: str, status: str, rows: int = 0, msg: str = ""):
@@ -3202,6 +3313,21 @@ def _deserialize_screener_preset(row: Optional[Dict[str, Any]]) -> Optional[Dict
     }
 
 
+def _deserialize_journal_filter_preset(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "name": row.get("name"),
+        "description": row.get("description"),
+        "scope": row.get("scope") or "ticker",
+        "filters": _json_loads(row.get("filters_json"), {}),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -3506,6 +3632,35 @@ def _normalize_screener_preset_payload(
         "name": _required_string(source.get("name"), "Screener preset name is required", max_length=128),
         "description": _optional_string(source.get("description"), max_length=512),
         "filters": filters,
+    }
+
+
+def _normalize_journal_filter_preset_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+    filters = source.get("filters")
+    if filters is None:
+        filters = (existing or {}).get("filters", {})
+    if not isinstance(filters, dict):
+        raise ValueError("Journal filter preset filters must be an object")
+
+    normalized_scope = _optional_string(source.get("scope"), max_length=32) or "ticker"
+    if normalized_scope not in {"ticker", "all"}:
+        raise ValueError("Journal filter preset scope must be ticker or all")
+
+    normalized_filters = {
+        key: _optional_string(filters.get(key), max_length=128) or ""
+        for key in ["market", "strategy_code", "tag", "search"]
+    }
+
+    return {
+        "name": _required_string(source.get("name"), "Journal filter preset name is required", max_length=128),
+        "description": _optional_string(source.get("description"), max_length=512),
+        "scope": normalized_scope,
+        "filters": normalized_filters,
     }
 
 

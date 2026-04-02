@@ -263,6 +263,48 @@
       <div class="bt-row"><div class="bt-label">標籤篩選</div><input class="bt-inp" :value="journalFilters.tag" @input="$emit('update-journal-filter', { key: 'tag', value: $event.target.value })" placeholder="swing"></div>
       <div class="bt-row"><div class="bt-label">關鍵字</div><input class="bt-inp" :value="journalFilters.search" @input="$emit('update-journal-filter', { key: 'search', value: $event.target.value })" placeholder="review / note"></div>
 
+      <div class="journal-card">
+        <div class="bt-section-title">篩選模板</div>
+        <div class="journal-preset-save">
+          <input
+            v-model.trim="journalPresetName"
+            class="bt-inp"
+            placeholder="儲存目前篩選"
+            data-testid="journal-preset-name"
+            @keydown.enter.prevent="saveJournalPreset"
+          />
+          <button
+            type="button"
+            class="sync-btn"
+            data-testid="journal-preset-save"
+            @click="saveJournalPreset"
+          >
+            儲存
+          </button>
+        </div>
+        <div v-if="journalFilterPresets.length" class="journal-preset-grid">
+          <button
+            v-for="preset in journalFilterPresets"
+            :key="preset.id"
+            type="button"
+            class="preset-chip journal-preset-chip"
+            :data-testid="`journal-preset-${preset.id}`"
+            @click="$emit('load-journal-filter-preset', preset)"
+          >
+            <span>{{ preset.name }}</span>
+            <small>{{ preset.scope === "all" ? "全部紀錄" : "目前標的" }}</small>
+            <strong
+              class="journal-preset-delete"
+              :data-testid="`journal-preset-delete-${preset.id}`"
+              @click.stop="$emit('delete-journal-filter-preset', preset.id)"
+            >
+              ×
+            </strong>
+          </button>
+        </div>
+        <div v-else class="bt-history-empty">尚無篩選模板</div>
+      </div>
+
       <div v-if="activeJournalFilters.length" class="journal-filter-summary">
         <div class="bt-section-title">目前篩選</div>
         <div class="journal-filter-chip-list">
@@ -470,7 +512,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   rightTab: { type: String, required: true },
@@ -490,6 +532,7 @@ const props = defineProps({
   journalEntries: { type: Array, default: () => [] },
   journalStats: { type: Object, default: null },
   journalLoading: { type: Boolean, required: true },
+  journalFilterPresets: { type: Array, default: () => [] },
   journalFilterScope: { type: String, required: true },
   journalFilters: { type: Object, required: true },
   dbStats: { type: Object, default: null },
@@ -498,7 +541,7 @@ const props = defineProps({
   syncingAll: { type: Boolean, required: true },
 });
 
-defineEmits([
+const emit = defineEmits([
   "set-right-tab",
   "toggle-indicator",
   "toggle-panel",
@@ -514,6 +557,9 @@ defineEmits([
   "update-journal-field",
   "update-journal-filter",
   "apply-journal-filter-preset",
+  "save-journal-filter-preset",
+  "load-journal-filter-preset",
+  "delete-journal-filter-preset",
   "save-journal-entry",
   "delete-journal-entry",
   "select-journal-entry",
@@ -550,6 +596,14 @@ function buildJournalTagPreset(tag) {
     tag,
     search: "",
   };
+}
+
+const journalPresetName = ref("");
+
+function saveJournalPreset() {
+  if (!journalPresetName.value) return;
+  emit("save-journal-filter-preset", journalPresetName.value);
+  journalPresetName.value = "";
 }
 
 const ALERT_TYPE_LABELS = {
@@ -1065,6 +1119,47 @@ const activeJournalFilters = computed(() => {
   border-radius: 10px;
   background: rgba(123, 231, 255, 0.05);
   border: 1px solid rgba(123, 231, 255, 0.12);
+}
+
+.journal-preset-save {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.journal-preset-save .bt-inp {
+  flex: 1;
+  min-width: 0;
+}
+
+.journal-preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.journal-preset-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 120px;
+  padding-right: 24px;
+}
+
+.journal-preset-chip small {
+  color: var(--text3);
+  font-size: 10px;
+}
+
+.journal-preset-delete {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 12px;
+  color: var(--text3);
 }
 
 .journal-filter-chip-list {

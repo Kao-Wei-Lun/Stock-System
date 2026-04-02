@@ -160,6 +160,7 @@ const dashboardMock = {
   journalEntries: [],
   journalStats: null,
   journalLoading: false,
+  journalFilterPresets: [],
   journalFilterScope: "ticker",
   journalFilters: {
     market: "",
@@ -240,6 +241,9 @@ const dashboardMock = {
   updateJournalField: noop,
   updateJournalFilter: noop,
   applyJournalFilterPreset: noop,
+  saveJournalFilterPreset: noop,
+  loadJournalFilterPreset: noop,
+  deleteJournalFilterPreset: noop,
   saveJournalEntry: noop,
   deleteJournalEntry: noop,
   selectJournalEntry: noop,

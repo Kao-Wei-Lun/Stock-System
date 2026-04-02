@@ -132,6 +132,7 @@
                 :journal-entries="journalEntries"
                 :journal-stats="journalStats"
                 :journal-loading="journalLoading"
+                :journal-filter-presets="journalFilterPresets"
                 :journal-filter-scope="journalFilterScope"
                 :journal-filters="journalFilters"
                 :db-stats="dbStats"
@@ -153,6 +154,9 @@
                 @update-journal-field="handleJournalField"
                 @update-journal-filter="handleJournalFilter"
                 @apply-journal-filter-preset="handleJournalFilterPreset"
+                @save-journal-filter-preset="saveJournalFilterPreset"
+                @load-journal-filter-preset="loadJournalFilterPreset"
+                @delete-journal-filter-preset="deleteJournalFilterPreset"
                 @save-journal-entry="saveJournalEntry"
                 @delete-journal-entry="deleteJournalEntry"
                 @select-journal-entry="selectJournalEntry"
@@ -358,6 +362,7 @@ const {
   journalEntries,
   journalStats,
   journalLoading,
+  journalFilterPresets,
   journalFilterScope,
   journalFilters,
   indicatorSnapshot,
@@ -433,6 +438,9 @@ const {
     updateJournalField,
     updateJournalFilter,
     applyJournalFilterPreset,
+    saveJournalFilterPreset,
+    loadJournalFilterPreset,
+    deleteJournalFilterPreset,
     saveJournalEntry,
     deleteJournalEntry,
     selectJournalEntry,

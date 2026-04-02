@@ -533,6 +533,7 @@ export function useDashboard() {
   const journalEntries = ref([]);
   const journalStats = ref(null);
   const journalLoading = ref(false);
+  const journalFilterPresets = ref([]);
   const calendarEvents = ref([]);
   const tickerEvents = ref([]);
   const tickerNews = ref([]);
@@ -1185,6 +1186,16 @@ export function useDashboard() {
     }
   }
 
+  async function loadJournalFilterPresets() {
+    try {
+      const response = await dashboardApi.listJournalFilterPresets();
+      journalFilterPresets.value = Array.isArray(response?.items) ? response.items : [];
+    } catch (error) {
+      console.error(error);
+      journalFilterPresets.value = [];
+    }
+  }
+
   function updateScreenerFilter(key, value) {
     if (!Object.prototype.hasOwnProperty.call(screenerFilters, key)) return;
     screenerFilters[key] = value;
@@ -1257,16 +1268,65 @@ export function useDashboard() {
     await loadJournalData();
   }
 
+  function buildJournalFilterPresetPayload() {
+    return {
+      scope: journalFilterScope.value === "all" ? "all" : "ticker",
+      filters: {
+        market: journalFilters.market || "",
+        strategy_code: journalFilters.strategy_code || "",
+        tag: journalFilters.tag || "",
+        search: journalFilters.search || "",
+      },
+    };
+  }
+
   async function applyJournalFilterPreset(preset = {}) {
-    if (Object.prototype.hasOwnProperty.call(preset, "scope")) {
-      journalFilterScope.value = preset.scope === "all" ? "all" : "ticker";
+    const source = preset && typeof preset === "object" ? preset : {};
+    const filters = source.filters && typeof source.filters === "object" ? source.filters : source;
+    if (Object.prototype.hasOwnProperty.call(source, "scope")) {
+      journalFilterScope.value = source.scope === "all" ? "all" : "ticker";
     }
     for (const key of ["market", "strategy_code", "tag", "search"]) {
-      if (Object.prototype.hasOwnProperty.call(preset, key)) {
-        journalFilters[key] = preset[key] || "";
+      if (Object.prototype.hasOwnProperty.call(filters, key)) {
+        journalFilters[key] = filters[key] || "";
       }
     }
     await loadJournalData();
+  }
+
+  async function saveJournalFilterPreset(name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return;
+    try {
+      await dashboardApi.createJournalFilterPreset({
+        name: trimmed,
+        description: "由交易日誌工作區儲存",
+        ...buildJournalFilterPresetPayload(),
+      });
+      await loadJournalFilterPresets();
+      pushNotification({ icon: "💾", title: "日誌篩選模板已儲存", msg: trimmed, type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "日誌篩選模板儲存失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
+  }
+
+  function loadJournalFilterPreset(preset) {
+    if (!preset) return;
+    void applyJournalFilterPreset(preset);
+    pushNotification({ icon: "🧭", title: "已載入日誌篩選模板", msg: preset.name || "preset", type: "success" });
+  }
+
+  async function deleteJournalFilterPreset(presetId) {
+    if (!presetId) return;
+    try {
+      await dashboardApi.deleteJournalFilterPreset(presetId);
+      await loadJournalFilterPresets();
+      pushNotification({ icon: "🗑", title: "日誌篩選模板已刪除", msg: String(presetId), type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "日誌篩選模板刪除失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
   }
 
   function resetJournalForm() {
@@ -2906,6 +2966,7 @@ export function useDashboard() {
     await loadNotifications();
     await loadBacktestHistory({ ticker: currentTicker.value });
     applyJournalEntryToForm();
+    await loadJournalFilterPresets();
     await loadJournalData();
     await loadScreenerPresets();
     await loadWatchlist();
@@ -3030,6 +3091,7 @@ export function useDashboard() {
     journalEntries,
     journalStats,
     journalLoading,
+    journalFilterPresets,
     journalFilterScope,
     journalFilters,
     indicatorSnapshot,
@@ -3109,6 +3171,9 @@ export function useDashboard() {
     resetJournalForm,
     updateJournalFilter,
     applyJournalFilterPreset,
+    saveJournalFilterPreset,
+    loadJournalFilterPreset,
+    deleteJournalFilterPreset,
     addJournalAttachment,
     removeJournalAttachment,
     startJournalEntry,

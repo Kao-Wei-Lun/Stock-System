@@ -88,6 +88,18 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     getJournalTrade(entryId) {
       return request(`/api/journal/trades/${entryId}`);
     },
+    listJournalFilterPresets() {
+      return request("/api/journal/presets");
+    },
+    createJournalFilterPreset(payload) {
+      return request("/api/journal/presets", buildJsonRequest("POST", payload));
+    },
+    updateJournalFilterPreset(presetId, payload) {
+      return request(`/api/journal/presets/${presetId}`, buildJsonRequest("PUT", payload));
+    },
+    deleteJournalFilterPreset(presetId) {
+      return request(`/api/journal/presets/${presetId}`, { method: "DELETE" });
+    },
     createJournalTrade(payload) {
       return request("/api/journal/trades", buildJsonRequest("POST", payload));
     },

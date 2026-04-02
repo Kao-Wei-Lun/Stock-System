@@ -498,4 +498,79 @@ describe("RightSidebar", () => {
       search: "",
     }]);
   });
+
+  it("emits journal preset save, load, and delete actions", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterPresets: [
+          {
+            id: 7,
+            name: "高風險日",
+            scope: "all",
+            filters: { tag: "市場:防守控倉" },
+          },
+        ],
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    await wrapper.get('[data-testid="journal-preset-name"]').setValue("我的模板");
+    await wrapper.get('[data-testid="journal-preset-save"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-7"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-delete-7"]').trigger("click");
+
+    expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual(["我的模板"]);
+    expect(wrapper.emitted("load-journal-filter-preset")[0]).toEqual([{
+      id: 7,
+      name: "高風險日",
+      scope: "all",
+      filters: { tag: "市場:防守控倉" },
+    }]);
+    expect(wrapper.emitted("delete-journal-filter-preset")[0]).toEqual([7]);
+  });
 });

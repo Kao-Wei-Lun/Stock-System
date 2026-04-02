@@ -399,6 +399,20 @@ class TradeJournalEntryUpdatePayload(BaseModel):
     result: dict | None = None
 
 
+class JournalFilterPresetCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=512)
+    scope: str = Field("ticker", max_length=32)
+    filters: dict = Field(default_factory=dict)
+
+
+class JournalFilterPresetUpdatePayload(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=512)
+    scope: str | None = Field(None, max_length=32)
+    filters: dict | None = None
+
+
 class ScreenerPresetCreatePayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: str | None = Field(None, max_length=512)
@@ -996,6 +1010,50 @@ async def get_trade_journal_stats(
         tag=tag.strip() if tag else None,
         search=search.strip() if search else None,
     )
+
+
+@app.get("/api/journal/presets")
+async def list_journal_filter_presets():
+    return {"items": await db.list_journal_filter_presets(owner_id=DEFAULT_OWNER_ID)}
+
+
+@app.post("/api/journal/presets")
+async def create_journal_filter_preset(payload: JournalFilterPresetCreatePayload):
+    try:
+        return await db.create_journal_filter_preset(payload.model_dump(), owner_id=DEFAULT_OWNER_ID)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/journal/presets/{preset_id}")
+async def get_journal_filter_preset(preset_id: int):
+    preset = await db.get_journal_filter_preset(preset_id, owner_id=DEFAULT_OWNER_ID)
+    if not preset:
+        raise HTTPException(404, "Journal filter preset not found")
+    return preset
+
+
+@app.put("/api/journal/presets/{preset_id}")
+async def update_journal_filter_preset(preset_id: int, payload: JournalFilterPresetUpdatePayload):
+    try:
+        preset = await db.update_journal_filter_preset(
+            preset_id,
+            payload.model_dump(exclude_unset=True),
+            owner_id=DEFAULT_OWNER_ID,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not preset:
+        raise HTTPException(404, "Journal filter preset not found")
+    return preset
+
+
+@app.delete("/api/journal/presets/{preset_id}")
+async def delete_journal_filter_preset(preset_id: int):
+    deleted = await db.delete_journal_filter_preset(preset_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Journal filter preset not found")
+    return {"ok": True, "preset_id": preset_id}
 
 
 @app.post("/api/journal/trades")

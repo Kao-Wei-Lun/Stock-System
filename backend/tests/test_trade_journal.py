@@ -10,7 +10,9 @@ from journal_service import build_journal_stats, compute_trade_result
 def trade_journal_store(monkeypatch):
     store = {
         "next_id": 1,
+        "preset_next_id": 1,
         "entries": {},
+        "presets": {},
         "notifications": {
             1: {
                 "id": 1,
@@ -119,6 +121,64 @@ def trade_journal_store(monkeypatch):
         )
         return build_journal_stats(entries)
 
+    def normalize_preset(payload, existing=None):
+        source = clone(existing or {})
+        source.update(clone(payload or {}))
+        filters = source.get("filters") if isinstance(source.get("filters"), dict) else {}
+        return {
+            "name": str(source.get("name") or "").strip(),
+            "description": source.get("description"),
+            "scope": source.get("scope") or "ticker",
+            "filters": {
+                "market": str(filters.get("market") or ""),
+                "strategy_code": str(filters.get("strategy_code") or ""),
+                "tag": str(filters.get("tag") or ""),
+                "search": str(filters.get("search") or ""),
+            },
+        }
+
+    async def list_journal_filter_presets(owner_id=1):
+        items = list(store["presets"].values())
+        items.sort(key=lambda item: item["updated_at"], reverse=True)
+        return clone(items)
+
+    async def get_journal_filter_preset(preset_id, owner_id=1):
+        preset = store["presets"].get(preset_id)
+        return clone(preset) if preset else None
+
+    async def create_journal_filter_preset(payload, owner_id=1):
+        preset_id = store["preset_next_id"]
+        store["preset_next_id"] += 1
+        normalized = normalize_preset(payload)
+        normalized.update(
+            {
+                "id": preset_id,
+                "owner_id": owner_id,
+                "created_at": "2026-04-01T08:00:00+00:00",
+                "updated_at": "2026-04-01T08:00:00+00:00",
+            }
+        )
+        store["presets"][preset_id] = normalized
+        return clone(normalized)
+
+    async def update_journal_filter_preset(preset_id, payload, owner_id=1):
+        if preset_id not in store["presets"]:
+            return None
+        normalized = normalize_preset(payload, existing=store["presets"][preset_id])
+        normalized.update(
+            {
+                "id": preset_id,
+                "owner_id": owner_id,
+                "created_at": store["presets"][preset_id]["created_at"],
+                "updated_at": "2026-04-01T08:30:00+00:00",
+            }
+        )
+        store["presets"][preset_id] = normalized
+        return clone(normalized)
+
+    async def delete_journal_filter_preset(preset_id, owner_id=1):
+        return store["presets"].pop(preset_id, None) is not None
+
     async def set_notification_read_state(notification_id, read, owner_id=1):
         notification = store["notifications"].get(notification_id)
         if not notification:
@@ -132,6 +192,11 @@ def trade_journal_store(monkeypatch):
     monkeypatch.setattr(main.db, "update_trade_journal_entry", update_trade_journal_entry)
     monkeypatch.setattr(main.db, "delete_trade_journal_entry", delete_trade_journal_entry)
     monkeypatch.setattr(main.db, "get_trade_journal_stats", get_trade_journal_stats)
+    monkeypatch.setattr(main.db, "list_journal_filter_presets", list_journal_filter_presets)
+    monkeypatch.setattr(main.db, "get_journal_filter_preset", get_journal_filter_preset)
+    monkeypatch.setattr(main.db, "create_journal_filter_preset", create_journal_filter_preset)
+    monkeypatch.setattr(main.db, "update_journal_filter_preset", update_journal_filter_preset)
+    monkeypatch.setattr(main.db, "delete_journal_filter_preset", delete_journal_filter_preset)
     monkeypatch.setattr(main.db, "set_notification_read_state", set_notification_read_state)
     monkeypatch.setattr(main.db, "mark_notification_read", lambda notification_id, owner_id=1: set_notification_read_state(notification_id, True, owner_id))
 
@@ -186,6 +251,50 @@ def test_trade_journal_crud_and_attachment_metadata(client, trade_journal_store)
     assert stats_response.json()["closed_entries"] == 1
 
     delete_response = client.delete(f"/api/journal/trades/{created['id']}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["ok"] is True
+
+
+def test_trade_journal_filter_preset_routes(client, trade_journal_store):
+    create_response = client.post(
+        "/api/journal/presets",
+        json={
+            "name": "高風險日",
+            "description": "只看防守情境",
+            "scope": "all",
+            "filters": {
+                "market": "TW",
+                "tag": "市場:防守控倉",
+            },
+        },
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["name"] == "高風險日"
+    assert created["scope"] == "all"
+    assert created["filters"]["tag"] == "市場:防守控倉"
+
+    list_response = client.get("/api/journal/presets")
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["id"] == created["id"]
+
+    update_response = client.put(
+        f"/api/journal/presets/{created['id']}",
+        json={
+            "filters": {
+                "market": "US",
+                "strategy_code": "breakout",
+                "tag": "來源:警報通知",
+                "search": "macro",
+            }
+        },
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["filters"]["market"] == "US"
+    assert updated["filters"]["search"] == "macro"
+
+    delete_response = client.delete(f"/api/journal/presets/{created['id']}")
     assert delete_response.status_code == 200
     assert delete_response.json()["ok"] is True
 

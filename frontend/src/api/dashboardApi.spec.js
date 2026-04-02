@@ -143,6 +143,36 @@ describe("dashboardApi", () => {
     });
   });
 
+  it("manages journal filter presets", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ id: 4, name: "高風險日" }))
+      .mockImplementationOnce(() => jsonResponse({ ok: true, preset_id: 4 }));
+    const api = createDashboardApi();
+
+    await api.listJournalFilterPresets();
+    await api.createJournalFilterPreset({
+      name: "高風險日",
+      scope: "all",
+      filters: { tag: "市場:防守控倉" },
+    });
+    await api.deleteJournalFilterPreset(4);
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/journal/presets", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/journal/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "高風險日",
+        scope: "all",
+        filters: { tag: "市場:防守控倉" },
+      }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/journal/presets/4", {
+      method: "DELETE",
+    });
+  });
+
   it("patches notification read state", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 5, read_at: null }));
     const api = createDashboardApi();
