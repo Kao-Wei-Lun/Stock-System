@@ -58,6 +58,65 @@
         />
         <button :disabled="!activeGroupId || !newTicker" @click="submitTicker">加入</button>
       </div>
+
+      <div v-if="leftTab === 'watch' && selectedGroup" class="watchlist-viewbar">
+        <label class="watchlist-viewfield">
+          <span>Verdict</span>
+          <select v-model="watchVerdictFilter" data-testid="watch-verdict-filter">
+            <option value="all">全部</option>
+            <option value="priority">優先候選</option>
+            <option value="watch">觀察名單</option>
+            <option value="wait">等待名單</option>
+          </select>
+        </label>
+        <label class="watchlist-viewfield">
+          <span>Q值</span>
+          <select v-model="watchSetupFilter" data-testid="watch-setup-filter">
+            <option value="all">全部</option>
+            <option value="q4">Q4 以上</option>
+            <option value="q3">Q3 以上</option>
+          </select>
+        </label>
+        <label class="watchlist-viewfield">
+          <span>市場</span>
+          <select v-model="watchPostureFilter" data-testid="watch-posture-filter">
+            <option value="all">全部</option>
+            <option
+              v-for="option in watchPostureOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label class="watchlist-viewfield">
+          <span>排序</span>
+          <select v-model="watchSortMode" data-testid="watch-sort-mode">
+            <option value="manual">群組順序</option>
+            <option value="verdict">Verdict 優先</option>
+            <option value="setup_desc">Q值優先</option>
+            <option value="change_pct">漲跌幅</option>
+            <option value="freshness">資料新鮮度</option>
+          </select>
+        </label>
+        <button
+          v-if="hasWatchTransforms"
+          class="reset-view-btn"
+          data-testid="reset-watch-view"
+          @click="resetWatchView"
+        >
+          重設
+        </button>
+      </div>
+
+      <div
+        v-if="leftTab === 'watch' && selectedGroup"
+        class="watchlist-summary"
+        data-testid="watchlist-summary"
+      >
+        {{ watchSummary }}
+      </div>
     </div>
 
     <div class="watchlist">
@@ -73,6 +132,7 @@
           :key="`${item.group_id || 'market'}-${item.ticker}`"
           class="wl-item"
           :class="{ active: item.ticker === activeTicker }"
+          :data-ticker="item.ticker"
           @click="$emit('select-ticker', item)"
         >
           <div>
@@ -94,7 +154,7 @@
             </div>
           </div>
           <div class="wl-side">
-            <div v-if="leftTab === 'watch' && selectedGroup" class="wl-ops">
+            <div v-if="manualOrderingEnabled" class="wl-ops">
               <button class="wl-op" title="上移" :disabled="!canMoveItem(item, -1)" @click.stop="moveItem(item, -1)">↑</button>
               <button class="wl-op" title="下移" :disabled="!canMoveItem(item, 1)" @click.stop="moveItem(item, 1)">↓</button>
               <button class="wl-op danger" title="移除" @click.stop="removeItem(item)">✕</button>
@@ -112,7 +172,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { fmtPrice } from "../utils/formatters";
 
@@ -144,16 +204,90 @@ const newGroupName = ref("");
 const newTicker = ref("");
 const editingGroupId = ref(null);
 const editGroupName = ref("");
+const watchVerdictFilter = ref("all");
+const watchSetupFilter = ref("all");
+const watchPostureFilter = ref("all");
+const watchSortMode = ref("manual");
+
+const SOURCE_LABELS = {
+  yahoo_finance: "Yahoo Finance",
+  local_cache: "Local cache",
+};
+
+const VERDICT_TAGS = {
+  priority: ["優先候選", "逆風強勢候選"],
+  watch: ["觀察名單", "防守觀察"],
+  wait: ["等待名單", "暫緩出手"],
+};
+
+const VERDICT_RANK = {
+  priority: 3,
+  watch: 2,
+  wait: 1,
+  other: 0,
+};
 
 const selectedGroup = computed(
   () => props.groups.find((group) => group.id === props.activeGroupId) || props.groups[0] || null,
+);
+
+const selectedWatchItems = computed(() => selectedGroup.value?.items || []);
+
+const watchPostureOptions = computed(() => {
+  const seen = new Set();
+  return selectedWatchItems.value
+    .map((item) => getPostureTag(item))
+    .filter(Boolean)
+    .filter((tag) => {
+      if (seen.has(tag)) return false;
+      seen.add(tag);
+      return true;
+    })
+    .map((tag) => ({
+      value: tag,
+      label: tag.replace(/^市場:/, ""),
+    }));
+});
+
+const hasWatchTransforms = computed(() => (
+  props.leftTab === "watch"
+  && (
+    watchVerdictFilter.value !== "all"
+    || watchSetupFilter.value !== "all"
+    || watchPostureFilter.value !== "all"
+    || watchSortMode.value !== "manual"
+  )
+));
+
+const manualOrderingEnabled = computed(
+  () => props.leftTab === "watch" && Boolean(selectedGroup.value) && !hasWatchTransforms.value,
 );
 
 const visibleItems = computed(() => {
   if (props.leftTab === "market") {
     return props.marketItems;
   }
-  return selectedGroup.value?.items || [];
+
+  let items = [...selectedWatchItems.value];
+
+  if (watchVerdictFilter.value !== "all") {
+    items = items.filter((item) => getVerdictKey(item) === watchVerdictFilter.value);
+  }
+
+  if (watchSetupFilter.value !== "all") {
+    const minimumSetup = watchSetupFilter.value === "q4" ? 4 : 3;
+    items = items.filter((item) => getSetupQuality(item) >= minimumSetup);
+  }
+
+  if (watchPostureFilter.value !== "all") {
+    items = items.filter((item) => getPostureTag(item) === watchPostureFilter.value);
+  }
+
+  if (watchSortMode.value === "manual") {
+    return items;
+  }
+
+  return items.sort(compareWatchItems);
 });
 
 const sectionLabel = computed(() => {
@@ -164,13 +298,34 @@ const sectionLabel = computed(() => {
 const emptyLabel = computed(() => {
   if (props.leftTab === "market") return "目前沒有市場指標資料";
   if (!props.groups.length) return "尚未建立觀察群組";
+  if (hasWatchTransforms.value) return "目前篩選條件下沒有股票";
   return "這個群組目前還沒有股票";
 });
 
-const SOURCE_LABELS = {
-  yahoo_finance: "Yahoo Finance",
-  local_cache: "Local cache",
-};
+const watchSummary = computed(() => {
+  if (props.leftTab !== "watch" || !selectedGroup.value) return "";
+  const totalCount = selectedWatchItems.value.length;
+  if (!totalCount) return "此群組尚無標的";
+
+  const baseSummary = `顯示 ${visibleItems.value.length} / ${totalCount} 檔`;
+  if (!manualOrderingEnabled.value) {
+    return `${baseSummary} · 目前為篩選/排序視圖，已暫停手動上下移`;
+  }
+  return baseSummary;
+});
+
+watch(
+  watchPostureOptions,
+  (options) => {
+    if (
+      watchPostureFilter.value !== "all"
+      && !options.some((option) => option.value === watchPostureFilter.value)
+    ) {
+      watchPostureFilter.value = "all";
+    }
+  },
+  { immediate: true },
+);
 
 function parseWatchTimestamp(value) {
   if (!value) return null;
@@ -214,8 +369,94 @@ function getFreshnessClass(item) {
   return item?.is_delayed === false ? "live" : "delayed";
 }
 
+function getTagList(item) {
+  return Array.isArray(item?.tags) ? item.tags.filter(Boolean) : [];
+}
+
 function getWatchTags(item) {
-  return Array.isArray(item?.tags) ? item.tags.slice(0, 3) : [];
+  return getTagList(item).slice(0, 3);
+}
+
+function getVerdictTag(item) {
+  const tags = getTagList(item);
+  const verdictCandidates = [
+    ...VERDICT_TAGS.priority,
+    ...VERDICT_TAGS.watch,
+    ...VERDICT_TAGS.wait,
+  ];
+  return verdictCandidates.find((tag) => tags.includes(tag)) || "";
+}
+
+function getVerdictKey(item) {
+  const verdictTag = getVerdictTag(item);
+  if (VERDICT_TAGS.priority.includes(verdictTag)) return "priority";
+  if (VERDICT_TAGS.watch.includes(verdictTag)) return "watch";
+  if (VERDICT_TAGS.wait.includes(verdictTag)) return "wait";
+  return "other";
+}
+
+function getSetupQuality(item) {
+  const setupTag = getTagList(item).find((tag) => /^Q\d+$/.test(tag));
+  if (!setupTag) return 0;
+  return Number(setupTag.slice(1)) || 0;
+}
+
+function getPostureTag(item) {
+  return getTagList(item).find((tag) => tag.startsWith("市場:")) || "";
+}
+
+function getFreshnessRank(item) {
+  if (isStaleItem(item)) return 0;
+  return item?.is_delayed === false ? 2 : 1;
+}
+
+function getManualOrder(item) {
+  if (Number.isFinite(Number(item?.sort_order))) {
+    return Number(item.sort_order);
+  }
+  return selectedWatchItems.value.findIndex((candidate) => candidate.id === item.id);
+}
+
+function compareByNumber(left, right, getter) {
+  const leftValue = Number(getter(left) || 0);
+  const rightValue = Number(getter(right) || 0);
+  if (rightValue !== leftValue) return rightValue - leftValue;
+  return getManualOrder(left) - getManualOrder(right);
+}
+
+function compareWatchItems(left, right) {
+  if (watchSortMode.value === "verdict") {
+    const verdictDelta = VERDICT_RANK[getVerdictKey(right)] - VERDICT_RANK[getVerdictKey(left)];
+    if (verdictDelta !== 0) return verdictDelta;
+    return compareByNumber(left, right, getSetupQuality);
+  }
+
+  if (watchSortMode.value === "setup_desc") {
+    const setupDelta = getSetupQuality(right) - getSetupQuality(left);
+    if (setupDelta !== 0) return setupDelta;
+    const verdictDelta = VERDICT_RANK[getVerdictKey(right)] - VERDICT_RANK[getVerdictKey(left)];
+    if (verdictDelta !== 0) return verdictDelta;
+    return getManualOrder(left) - getManualOrder(right);
+  }
+
+  if (watchSortMode.value === "change_pct") {
+    return compareByNumber(left, right, (item) => item.change_pct);
+  }
+
+  if (watchSortMode.value === "freshness") {
+    const freshnessDelta = getFreshnessRank(right) - getFreshnessRank(left);
+    if (freshnessDelta !== 0) return freshnessDelta;
+    return getManualOrder(left) - getManualOrder(right);
+  }
+
+  return getManualOrder(left) - getManualOrder(right);
+}
+
+function resetWatchView() {
+  watchVerdictFilter.value = "all";
+  watchSetupFilter.value = "all";
+  watchPostureFilter.value = "all";
+  watchSortMode.value = "manual";
 }
 
 function toggleCreateGroup() {
@@ -258,14 +499,14 @@ function requestDeleteGroup(group) {
 }
 
 function canMoveItem(item, direction) {
-  const items = selectedGroup.value?.items || [];
+  const items = selectedWatchItems.value;
   const index = items.findIndex((candidate) => candidate.id === item.id);
   const targetIndex = index + direction;
   return index >= 0 && targetIndex >= 0 && targetIndex < items.length;
 }
 
 function moveItem(item, direction) {
-  const items = [...(selectedGroup.value?.items || [])];
+  const items = [...selectedWatchItems.value];
   const index = items.findIndex((candidate) => candidate.id === item.id);
   const targetIndex = index + direction;
   if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return;
@@ -280,6 +521,43 @@ function removeItem(item) {
 </script>
 
 <style scoped>
+.watchlist-viewbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.watchlist-viewfield {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text3);
+}
+
+.watchlist-viewfield select {
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text1);
+}
+
+.reset-view-btn {
+  align-self: end;
+  min-height: 30px;
+  border-radius: 10px;
+}
+
+.watchlist-summary {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text3);
+}
+
 .wl-meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -331,5 +609,11 @@ function removeItem(item) {
   line-height: 1.4;
   background: rgba(123, 231, 255, 0.12);
   color: #bfefff;
+}
+
+@media (max-width: 1100px) {
+  .watchlist-viewbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

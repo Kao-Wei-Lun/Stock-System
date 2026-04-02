@@ -3,6 +3,24 @@ import { describe, expect, it } from "vitest";
 
 import WatchlistPanel from "./WatchlistPanel.vue";
 
+function buildWatchItem(timestamp, overrides = {}) {
+  return {
+    id: 10,
+    group_id: 1,
+    ticker: "AAPL",
+    name: "Apple",
+    category: "US",
+    close: 210.5,
+    change_pct: 2.68,
+    source: "yahoo_finance",
+    is_delayed: true,
+    quote_timestamp: timestamp,
+    synced_at: timestamp,
+    tags: ["優先候選", "Q4", "市場:選擇性出手"],
+    ...overrides,
+  };
+}
+
 function buildPanelProps(overrides = {}) {
   const freshTimestamp = new Date().toISOString();
   return {
@@ -10,22 +28,7 @@ function buildPanelProps(overrides = {}) {
       {
         id: 1,
         name: "Core",
-        items: [
-          {
-            id: 10,
-            group_id: 1,
-            ticker: "AAPL",
-            name: "Apple",
-            category: "US",
-            close: 210.5,
-            change_pct: 2.68,
-            source: "yahoo_finance",
-            is_delayed: true,
-            quote_timestamp: freshTimestamp,
-            synced_at: freshTimestamp,
-            tags: ["優先候選", "Q4", "市場:選擇性出手"],
-          },
-        ],
+        items: [buildWatchItem(freshTimestamp)],
       },
     ],
     marketItems: [],
@@ -82,5 +85,59 @@ describe("WatchlistPanel", () => {
     expect(wrapper.text()).toContain("Local cache");
     expect(wrapper.text()).toContain("資料較舊");
     expect(wrapper.text()).toContain("無時間戳");
+  });
+
+  it("filters and sorts watchlist items by stored screener tags", async () => {
+    const freshTimestamp = new Date().toISOString();
+    const wrapper = mount(WatchlistPanel, {
+      props: buildPanelProps({
+        groups: [
+          {
+            id: 1,
+            name: "Core",
+            items: [
+              buildWatchItem(freshTimestamp, {
+                id: 10,
+                ticker: "AAPL",
+                name: "Apple",
+                change_pct: 2.68,
+                tags: ["優先候選", "Q4", "市場:選擇性出手"],
+              }),
+              buildWatchItem(freshTimestamp, {
+                id: 11,
+                ticker: "NVDA",
+                name: "NVIDIA",
+                change_pct: 1.82,
+                tags: ["觀察名單", "Q3", "市場:選擇性出手"],
+              }),
+              buildWatchItem(freshTimestamp, {
+                id: 12,
+                ticker: "MSFT",
+                name: "Microsoft",
+                change_pct: -0.54,
+                tags: ["等待名單", "Q2", "市場:防守控倉"],
+              }),
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(wrapper.findAll(".wl-op")).toHaveLength(9);
+
+    await wrapper.get('[data-testid="watch-verdict-filter"]').setValue("priority");
+
+    expect(wrapper.findAll(".wl-item").map((node) => node.attributes("data-ticker"))).toEqual(["AAPL"]);
+    expect(wrapper.get('[data-testid="watchlist-summary"]').text()).toContain("顯示 1 / 3 檔");
+    expect(wrapper.findAll(".wl-op")).toHaveLength(0);
+
+    await wrapper.get('[data-testid="reset-watch-view"]').trigger("click");
+    await wrapper.get('[data-testid="watch-sort-mode"]').setValue("setup_desc");
+
+    expect(wrapper.findAll(".wl-item").map((node) => node.attributes("data-ticker"))).toEqual([
+      "AAPL",
+      "NVDA",
+      "MSFT",
+    ]);
   });
 });
