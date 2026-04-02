@@ -97,4 +97,31 @@ describe("NotificationPanel", () => {
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
     expect(wrapper.emitted("dismiss")[0]).toEqual(["local-1"]);
   });
+
+  it("routes market alerts back to the macro workspace", async () => {
+    const wrapper = mount(NotificationPanel, {
+      props: {
+        notifications: [
+          {
+            id: "remote-3",
+            icon: "!",
+            title: "Market risk alert triggered",
+            msg: "市場風險警報觸發：進入高風險",
+            time: "2026/04/02 10:15",
+            createdAt: "2026-04-02T10:15:00+08:00",
+            read: false,
+            persisted: true,
+            category: "alert",
+            source: "local_db",
+            ticker: null,
+            workspaceTarget: "macro",
+          },
+        ],
+      },
+    });
+
+    await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "開啟宏觀").trigger("click");
+
+    expect(wrapper.emitted("open-workspace")[0]).toEqual(["macro"]);
+  });
 });

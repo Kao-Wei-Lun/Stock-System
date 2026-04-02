@@ -238,6 +238,7 @@
       @dismiss="dismissNotification"
       @toggle-read="handleNotificationReadToggle"
       @open-ticker="handleOpenNotificationTicker"
+      @open-workspace="handleOpenNotificationWorkspace"
     />
 
     <AlertModal
@@ -502,6 +503,11 @@ function handleOpenNotificationTicker(ticker) {
   if (!ticker) return;
   setWorkspaceTab("chart");
   selectTicker(ticker, ticker);
+}
+
+function handleOpenNotificationWorkspace(workspace) {
+  if (!workspace) return;
+  setWorkspaceTab(workspace);
 }
 
 function handleMacroAlertShortcut(payload) {

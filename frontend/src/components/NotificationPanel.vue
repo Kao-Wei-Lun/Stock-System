@@ -67,13 +67,20 @@
           <span>{{ item.time || "—" }}</span>
         </div>
 
-        <div v-if="item.ticker || item.persisted || item.category === 'session'" class="notif-action-row">
+        <div v-if="item.ticker || item.workspaceTarget || item.persisted || item.category === 'session'" class="notif-action-row">
           <button
             v-if="item.ticker"
             class="notif-action-btn"
             @click="$emit('open-ticker', item.ticker)"
           >
             開啟 {{ item.ticker }}
+          </button>
+          <button
+            v-if="item.workspaceTarget"
+            class="notif-action-btn"
+            @click="$emit('open-workspace', item.workspaceTarget)"
+          >
+            開啟宏觀
           </button>
           <button
             v-if="item.persisted"
@@ -103,7 +110,7 @@ const props = defineProps({
   notifications: { type: Array, required: true },
 });
 
-defineEmits(["dismiss", "toggle-read", "open-ticker"]);
+defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace"]);
 
 const viewMode = ref("all");
 const categoryFilter = ref("all");
@@ -143,7 +150,7 @@ const visibleNotifications = computed(() => {
     if (viewMode.value === "unread" && item.read) return false;
     if (categoryFilter.value !== "all" && item.category !== categoryFilter.value) return false;
     if (!keyword) return true;
-    return [item.title, item.msg, item.ticker]
+    return [item.title, item.msg, item.ticker, item.workspaceTarget]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword));
   });

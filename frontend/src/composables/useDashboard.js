@@ -876,6 +876,9 @@ export function useDashboard() {
       success: "✅",
       info: "ℹ",
     };
+    const quote = item.payload?.quote || {};
+    const rawTicker = quote.ticker || item.payload?.ticker || null;
+    const isMacroNotification = String(rawTicker || "").toUpperCase() === "MARKET" || Boolean(quote.macro_summary);
     return {
       id: `remote-${item.id}`,
       remoteId: item.id,
@@ -887,8 +890,9 @@ export function useDashboard() {
       category: item.category || "system",
       read: Boolean(item.read_at),
       persisted: true,
-      source: item.payload?.quote?.source || item.payload?.source || "local_db",
-      ticker: item.payload?.quote?.ticker || item.payload?.ticker || null,
+      source: quote.source || item.payload?.source || "local_db",
+      ticker: isMacroNotification ? null : rawTicker,
+      workspaceTarget: isMacroNotification ? "macro" : null,
       payload: item.payload || {},
       relatedEntityType: item.related_entity_type || null,
       relatedEntityId: item.related_entity_id || null,
