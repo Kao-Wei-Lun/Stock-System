@@ -89,7 +89,7 @@
         >
           <div class="alert-head">
             <div>
-              <div class="alert-tk">{{ alert.ticker }}</div>
+              <div class="alert-tk">{{ formatAlertTarget(alert) }}</div>
               <div class="alert-cond">{{ formatAlertSummary(alert) }}</div>
             </div>
             <div class="alert-badge" :class="alert.triggered ? 'triggered' : (alert.active ? 'active' : 'paused')">
@@ -434,6 +434,7 @@ const ALERT_TYPE_LABELS = {
   rsi: "RSI",
   macd: "MACD",
   volume: "量比",
+  market_risk: "市場風險",
 };
 
 const ALERT_CONDITION_LABELS = {
@@ -449,6 +450,23 @@ const ALERT_CONDITION_LABELS = {
   "下穿": "死亡交叉",
   "黃金交叉": "黃金交叉",
   "死亡交叉": "死亡交叉",
+  high: "進入高風險",
+  medium_or_high: "進入中風險以上",
+  risk_off: "進入 risk-off",
+  offensive: "進入偏進攻",
+};
+
+const MARKET_RISK_VALUE_LABELS = {
+  high: "高風險",
+  medium: "中風險",
+  low: "低風險",
+  medium_or_high: "中風險以上",
+  risk_off: "risk-off",
+  risk_on: "risk-on",
+  offensive: "偏進攻",
+  balanced: "平衡觀察",
+  selective: "選擇性出手",
+  defensive: "防守控倉",
 };
 
 function formatDateTime(value) {
@@ -462,11 +480,20 @@ function formatAlertType(alert) {
   return ALERT_TYPE_LABELS[String(alert?.type || "").toLowerCase()] || alert?.type || "警報";
 }
 
+function formatAlertTarget(alert) {
+  if (String(alert?.type || "").toLowerCase() === "market_risk") return "市場";
+  if (String(alert?.ticker || "").toUpperCase() === "MARKET") return "市場";
+  return alert?.ticker || "—";
+}
+
 function formatAlertMetricValue(alert, value) {
   if (value == null || value === "") return "—";
+  const normalizedType = String(alert?.type || "").toLowerCase();
+  if (normalizedType === "market_risk") {
+    return MARKET_RISK_VALUE_LABELS[String(value)] || String(value);
+  }
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return String(value);
-  const normalizedType = String(alert?.type || "").toLowerCase();
   if (normalizedType === "pct") {
     return `${numericValue.toFixed(2)}%`;
   }

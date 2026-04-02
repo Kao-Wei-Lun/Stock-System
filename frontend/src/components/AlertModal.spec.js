@@ -44,4 +44,31 @@ describe("AlertModal", () => {
     expect(wrapper.text()).toContain("量比異常會以近 20 根日 K 的平均量作為基準");
     expect(valueInput.attributes("disabled")).toBeUndefined();
   });
+
+  it("supports market risk alerts without ticker or numeric input", () => {
+    const wrapper = mount(AlertModal, {
+      props: {
+        isOpen: true,
+        form: {
+          ticker: "MARKET",
+          type: "market_risk",
+          cond: "high",
+          value: "",
+        },
+      },
+    });
+
+    const selects = wrapper.findAll("select");
+    const conditionOptions = selects[1].findAll("option").map((item) => item.text());
+    const inputs = wrapper.findAll("input");
+    const tickerInput = inputs[0];
+    const valueInput = wrapper.find('input[type="number"]');
+
+    expect(conditionOptions).toContain("進入高風險");
+    expect(conditionOptions).toContain("進入 risk-off");
+    expect(tickerInput.attributes("disabled")).toBeDefined();
+    expect(valueInput.attributes("disabled")).toBeDefined();
+    expect(valueInput.attributes("placeholder")).toBe("市場型警報不需填數值");
+    expect(wrapper.text()).toContain("市場風險警報會直接讀取本地 macro_snapshots");
+  });
 });

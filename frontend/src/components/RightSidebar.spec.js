@@ -98,6 +98,93 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("delete-alert")[0]).toEqual([7]);
   });
 
+  it("renders market risk alerts with readable labels", () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "alerts",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [
+          {
+            id: 8,
+            ticker: "MARKET",
+            type: "market_risk",
+            condition: "high",
+            value: null,
+            active: true,
+            triggered: true,
+          },
+        ],
+        alertTriggerLogs: {
+          8: [
+            {
+              id: 108,
+              alert_id: 8,
+              created_at: "2026-04-02T10:05:00+08:00",
+              trigger_value: "high",
+              threshold_value: "high",
+              payload: {
+                quote: {
+                  source: "local_db",
+                },
+              },
+            },
+          ],
+        },
+        alertLogLoading: {},
+        expandedAlertLogId: 8,
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("市場");
+    expect(wrapper.text()).toContain("市場風險");
+    expect(wrapper.text()).toContain("進入高風險");
+    expect(wrapper.text()).toContain("觸發值 高風險");
+    expect(wrapper.text()).toContain("門檻 高風險");
+  });
+
   it("renders backtest results and loads persisted runs", async () => {
     const wrapper = mount(RightSidebar, {
       props: {

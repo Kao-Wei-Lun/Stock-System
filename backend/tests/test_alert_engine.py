@@ -37,6 +37,16 @@ from alert_engine import AlertEngine, evaluate_alert_rule
             {"volume_ratio": 2.4, "source": "yahoo_finance"},
             True,
         ),
+        (
+            {"type": "market_risk", "condition": "high", "value": None, "condition_payload": {}},
+            {
+                "macro_overall_risk": "high",
+                "macro_regime": "risk_off",
+                "macro_trade_posture": "defensive",
+                "source": "local_db",
+            },
+            True,
+        ),
     ],
 )
 def test_evaluate_alert_rule_supports_indicator_types(alert, quote, expected_match):
@@ -44,7 +54,7 @@ def test_evaluate_alert_rule_supports_indicator_types(alert, quote, expected_mat
 
     assert result["matched"] is expected_match
     assert result["reason"] == "matched"
-    assert result["condition_payload"]["last_source"] == "yahoo_finance"
+    assert result["condition_payload"]["last_source"] == quote["source"]
 
 
 def test_evaluate_alert_rule_reports_unsupported_type():
@@ -58,12 +68,13 @@ def test_evaluate_alert_rule_reports_unsupported_type():
 
 
 class StubDb:
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, macro_items=None):
         self.updated_alerts = []
         self.trigger_logs = []
         self.notifications = []
         self.stored_quotes = {}
         self.rows = rows or []
+        self.macro_items = macro_items or []
 
     async def upsert_market_quote(self, quote):
         self.stored_quotes[quote["ticker"]] = dict(quote)
@@ -75,6 +86,9 @@ class StubDb:
 
     async def get_recent_ohlcv_rows(self, ticker, limit=80):
         return [dict(item) for item in self.rows[-limit:]]
+
+    async def list_macro_snapshots(self, snapshot_date=None):
+        return [dict(item) for item in self.macro_items]
 
     async def update_alert(self, alert_id, payload, owner_id=1):
         self.updated_alerts.append((alert_id, payload, owner_id))
@@ -194,6 +208,39 @@ async def test_alert_engine_supports_macd_cross_alerts():
     assert triggered is True
     assert db.trigger_logs[0]["threshold_value"] is not None
     assert "macd" in db.trigger_logs[0]["payload"]["alert"]["type"]
+
+
+@pytest.mark.anyio
+async def test_alert_engine_supports_market_risk_alerts():
+    db = StubDb(
+        macro_items=[
+            {"metric_code": "VIX", "value": 28.6, "change_pct": 1.1, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "US10Y", "value": 4.58, "change_pct": 0.1, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "DXY", "value": 104.0, "change_pct": 0.81, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "SOX", "value": 4500, "change_pct": -1.8, "date": "2026-04-02", "source": "local_db"},
+        ]
+    )
+    provider = StubQuoteProvider(None)
+    engine = AlertEngine(db, provider)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 11,
+            "ticker": "MARKET",
+            "name": "Market risk-off alert",
+            "notification_title": "Market risk-off alert",
+            "type": "market_risk",
+            "condition": "high",
+            "value": None,
+            "condition_payload": {},
+        }
+    )
+
+    assert triggered is True
+    assert db.updated_alerts[-1][1]["triggered"] is True
+    assert db.trigger_logs[0]["ticker"] == "MARKET"
+    assert db.notifications[0]["payload"]["source"] == "local_db"
+    assert "ticker" not in db.notifications[0]["payload"]
 
 
 def test_alert_trigger_log_api_smoke(client, monkeypatch):

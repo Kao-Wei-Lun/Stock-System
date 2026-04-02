@@ -826,16 +826,19 @@ export function useDashboard() {
   function alertRequiresNumericValue(type, condition) {
     const normalizedType = String(type || "").toLowerCase();
     const normalizedCondition = String(condition || "").toLowerCase();
+    if (normalizedType === "market_risk") return false;
     if (normalizedType !== "macd") return true;
     return !["上穿", "下穿", "cross_up", "cross_down"].includes(normalizedCondition);
   }
 
   function defaultAlertCondition(type) {
+    if (String(type || "").toLowerCase() === "market_risk") return "high";
     return String(type || "").toLowerCase() === "macd" ? "上穿" : "大於";
   }
 
   function resetAlertForm() {
     alertForm.ticker = currentTicker.value || "AAPL";
+    alertForm.ticker = normalizeTicker(alertForm.ticker);
     alertForm.type = "price";
     alertForm.cond = "大於";
     alertForm.value = "";
@@ -2564,8 +2567,18 @@ export function useDashboard() {
 
   function updateAlertField(key, value) {
     if (key === "type") {
+      const previousType = String(alertForm.type || "").toLowerCase();
+      const nextType = String(value || "").toLowerCase();
       alertForm.type = value;
       alertForm.cond = defaultAlertCondition(value);
+      if (nextType === "market_risk") {
+        alertForm.ticker = "MARKET";
+      } else if (
+        previousType === "market_risk"
+        && (!alertForm.ticker || String(alertForm.ticker).toUpperCase() === "MARKET")
+      ) {
+        alertForm.ticker = normalizeTicker(currentTicker.value || "AAPL");
+      }
       if (!alertRequiresNumericValue(value, alertForm.cond)) {
         alertForm.value = "";
       }
@@ -2584,12 +2597,15 @@ export function useDashboard() {
   async function saveAlert() {
     const requiresNumericValue = alertRequiresNumericValue(alertForm.type, alertForm.cond);
     const numericValue = requiresNumericValue ? Number(alertForm.value) : null;
-    if (!alertForm.ticker || (requiresNumericValue && Number.isNaN(numericValue))) {
+    const normalizedTicker = String(alertForm.type || "").toLowerCase() === "market_risk"
+      ? "MARKET"
+      : normalizeTicker(alertForm.ticker || currentTicker.value);
+    if (!normalizedTicker || (requiresNumericValue && Number.isNaN(numericValue))) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: "請完整填寫股票代號與數值", type: "error" });
       return;
     }
     const payload = {
-      ticker: normalizeTicker(alertForm.ticker || currentTicker.value),
+      ticker: normalizedTicker,
       type: alertForm.type,
       condition: alertForm.cond,
       value: numericValue,
@@ -2606,7 +2622,8 @@ export function useDashboard() {
       alertModalOpen.value = false;
       resetAlertForm();
       const displayValue = record.value == null ? "" : ` ${record.value}`;
-      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${record.ticker} ${record.condition}${displayValue}`.trim(), type: "success" });
+      const targetLabel = String(record.type || "").toLowerCase() === "market_risk" ? "市場" : record.ticker;
+      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${targetLabel} ${record.condition}${displayValue}`.trim(), type: "success" });
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: error.message || "請稍後再試", type: "error" });
     }

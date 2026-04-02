@@ -3,12 +3,13 @@
     <div class="modal">
       <div class="modal-title">設定警報條件</div>
       <div class="modal-row">
-        <div class="modal-label">股票代號</div>
+        <div class="modal-label">{{ tickerLabel }}</div>
         <input
           class="modal-input"
           :value="form.ticker"
-          placeholder="AAPL"
+          :placeholder="tickerPlaceholder"
           style="text-transform:uppercase"
+          :disabled="tickerDisabled"
           @input="$emit('update-field', { key: 'ticker', value: $event.target.value })"
         >
       </div>
@@ -20,6 +21,7 @@
           <option value="macd">MACD 交叉</option>
           <option value="pct">單日漲跌幅</option>
           <option value="volume">量比異常</option>
+          <option value="market_risk">市場風險</option>
         </select>
       </div>
       <div class="modal-row">
@@ -79,17 +81,33 @@ const volumeConditions = [
   { label: "小於", value: "小於" },
 ];
 
+const marketRiskConditions = [
+  { label: "進入高風險", value: "high" },
+  { label: "進入中風險以上", value: "medium_or_high" },
+  { label: "進入 risk-off", value: "risk_off" },
+  { label: "進入偏進攻", value: "offensive" },
+];
+
 const conditionOptions = computed(() => {
   if (props.form.type === "macd") return macdConditions;
   if (props.form.type === "volume") return volumeConditions;
+  if (props.form.type === "market_risk") return marketRiskConditions;
   return genericConditions;
 });
 
-const requiresNumericValue = computed(() => !(
-  props.form.type === "macd" && ["上穿", "下穿", "cross_up", "cross_down"].includes(props.form.cond)
-));
+const requiresNumericValue = computed(() => {
+  if (props.form.type === "market_risk") return false;
+  return !(
+    props.form.type === "macd" && ["上穿", "下穿", "cross_up", "cross_down"].includes(props.form.cond)
+  );
+});
+
+const tickerDisabled = computed(() => props.form.type === "market_risk");
+const tickerLabel = computed(() => (props.form.type === "market_risk" ? "市場範圍" : "股票代號"));
+const tickerPlaceholder = computed(() => (props.form.type === "market_risk" ? "MARKET" : "AAPL"));
 
 const valueLabel = computed(() => {
+  if (props.form.type === "market_risk") return "市場條件";
   if (props.form.type === "volume") return "量比門檻";
   if (props.form.type === "pct") return "漲跌幅(%)";
   if (props.form.type === "rsi") return "RSI 數值";
@@ -97,6 +115,7 @@ const valueLabel = computed(() => {
 });
 
 const valuePlaceholder = computed(() => {
+  if (props.form.type === "market_risk") return "市場型警報不需填數值";
   if (!requiresNumericValue.value) return "交叉條件不需填寫";
   if (props.form.type === "rsi") return "70 或 30";
   if (props.form.type === "pct") return "5 或 -3";
@@ -114,6 +133,9 @@ const helperText = computed(() => {
   }
   if (props.form.type === "rsi") {
     return "RSI 可設定大於 / 小於 / 上穿 / 下穿，例如 70 與 30。";
+  }
+  if (props.form.type === "market_risk") {
+    return "市場風險警報會直接讀取本地 macro_snapshots，不依賴外部即時報價。";
   }
   return "所有警報都會記錄觸發時間、數值與資料來源。";
 });

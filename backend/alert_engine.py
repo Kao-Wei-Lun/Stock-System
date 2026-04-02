@@ -6,6 +6,7 @@ from statistics import mean
 from typing import Any, Dict, List, Optional
 
 from database import DEFAULT_OWNER_ID
+from macro_regime import build_macro_summary
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,14 @@ def normalize_alert_condition(value: Optional[str]) -> str:
         "lt": "lt",
         "cross_up": "cross_up",
         "cross_down": "cross_down",
+        "high": "high",
+        "medium_or_high": "medium_or_high",
+        "risk_off": "risk_off",
+        "offensive": "offensive",
+        "進入高風險": "high",
+        "進入中風險以上": "medium_or_high",
+        "進入risk-off": "risk_off",
+        "進入偏進攻": "offensive",
     }
     return mapping.get(str(value or "").strip().lower(), mapping.get(str(value or "").strip(), ""))
 
@@ -57,6 +66,25 @@ def evaluate_alert_rule(alert: Dict[str, Any], quote: Dict[str, Any]) -> Dict[st
     elif alert_type == "volume":
         current_value = quote.get("volume_ratio")
         previous_value = condition_payload.get("last_observed_value")
+    elif alert_type == "market_risk":
+        overall_risk = str(quote.get("macro_overall_risk") or "").strip().lower() or None
+        regime = str(quote.get("macro_regime") or "").strip().lower() or None
+        posture = str(quote.get("macro_trade_posture") or "").strip().lower() or None
+        threshold_value = condition
+        if condition in {"high", "medium_or_high"}:
+            current_value = overall_risk
+        elif condition == "risk_off":
+            current_value = regime
+        elif condition == "offensive":
+            current_value = posture
+        else:
+            return {
+                "matched": False,
+                "reason": "unsupported_condition",
+                "condition_payload": condition_payload,
+                "current_value": None,
+                "threshold_value": threshold_value,
+            }
     else:
         return {
             "matched": False,
@@ -68,7 +96,7 @@ def evaluate_alert_rule(alert: Dict[str, Any], quote: Dict[str, Any]) -> Dict[st
 
     missing_threshold = threshold is None and not (
         alert_type == "macd" and condition in {"cross_up", "cross_down"}
-    )
+    ) and alert_type != "market_risk"
     if current_value is None or missing_threshold:
         return {
             "matched": False,
@@ -93,6 +121,15 @@ def evaluate_alert_rule(alert: Dict[str, Any], quote: Dict[str, Any]) -> Dict[st
             matched = previous_value >= previous_secondary_value and current_value < secondary_value
         elif previous_value is not None and threshold is not None:
             matched = previous_value >= threshold > current_value
+    elif alert_type == "market_risk":
+        if condition == "high":
+            matched = current_value == "high"
+        elif condition == "medium_or_high":
+            matched = current_value in {"medium", "high"}
+        elif condition == "risk_off":
+            matched = current_value == "risk_off"
+        elif condition == "offensive":
+            matched = current_value == "offensive"
 
     updated_payload = {
         **condition_payload,
@@ -101,6 +138,10 @@ def evaluate_alert_rule(alert: Dict[str, Any], quote: Dict[str, Any]) -> Dict[st
         "last_quote_timestamp": quote.get("quote_timestamp") or quote.get("synced_at"),
         "last_source": quote.get("source"),
     }
+    if alert_type == "market_risk":
+        updated_payload["last_macro_overall_risk"] = quote.get("macro_overall_risk")
+        updated_payload["last_macro_regime"] = quote.get("macro_regime")
+        updated_payload["last_macro_trade_posture"] = quote.get("macro_trade_posture")
 
     return {
         "matched": matched,
@@ -268,19 +309,35 @@ class AlertEngine:
             return False
 
         alert_type = str(alert.get("type") or "").strip().lower()
-        quote = await self._quote_provider.fetch_quote(ticker)
-        if quote:
-            quote = await self._db.upsert_market_quote(quote)
+        if alert_type == "market_risk":
+            macro_items = await self._db.list_macro_snapshots() if hasattr(self._db, "list_macro_snapshots") else []
+            macro_summary = build_macro_summary(macro_items or [])
+            if macro_summary.get("overall_risk") == "unknown":
+                return False
+            quote = {
+                "ticker": ticker,
+                "source": "local_db",
+                "quote_timestamp": macro_summary.get("updated_at"),
+                "macro_overall_risk": macro_summary.get("overall_risk"),
+                "macro_regime": macro_summary.get("regime"),
+                "macro_trade_posture": macro_summary.get("trade_posture"),
+                "macro_summary": macro_summary,
+            }
+            market_data = dict(quote)
         else:
-            quote = await self._db.get_market_quote(ticker)
-        if not quote:
-            return False
+            quote = await self._quote_provider.fetch_quote(ticker)
+            if quote:
+                quote = await self._db.upsert_market_quote(quote)
+            else:
+                quote = await self._db.get_market_quote(ticker)
+            if not quote:
+                return False
 
-        market_data = dict(quote)
-        if alert_type in {"rsi", "macd", "volume"} and hasattr(self._db, "get_recent_ohlcv_rows"):
-            rows = await self._db.get_recent_ohlcv_rows(ticker, limit=80)
-            if rows:
-                market_data.update(_build_indicator_market_data(_merge_quote_into_rows(rows, quote)))
+            market_data = dict(quote)
+            if alert_type in {"rsi", "macd", "volume"} and hasattr(self._db, "get_recent_ohlcv_rows"):
+                rows = await self._db.get_recent_ohlcv_rows(ticker, limit=80)
+                if rows:
+                    market_data.update(_build_indicator_market_data(_merge_quote_into_rows(rows, quote)))
 
         evaluation = evaluate_alert_rule(alert, market_data)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -323,17 +380,19 @@ class AlertEngine:
             {
                 "category": "alert",
                 "level": "warning",
-                "title": alert.get("notification_title") or alert.get("name") or f"{ticker} alert triggered",
+                "title": alert.get("notification_title") or alert.get("name") or (
+                    "Market risk alert triggered" if alert_type == "market_risk" else f"{ticker} alert triggered"
+                ),
                 "message": self._build_notification_message(ticker, alert, evaluation),
                 "related_entity_type": "alert",
                 "related_entity_id": alert.get("id"),
                 "payload": {
                     "quote": quote,
                     "alert_id": alert.get("id"),
-                    "ticker": ticker,
                     "source": quote.get("source"),
                     "trigger_value": evaluation["current_value"],
                     "threshold_value": evaluation["threshold_value"],
+                    **({"ticker": ticker} if alert_type != "market_risk" else {}),
                 },
             },
             owner_id=self._owner_id,
@@ -345,6 +404,23 @@ class AlertEngine:
         condition = alert.get("condition") or ""
         threshold_value = evaluation.get("threshold_value")
         current_value = evaluation.get("current_value")
+        if str(alert.get("type") or "").strip().lower() == "market_risk":
+            label_map = {
+                "high": "高風險",
+                "medium": "中風險",
+                "low": "低風險",
+                "medium_or_high": "中風險以上",
+                "risk_off": "risk-off",
+                "offensive": "偏進攻",
+                "balanced": "平衡觀察",
+                "defensive": "防守控倉",
+                "selective": "選擇性出手",
+            }
+            return (
+                "市場風險警報觸發："
+                f"{label_map.get(str(threshold_value), threshold_value)} -> "
+                f"{label_map.get(str(current_value), current_value)}"
+            )
         if threshold_value in (None, ""):
             return f"{ticker} {alert.get('type')} {condition} -> {current_value}"
         return f"{ticker} {alert.get('type')} {condition} {threshold_value} -> {current_value}"
