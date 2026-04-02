@@ -83,6 +83,7 @@ describe("Market workspaces", () => {
           sector: "",
           min_price: "",
           min_volume_ratio: "",
+          min_setup_quality: "",
           max_pe_ratio: "",
           min_dividend_yield: "",
           near_52w_high_pct: "",
@@ -131,6 +132,7 @@ describe("Market workspaces", () => {
 
     expect(wrapper.text()).toContain("選股器");
     expect(wrapper.text()).toContain("AAPL");
+    expect(wrapper.text()).toContain("Setup 品質");
     expect(wrapper.text()).toContain("選擇性出手");
     expect(wrapper.text()).toContain("+6");
 

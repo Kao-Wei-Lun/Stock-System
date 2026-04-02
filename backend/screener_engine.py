@@ -55,6 +55,7 @@ def normalize_screener_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, A
         "min_price": _safe_float(source.get("min_price"), 0.0) or None,
         "max_price": _safe_float(source.get("max_price"), 0.0) or None,
         "min_volume_ratio": _safe_float(source.get("min_volume_ratio"), 0.0) or None,
+        "min_setup_quality": _safe_int(source.get("min_setup_quality"), 0) or None,
         "max_pe_ratio": _safe_float(source.get("max_pe_ratio"), 0.0) or None,
         "min_dividend_yield": _safe_float(source.get("min_dividend_yield"), 0.0) or None,
         "near_52w_high_pct": _safe_float(source.get("near_52w_high_pct"), 0.0) or None,
@@ -73,6 +74,7 @@ def build_screener_presets() -> List[Dict[str, Any]]:
             "description": "量能放大且接近 52 週高點",
             "filters": {
                 "min_volume_ratio": 1.5,
+                "min_setup_quality": 4,
                 "near_52w_high_pct": 5,
                 "ma_alignment": "bullish",
                 "sort_by": "score",
@@ -560,6 +562,8 @@ class ScreenerEngine:
                 institutional_signal,
                 change_pct,
             )
+            if normalized_filters["min_setup_quality"] is not None and setup_quality < normalized_filters["min_setup_quality"]:
+                continue
             score = base_score + macro_adjustment
             decision_card = _build_decision_card(
                 score=score,
@@ -619,6 +623,10 @@ class ScreenerEngine:
             results.sort(key=lambda item: item.get("change_pct") or 0, reverse=True)
         elif sort_by == "volume_ratio":
             results.sort(key=lambda item: item.get("volume_ratio") or 0, reverse=True)
+        elif sort_by == "setup_quality":
+            results.sort(key=lambda item: (item.get("setup_quality") or 0, item.get("score") or 0), reverse=True)
+        elif sort_by == "macro_adjustment":
+            results.sort(key=lambda item: (item.get("macro_adjustment") or 0, item.get("score") or 0), reverse=True)
         elif sort_by == "event_date":
             results.sort(key=lambda item: (item.get("next_event") or {}).get("event_date") or "9999-12-31")
         else:

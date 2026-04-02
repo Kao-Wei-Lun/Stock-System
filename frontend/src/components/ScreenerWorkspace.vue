@@ -39,6 +39,10 @@
           <input type="number" step="0.1" :value="filters.min_volume_ratio" @input="$emit('update-filter', { key: 'min_volume_ratio', value: $event.target.value })" />
         </label>
         <label class="filter-row">
+          <span>Setup 品質</span>
+          <input type="number" step="1" min="1" max="5" :value="filters.min_setup_quality" @input="$emit('update-filter', { key: 'min_setup_quality', value: $event.target.value })" />
+        </label>
+        <label class="filter-row">
           <span>PE 上限</span>
           <input type="number" step="0.1" :value="filters.max_pe_ratio" @input="$emit('update-filter', { key: 'max_pe_ratio', value: $event.target.value })" />
         </label>
@@ -73,6 +77,8 @@
           <span>排序</span>
           <select :value="filters.sort_by" @change="$emit('update-filter', { key: 'sort_by', value: $event.target.value })">
             <option value="score">綜合分數</option>
+            <option value="setup_quality">Setup 品質</option>
+            <option value="macro_adjustment">市場調整</option>
             <option value="change_pct">漲跌幅</option>
             <option value="volume_ratio">量比</option>
             <option value="event_date">事件日期</option>
@@ -146,6 +152,7 @@
                 <td>
                   <div class="score-cell">
                     <strong>{{ item.score }}</strong>
+                    <span class="verdict-pill" :class="verdictClass(getDecisionCard(item).verdict)">{{ getDecisionCard(item).verdict }}</span>
                     <small :class="scoreAdjustmentClass(item.macro_adjustment)">
                       {{ formatAdjustment(item.macro_adjustment) }} · Q{{ item.setup_quality ?? "—" }}
                     </small>
@@ -265,6 +272,12 @@ function scoreAdjustmentClass(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric === 0) return "";
   return numeric > 0 ? "up" : "dn";
+}
+
+function verdictClass(verdict) {
+  if (String(verdict || "").includes("優先") || String(verdict || "").includes("強勢")) return "positive";
+  if (String(verdict || "").includes("暫緩") || String(verdict || "").includes("等待")) return "risk";
+  return "neutral";
 }
 
 function formatSectionScore(value) {
@@ -568,6 +581,25 @@ function savePreset() {
 
 .score-cell small {
   color: var(--text3);
+}
+
+.verdict-pill {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+  font-size: 10px;
+}
+
+.verdict-pill.positive {
+  background: rgba(0, 217, 163, 0.14);
+  color: #bfffea;
+}
+
+.verdict-pill.risk {
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd5d5;
 }
 
 .detail-toggle-btn {
