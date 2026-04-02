@@ -52,6 +52,12 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     updateAlert(alertId, payload) {
       return request(`/api/alerts/${alertId}`, buildJsonRequest("PATCH", payload));
     },
+    listAlertTriggers(alertId, options = {}) {
+      const params = new URLSearchParams();
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/alerts/${alertId}/triggers${query ? `?${query}` : ""}`);
+    },
     deleteAlert(alertId) {
       return request(`/api/alerts/${alertId}`, { method: "DELETE" });
     },

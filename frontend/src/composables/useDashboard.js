@@ -491,6 +491,9 @@ export function useDashboard() {
   const workspacePresets = ref([]);
   const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
   const alerts = ref([]);
+  const alertTriggerLogs = ref({});
+  const alertLogLoading = ref({});
+  const expandedAlertLogId = ref(null);
   const localNotifications = ref([]);
   const remoteNotifications = ref([]);
   const notifications = computed(() => [...localNotifications.value, ...remoteNotifications.value]);
@@ -773,6 +776,30 @@ export function useDashboard() {
     };
   }
 
+  function mapAlertTriggerLog(record) {
+    const payload = record?.payload || {};
+    const evaluation = payload.evaluation || {};
+    return {
+      ...record,
+      trigger_value: record?.trigger_value ?? evaluation.current_value ?? null,
+      threshold_value: record?.threshold_value ?? evaluation.threshold_value ?? null,
+      payload,
+    };
+  }
+
+  function pruneAlertArtifacts(nextAlerts) {
+    const validIds = new Set((nextAlerts || []).map((item) => String(item.id)));
+    alertTriggerLogs.value = Object.fromEntries(
+      Object.entries(alertTriggerLogs.value).filter(([key]) => validIds.has(String(key))),
+    );
+    alertLogLoading.value = Object.fromEntries(
+      Object.entries(alertLogLoading.value).filter(([key]) => validIds.has(String(key))),
+    );
+    if (expandedAlertLogId.value != null && !validIds.has(String(expandedAlertLogId.value))) {
+      expandedAlertLogId.value = null;
+    }
+  }
+
   function alertRequiresNumericValue(type, condition) {
     const normalizedType = String(type || "").toLowerCase();
     const normalizedCondition = String(condition || "").toLowerCase();
@@ -919,7 +946,9 @@ export function useDashboard() {
   async function loadAlerts({ silent = true } = {}) {
     try {
       const response = await dashboardApi.listAlerts();
-      alerts.value = Array.isArray(response?.items) ? response.items.map((item) => mapAlertRecord(item)) : [];
+      const nextAlerts = Array.isArray(response?.items) ? response.items.map((item) => mapAlertRecord(item)) : [];
+      alerts.value = nextAlerts;
+      pruneAlertArtifacts(nextAlerts);
     } catch (error) {
       console.error(error);
       if (!silent) {
@@ -2530,12 +2559,90 @@ export function useDashboard() {
     }
   }
 
+  async function loadAlertTriggerLogs(alertId, { force = false } = {}) {
+    const cacheKey = String(alertId);
+    if (!force && Array.isArray(alertTriggerLogs.value[cacheKey])) {
+      return alertTriggerLogs.value[cacheKey];
+    }
+
+    alertLogLoading.value = {
+      ...alertLogLoading.value,
+      [cacheKey]: true,
+    };
+    try {
+      const response = await dashboardApi.listAlertTriggers(alertId, { limit: 20 });
+      const logs = Array.isArray(response?.items)
+        ? response.items.map((item) => mapAlertTriggerLog(item))
+        : [];
+      alertTriggerLogs.value = {
+        ...alertTriggerLogs.value,
+        [cacheKey]: logs,
+      };
+      return logs;
+    } catch (error) {
+      pushNotification({
+        icon: "!",
+        title: "Alert log load failed",
+        msg: error.message || "Please try again later",
+        type: "error",
+      });
+      return [];
+    } finally {
+      alertLogLoading.value = {
+        ...alertLogLoading.value,
+        [cacheKey]: false,
+      };
+    }
+  }
+
+  async function toggleAlertLog(alertId) {
+    if (alertId == null) return;
+    if (String(expandedAlertLogId.value) === String(alertId)) {
+      expandedAlertLogId.value = null;
+      return;
+    }
+    expandedAlertLogId.value = alertId;
+    await loadAlertTriggerLogs(alertId);
+  }
+
+  async function toggleAlertActive(alertId) {
+    if (alertId == null) return;
+    const target = alerts.value.find((item) => String(item.id) === String(alertId));
+    if (!target) return;
+
+    const nextActive = !target.active;
+    const payload = nextActive
+      ? { active: true, triggered: false, triggered_at: null }
+      : { active: false };
+
+    try {
+      const record = await dashboardApi.updateAlert(alertId, payload);
+      alerts.value = alerts.value.map((item) =>
+        String(item.id) === String(alertId) ? mapAlertRecord(record) : item,
+      );
+      pushNotification({
+        icon: nextActive ? ">" : "||",
+        title: nextActive ? "Alert resumed" : "Alert paused",
+        msg: `${record.ticker} ${record.condition || record.cond}`,
+        type: "success",
+      });
+    } catch (error) {
+      pushNotification({
+        icon: "!",
+        title: nextActive ? "Resume alert failed" : "Pause alert failed",
+        msg: error.message || "Please try again later",
+        type: "error",
+      });
+    }
+  }
+
   async function deleteAlert(alertId) {
     if (alertId == null) return;
-    const target = alerts.value.find((item) => item.id === alertId);
+    const target = alerts.value.find((item) => String(item.id) === String(alertId));
     try {
       await dashboardApi.deleteAlert(alertId);
-      alerts.value = alerts.value.filter((item) => item.id !== alertId);
+      alerts.value = alerts.value.filter((item) => String(item.id) !== String(alertId));
+      pruneAlertArtifacts(alerts.value);
       pushNotification({
         icon: "🗑",
         title: "警報已刪除",
@@ -2703,6 +2810,9 @@ export function useDashboard() {
     drawings,
     selectedDrawingId,
     alerts,
+    alertTriggerLogs,
+    alertLogLoading,
+    expandedAlertLogId,
     notifications,
     wsConnected,
     latency,
@@ -2817,6 +2927,8 @@ export function useDashboard() {
     closeAlertModal,
     updateAlertField,
     saveAlert,
+    toggleAlertLog,
+    toggleAlertActive,
     deleteAlert,
     updateBacktestField,
     runBacktest,

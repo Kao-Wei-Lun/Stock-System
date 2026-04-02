@@ -52,6 +52,15 @@ describe("dashboardApi", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/notifications?unread_only=true&limit=20", {});
   });
 
+  it("builds alert trigger log query strings", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ items: [] }));
+    const api = createDashboardApi();
+
+    await api.listAlertTriggers(7, { limit: 10 });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/alerts/7/triggers?limit=10", {});
+  });
+
   it("marks notifications as read", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 5, read_at: "2026-03-29T03:00:00+00:00" }));
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });

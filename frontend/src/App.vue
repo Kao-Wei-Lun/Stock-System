@@ -118,6 +118,9 @@
                 :active-panels="activePanels"
                 :indicator-settings="indicatorSettings"
                 :alerts="alerts"
+                :alert-trigger-logs="alertTriggerLogs"
+                :alert-log-loading="alertLogLoading"
+                :expanded-alert-log-id="expandedAlertLogId"
                 :backtest-form="backtestForm"
                 :backtest-result="backtestResult"
                 :backtest-history="backtestHistory"
@@ -138,6 +141,8 @@
                 @update-indicator-setting="updateIndicatorSetting"
                 @apply-indicator-preset="applyIndicatorPreset"
                 @open-alert-modal="openAlertModal"
+                @toggle-alert-active="toggleAlertActive"
+                @toggle-alert-log="toggleAlertLog"
                 @delete-alert="deleteAlert"
                 @update-backtest-field="handleBacktestField"
                 @run-backtest="runBacktest"
@@ -286,6 +291,9 @@ const {
   drawings,
   selectedDrawingId,
   alerts,
+  alertTriggerLogs,
+  alertLogLoading,
+  expandedAlertLogId,
   notifications,
   wsConnected,
   latency,
@@ -398,6 +406,8 @@ const {
     closeAlertModal,
     updateAlertField,
     saveAlert,
+    toggleAlertLog,
+    toggleAlertActive,
     deleteAlert,
     updateBacktestField,
     runBacktest,

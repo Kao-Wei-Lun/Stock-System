@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import RightSidebar from "./RightSidebar.vue";
 
 describe("RightSidebar", () => {
-  it("renders persisted alerts and emits delete actions", async () => {
+  it("renders persisted alerts, trigger logs, and emits alert actions", async () => {
     const wrapper = mount(RightSidebar, {
       props: {
         rightTab: "alerts",
@@ -23,6 +23,24 @@ describe("RightSidebar", () => {
             triggered: false,
           },
         ],
+        alertTriggerLogs: {
+          7: [
+            {
+              id: 99,
+              alert_id: 7,
+              created_at: "2026-04-02T09:15:00+08:00",
+              trigger_value: 212,
+              threshold_value: 210,
+              payload: {
+                quote: {
+                  source: "yahoo_finance",
+                },
+              },
+            },
+          ],
+        },
+        alertLogLoading: {},
+        expandedAlertLogId: 7,
         backtestForm: {},
         backtestResult: null,
         backtestHistory: [],
@@ -67,10 +85,16 @@ describe("RightSidebar", () => {
     });
 
     expect(wrapper.text()).toContain("AAPL");
+    expect(wrapper.text()).toContain("MySQL / alerts");
+    expect(wrapper.text()).toContain("yahoo_finance");
     expect(wrapper.text()).toContain("監控中");
 
-    await wrapper.find(".alert-card .add-btn").trigger("click");
+    await wrapper.find(".alert-action-btn.pause").trigger("click");
+    await wrapper.find(".alert-action-btn.log").trigger("click");
+    await wrapper.find(".alert-action-btn.delete").trigger("click");
 
+    expect(wrapper.emitted("toggle-alert-active")[0]).toEqual([7]);
+    expect(wrapper.emitted("toggle-alert-log")[0]).toEqual([7]);
     expect(wrapper.emitted("delete-alert")[0]).toEqual([7]);
   });
 
