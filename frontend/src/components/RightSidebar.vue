@@ -159,6 +159,9 @@
                   <span>觸發值 {{ formatAlertMetricValue(alert, log.trigger_value) }}</span>
                   <span>門檻 {{ formatAlertMetricValue(alert, log.threshold_value) }}</span>
                 </div>
+                <div v-if="formatLogMacroContext(log)" class="alert-log-row-bottom">
+                  <span>{{ formatLogMacroContext(log) }}</span>
+                </div>
               </div>
             </div>
             <div v-else class="alert-log-empty">尚無觸發紀錄</div>
@@ -547,6 +550,14 @@ function isAlertLogLoading(alert) {
 
 function formatLogSource(log) {
   return log?.payload?.quote?.source || "local_db";
+}
+
+function formatLogMacroContext(log) {
+  const summary = log?.payload?.macro_summary || log?.payload?.quote?.macro_summary;
+  if (!summary) return "";
+  const riskLabel = MARKET_RISK_VALUE_LABELS[String(summary.overall_risk)] || summary.overall_risk;
+  const postureLabel = MARKET_RISK_VALUE_LABELS[String(summary.trade_posture)] || summary.trade_posture;
+  return `市場 ${riskLabel} / ${postureLabel}`;
 }
 
 function getAlertContextSource(alert) {

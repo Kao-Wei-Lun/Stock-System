@@ -67,8 +67,14 @@
           <span>{{ item.time || "—" }}</span>
         </div>
 
-        <div v-if="item.contextSource || item.contextTags?.length" class="notif-context-row">
+        <div v-if="item.contextSource || item.contextTags?.length || item.macroSummary" class="notif-context-row">
           <span v-if="item.contextSource">{{ formatContextSource(item.contextSource) }}</span>
+          <span v-if="item.macroSummary" class="notif-context-tag">
+            {{ formatMacroRisk(item.macroSummary.overall_risk) }}
+          </span>
+          <span v-if="item.macroSummary" class="notif-context-tag">
+            {{ formatMacroPosture(item.macroSummary.trade_posture) }}
+          </span>
           <span
             v-for="tag in item.contextTags || []"
             :key="`${item.id}-${tag}`"
@@ -168,7 +174,16 @@ const visibleNotifications = computed(() => {
     if (viewMode.value === "unread" && item.read) return false;
     if (categoryFilter.value !== "all" && item.category !== categoryFilter.value) return false;
     if (!keyword) return true;
-    return [item.title, item.msg, item.ticker, item.workspaceTarget, ...(item.contextTags || [])]
+    return [
+      item.title,
+      item.msg,
+      item.ticker,
+      item.workspaceTarget,
+      item.macroSummary?.overall_risk,
+      item.macroSummary?.trade_posture,
+      item.macroSummary?.decision_hint,
+      ...(item.contextTags || []),
+    ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword));
   });
@@ -188,15 +203,43 @@ function formatContextSource(value) {
   return `來源：${value}`;
 }
 
+function formatMacroRisk(value) {
+  const labels = {
+    high: "風險：高",
+    medium: "風險：中",
+    low: "風險：低",
+    unknown: "風險：未知",
+  };
+  return labels[String(value || "").toLowerCase()] || `風險：${value || "未知"}`;
+}
+
+function formatMacroPosture(value) {
+  const labels = {
+    defensive: "防守控倉",
+    selective: "選擇性出手",
+    offensive: "偏進攻",
+    balanced: "平衡觀察",
+    standby: "等待同步",
+  };
+  return labels[String(value || "").toLowerCase()] || String(value || "等待同步");
+}
+
 function buildJournalSeed(item) {
-  const tags = [...new Set([...(item.contextTags || []), "來源:警報通知"])];
+  const tags = [...new Set([
+    ...(item.contextTags || []),
+    item.macroSummary ? `市場:${formatMacroPosture(item.macroSummary.trade_posture)}` : "",
+    "來源:警報通知",
+  ].filter(Boolean))];
   const thresholdText = item.thresholdValue == null ? "—" : String(item.thresholdValue);
   const triggerText = item.triggerValue == null ? "—" : String(item.triggerValue);
+  const macroContext = item.macroSummary
+    ? `${formatMacroRisk(item.macroSummary.overall_risk)} | ${formatMacroPosture(item.macroSummary.trade_posture)}`
+    : "";
   return {
     ticker: item.ticker,
     name: item.ticker,
     entry_reason: `通知回寫：${item.title || item.ticker}`,
-    review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}`,
+    review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}${macroContext ? ` | ${macroContext}` : ""}${item.macroSummary?.decision_hint ? ` | ${item.macroSummary.decision_hint}` : ""}`,
     tags,
   };
 }

@@ -899,6 +899,7 @@ export function useDashboard() {
     const rawTicker = quote.ticker || item.payload?.ticker || null;
     const isMacroNotification = String(rawTicker || "").toUpperCase() === "MARKET" || Boolean(quote.macro_summary);
     const contextTags = Array.isArray(item.payload?.context_tags) ? item.payload.context_tags.filter(Boolean).slice(0, 4) : [];
+    const macroSummary = item.payload?.macro_summary || null;
     return {
       id: `remote-${item.id}`,
       remoteId: item.id,
@@ -915,6 +916,7 @@ export function useDashboard() {
       workspaceTarget: isMacroNotification ? "macro" : null,
       contextSource: item.payload?.context_source || "",
       contextTags,
+      macroSummary,
       triggerValue: item.payload?.trigger_value ?? null,
       thresholdValue: item.payload?.threshold_value ?? null,
       payload: item.payload || {},

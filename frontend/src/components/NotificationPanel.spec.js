@@ -21,6 +21,11 @@ describe("NotificationPanel", () => {
             source: "yahoo_finance",
             ticker: "AAPL",
             contextTags: ["優先候選", "Q4"],
+            macroSummary: {
+              overall_risk: "medium",
+              trade_posture: "selective",
+              decision_hint: "環境偏震盪，只做最強標的。",
+            },
           },
           {
             id: "remote-2",
@@ -49,6 +54,9 @@ describe("NotificationPanel", () => {
     await wrapper.find(".notif-search").setValue("Q4");
     expect(wrapper.text()).toContain("AAPL alert");
 
+    await wrapper.find(".notif-search").setValue("selective");
+    expect(wrapper.text()).toContain("AAPL alert");
+
     await wrapper.find(".notif-search").setValue("breakout");
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "標記已讀").trigger("click");
 
@@ -75,6 +83,11 @@ describe("NotificationPanel", () => {
             contextTags: ["優先候選", "Q4"],
             thresholdValue: 210,
             triggerValue: 212,
+            macroSummary: {
+              overall_risk: "medium",
+              trade_posture: "selective",
+              decision_hint: "環境偏震盪，只做最強標的。",
+            },
           },
           {
             id: "local-1",
@@ -109,8 +122,8 @@ describe("NotificationPanel", () => {
         ticker: "AAPL",
         name: "AAPL",
         entry_reason: "通知回寫：AAPL alert",
-        review_notes: "AAPL price breakout | 門檻:210 | 觸發:212 | 來源：觀察池",
-        tags: ["優先候選", "Q4", "來源:警報通知"],
+        review_notes: "AAPL price breakout | 門檻:210 | 觸發:212 | 來源：觀察池 | 風險：中 | 選擇性出手 | 環境偏震盪，只做最強標的。",
+        tags: ["優先候選", "Q4", "市場:選擇性出手", "來源:警報通知"],
       },
     ]);
     expect(wrapper.emitted("dismiss")[0]).toEqual(["local-1"]);
@@ -161,12 +174,19 @@ describe("NotificationPanel", () => {
             ticker: "AAPL",
             contextSource: "watchlist",
             contextTags: ["優先候選", "Q4"],
+            macroSummary: {
+              overall_risk: "medium",
+              trade_posture: "selective",
+              decision_hint: "環境偏震盪，只做最強標的。",
+            },
           },
         ],
       },
     });
 
     expect(wrapper.text()).toContain("來源：觀察池");
+    expect(wrapper.text()).toContain("風險：中");
+    expect(wrapper.text()).toContain("選擇性出手");
     expect(wrapper.text()).toContain("優先候選");
     expect(wrapper.text()).toContain("Q4");
   });

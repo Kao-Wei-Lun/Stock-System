@@ -140,7 +140,14 @@ def _build_rows():
 
 @pytest.mark.anyio
 async def test_alert_engine_triggers_and_persists_notifications():
-    db = StubDb()
+    db = StubDb(
+        macro_items=[
+            {"metric_code": "VIX", "value": 21.4, "change_pct": 0.3, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "US10Y", "value": 4.36, "change_pct": 0.05, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "DXY", "value": 103.2, "change_pct": 0.2, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "SOX", "value": 4625, "change_pct": 0.9, "date": "2026-04-02", "source": "local_db"},
+        ]
+    )
     provider = StubQuoteProvider(
         {
             "ticker": "AAPL",
@@ -175,10 +182,12 @@ async def test_alert_engine_triggers_and_persists_notifications():
     assert db.updated_alerts[-1][1]["triggered"] is True
     assert db.updated_alerts[-1][1]["active"] is False
     assert db.trigger_logs[0]["trigger_value"] == 212
+    assert db.trigger_logs[0]["payload"]["macro_summary"]["trade_posture"] == "balanced"
     assert db.notifications[0]["category"] == "alert"
     assert db.notifications[0]["payload"]["context_source"] == "watchlist"
     assert db.notifications[0]["payload"]["context_tags"] == ["優先候選", "Q4"]
     assert db.notifications[0]["payload"]["snapshot_price"] == 210.5
+    assert db.notifications[0]["payload"]["macro_summary"]["trade_posture"] == "balanced"
 
 
 @pytest.mark.anyio

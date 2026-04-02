@@ -138,9 +138,11 @@ def evaluate_alert_rule(alert: Dict[str, Any], quote: Dict[str, Any]) -> Dict[st
         "last_quote_timestamp": quote.get("quote_timestamp") or quote.get("synced_at"),
         "last_source": quote.get("source"),
     }
-    if alert_type == "market_risk":
+    if quote.get("macro_overall_risk") is not None:
         updated_payload["last_macro_overall_risk"] = quote.get("macro_overall_risk")
+    if quote.get("macro_regime") is not None:
         updated_payload["last_macro_regime"] = quote.get("macro_regime")
+    if quote.get("macro_trade_posture") is not None:
         updated_payload["last_macro_trade_posture"] = quote.get("macro_trade_posture")
 
     return {
@@ -309,6 +311,7 @@ class AlertEngine:
             return False
 
         alert_type = str(alert.get("type") or "").strip().lower()
+        macro_summary = None
         if alert_type == "market_risk":
             macro_items = await self._db.list_macro_snapshots() if hasattr(self._db, "list_macro_snapshots") else []
             macro_summary = build_macro_summary(macro_items or [])
@@ -338,6 +341,19 @@ class AlertEngine:
                 rows = await self._db.get_recent_ohlcv_rows(ticker, limit=80)
                 if rows:
                     market_data.update(_build_indicator_market_data(_merge_quote_into_rows(rows, quote)))
+            if hasattr(self._db, "list_macro_snapshots"):
+                macro_items = await self._db.list_macro_snapshots()
+                macro_summary = build_macro_summary(macro_items or [])
+                if macro_summary.get("overall_risk") != "unknown":
+                    market_data.update(
+                        {
+                            "macro_overall_risk": macro_summary.get("overall_risk"),
+                            "macro_regime": macro_summary.get("regime"),
+                            "macro_trade_posture": macro_summary.get("trade_posture"),
+                        }
+                    )
+                else:
+                    macro_summary = None
 
         evaluation = evaluate_alert_rule(alert, market_data)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -367,6 +383,7 @@ class AlertEngine:
             threshold_value=evaluation["threshold_value"],
             payload={
                 "quote": quote,
+                "macro_summary": macro_summary,
                 "evaluation": evaluation,
                 "alert": {
                     "id": alert.get("id"),
@@ -397,6 +414,7 @@ class AlertEngine:
                     "snapshot_price": alert.get("condition_payload", {}).get("snapshot_price"),
                     "snapshot_source": alert.get("condition_payload", {}).get("snapshot_source"),
                     "snapshot_timestamp": alert.get("condition_payload", {}).get("snapshot_timestamp"),
+                    "macro_summary": macro_summary,
                     "alert_type": alert.get("type"),
                     "alert_condition": alert.get("condition"),
                     **({"ticker": ticker} if alert_type != "market_risk" else {}),

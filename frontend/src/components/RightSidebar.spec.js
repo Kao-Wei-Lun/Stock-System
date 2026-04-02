@@ -40,6 +40,10 @@ describe("RightSidebar", () => {
                 quote: {
                   source: "yahoo_finance",
                 },
+                macro_summary: {
+                  overall_risk: "medium",
+                  trade_posture: "selective",
+                },
               },
             },
           ],
@@ -96,6 +100,7 @@ describe("RightSidebar", () => {
     expect(wrapper.text()).toContain("Q4");
     expect(wrapper.text()).toContain("快照 210.5");
     expect(wrapper.text()).toContain("yahoo_finance");
+    expect(wrapper.text()).toContain("市場 中風險 / 選擇性出手");
     expect(wrapper.text()).toContain("監控中");
 
     await wrapper.find(".alert-action-btn.pause").trigger("click");
