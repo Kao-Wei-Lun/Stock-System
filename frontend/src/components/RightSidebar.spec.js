@@ -560,7 +560,7 @@ describe("RightSidebar", () => {
     }]);
   });
 
-  it("emits journal preset save, load, and delete actions", async () => {
+  it.skip("emits journal preset save, load, and delete actions", async () => {
     const wrapper = mount(RightSidebar, {
       props: {
         rightTab: "journal",
@@ -631,6 +631,134 @@ describe("RightSidebar", () => {
       name: "高風險日",
       scope: "all",
       filters: { tag: "市場:防守控倉" },
+    }]);
+    expect(wrapper.emitted("delete-journal-filter-preset")[0]).toEqual([7]);
+  });
+
+  it("emits journal preset save, edit, load, and delete actions", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterPresets: [
+          {
+            id: 7,
+            name: "高風險日",
+            description: "只看防守 setup",
+            scope: "all",
+            use_count: 3,
+            last_used_at: "2026-04-01T09:00:00+08:00",
+            filters: {
+              market: "TW",
+              strategy_code: "",
+              tag: "市場:防守控倉",
+              search: "",
+            },
+          },
+        ],
+        journalFilterScope: "all",
+        journalFilters: {
+          market: "TW",
+          strategy_code: "breakout",
+          tag: "watchlist",
+          search: "macro",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("已用 3");
+
+    await wrapper.get('[data-testid="journal-preset-name"]').setValue("我的模板");
+    await wrapper.get('[data-testid="journal-preset-description"]').setValue("用於快速回顧");
+    await wrapper.get('[data-testid="journal-preset-save"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-edit-7"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="journal-preset-name"]').element.value).toBe("高風險日");
+    expect(wrapper.get('[data-testid="journal-preset-description"]').element.value).toBe("只看防守 setup");
+
+    await wrapper.get('[data-testid="journal-preset-description"]').setValue("更新後說明");
+    await wrapper.get('[data-testid="journal-preset-save"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-edit-7"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-cancel"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-7"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-delete-7"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="journal-preset-name"]').element.value).toBe("");
+    expect(wrapper.get('[data-testid="journal-preset-description"]').element.value).toBe("");
+    expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual([{
+      id: null,
+      name: "我的模板",
+      description: "用於快速回顧",
+      scope: "all",
+      filters: {
+        market: "TW",
+        strategy_code: "breakout",
+        tag: "watchlist",
+        search: "macro",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[1]).toEqual([{
+      id: 7,
+      name: "高風險日",
+      description: "更新後說明",
+      scope: "all",
+      filters: {
+        market: "TW",
+        strategy_code: "breakout",
+        tag: "watchlist",
+        search: "macro",
+      },
+    }]);
+    expect(wrapper.emitted("load-journal-filter-preset")[0]).toEqual([{
+      id: 7,
+      name: "高風險日",
+      description: "只看防守 setup",
+      scope: "all",
+      use_count: 3,
+      last_used_at: "2026-04-01T09:00:00+08:00",
+      filters: {
+        market: "TW",
+        strategy_code: "",
+        tag: "市場:防守控倉",
+        search: "",
+      },
     }]);
     expect(wrapper.emitted("delete-journal-filter-preset")[0]).toEqual([7]);
   });

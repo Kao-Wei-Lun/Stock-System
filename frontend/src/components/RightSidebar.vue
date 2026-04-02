@@ -273,13 +273,29 @@
             data-testid="journal-preset-name"
             @keydown.enter.prevent="saveJournalPreset"
           />
+          <input
+            v-model.trim="journalPresetDescription"
+            class="bt-inp"
+            placeholder="模板說明"
+            data-testid="journal-preset-description"
+            @keydown.enter.prevent="saveJournalPreset"
+          />
           <button
             type="button"
             class="sync-btn"
             data-testid="journal-preset-save"
             @click="saveJournalPreset"
           >
-            儲存
+            {{ editingJournalPresetId ? "更新" : "儲存" }}
+          </button>
+          <button
+            v-if="editingJournalPresetId"
+            type="button"
+            class="sync-btn"
+            data-testid="journal-preset-cancel"
+            @click="resetJournalPresetEditor"
+          >
+            取消
           </button>
         </div>
         <div v-if="journalFilterPresets.length" class="journal-preset-grid">
@@ -292,14 +308,28 @@
             @click="$emit('load-journal-filter-preset', preset)"
           >
             <span>{{ preset.name }}</span>
-            <small>{{ preset.scope === "all" ? "全部紀錄" : "目前標的" }}</small>
-            <strong
-              class="journal-preset-delete"
-              :data-testid="`journal-preset-delete-${preset.id}`"
-              @click.stop="$emit('delete-journal-filter-preset', preset.id)"
-            >
-              ×
-            </strong>
+            <small>{{ preset.description || "自訂模板" }}</small>
+            <small>
+              {{ preset.scope === "all" ? "全部紀錄" : "目前標的" }}
+              · 已用 {{ Number(preset.use_count || 0) }}
+              <template v-if="preset.last_used_at"> · {{ formatDateTime(preset.last_used_at) }}</template>
+            </small>
+            <span class="journal-preset-actions">
+              <strong
+                class="journal-preset-edit"
+                :data-testid="`journal-preset-edit-${preset.id}`"
+                @click.stop="startEditingJournalPreset(preset)"
+              >
+                編
+              </strong>
+              <strong
+                class="journal-preset-delete"
+                :data-testid="`journal-preset-delete-${preset.id}`"
+                @click.stop="$emit('delete-journal-filter-preset', preset.id)"
+              >
+                ×
+              </strong>
+            </span>
           </button>
         </div>
         <div v-else class="bt-history-empty">尚無篩選模板</div>
@@ -700,11 +730,36 @@ function buildJournalQuickSaveDraft(name, partialPreset, description) {
 }
 
 const journalPresetName = ref("");
+const journalPresetDescription = ref("");
+const editingJournalPresetId = ref(null);
 
 function saveJournalPreset() {
   if (!journalPresetName.value) return;
-  emit("save-journal-filter-preset", journalPresetName.value);
+  emit("save-journal-filter-preset", {
+    id: editingJournalPresetId.value,
+    name: journalPresetName.value,
+    description: journalPresetDescription.value,
+    scope: props.journalFilterScope === "all" ? "all" : "ticker",
+    filters: {
+      market: props.journalFilters?.market || "",
+      strategy_code: props.journalFilters?.strategy_code || "",
+      tag: props.journalFilters?.tag || "",
+      search: props.journalFilters?.search || "",
+    },
+  });
+  resetJournalPresetEditor();
+}
+
+function startEditingJournalPreset(preset) {
+  editingJournalPresetId.value = preset?.id ?? null;
+  journalPresetName.value = preset?.name || "";
+  journalPresetDescription.value = preset?.description || "";
+}
+
+function resetJournalPresetEditor() {
+  editingJournalPresetId.value = null;
   journalPresetName.value = "";
+  journalPresetDescription.value = "";
 }
 
 const ALERT_TYPE_LABELS = {
@@ -1244,13 +1299,13 @@ const activeJournalFilters = computed(() => {
 }
 
 .journal-preset-save {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 8px;
   margin-top: 8px;
 }
 
 .journal-preset-save .bt-inp {
-  flex: 1;
   min-width: 0;
 }
 
@@ -1267,19 +1322,27 @@ const activeJournalFilters = computed(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  min-width: 120px;
-  padding-right: 24px;
+  min-width: 180px;
+  padding-right: 52px;
 }
 
 .journal-preset-chip small {
   color: var(--text3);
   font-size: 10px;
+  line-height: 1.4;
+  text-align: left;
 }
 
-.journal-preset-delete {
+.journal-preset-actions {
   position: absolute;
   top: 6px;
   right: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.journal-preset-edit,
+.journal-preset-delete {
   font-size: 12px;
   color: var(--text3);
 }

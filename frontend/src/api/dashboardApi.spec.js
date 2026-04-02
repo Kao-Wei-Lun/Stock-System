@@ -147,7 +147,8 @@ describe("dashboardApi", () => {
     globalThis.fetch
       .mockImplementationOnce(() => jsonResponse({ items: [] }))
       .mockImplementationOnce(() => jsonResponse({ id: 4, name: "高風險日" }))
-      .mockImplementationOnce(() => jsonResponse({ ok: true, preset_id: 4 }));
+      .mockImplementationOnce(() => jsonResponse({ ok: true, preset_id: 4 }))
+      .mockImplementationOnce(() => jsonResponse({ id: 4, use_count: 1 }));
     const api = createDashboardApi();
 
     await api.listJournalFilterPresets();
@@ -157,6 +158,7 @@ describe("dashboardApi", () => {
       filters: { tag: "市場:防守控倉" },
     });
     await api.deleteJournalFilterPreset(4);
+    await api.markJournalFilterPresetUsed(4);
 
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/journal/presets", {});
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/journal/presets", {
@@ -170,6 +172,9 @@ describe("dashboardApi", () => {
     });
     expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/journal/presets/4", {
       method: "DELETE",
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, "/api/journal/presets/4/use", {
+      method: "POST",
     });
   });
 

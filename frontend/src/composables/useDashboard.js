@@ -1284,6 +1284,7 @@ export function useDashboard() {
     if (input && typeof input === "object" && !Array.isArray(input)) {
       const filters = input.filters && typeof input.filters === "object" ? input.filters : {};
       return {
+        id: input.id ?? null,
         name: String(input.name || "").trim(),
         description: input.description || "由交易日誌工作區儲存",
         scope: input.scope === "all" ? "all" : "ticker",
@@ -1298,6 +1299,7 @@ export function useDashboard() {
 
     const name = String(input || "").trim();
     return {
+      id: null,
       name,
       description: "由交易日誌工作區儲存",
       ...buildJournalFilterPresetPayload(),
@@ -1322,16 +1324,28 @@ export function useDashboard() {
     const draft = normalizeJournalFilterPresetDraft(name);
     if (!draft.name) return;
     try {
-      const existing = journalFilterPresets.value.find((item) => String(item?.name || "").trim() === draft.name);
-      if (existing?.id) {
-        await dashboardApi.updateJournalFilterPreset(existing.id, draft);
+      const existing = draft.id
+        ? journalFilterPresets.value.find((item) => String(item?.id) === String(draft.id))
+        : journalFilterPresets.value.find((item) => String(item?.name || "").trim() === draft.name);
+      if (existing?.id || draft.id) {
+        await dashboardApi.updateJournalFilterPreset(draft.id || existing.id, {
+          name: draft.name,
+          description: draft.description,
+          scope: draft.scope,
+          filters: draft.filters,
+        });
       } else {
-        await dashboardApi.createJournalFilterPreset(draft);
+        await dashboardApi.createJournalFilterPreset({
+          name: draft.name,
+          description: draft.description,
+          scope: draft.scope,
+          filters: draft.filters,
+        });
       }
       await loadJournalFilterPresets();
       pushNotification({
-        icon: existing?.id ? "♻️" : "💾",
-        title: existing?.id ? "日誌篩選模板已更新" : "日誌篩選模板已儲存",
+        icon: existing?.id || draft.id ? "♻️" : "💾",
+        title: existing?.id || draft.id ? "日誌篩選模板已更新" : "日誌篩選模板已儲存",
         msg: draft.name,
         type: "success",
       });
@@ -1341,9 +1355,23 @@ export function useDashboard() {
     }
   }
 
-  function loadJournalFilterPreset(preset) {
+  async function loadJournalFilterPreset(preset) {
     if (!preset) return;
-    void applyJournalFilterPreset(preset);
+    let nextPreset = preset;
+    if (preset.id) {
+      try {
+        const updated = await dashboardApi.markJournalFilterPresetUsed(preset.id);
+        if (updated) {
+          nextPreset = updated;
+          journalFilterPresets.value = journalFilterPresets.value.map((item) =>
+            String(item?.id) === String(updated.id) ? updated : item,
+          );
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    await applyJournalFilterPreset(nextPreset);
     pushNotification({ icon: "🧭", title: "已載入日誌篩選模板", msg: preset.name || "preset", type: "success" });
   }
 

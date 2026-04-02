@@ -139,7 +139,14 @@ def trade_journal_store(monkeypatch):
 
     async def list_journal_filter_presets(owner_id=1):
         items = list(store["presets"].values())
-        items.sort(key=lambda item: item["updated_at"], reverse=True)
+        items.sort(
+            key=lambda item: (
+                item.get("last_used_at") or item["updated_at"],
+                item["updated_at"],
+                item["id"],
+            ),
+            reverse=True,
+        )
         return clone(items)
 
     async def get_journal_filter_preset(preset_id, owner_id=1):
@@ -154,6 +161,8 @@ def trade_journal_store(monkeypatch):
             {
                 "id": preset_id,
                 "owner_id": owner_id,
+                "use_count": 0,
+                "last_used_at": None,
                 "created_at": "2026-04-01T08:00:00+00:00",
                 "updated_at": "2026-04-01T08:00:00+00:00",
             }
@@ -169,6 +178,8 @@ def trade_journal_store(monkeypatch):
             {
                 "id": preset_id,
                 "owner_id": owner_id,
+                "use_count": store["presets"][preset_id].get("use_count", 0),
+                "last_used_at": store["presets"][preset_id].get("last_used_at"),
                 "created_at": store["presets"][preset_id]["created_at"],
                 "updated_at": "2026-04-01T08:30:00+00:00",
             }
@@ -178,6 +189,14 @@ def trade_journal_store(monkeypatch):
 
     async def delete_journal_filter_preset(preset_id, owner_id=1):
         return store["presets"].pop(preset_id, None) is not None
+
+    async def mark_journal_filter_preset_used(preset_id, owner_id=1):
+        preset = store["presets"].get(preset_id)
+        if not preset:
+            return None
+        preset["use_count"] = int(preset.get("use_count") or 0) + 1
+        preset["last_used_at"] = "2026-04-01T09:00:00+00:00"
+        return clone(preset)
 
     async def set_notification_read_state(notification_id, read, owner_id=1):
         notification = store["notifications"].get(notification_id)
@@ -197,6 +216,7 @@ def trade_journal_store(monkeypatch):
     monkeypatch.setattr(main.db, "create_journal_filter_preset", create_journal_filter_preset)
     monkeypatch.setattr(main.db, "update_journal_filter_preset", update_journal_filter_preset)
     monkeypatch.setattr(main.db, "delete_journal_filter_preset", delete_journal_filter_preset)
+    monkeypatch.setattr(main.db, "mark_journal_filter_preset_used", mark_journal_filter_preset_used)
     monkeypatch.setattr(main.db, "set_notification_read_state", set_notification_read_state)
     monkeypatch.setattr(main.db, "mark_notification_read", lambda notification_id, owner_id=1: set_notification_read_state(notification_id, True, owner_id))
 
@@ -274,9 +294,23 @@ def test_trade_journal_filter_preset_routes(client, trade_journal_store):
     assert created["scope"] == "all"
     assert created["filters"]["tag"] == "市場:防守控倉"
 
+    secondary_response = client.post(
+        "/api/journal/presets",
+        json={
+            "name": "強勢突破",
+            "description": "只看 breakout",
+            "scope": "ticker",
+            "filters": {
+                "market": "US",
+                "strategy_code": "breakout",
+            },
+        },
+    )
+    assert secondary_response.status_code == 200
+
     list_response = client.get("/api/journal/presets")
     assert list_response.status_code == 200
-    assert list_response.json()["items"][0]["id"] == created["id"]
+    assert list_response.json()["items"][0]["id"] == secondary_response.json()["id"]
 
     update_response = client.put(
         f"/api/journal/presets/{created['id']}",
@@ -293,6 +327,15 @@ def test_trade_journal_filter_preset_routes(client, trade_journal_store):
     updated = update_response.json()
     assert updated["filters"]["market"] == "US"
     assert updated["filters"]["search"] == "macro"
+
+    use_response = client.post(f"/api/journal/presets/{created['id']}/use")
+    assert use_response.status_code == 200
+    assert use_response.json()["use_count"] == 1
+    assert use_response.json()["last_used_at"] == "2026-04-01T09:00:00+00:00"
+
+    used_list_response = client.get("/api/journal/presets")
+    assert used_list_response.status_code == 200
+    assert used_list_response.json()["items"][0]["id"] == created["id"]
 
     delete_response = client.delete(f"/api/journal/presets/{created['id']}")
     assert delete_response.status_code == 200

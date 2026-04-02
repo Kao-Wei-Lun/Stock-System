@@ -513,6 +513,8 @@ CREATE_TABLE_STATEMENTS = {
             `description` VARCHAR(512) NULL,
             `scope` VARCHAR(32) NOT NULL DEFAULT 'ticker',
             `filters_json` JSON NOT NULL,
+            `use_count` INT NOT NULL DEFAULT 0,
+            `last_used_at` DATETIME NULL,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
@@ -579,6 +581,16 @@ REQUIRED_COLUMN_MIGRATIONS = {
             ALTER TABLE `alerts`
             ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             AFTER `created_at`
+        """,
+    },
+    "journal_filter_presets": {
+        "use_count": """
+            ALTER TABLE `journal_filter_presets`
+            ADD COLUMN `use_count` INT NOT NULL DEFAULT 0 AFTER `filters_json`
+        """,
+        "last_used_at": """
+            ALTER TABLE `journal_filter_presets`
+            ADD COLUMN `last_used_at` DATETIME NULL AFTER `use_count`
         """,
     },
 }
@@ -2182,7 +2194,7 @@ class Database:
             SELECT *
             FROM `journal_filter_presets`
             WHERE `owner_id`=%s
-            ORDER BY `updated_at` DESC, `id` DESC
+            ORDER BY COALESCE(`last_used_at`, `updated_at`) DESC, `updated_at` DESC, `id` DESC
             """,
             (owner_id,),
         )
@@ -2267,6 +2279,23 @@ class Database:
             (preset_id, owner_id),
         )
         return bool(deleted)
+
+    async def mark_journal_filter_preset_used(
+        self,
+        preset_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        updated = await self._execute(
+            """
+            UPDATE `journal_filter_presets`
+            SET `use_count`=`use_count` + 1, `last_used_at`=UTC_TIMESTAMP()
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (preset_id, owner_id),
+        )
+        if not updated:
+            return None
+        return await self.get_journal_filter_preset(preset_id, owner_id=owner_id)
 
     async def _replace_trade_journal_children(
         self,
@@ -3323,6 +3352,8 @@ def _deserialize_journal_filter_preset(row: Optional[Dict[str, Any]]) -> Optiona
         "description": row.get("description"),
         "scope": row.get("scope") or "ticker",
         "filters": _json_loads(row.get("filters_json"), {}),
+        "use_count": int(row.get("use_count") or 0),
+        "last_used_at": _datetime_to_iso(row.get("last_used_at")),
         "created_at": _datetime_to_iso(row.get("created_at")),
         "updated_at": _datetime_to_iso(row.get("updated_at")),
     }

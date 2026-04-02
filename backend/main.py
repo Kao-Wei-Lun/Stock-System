@@ -1056,6 +1056,14 @@ async def delete_journal_filter_preset(preset_id: int):
     return {"ok": True, "preset_id": preset_id}
 
 
+@app.post("/api/journal/presets/{preset_id}/use")
+async def mark_journal_filter_preset_used(preset_id: int):
+    preset = await db.mark_journal_filter_preset_used(preset_id, owner_id=DEFAULT_OWNER_ID)
+    if not preset:
+        raise HTTPException(404, "Journal filter preset not found")
+    return preset
+
+
 @app.post("/api/journal/trades")
 async def create_trade_journal_entry(payload: TradeJournalEntryCreatePayload):
     try:

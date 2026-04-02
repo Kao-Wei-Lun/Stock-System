@@ -100,6 +100,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     deleteJournalFilterPreset(presetId) {
       return request(`/api/journal/presets/${presetId}`, { method: "DELETE" });
     },
+    markJournalFilterPresetUsed(presetId) {
+      return request(`/api/journal/presets/${presetId}/use`, { method: "POST" });
+    },
     createJournalTrade(payload) {
       return request("/api/journal/trades", buildJsonRequest("POST", payload));
     },
