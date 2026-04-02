@@ -124,6 +124,9 @@ describe("WatchlistPanel", () => {
     });
 
     expect(wrapper.findAll(".wl-op")).toHaveLength(9);
+    expect(wrapper.get('[data-testid="watchlist-summary"]').text()).toContain("優先 1");
+    expect(wrapper.get('[data-testid="watchlist-summary"]').text()).toContain("觀察 1");
+    expect(wrapper.get('[data-testid="watchlist-summary"]').text()).toContain("等待 1");
 
     await wrapper.get('[data-testid="watch-verdict-filter"]').setValue("priority");
 

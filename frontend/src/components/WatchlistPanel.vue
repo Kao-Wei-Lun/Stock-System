@@ -322,12 +322,32 @@ const emptyLabel = computed(() => {
   return "這個群組目前還沒有股票";
 });
 
+const watchVerdictCounts = computed(() => selectedWatchItems.value.reduce((accumulator, item) => {
+  const verdictKey = getVerdictKey(item);
+  if (verdictKey === "priority" || verdictKey === "watch" || verdictKey === "wait") {
+    accumulator[verdictKey] += 1;
+  }
+  return accumulator;
+}, {
+  priority: 0,
+  watch: 0,
+  wait: 0,
+}));
+
 const watchSummary = computed(() => {
   if (props.leftTab !== "watch" || !selectedGroup.value) return "";
   const totalCount = selectedWatchItems.value.length;
   if (!totalCount) return "此群組尚無標的";
 
-  const baseSummary = `顯示 ${visibleItems.value.length} / ${totalCount} 檔`;
+  const verdictSummary = [
+    watchVerdictCounts.value.priority ? `優先 ${watchVerdictCounts.value.priority}` : "",
+    watchVerdictCounts.value.watch ? `觀察 ${watchVerdictCounts.value.watch}` : "",
+    watchVerdictCounts.value.wait ? `等待 ${watchVerdictCounts.value.wait}` : "",
+  ].filter(Boolean).join(" · ");
+
+  const baseSummary = verdictSummary
+    ? `顯示 ${visibleItems.value.length} / ${totalCount} 檔 · ${verdictSummary}`
+    : `顯示 ${visibleItems.value.length} / ${totalCount} 檔`;
   if (!manualOrderingEnabled.value) {
     return `${baseSummary} · 目前為篩選/排序視圖，已暫停手動上下移`;
   }
