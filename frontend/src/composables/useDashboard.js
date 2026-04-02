@@ -844,6 +844,27 @@ export function useDashboard() {
     alertForm.value = "";
   }
 
+  function formatAlertConditionLabel(condition) {
+    const normalizedCondition = String(condition || "").toLowerCase();
+    const labels = {
+      gt: "大於",
+      lt: "小於",
+      eq: "等於",
+      "大於": "大於",
+      "小於": "小於",
+      "等於": "等於",
+      cross_up: "黃金交叉",
+      cross_down: "死亡交叉",
+      上穿: "黃金交叉",
+      下穿: "死亡交叉",
+      high: "進入高風險",
+      medium_or_high: "進入中風險以上",
+      risk_off: "進入 risk-off",
+      offensive: "進入偏進攻",
+    };
+    return labels[normalizedCondition] || labels[String(condition || "")] || String(condition || "");
+  }
+
   function mapRemoteNotification(item) {
     const iconByCategory = {
       alert: "⚡",
@@ -2555,9 +2576,21 @@ export function useDashboard() {
     await selectTicker(result.ticker, result.name || result.ticker);
   }
 
-  function openAlertModal(ticker = currentTicker.value) {
+  function openAlertModal(ticker = currentTicker.value, overrides = {}) {
+    const options = ticker && typeof ticker === "object" && !Array.isArray(ticker)
+      ? ticker
+      : { ticker, ...overrides };
     resetAlertForm();
-    alertForm.ticker = normalizeTicker(ticker || currentTicker.value || "AAPL");
+    alertForm.ticker = normalizeTicker(options.ticker || currentTicker.value || "AAPL");
+    if (options.type) {
+      updateAlertField("type", options.type);
+    }
+    if (options.condition) {
+      updateAlertField("cond", options.condition);
+    }
+    if ("value" in options) {
+      alertForm.value = options.value == null ? "" : String(options.value);
+    }
     alertModalOpen.value = true;
   }
 
@@ -2623,7 +2656,8 @@ export function useDashboard() {
       resetAlertForm();
       const displayValue = record.value == null ? "" : ` ${record.value}`;
       const targetLabel = String(record.type || "").toLowerCase() === "market_risk" ? "市場" : record.ticker;
-      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${targetLabel} ${record.condition}${displayValue}`.trim(), type: "success" });
+      const conditionLabel = formatAlertConditionLabel(record.condition);
+      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${targetLabel} ${conditionLabel}${displayValue}`.trim(), type: "success" });
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: error.message || "請稍後再試", type: "error" });
     }

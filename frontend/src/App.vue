@@ -197,6 +197,7 @@
             v-else-if="workspaceTab === 'macro'"
             :macro-dashboard="macroDashboard"
             @refresh="loadMacroDashboard(true)"
+            @create-alert="handleMacroAlertShortcut"
           />
 
           <ScreenerWorkspace
@@ -501,6 +502,15 @@ function handleOpenNotificationTicker(ticker) {
   if (!ticker) return;
   setWorkspaceTab("chart");
   selectTicker(ticker, ticker);
+}
+
+function handleMacroAlertShortcut(payload) {
+  openAlertModal({
+    ticker: "MARKET",
+    type: payload?.type || "market_risk",
+    condition: payload?.condition || "high",
+    value: "",
+  });
 }
 
 function handleAlertField(payload) {

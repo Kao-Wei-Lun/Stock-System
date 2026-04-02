@@ -10,6 +10,14 @@
           <span class="hero-pill muted">{{ postureLabel }}</span>
         </div>
         <div class="hero-hint">{{ decisionHint }}</div>
+        <div class="hero-actions">
+          <button class="macro-action-btn" @click="$emit('create-alert', { type: 'market_risk', condition: 'high' })">
+            提醒高風險
+          </button>
+          <button class="macro-action-btn secondary" @click="$emit('create-alert', { type: 'market_risk', condition: 'risk_off' })">
+            提醒 risk-off
+          </button>
+        </div>
       </div>
       <div class="hero-side">
         <div class="risk-badge" :class="riskClass">{{ riskLabel }}</div>
@@ -75,7 +83,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(["refresh"]);
+defineEmits(["refresh", "create-alert"]);
 
 const items = computed(() => props.macroDashboard?.items || []);
 const summary = computed(() => props.macroDashboard?.summary || {});
@@ -226,6 +234,12 @@ function formatTimestamp(value) {
   max-width: 620px;
 }
 
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .hero-side {
   display: flex;
   flex-direction: column;
@@ -281,6 +295,22 @@ function formatTimestamp(value) {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text2);
   cursor: pointer;
+}
+
+.macro-action-btn {
+  border: 1px solid rgba(255, 107, 107, 0.28);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 107, 107, 0.12);
+  color: #ffd2d2;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.macro-action-btn.secondary {
+  border-color: rgba(245, 166, 35, 0.28);
+  background: rgba(245, 166, 35, 0.12);
+  color: #ffe5b4;
 }
 
 .summary-panel {

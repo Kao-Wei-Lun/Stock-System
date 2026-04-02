@@ -31,7 +31,7 @@ describe("Market workspaces", () => {
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
   });
 
-  it("renders macro dashboard summary", () => {
+  it("renders macro dashboard summary and emits alert shortcuts", async () => {
     const wrapper = mount(MacroDashboard, {
       props: {
         macroDashboard: {
@@ -63,6 +63,13 @@ describe("Market workspaces", () => {
     expect(wrapper.text()).toContain("防守控倉");
     expect(wrapper.text()).toContain("美元轉弱");
     expect(wrapper.text()).toContain("VIX");
+
+    const actionButtons = wrapper.findAll(".macro-action-btn");
+    await actionButtons[0].trigger("click");
+    await actionButtons[1].trigger("click");
+
+    expect(wrapper.emitted("create-alert")[0]).toEqual([{ type: "market_risk", condition: "high" }]);
+    expect(wrapper.emitted("create-alert")[1]).toEqual([{ type: "market_risk", condition: "risk_off" }]);
   });
 
   it("renders screener results and emits actions", async () => {
