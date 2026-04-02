@@ -1,26 +1,47 @@
 <template>
   <div class="macro-shell">
     <section class="macro-hero">
-      <div>
+      <div class="hero-copy">
         <div class="macro-kicker">Macro Risk</div>
         <h2>宏觀風險儀表板</h2>
         <p>把波動、匯率、利率與半導體風向納入交易前檢查。</p>
+        <div class="hero-meta">
+          <span class="hero-pill">{{ regimeLabel }}</span>
+          <span class="hero-pill muted">{{ postureLabel }}</span>
+        </div>
+        <div class="hero-hint">{{ decisionHint }}</div>
       </div>
       <div class="hero-side">
         <div class="risk-badge" :class="riskClass">{{ riskLabel }}</div>
+        <div class="posture-badge" :class="postureClass">{{ postureLabel }}</div>
+        <div class="hero-updated">更新 {{ updatedLabel }}</div>
         <button class="refresh-btn" @click="$emit('refresh')">重新整理</button>
       </div>
     </section>
 
     <section class="summary-panel">
-      <div class="panel-title">風險摘要</div>
-      <div v-if="summary.drivers?.length" class="driver-list">
-        <div v-for="driver in summary.drivers" :key="`${driver.label}-${driver.value}`" class="driver-chip" :class="driver.tone">
-          <span>{{ driver.label }}</span>
-          <strong>{{ driver.value }}</strong>
+      <div class="summary-grid">
+        <div class="summary-block">
+          <div class="panel-title">風險摘要</div>
+          <div v-if="riskDrivers.length" class="driver-list">
+            <div v-for="driver in riskDrivers" :key="`risk-${driver.label}-${driver.value}`" class="driver-chip" :class="driver.tone">
+              <span>{{ driver.label }}</span>
+              <strong>{{ driver.value }}</strong>
+            </div>
+          </div>
+          <div v-else class="empty-state">目前沒有明顯風險升溫訊號</div>
+        </div>
+        <div class="summary-block">
+          <div class="panel-title">順風項</div>
+          <div v-if="tailwinds.length" class="driver-list">
+            <div v-for="driver in tailwinds" :key="`tailwind-${driver.label}-${driver.value}`" class="driver-chip" :class="driver.tone">
+              <span>{{ driver.label }}</span>
+              <strong>{{ driver.value }}</strong>
+            </div>
+          </div>
+          <div v-else class="empty-state">尚未看到明確順風項</div>
         </div>
       </div>
-      <div v-else class="empty-state">尚未同步宏觀風險摘要</div>
     </section>
 
     <section class="metric-grid">
@@ -60,17 +81,58 @@ const items = computed(() => props.macroDashboard?.items || []);
 const summary = computed(() => props.macroDashboard?.summary || {});
 const riskLevel = computed(() => summary.value?.overall_risk || "unknown");
 const riskClass = computed(() => `is-${riskLevel.value}`);
+const postureClass = computed(() => `is-${summary.value?.trade_posture || "standby"}`);
 const riskLabel = computed(() => {
   if (riskLevel.value === "high") return "高風險";
   if (riskLevel.value === "medium") return "中風險";
   if (riskLevel.value === "low") return "低風險";
   return "尚未同步";
 });
+const regimeLabel = computed(() => {
+  if (summary.value?.regime === "risk_off") return "Risk-off";
+  if (summary.value?.regime === "mixed") return "震盪混合";
+  if (summary.value?.regime === "trend_supportive") return "趨勢順風";
+  if (summary.value?.regime === "neutral") return "中性觀察";
+  return "等待快照";
+});
+const postureLabel = computed(() => {
+  if (summary.value?.trade_posture === "defensive") return "防守控倉";
+  if (summary.value?.trade_posture === "selective") return "選擇性出手";
+  if (summary.value?.trade_posture === "offensive") return "偏進攻";
+  if (summary.value?.trade_posture === "balanced") return "平衡觀察";
+  return "暫停判斷";
+});
+const decisionHint = computed(
+  () => summary.value?.decision_hint || "尚未同步宏觀風險摘要，暫時不要把市場環境當成進場依據。",
+);
+const riskDrivers = computed(() => {
+  if (summary.value?.risk_drivers?.length) return summary.value.risk_drivers;
+  return (summary.value?.drivers || []).filter((item) => item.tone !== "positive");
+});
+const tailwinds = computed(() => {
+  if (summary.value?.tailwinds?.length) return summary.value.tailwinds;
+  return (summary.value?.drivers || []).filter((item) => item.tone === "positive");
+});
+const updatedLabel = computed(() => formatTimestamp(summary.value?.updated_at || props.macroDashboard?.snapshot_date));
 
 function formatValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "—";
   return numeric.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+}
+
+function formatTimestamp(value) {
+  if (!value) return "未同步";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "未同步";
+  return parsed.toLocaleString("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 </script>
 
@@ -108,6 +170,12 @@ function formatValue(value) {
     rgba(8, 15, 24, 0.92);
 }
 
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .macro-kicker {
   color: #7be7ff;
   letter-spacing: 0.08em;
@@ -124,6 +192,38 @@ function formatValue(value) {
   margin: 0;
   color: var(--text2);
   max-width: 560px;
+}
+
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hero-pill,
+.posture-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.hero-pill {
+  background: rgba(123, 231, 255, 0.12);
+  color: #b6f3ff;
+}
+
+.hero-pill.muted {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+}
+
+.hero-hint {
+  color: var(--text2);
+  font-size: 13px;
+  max-width: 620px;
 }
 
 .hero-side {
@@ -153,6 +253,29 @@ function formatValue(value) {
   background: #8ad18a;
 }
 
+.posture-badge {
+  color: var(--text1);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.posture-badge.is-defensive {
+  background: rgba(255, 107, 107, 0.18);
+}
+
+.posture-badge.is-selective,
+.posture-badge.is-balanced {
+  background: rgba(245, 166, 35, 0.18);
+}
+
+.posture-badge.is-offensive {
+  background: rgba(40, 167, 69, 0.18);
+}
+
+.hero-updated {
+  color: var(--text3);
+  font-size: 11px;
+}
+
 .refresh-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
@@ -162,6 +285,16 @@ function formatValue(value) {
 
 .summary-panel {
   padding: 16px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.summary-block {
+  min-width: 0;
 }
 
 .panel-title {
@@ -275,6 +408,10 @@ function formatValue(value) {
 
   .refresh-btn {
     width: 100%;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
   }
 
   .metric-grid {

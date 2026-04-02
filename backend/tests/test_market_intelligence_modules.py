@@ -115,6 +115,36 @@ async def test_macro_snapshot_provider_persists_normalized_payload(monkeypatch):
     assert all(item["source"] == "yahoo_finance" for item in items)
 
 
+def test_build_macro_dashboard_payload_summarizes_regime_and_posture():
+    risk_off_payload = main.build_macro_dashboard_payload(
+        [
+            {"metric_code": "VIX", "value": 29.4, "change_pct": 1.1, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "US10Y", "value": 4.61, "change_pct": 0.3, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "DXY", "value": 104.1, "change_pct": 0.82, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "SOX", "value": 4500, "change_pct": -2.1, "date": "2026-04-02", "source": "local_db"},
+        ]
+    )
+    trend_payload = main.build_macro_dashboard_payload(
+        [
+            {"metric_code": "VIX", "value": 14.8, "change_pct": -1.5, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "US10Y", "value": 4.02, "change_pct": -0.2, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "DXY", "value": 102.4, "change_pct": -0.61, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "SOX", "value": 4700, "change_pct": 1.9, "date": "2026-04-02", "source": "local_db"},
+            {"metric_code": "TWII", "value": 21200, "change_pct": 0.91, "date": "2026-04-02", "source": "local_db"},
+        ]
+    )
+
+    assert risk_off_payload["summary"]["overall_risk"] == "high"
+    assert risk_off_payload["summary"]["regime"] == "risk_off"
+    assert risk_off_payload["summary"]["trade_posture"] == "defensive"
+    assert risk_off_payload["summary"]["risk_score"] >= 4
+
+    assert trend_payload["summary"]["overall_risk"] == "low"
+    assert trend_payload["summary"]["regime"] == "trend_supportive"
+    assert trend_payload["summary"]["trade_posture"] == "offensive"
+    assert len(trend_payload["summary"]["tailwinds"]) >= 2
+
+
 def test_fundamental_and_chip_summary_builders():
     fundamental_summary = build_fundamental_summary(
         {
@@ -303,6 +333,8 @@ def test_market_intelligence_routes(client, intelligence_store):
     macro_response = client.get("/api/market/macro")
     assert macro_response.status_code == 200
     assert macro_response.json()["summary"]["overall_risk"] in {"medium", "high"}
+    assert macro_response.json()["summary"]["trade_posture"] in {"selective", "defensive"}
+    assert macro_response.json()["summary"]["decision_hint"]
 
     fundamentals_response = client.get("/api/fundamentals/AAPL")
     assert fundamentals_response.status_code == 200

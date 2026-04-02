@@ -38,7 +38,11 @@ describe("Market workspaces", () => {
           snapshot_date: "2026-04-02",
           summary: {
             overall_risk: "high",
-            drivers: [{ tone: "risk", label: "VIX 偏高", value: "29.40" }],
+            regime: "risk_off",
+            trade_posture: "defensive",
+            decision_hint: "系統性風險升高，今天優先保留現金、降低部位，等待風險收斂。",
+            risk_drivers: [{ tone: "risk", label: "VIX 偏高", value: "29.40" }],
+            tailwinds: [{ tone: "positive", label: "美元轉弱", value: "-0.80%" }],
           },
           items: [
             {
@@ -55,6 +59,9 @@ describe("Market workspaces", () => {
     });
 
     expect(wrapper.text()).toContain("高風險");
+    expect(wrapper.text()).toContain("Risk-off");
+    expect(wrapper.text()).toContain("防守控倉");
+    expect(wrapper.text()).toContain("美元轉弱");
     expect(wrapper.text()).toContain("VIX");
   });
 
