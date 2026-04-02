@@ -303,7 +303,7 @@
             v-for="preset in journalFilterPresets"
             :key="preset.id"
             type="button"
-            class="preset-chip journal-preset-chip"
+            :class="['preset-chip', 'journal-preset-chip', { 'journal-preset-active': isJournalPresetActive(preset) }]"
             :data-testid="`journal-preset-${preset.id}`"
             @click="$emit('load-journal-filter-preset', preset)"
           >
@@ -333,6 +333,43 @@
           </button>
         </div>
         <div v-else class="bt-history-empty">尚無篩選模板</div>
+      </div>
+
+      <div v-if="journalPresetResultSummary" class="journal-card journal-preset-result-card" data-testid="journal-preset-result-summary">
+        <div class="bt-section-title">套用結果</div>
+        <div class="bt-trade-row">
+          <div>
+            <div>{{ journalPresetResultSummary.name }}</div>
+            <div class="bt-trade-sub">{{ journalPresetResultSummary.description }}</div>
+          </div>
+          <div class="bt-trade-sub">{{ journalPresetResultSummary.scopeLabel }}</div>
+        </div>
+        <div class="bt-metric">
+          <span>命中筆數</span>
+          <span>{{ journalPresetResultSummary.totalEntries }}</span>
+        </div>
+        <div class="bt-metric">
+          <span>目前顯示</span>
+          <span>{{ journalPresetResultSummary.visibleEntries }}</span>
+        </div>
+        <div class="bt-metric">
+          <span>已平倉 / 未平倉</span>
+          <span>{{ journalPresetResultSummary.closedEntries }} / {{ journalPresetResultSummary.openEntries }}</span>
+        </div>
+        <div class="bt-metric">
+          <span>勝率</span>
+          <span :class="journalPresetResultSummary.winRate >= 50 ? 'up' : 'dn'">{{ journalPresetResultSummary.winRate.toFixed(1) }}%</span>
+        </div>
+        <div class="bt-metric">
+          <span>淨損益</span>
+          <span :class="journalPresetResultSummary.netPnl >= 0 ? 'up' : 'dn'">
+            {{ journalPresetResultSummary.netPnl >= 0 ? "+" : "" }}${{ Math.round(journalPresetResultSummary.netPnl).toLocaleString() }}
+          </span>
+        </div>
+        <div class="bt-metric">
+          <span>平均報酬</span>
+          <span :class="journalPresetResultSummary.avgReturnPct >= 0 ? 'up' : 'dn'">{{ journalPresetResultSummary.avgReturnPct.toFixed(2) }}%</span>
+        </div>
       </div>
 
       <div v-if="activeJournalFilters.length" class="journal-filter-summary">
@@ -805,6 +842,29 @@ function buildJournalQuickSaveDraft(name, partialPreset, description) {
   };
 }
 
+function normalizeJournalFilterSnapshot(source) {
+  const filters = source?.filters && typeof source.filters === "object"
+    ? source.filters
+    : source || {};
+  return {
+    scope: source?.scope === "all" ? "all" : "ticker",
+    filters: {
+      market: String(filters.market || "").trim(),
+      strategy_code: String(filters.strategy_code || "").trim(),
+      tag: String(filters.tag || "").trim(),
+      search: String(filters.search || "").trim(),
+    },
+  };
+}
+
+function isSameJournalFilterSnapshot(left, right) {
+  if (!left || !right) return false;
+  if (left.scope !== right.scope) return false;
+  return ["market", "strategy_code", "tag", "search"].every(
+    (key) => String(left.filters?.[key] || "") === String(right.filters?.[key] || ""),
+  );
+}
+
 const journalPresetName = ref("");
 const journalPresetDescription = ref("");
 const editingJournalPresetId = ref(null);
@@ -1069,6 +1129,15 @@ const resetJournalFilterPreset = {
   tag: "",
   search: "",
 };
+const currentJournalFilterSnapshot = computed(() => normalizeJournalFilterSnapshot({
+  scope: props.journalFilterScope,
+  filters: props.journalFilters,
+}));
+const activeJournalPreset = computed(() => (
+  (props.journalFilterPresets || []).find((preset) =>
+    isSameJournalFilterSnapshot(normalizeJournalFilterSnapshot(preset), currentJournalFilterSnapshot.value))
+  || null
+));
 const activeJournalFilters = computed(() => {
   const chips = [];
   if (props.journalFilterScope === "all") {
@@ -1099,6 +1168,29 @@ const activeJournalFilters = computed(() => {
   });
 
   return chips;
+});
+
+function isJournalPresetActive(preset) {
+  if (!preset || !activeJournalPreset.value) return false;
+  return String(preset.id) === String(activeJournalPreset.value.id);
+}
+
+const journalPresetResultSummary = computed(() => {
+  if (!props.journalStats || (!activeJournalPreset.value && !activeJournalFilters.value.length)) {
+    return null;
+  }
+  return {
+    name: activeJournalPreset.value?.name || "自訂篩選",
+    description: activeJournalPreset.value?.description || "目前條件命中摘要",
+    scopeLabel: currentJournalFilterSnapshot.value.scope === "all" ? "全部紀錄" : "目前標的",
+    totalEntries: Number(props.journalStats.total_entries || 0),
+    visibleEntries: Number(journalEntryRows.value.length || 0),
+    closedEntries: Number(props.journalStats.closed_entries || 0),
+    openEntries: Number(props.journalStats.open_entries || 0),
+    winRate: Number(props.journalStats.win_rate || 0),
+    netPnl: Number(props.journalStats.net_pnl || 0),
+    avgReturnPct: Number(props.journalStats.avg_return_pct || 0),
+  };
 });
 </script>
 
@@ -1409,6 +1501,11 @@ const activeJournalFilters = computed(() => {
   text-align: left;
 }
 
+.journal-preset-active {
+  border-color: rgba(123, 231, 255, 0.38);
+  box-shadow: 0 0 0 1px rgba(123, 231, 255, 0.12) inset;
+}
+
 .journal-preset-actions {
   position: absolute;
   top: 6px;
@@ -1451,6 +1548,10 @@ const activeJournalFilters = computed(() => {
 .journal-filter-reset {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text2);
+}
+
+.journal-preset-result-card {
+  margin-top: 12px;
 }
 
 .journal-entry-tags {
