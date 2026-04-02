@@ -518,9 +518,18 @@ function openJournalEntry(item) {
 }
 
 function openAlertShortcut(item) {
+  const contextTags = getTagList(item);
+  const hasPrice = Number.isFinite(Number(item.close));
+  const latestPrice = hasPrice ? Number(item.close) : null;
+  const latestPriceLabel = hasPrice ? fmtPrice(item.close) : "—";
+  const latestTimeLabel = formatWatchTimestamp(item);
   emit("open-alert-modal", {
     ticker: item.ticker,
     type: "price",
+    condition: Number(item.change_pct || 0) >= 0 ? "大於" : "小於",
+    value: latestPrice,
+    prefill_hint: `觀察池快捷警報：以 ${latestPriceLabel} 為基準，資料源 ${formatSourceLabel(item.source)}，時間 ${latestTimeLabel}。`,
+    context_tags: contextTags,
   });
 }
 

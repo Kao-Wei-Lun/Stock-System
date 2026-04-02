@@ -613,7 +613,14 @@ export function useDashboard() {
     close: "—",
     volume: "—",
   });
-  const alertForm = reactive({ ticker: "AAPL", type: "price", cond: "大於", value: "" });
+  const alertForm = reactive({
+    ticker: "AAPL",
+    type: "price",
+    cond: "大於",
+    value: "",
+    prefill_hint: "",
+    context_tags: [],
+  });
   const backtestForm = reactive({
     strategy: "MA 黃金/死亡交叉",
     start: "2022-01-01",
@@ -844,6 +851,8 @@ export function useDashboard() {
     alertForm.type = "price";
     alertForm.cond = "大於";
     alertForm.value = "";
+    alertForm.prefill_hint = "";
+    alertForm.context_tags = [];
   }
 
   function formatAlertConditionLabel(condition) {
@@ -2607,6 +2616,8 @@ export function useDashboard() {
     if ("value" in options) {
       alertForm.value = options.value == null ? "" : String(options.value);
     }
+    alertForm.prefill_hint = options.prefill_hint || "";
+    alertForm.context_tags = Array.isArray(options.context_tags) ? options.context_tags.filter(Boolean) : [];
     alertModalOpen.value = true;
   }
 

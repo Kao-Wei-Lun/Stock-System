@@ -41,6 +41,18 @@
           @input="$emit('update-field', { key: 'value', value: $event.target.value })"
         >
       </div>
+      <div v-if="prefillHint" class="modal-row modal-note">
+        <span>{{ prefillHint }}</span>
+      </div>
+      <div v-if="contextTags.length" class="modal-row modal-tag-row">
+        <span
+          v-for="tag in contextTags"
+          :key="tag"
+          class="modal-tag-pill"
+        >
+          {{ tag }}
+        </span>
+      </div>
       <div class="modal-row modal-note">
         <span>{{ helperText }}</span>
       </div>
@@ -124,6 +136,11 @@ const valuePlaceholder = computed(() => {
   return "190.00";
 });
 
+const prefillHint = computed(() => String(props.form.prefill_hint || "").trim());
+const contextTags = computed(() => (
+  Array.isArray(props.form.context_tags) ? props.form.context_tags.filter(Boolean).slice(0, 4) : []
+));
+
 const helperText = computed(() => {
   if (props.form.type === "macd" && !requiresNumericValue.value) {
     return "MACD 黃金交叉 / 死亡交叉會使用 MACD 線與訊號線的交叉判斷。";
@@ -140,3 +157,20 @@ const helperText = computed(() => {
   return "所有警報都會記錄觸發時間、數值與資料來源。";
 });
 </script>
+
+<style scoped>
+.modal-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.modal-tag-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.12);
+  color: #bfefff;
+  font-size: 10px;
+  line-height: 1.4;
+}
+</style>

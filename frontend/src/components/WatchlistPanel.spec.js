@@ -170,11 +170,14 @@ describe("WatchlistPanel", () => {
 
     await wrapper.get('[data-testid="watch-alert-AAPL"]').trigger("click");
 
-    expect(wrapper.emitted("open-alert-modal")[0]).toEqual([
-      {
-        ticker: "AAPL",
-        type: "price",
-      },
-    ]);
+    const [payload] = wrapper.emitted("open-alert-modal")[0];
+
+    expect(payload.ticker).toBe("AAPL");
+    expect(payload.type).toBe("price");
+    expect(payload.condition).toBe("大於");
+    expect(payload.value).toBe(210.5);
+    expect(payload.context_tags).toEqual(["優先候選", "Q4", "市場:選擇性出手"]);
+    expect(payload.prefill_hint).toContain("觀察池快捷警報：以 210.50 為基準");
+    expect(payload.prefill_hint).toContain("資料源 Yahoo Finance");
   });
 });

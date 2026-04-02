@@ -71,4 +71,25 @@ describe("AlertModal", () => {
     expect(valueInput.attributes("placeholder")).toBe("市場型警報不需填數值");
     expect(wrapper.text()).toContain("市場風險警報會直接讀取本地 macro_snapshots");
   });
+
+  it("shows watchlist prefill hint and context tags", () => {
+    const wrapper = mount(AlertModal, {
+      props: {
+        isOpen: true,
+        form: {
+          ticker: "AAPL",
+          type: "price",
+          cond: "大於",
+          value: "210.5",
+          prefill_hint: "觀察池快捷警報：以 210.5 為基準，資料源 Yahoo Finance。",
+          context_tags: ["優先候選", "Q4", "市場:選擇性出手"],
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("觀察池快捷警報：以 210.5 為基準");
+    expect(wrapper.text()).toContain("優先候選");
+    expect(wrapper.text()).toContain("Q4");
+    expect(wrapper.find('input[type="number"]').element.value).toBe("210.5");
+  });
 });
