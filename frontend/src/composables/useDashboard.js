@@ -1257,6 +1257,18 @@ export function useDashboard() {
     await loadJournalData();
   }
 
+  async function applyJournalFilterPreset(preset = {}) {
+    if (Object.prototype.hasOwnProperty.call(preset, "scope")) {
+      journalFilterScope.value = preset.scope === "all" ? "all" : "ticker";
+    }
+    for (const key of ["market", "strategy_code", "tag", "search"]) {
+      if (Object.prototype.hasOwnProperty.call(preset, key)) {
+        journalFilters[key] = preset[key] || "";
+      }
+    }
+    await loadJournalData();
+  }
+
   function resetJournalForm() {
     applyJournalEntryToForm({
       ticker: currentTicker.value,
@@ -3096,6 +3108,7 @@ export function useDashboard() {
     selectJournalEntry,
     resetJournalForm,
     updateJournalFilter,
+    applyJournalFilterPreset,
     addJournalAttachment,
     removeJournalAttachment,
     startJournalEntry,

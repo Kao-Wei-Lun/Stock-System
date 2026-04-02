@@ -152,6 +152,7 @@
                 @load-backtest="selectBacktestRun"
                 @update-journal-field="handleJournalField"
                 @update-journal-filter="handleJournalFilter"
+                @apply-journal-filter-preset="handleJournalFilterPreset"
                 @save-journal-entry="saveJournalEntry"
                 @delete-journal-entry="deleteJournalEntry"
                 @select-journal-entry="selectJournalEntry"
@@ -431,6 +432,7 @@ const {
     selectBacktestRun,
     updateJournalField,
     updateJournalFilter,
+    applyJournalFilterPreset,
     saveJournalEntry,
     deleteJournalEntry,
     selectJournalEntry,
@@ -562,6 +564,11 @@ function handleJournalField(payload) {
 function handleJournalFilter(payload) {
   if (!payload?.key) return;
   updateJournalFilter(payload.key, payload.value);
+}
+
+function handleJournalFilterPreset(payload) {
+  if (!payload || typeof payload !== "object") return;
+  applyJournalFilterPreset(payload);
 }
 
 function handleScreenerFilter(payload) {

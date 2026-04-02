@@ -239,6 +239,7 @@ const dashboardMock = {
   selectBacktestRun: noop,
   updateJournalField: noop,
   updateJournalFilter: noop,
+  applyJournalFilterPreset: noop,
   saveJournalEntry: noop,
   deleteJournalEntry: noop,
   selectJournalEntry: noop,

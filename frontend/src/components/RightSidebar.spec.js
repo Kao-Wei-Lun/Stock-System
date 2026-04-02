@@ -413,10 +413,16 @@ describe("RightSidebar", () => {
 
     await wrapper.find(".journal-card .add-btn").trigger("click");
     await wrapper.findAll(".bt-history-row")[0].trigger("click");
+    await wrapper.get('[data-testid="journal-source-警報通知"]').trigger("click");
+    await wrapper.get('[data-testid="journal-posture-選擇性出手"]').trigger("click");
+    await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
     await wrapper.find(".journal-action-row .run-btn").trigger("click");
 
     expect(wrapper.emitted("add-journal-attachment")).toBeTruthy();
     expect(wrapper.emitted("select-journal-entry")[0]).toEqual([5]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[0]).toEqual([{ tag: "來源:警報通知", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[1]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
 });

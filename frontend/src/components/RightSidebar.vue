@@ -328,10 +328,13 @@
 
         <div v-if="journalStats.source_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">來源拆解</div>
-          <div
+          <button
             v-for="item in topSourceBreakdown"
             :key="`source-${item.key}`"
+            type="button"
             class="journal-analytics-row"
+            :data-testid="`journal-source-${item.key}`"
+            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`來源:${item.key}`))"
           >
             <div>
               <div>{{ item.key }}</div>
@@ -340,15 +343,18 @@
             <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
               {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
             </div>
-          </div>
+          </button>
         </div>
 
         <div v-if="journalStats.market_posture_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">市場情境</div>
-          <div
+          <button
             v-for="item in topMarketPostureBreakdown"
             :key="`posture-${item.key}`"
+            type="button"
             class="journal-analytics-row"
+            :data-testid="`journal-posture-${item.key}`"
+            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`市場:${item.key}`))"
           >
             <div>
               <div>{{ item.key }}</div>
@@ -357,15 +363,18 @@
             <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
               {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
             </div>
-          </div>
+          </button>
         </div>
 
         <div v-if="journalStats.tag_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">高頻標籤</div>
-          <div
+          <button
             v-for="item in topTagBreakdown"
             :key="`tag-${item.key}`"
+            type="button"
             class="journal-analytics-row"
+            :data-testid="`journal-tag-${item.key}`"
+            @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(item.key))"
           >
             <div>
               <div>{{ item.key }}</div>
@@ -374,7 +383,7 @@
             <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
               {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -467,6 +476,7 @@ defineEmits([
   "load-backtest",
   "update-journal-field",
   "update-journal-filter",
+  "apply-journal-filter-preset",
   "save-journal-entry",
   "delete-journal-entry",
   "select-journal-entry",
@@ -496,6 +506,13 @@ function buildSparklinePath(points) {
 function formatPct(value) {
   if (value == null || value === "") return "—";
   return `${(Number(value) * 100).toFixed(2)}%`;
+}
+
+function buildJournalTagPreset(tag) {
+  return {
+    tag,
+    search: "",
+  };
 }
 
 const ALERT_TYPE_LABELS = {
@@ -954,8 +971,13 @@ const topTagBreakdown = computed(() => (
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
   padding: 8px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
   font-size: 11px;
+  cursor: pointer;
 }
 
 .journal-analytics-row + .journal-analytics-row {
