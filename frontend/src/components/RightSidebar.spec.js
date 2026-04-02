@@ -602,7 +602,7 @@ describe("RightSidebar", () => {
     }]);
   });
 
-  it("shows active preset result summary when current filters match a preset", () => {
+  it("shows active preset result summary when current filters match a preset", async () => {
     const wrapper = mount(RightSidebar, {
       props: {
         rightTab: "journal",
@@ -689,6 +689,13 @@ describe("RightSidebar", () => {
     expect(wrapper.get('[data-testid="journal-preset-result-summary"]').text()).toContain("3");
     expect(wrapper.get('[data-testid="journal-preset-result-summary"]').text()).toContain("2 / 1");
     expect(wrapper.get('[data-testid="journal-preset-result-summary"]').text()).toContain("+$750");
+    expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("最近命中");
+    expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("MSFT");
+    expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("+$250");
+
+    await wrapper.get('[data-testid="journal-preset-latest-entry"]').trigger("click");
+
+    expect(wrapper.emitted("select-journal-entry")[0]).toEqual([2]);
   });
 
   it("shows empty-result suggestions and emits recovery actions", async () => {

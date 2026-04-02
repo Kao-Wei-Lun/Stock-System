@@ -370,6 +370,24 @@
           <span>平均報酬</span>
           <span :class="journalPresetResultSummary.avgReturnPct >= 0 ? 'up' : 'dn'">{{ journalPresetResultSummary.avgReturnPct.toFixed(2) }}%</span>
         </div>
+        <button
+          v-if="journalPresetLatestEntry"
+          type="button"
+          class="journal-preset-latest-hit"
+          data-testid="journal-preset-latest-entry"
+          @click="$emit('select-journal-entry', journalPresetLatestEntry.id)"
+        >
+          <div>
+            <div>最近命中</div>
+            <div class="bt-trade-sub">
+              {{ journalPresetLatestEntry.ticker }} · {{ journalPresetLatestEntry.direction }} · {{ journalPresetLatestEntry.strategy_code || "manual" }}
+            </div>
+            <div class="bt-trade-sub">{{ formatDateTime(journalPresetLatestEntry.entry_time) }}</div>
+          </div>
+          <div :class="Number(journalPresetLatestEntry.result?.pnl || 0) >= 0 ? 'up' : 'dn'">
+            {{ Number(journalPresetLatestEntry.result?.pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(journalPresetLatestEntry.result?.pnl || 0)).toLocaleString() }}
+          </div>
+        </button>
         <div v-if="journalPresetResultSummary.totalEntries === 0" class="journal-empty-state">
           <div class="bt-trade-sub">目前條件沒有命中任何交易紀錄，可以先放寬一個篩選條件再看。</div>
           <div v-if="journalPresetEmptySuggestions.length" class="journal-empty-actions">
@@ -1208,6 +1226,20 @@ const journalPresetResultSummary = computed(() => {
   };
 });
 
+const journalPresetLatestEntry = computed(() => {
+  if (!journalPresetResultSummary.value || journalPresetResultSummary.value.totalEntries === 0) {
+    return null;
+  }
+  const entries = Array.isArray(props.journalEntries) ? props.journalEntries : [];
+  if (!entries.length) return null;
+  return entries.reduce((latest, entry) => {
+    if (!latest) return entry;
+    const latestTime = Date.parse(latest?.entry_time || "") || 0;
+    const currentTime = Date.parse(entry?.entry_time || "") || 0;
+    return currentTime >= latestTime ? entry : latest;
+  }, null);
+});
+
 const journalPresetEmptySuggestions = computed(() => {
   if (!journalPresetResultSummary.value || journalPresetResultSummary.value.totalEntries !== 0) {
     return [];
@@ -1638,6 +1670,22 @@ function applyJournalEmptySuggestion(suggestion) {
 
 .journal-preset-result-card {
   margin-top: 12px;
+}
+
+.journal-preset-latest-hit {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(123, 231, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(8, 26, 36, 0.82);
+  color: var(--text1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .journal-empty-state {
