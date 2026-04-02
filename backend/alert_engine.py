@@ -330,6 +330,8 @@ class AlertEngine:
                 "payload": {
                     "quote": quote,
                     "alert_id": alert.get("id"),
+                    "ticker": ticker,
+                    "source": quote.get("source"),
                     "trigger_value": evaluation["current_value"],
                     "threshold_value": evaluation["threshold_value"],
                 },

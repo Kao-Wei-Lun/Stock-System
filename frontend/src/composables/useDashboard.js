@@ -496,7 +496,13 @@ export function useDashboard() {
   const expandedAlertLogId = ref(null);
   const localNotifications = ref([]);
   const remoteNotifications = ref([]);
-  const notifications = computed(() => [...localNotifications.value, ...remoteNotifications.value]);
+  const notifications = computed(() =>
+    [...localNotifications.value, ...remoteNotifications.value].sort((left, right) => {
+      const leftTime = Date.parse(left?.createdAt || "") || 0;
+      const rightTime = Date.parse(right?.createdAt || "") || 0;
+      return rightTime - leftTime;
+    }),
+  );
   const wsConnected = ref(false);
   const latency = ref("—");
   const lastUpdate = ref("—");
@@ -712,9 +718,24 @@ export function useDashboard() {
 
   function pushNotification({ icon, title, msg, type = "" }) {
     const id = `${Date.now()}-${Math.random()}`;
+    const createdAt = new Date().toISOString();
     localNotifications.value = [
       ...localNotifications.value,
-      { id, icon, title, msg, type, time: new Date().toLocaleTimeString("zh-TW") },
+      {
+        id,
+        icon,
+        title,
+        msg,
+        type,
+        level: type || "info",
+        category: "session",
+        read: false,
+        persisted: false,
+        ticker: null,
+        source: "session",
+        createdAt,
+        time: new Date(createdAt).toLocaleTimeString("zh-TW"),
+      },
     ];
     window.setTimeout(() => dismissNotification(id), 6000);
   }
@@ -723,11 +744,13 @@ export function useDashboard() {
     const remoteTarget = remoteNotifications.value.find((item) => item.id === id);
     if (remoteTarget?.remoteId != null) {
       try {
-        await dashboardApi.markNotificationRead(remoteTarget.remoteId);
+        const record = await dashboardApi.markNotificationRead(remoteTarget.remoteId);
+        remoteNotifications.value = remoteNotifications.value.map((item) =>
+          item.id === id ? mapRemoteNotification(record) : item,
+        );
       } catch (error) {
         console.error(error);
       }
-      remoteNotifications.value = remoteNotifications.value.filter((item) => item.id !== id);
       return;
     }
     localNotifications.value = localNotifications.value.filter((item) => item.id !== id);
@@ -836,6 +859,16 @@ export function useDashboard() {
       title: item.title,
       msg: item.message,
       type: item.level || "",
+      level: item.level || "info",
+      category: item.category || "system",
+      read: Boolean(item.read_at),
+      persisted: true,
+      source: item.payload?.quote?.source || item.payload?.source || "local_db",
+      ticker: item.payload?.quote?.ticker || item.payload?.ticker || null,
+      payload: item.payload || {},
+      relatedEntityType: item.related_entity_type || null,
+      relatedEntityId: item.related_entity_id || null,
+      createdAt: item.created_at || null,
       time: formatQuoteTimestampLabel(item.created_at),
     };
   }
@@ -959,7 +992,7 @@ export function useDashboard() {
 
   async function loadNotifications({ silent = true } = {}) {
     try {
-      const response = await dashboardApi.listNotifications({ unreadOnly: true, limit: 30 });
+      const response = await dashboardApi.listNotifications({ unreadOnly: false, limit: 50 });
       remoteNotifications.value = Array.isArray(response?.items)
         ? response.items.map((item) => mapRemoteNotification(item))
         : [];
@@ -968,6 +1001,26 @@ export function useDashboard() {
       if (!silent) {
         pushNotification({ icon: "⚠️", title: "通知載入失敗", msg: "請稍後再試", type: "error" });
       }
+    }
+  }
+
+  async function setNotificationRead(notificationId, read) {
+    if (!notificationId) return;
+    const target = remoteNotifications.value.find((item) => item.id === notificationId);
+    if (!target?.remoteId) return;
+    try {
+      const record = await dashboardApi.setNotificationReadState(target.remoteId, read);
+      remoteNotifications.value = remoteNotifications.value.map((item) =>
+        item.id === notificationId ? mapRemoteNotification(record) : item,
+      );
+    } catch (error) {
+      console.error(error);
+      pushNotification({
+        icon: "!",
+        title: read ? "Mark read failed" : "Mark unread failed",
+        msg: error.message || "Please try again later",
+        type: "error",
+      });
     }
   }
 
@@ -2923,6 +2976,7 @@ export function useDashboard() {
     syncCurrentTicker,
     syncAll,
     dismissNotification,
+    setNotificationRead,
     openAlertModal,
     closeAlertModal,
     updateAlertField,

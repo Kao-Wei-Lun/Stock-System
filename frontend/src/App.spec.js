@@ -228,6 +228,7 @@ const dashboardMock = {
   syncCurrentTicker: noop,
   syncAll: noop,
   dismissNotification: noop,
+  setNotificationRead: noop,
   openAlertModal: noop,
   closeAlertModal: noop,
   updateAlertField: noop,

@@ -227,7 +227,12 @@
       :clock-time="clockTime"
     />
 
-    <NotificationPanel :notifications="notifications" @dismiss="dismissNotification" />
+    <NotificationPanel
+      :notifications="notifications"
+      @dismiss="dismissNotification"
+      @toggle-read="handleNotificationReadToggle"
+      @open-ticker="handleOpenNotificationTicker"
+    />
 
     <AlertModal
       :is-open="alertModalOpen"
@@ -402,6 +407,7 @@ const {
   syncCurrentTicker,
   syncAll,
   dismissNotification,
+  setNotificationRead,
   openAlertModal,
     closeAlertModal,
     updateAlertField,
@@ -479,6 +485,17 @@ function handleSelectTicker(item) {
 function handleOpenDbTab() {
   setWorkspaceTab("chart");
   setRightTab("db");
+}
+
+function handleNotificationReadToggle(payload) {
+  if (!payload?.id || typeof payload.read !== "boolean") return;
+  setNotificationRead(payload.id, payload.read);
+}
+
+function handleOpenNotificationTicker(ticker) {
+  if (!ticker) return;
+  setWorkspaceTab("chart");
+  selectTicker(ticker, ticker);
 }
 
 function handleAlertField(payload) {
