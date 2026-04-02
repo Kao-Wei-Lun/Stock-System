@@ -433,8 +433,11 @@ describe("RightSidebar", () => {
     await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-save-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-source-5-警報通知"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-save-source-5-警報通知"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-posture-5-選擇性出手"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-save-posture-5-選擇性出手"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-strategy-5-breakout"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-save-strategy-5-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-tag-5-breakout"]').trigger("click");
     await wrapper.find(".journal-action-row .run-btn").trigger("click");
 
@@ -489,6 +492,39 @@ describe("RightSidebar", () => {
         market: "",
         strategy_code: "",
         tag: "breakout",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[4]).toEqual([{
+      name: "來源：警報通知",
+      description: "由歷史紀錄快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "",
+        tag: "來源:警報通知",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[5]).toEqual([{
+      name: "市場：選擇性出手",
+      description: "由歷史紀錄快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "",
+        tag: "市場:選擇性出手",
+        search: "",
+      },
+    }]);
+    expect(wrapper.emitted("save-journal-filter-preset")[6]).toEqual([{
+      name: "策略：breakout",
+      description: "由歷史紀錄快速建立",
+      scope: "ticker",
+      filters: {
+        market: "",
+        strategy_code: "breakout",
+        tag: "",
         search: "",
       },
     }]);

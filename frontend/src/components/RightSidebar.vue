@@ -563,11 +563,22 @@
                 <span
                   v-for="chip in getJournalEntryQuickFilters(entry)"
                   :key="`${entry.id}-${chip.kind}-${chip.value}`"
-                  class="journal-entry-meta-chip"
-                  :data-testid="`journal-entry-${chip.kind}-${entry.id}-${chip.value}`"
-                  @click.stop="$emit('apply-journal-filter-preset', chip.preset)"
+                  class="journal-entry-quick-filter-group"
                 >
-                  {{ chip.label }}
+                  <span
+                    class="journal-entry-meta-chip"
+                    :data-testid="`journal-entry-${chip.kind}-${entry.id}-${chip.value}`"
+                    @click.stop="$emit('apply-journal-filter-preset', chip.preset)"
+                  >
+                    {{ chip.label }}
+                  </span>
+                  <span
+                    class="journal-entry-meta-save"
+                    :data-testid="`journal-entry-save-${chip.kind}-${entry.id}-${chip.value}`"
+                    @click.stop="$emit('save-journal-filter-preset', chip.saveDraft)"
+                  >
+                    存
+                  </span>
                 </span>
               </div>
               <div v-if="getJournalEntryPlainTags(entry).length" class="journal-entry-tags">
@@ -733,29 +744,35 @@ function getJournalEntryQuickFilters(entry) {
   const marketPostureTag = findJournalEntryPrefixedTag(entry, "市場:");
 
   if (sourceTag) {
+    const label = `來源：${sourceTag.slice(3)}`;
     quickFilters.push({
       kind: "source",
       value: sourceTag.slice(3),
-      label: `來源：${sourceTag.slice(3)}`,
+      label,
       preset: buildJournalTagPreset(sourceTag),
+      saveDraft: buildJournalQuickSaveDraft(label, buildJournalTagPreset(sourceTag), "由歷史紀錄快速建立"),
     });
   }
 
   if (marketPostureTag) {
+    const label = `市場：${marketPostureTag.slice(3)}`;
     quickFilters.push({
       kind: "posture",
       value: marketPostureTag.slice(3),
-      label: `市場：${marketPostureTag.slice(3)}`,
+      label,
       preset: buildJournalTagPreset(marketPostureTag),
+      saveDraft: buildJournalQuickSaveDraft(label, buildJournalTagPreset(marketPostureTag), "由歷史紀錄快速建立"),
     });
   }
 
   if (strategyCode) {
+    const label = `策略：${strategyCode}`;
     quickFilters.push({
       kind: "strategy",
       value: strategyCode,
-      label: `策略：${strategyCode}`,
+      label,
       preset: buildJournalStrategyPreset(strategyCode),
+      saveDraft: buildJournalQuickSaveDraft(label, buildJournalStrategyPreset(strategyCode), "由歷史紀錄快速建立"),
     });
   }
 
@@ -1450,6 +1467,12 @@ const activeJournalFilters = computed(() => {
   margin-top: 8px;
 }
 
+.journal-entry-quick-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .journal-entry-meta-chip {
   display: inline-flex;
   align-items: center;
@@ -1458,6 +1481,18 @@ const activeJournalFilters = computed(() => {
   border: 1px solid rgba(123, 231, 255, 0.2);
   background: rgba(8, 26, 36, 0.9);
   color: var(--text2);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.journal-entry-meta-save {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text3);
   font-size: 10px;
   line-height: 1.4;
   cursor: pointer;
