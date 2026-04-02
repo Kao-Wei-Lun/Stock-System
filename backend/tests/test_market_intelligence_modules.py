@@ -297,7 +297,23 @@ def intelligence_store(monkeypatch):
     async def run_screener(filters=None):
         return {
             "filters": filters or {},
-            "items": [{"ticker": "AAPL", "market": "US", "name": "Apple", "score": 88, "change_pct": 2.3}],
+            "items": [
+                {
+                    "ticker": "AAPL",
+                    "market": "US",
+                    "name": "Apple",
+                    "score": 88,
+                    "base_score": 82,
+                    "macro_adjustment": 6,
+                    "setup_quality": 4,
+                    "change_pct": 2.3,
+                }
+            ],
+            "market_context": {
+                "overall_risk": "medium",
+                "trade_posture": "selective",
+                "decision_hint": "環境偏震盪，只做最強標的，並縮小部位與嚴守停損。",
+            },
             "total": 1,
             "generated_at": "2026-04-02T00:00:00Z",
         }
@@ -347,6 +363,7 @@ def test_market_intelligence_routes(client, intelligence_store):
     screener_response = client.post("/api/screener/run", json={"filters": {"market": "US"}})
     assert screener_response.status_code == 200
     assert screener_response.json()["items"][0]["ticker"] == "AAPL"
+    assert screener_response.json()["market_context"]["trade_posture"] == "selective"
 
 
 def test_screener_preset_routes(client, intelligence_store):

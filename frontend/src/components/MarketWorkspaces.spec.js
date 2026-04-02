@@ -90,8 +90,24 @@ describe("Market workspaces", () => {
         ],
         results: {
           total: 1,
+          market_context: {
+            overall_risk: "medium",
+            trade_posture: "selective",
+            decision_hint: "環境偏震盪，只做最強標的，並縮小部位與嚴守停損。",
+          },
           items: [
-            { ticker: "AAPL", market: "US", name: "Apple", close: 210, change_pct: 2.3, volume_ratio: 1.9, score: 88, next_event: { event_date: "2026-04-10" } },
+            {
+              ticker: "AAPL",
+              market: "US",
+              name: "Apple",
+              close: 210,
+              change_pct: 2.3,
+              volume_ratio: 1.9,
+              score: 88,
+              macro_adjustment: 6,
+              setup_quality: 4,
+              next_event: { event_date: "2026-04-10" },
+            },
           ],
         },
       },
@@ -99,6 +115,8 @@ describe("Market workspaces", () => {
 
     expect(wrapper.text()).toContain("選股器");
     expect(wrapper.text()).toContain("AAPL");
+    expect(wrapper.text()).toContain("選擇性出手");
+    expect(wrapper.text()).toContain("+6");
 
     await wrapper.find(".preset-chip").trigger("click");
     expect(wrapper.emitted("load-preset")[0][0].name).toBe("量增突破");

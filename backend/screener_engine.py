@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 from typing import Any, Dict, List, Optional
 
 from data_fetcher import normalize_ticker
 from database import db
+from macro_regime import build_macro_summary
 from market_intelligence import infer_market
 
 
@@ -125,10 +126,115 @@ async def _institutional_signal_for_ticker(ticker: str) -> Optional[Dict[str, An
     }
 
 
+def _build_macro_cache_fragment(summary: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "overall_risk": summary.get("overall_risk"),
+        "regime": summary.get("regime"),
+        "trade_posture": summary.get("trade_posture"),
+        "updated_at": summary.get("updated_at"),
+    }
+
+
+def _setup_quality(
+    latest_close: float,
+    volume_ratio: float,
+    ma20: Optional[float],
+    ma50: Optional[float],
+    distance_to_high_pct: Optional[float],
+    change_pct: float,
+) -> int:
+    quality = 0
+    quality += 1 if volume_ratio >= 1.5 else 0
+    quality += 1 if ma20 is not None and latest_close >= ma20 else 0
+    quality += 1 if ma50 is not None and ma20 is not None and ma20 >= ma50 else 0
+    quality += 1 if distance_to_high_pct is not None and distance_to_high_pct <= 5 else 0
+    quality += 1 if change_pct > 0 else 0
+    return quality
+
+
+def _macro_adjustment(
+    summary: Dict[str, Any],
+    setup_quality: int,
+    chip_bias: Optional[str],
+    institutional_signal: Optional[Dict[str, Any]],
+    change_pct: float,
+) -> tuple[int, Optional[str]]:
+    posture = str(summary.get("trade_posture") or "standby").lower()
+    institutional_bias = (institutional_signal or {}).get("signal")
+    confirmation_adjustment = 0
+    confirmation_notes: List[str] = []
+
+    if chip_bias == "bullish":
+        confirmation_adjustment += 2
+        confirmation_notes.append("籌碼偏多")
+    elif chip_bias == "bearish":
+        confirmation_adjustment -= 2
+        confirmation_notes.append("籌碼偏空")
+
+    if institutional_bias == "bullish":
+        confirmation_adjustment += 2
+        confirmation_notes.append("法人基差偏多")
+    elif institutional_bias == "bearish":
+        confirmation_adjustment -= 2
+        confirmation_notes.append("法人基差偏空")
+
+    if posture == "defensive":
+        adjustment = -12
+        note = "高風險日先降權"
+        if setup_quality >= 4:
+            adjustment += 6
+            note = "高風險日僅保留最強 setup"
+        elif setup_quality >= 3:
+            adjustment += 3
+            note = "高風險日但結構仍可觀察"
+        adjustment += confirmation_adjustment
+        if change_pct < 0:
+            adjustment -= 4
+        return adjustment, note
+
+    if posture == "selective":
+        adjustment = -4
+        note = "震盪環境先控管出手"
+        if setup_quality >= 4:
+            adjustment += 6
+            note = "震盪環境仍保留強勢候選"
+        elif setup_quality >= 3:
+            adjustment += 3
+        adjustment += confirmation_adjustment
+        return adjustment, note
+
+    if posture == "offensive":
+        adjustment = 4
+        note = "順風環境提高趨勢權重"
+        if setup_quality >= 4:
+            adjustment += 5
+        elif setup_quality >= 3:
+            adjustment += 2
+        if change_pct > 0:
+            adjustment += 2
+        adjustment += max(-1, confirmation_adjustment)
+        return adjustment, note
+
+    if posture == "balanced" and setup_quality >= 4:
+        return 3 + max(-1, confirmation_adjustment), "中性盤保留強勢 setup"
+
+    if confirmation_notes:
+        return confirmation_adjustment, " / ".join(confirmation_notes[:2])
+    return 0, None
+
+
 class ScreenerEngine:
     async def run(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         normalized_filters = normalize_screener_filters(filters)
-        cache_key = json.dumps(normalized_filters, sort_keys=True, ensure_ascii=False)
+        macro_summary = build_macro_summary(await db.list_macro_snapshots())
+        cache_key = json.dumps(
+            {
+                "filters": normalized_filters,
+                "macro": _build_macro_cache_fragment(macro_summary),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
         now = time.time()
         cached = _screen_cache.get(cache_key)
         if cached and now - cached[0] < SCREEN_CACHE_TTL_SECONDS:
@@ -214,14 +320,31 @@ class ScreenerEngine:
 
             institutional_signal = await _institutional_signal_for_ticker(ticker)
             change_pct = _safe_float(row.get("quote_change_pct"))
-            score = 0
-            score += 25 if volume_ratio >= 1.5 else 10 if volume_ratio >= 1.0 else 0
-            score += 20 if ma20 is not None and latest_close >= ma20 else 0
-            score += 15 if ma50 is not None and ma20 is not None and ma20 >= ma50 else 0
-            score += 15 if distance_to_high_pct is not None and distance_to_high_pct <= 5 else 0
-            score += 15 if chip_bias == "bullish" else -10 if chip_bias == "bearish" else 0
-            score += 10 if change_pct > 0 else -5 if change_pct < 0 else 0
-            score += 10 if institutional_signal and institutional_signal.get("signal") == "bullish" else 0
+            base_score = 0
+            base_score += 25 if volume_ratio >= 1.5 else 10 if volume_ratio >= 1.0 else 0
+            base_score += 20 if ma20 is not None and latest_close >= ma20 else 0
+            base_score += 15 if ma50 is not None and ma20 is not None and ma20 >= ma50 else 0
+            base_score += 15 if distance_to_high_pct is not None and distance_to_high_pct <= 5 else 0
+            base_score += 15 if chip_bias == "bullish" else -10 if chip_bias == "bearish" else 0
+            base_score += 10 if change_pct > 0 else -5 if change_pct < 0 else 0
+            base_score += 10 if institutional_signal and institutional_signal.get("signal") == "bullish" else 0
+
+            setup_quality = _setup_quality(
+                latest_close=latest_close,
+                volume_ratio=volume_ratio,
+                ma20=ma20,
+                ma50=ma50,
+                distance_to_high_pct=distance_to_high_pct,
+                change_pct=change_pct,
+            )
+            macro_adjustment, macro_adjustment_reason = _macro_adjustment(
+                macro_summary,
+                setup_quality,
+                chip_bias,
+                institutional_signal,
+                change_pct,
+            )
+            score = base_score + macro_adjustment
 
             results.append(
                 {
@@ -241,6 +364,10 @@ class ScreenerEngine:
                     "distance_to_52w_high_pct": round(distance_to_high_pct, 2) if distance_to_high_pct is not None else None,
                     "ma20": round(ma20, 4) if ma20 is not None else None,
                     "ma50": round(ma50, 4) if ma50 is not None else None,
+                    "base_score": base_score,
+                    "macro_adjustment": macro_adjustment,
+                    "macro_adjustment_reason": macro_adjustment_reason,
+                    "setup_quality": setup_quality,
                     "score": score,
                     "next_event": earliest_event,
                     "chip_summary": chip_summary,
@@ -263,7 +390,8 @@ class ScreenerEngine:
             "filters": normalized_filters,
             "items": results[: normalized_filters["limit"]],
             "total": len(results),
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "market_context": macro_summary,
+            "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         _screen_cache[cache_key] = (now, payload)
         return payload

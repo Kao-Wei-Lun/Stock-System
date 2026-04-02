@@ -107,7 +107,14 @@
     <section class="result-panel">
       <div class="panel-head">
         <div class="panel-title">結果</div>
-        <div class="panel-subtitle">{{ results.total || 0 }} 檔符合條件</div>
+        <div class="panel-subtitle">
+          {{ results.total || 0 }} 檔符合條件<span v-if="marketContext"> · {{ postureLabel }}</span>
+        </div>
+      </div>
+      <div v-if="marketContext" class="market-context-banner" :class="bannerClass">
+        <span class="market-context-pill">{{ riskLabel }}</span>
+        <strong>{{ postureLabel }}</strong>
+        <span>{{ marketContext.decision_hint }}</span>
       </div>
       <div v-if="results.items?.length" class="result-table-wrap">
         <table class="result-table">
@@ -135,7 +142,14 @@
               <td>{{ formatNumber(item.close) }}</td>
               <td :class="Number(item.change_pct || 0) >= 0 ? 'up' : 'dn'">{{ formatSigned(item.change_pct) }}%</td>
               <td>{{ formatNumber(item.volume_ratio) }}</td>
-              <td>{{ item.score }}</td>
+              <td>
+                <div class="score-cell">
+                  <strong>{{ item.score }}</strong>
+                  <small :class="scoreAdjustmentClass(item.macro_adjustment)">
+                    {{ formatAdjustment(item.macro_adjustment) }} · Q{{ item.setup_quality ?? "—" }}
+                  </small>
+                </div>
+              </td>
               <td>{{ item.next_event?.event_date || "—" }}</td>
               <td>
                 <div class="action-row">
@@ -153,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   filters: { type: Object, required: true },
@@ -174,6 +188,21 @@ const emit = defineEmits([
 ]);
 
 const presetName = ref("");
+const marketContext = computed(() => props.results?.market_context || null);
+const bannerClass = computed(() => `is-${marketContext.value?.trade_posture || "standby"}`);
+const postureLabel = computed(() => {
+  if (marketContext.value?.trade_posture === "defensive") return "防守控倉";
+  if (marketContext.value?.trade_posture === "selective") return "選擇性出手";
+  if (marketContext.value?.trade_posture === "offensive") return "偏進攻";
+  if (marketContext.value?.trade_posture === "balanced") return "平衡觀察";
+  return "暫停判斷";
+});
+const riskLabel = computed(() => {
+  if (marketContext.value?.overall_risk === "high") return "高風險";
+  if (marketContext.value?.overall_risk === "medium") return "中風險";
+  if (marketContext.value?.overall_risk === "low") return "低風險";
+  return "未同步";
+});
 
 function formatNumber(value) {
   const numeric = Number(value);
@@ -185,6 +214,18 @@ function formatSigned(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "—";
   return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(2)}`;
+}
+
+function formatAdjustment(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return "±0";
+  return `${numeric > 0 ? "+" : ""}${numeric}`;
+}
+
+function scoreAdjustmentClass(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return "";
+  return numeric > 0 ? "up" : "dn";
 }
 
 function savePreset() {
@@ -331,6 +372,58 @@ function savePreset() {
   overflow: auto;
 }
 
+.market-context-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.market-context-banner strong {
+  color: var(--text1);
+}
+
+.market-context-pill {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.market-context-banner.is-defensive {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.market-context-banner.is-defensive .market-context-pill {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ffd0d0;
+}
+
+.market-context-banner.is-selective,
+.market-context-banner.is-balanced {
+  background: rgba(255, 209, 102, 0.12);
+}
+
+.market-context-banner.is-selective .market-context-pill,
+.market-context-banner.is-balanced .market-context-pill {
+  background: rgba(255, 209, 102, 0.2);
+  color: #ffe2a6;
+}
+
+.market-context-banner.is-offensive {
+  background: rgba(0, 217, 163, 0.12);
+}
+
+.market-context-banner.is-offensive .market-context-pill {
+  background: rgba(0, 217, 163, 0.2);
+  color: #bfffea;
+}
+
 .result-table {
   width: 100%;
   border-collapse: collapse;
@@ -379,6 +472,20 @@ function savePreset() {
 .action-row {
   display: flex;
   gap: 6px;
+}
+
+.score-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.score-cell strong {
+  color: var(--text1);
+}
+
+.score-cell small {
+  color: var(--text3);
 }
 
 .tiny-btn {

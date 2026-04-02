@@ -541,7 +541,7 @@ export function useDashboard() {
   const fundamentalsSummary = ref(null);
   const taiwanChipDetail = ref(null);
   const taiwanChipSummary = ref(null);
-  const screenerResults = ref({ items: [], total: 0, filters: {}, generated_at: null });
+  const screenerResults = ref({ items: [], total: 0, filters: {}, market_context: null, generated_at: null });
   const screenerPresets = ref([]);
   const screenerLoading = ref(false);
   const screenerFilters = reactive({
@@ -1140,7 +1140,7 @@ export function useDashboard() {
     screenerLoading.value = true;
     try {
       const payload = await dashboardApi.runScreener({ filters: buildScreenerPayload() });
-      screenerResults.value = payload || { items: [], total: 0, filters: {}, generated_at: null };
+      screenerResults.value = payload || { items: [], total: 0, filters: {}, market_context: null, generated_at: null };
     } catch (error) {
       console.error(error);
       pushNotification({ icon: "⚠️", title: "選股器執行失敗", msg: error.message || "請稍後再試", type: "error" });
