@@ -691,6 +691,103 @@ describe("RightSidebar", () => {
     expect(wrapper.get('[data-testid="journal-preset-result-summary"]').text()).toContain("+$750");
   });
 
+  it("shows empty-result suggestions and emits recovery actions", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: {
+          total_entries: 0,
+          closed_entries: 0,
+          open_entries: 0,
+          win_rate: 0,
+          net_pnl: 0,
+          avg_return_pct: 0,
+          source_breakdown: [],
+          strategy_breakdown: [],
+          market_posture_breakdown: [],
+          tag_breakdown: [],
+        },
+        journalLoading: false,
+        journalFilterPresets: [
+          {
+            id: 11,
+            name: "過濾過嚴",
+            description: "只看極窄條件",
+            scope: "ticker",
+            filters: {
+              market: "TW",
+              strategy_code: "breakout",
+              tag: "來源:警報通知",
+              search: "macro",
+            },
+          },
+        ],
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "TW",
+          strategy_code: "breakout",
+          tag: "來源:警報通知",
+          search: "macro",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="journal-preset-result-summary"]').text()).toContain("目前條件沒有命中任何交易紀錄");
+    expect(wrapper.get('[data-testid="journal-empty-scope-all"]').text()).toContain("改看全部紀錄");
+    expect(wrapper.get('[data-testid="journal-empty-clear-search"]').text()).toContain("清除關鍵字");
+    expect(wrapper.get('[data-testid="journal-empty-reset-all"]').text()).toContain("清除全部篩選");
+
+    await wrapper.get('[data-testid="journal-empty-scope-all"]').trigger("click");
+    await wrapper.get('[data-testid="journal-empty-clear-search"]').trigger("click");
+    await wrapper.get('[data-testid="journal-empty-reset-all"]').trigger("click");
+
+    expect(wrapper.emitted("update-journal-filter")[0]).toEqual([{ key: "scope", value: "all" }]);
+    expect(wrapper.emitted("update-journal-filter")[1]).toEqual([{ key: "search", value: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[0]).toEqual([{
+      scope: "ticker",
+      market: "",
+      strategy_code: "",
+      tag: "",
+      search: "",
+    }]);
+  });
+
   it.skip("emits journal preset save, load, and delete actions", async () => {
     const wrapper = mount(RightSidebar, {
       props: {

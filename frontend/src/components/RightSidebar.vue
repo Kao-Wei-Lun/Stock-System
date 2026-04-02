@@ -370,6 +370,21 @@
           <span>平均報酬</span>
           <span :class="journalPresetResultSummary.avgReturnPct >= 0 ? 'up' : 'dn'">{{ journalPresetResultSummary.avgReturnPct.toFixed(2) }}%</span>
         </div>
+        <div v-if="journalPresetResultSummary.totalEntries === 0" class="journal-empty-state">
+          <div class="bt-trade-sub">目前條件沒有命中任何交易紀錄，可以先放寬一個篩選條件再看。</div>
+          <div v-if="journalPresetEmptySuggestions.length" class="journal-empty-actions">
+            <button
+              v-for="suggestion in journalPresetEmptySuggestions"
+              :key="suggestion.id"
+              type="button"
+              class="journal-empty-action"
+              :data-testid="`journal-empty-${suggestion.id}`"
+              @click="applyJournalEmptySuggestion(suggestion)"
+            >
+              {{ suggestion.label }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div v-if="activeJournalFilters.length" class="journal-filter-summary">
@@ -1192,6 +1207,77 @@ const journalPresetResultSummary = computed(() => {
     avgReturnPct: Number(props.journalStats.avg_return_pct || 0),
   };
 });
+
+const journalPresetEmptySuggestions = computed(() => {
+  if (!journalPresetResultSummary.value || journalPresetResultSummary.value.totalEntries !== 0) {
+    return [];
+  }
+
+  const suggestions = [];
+  if (props.journalFilterScope !== "all") {
+    suggestions.push({
+      id: "scope-all",
+      label: "改看全部紀錄",
+      type: "update",
+      key: "scope",
+      value: "all",
+    });
+  }
+  if (String(props.journalFilters?.search || "").trim()) {
+    suggestions.push({
+      id: "clear-search",
+      label: "清除關鍵字",
+      type: "update",
+      key: "search",
+      value: "",
+    });
+  }
+  if (String(props.journalFilters?.tag || "").trim()) {
+    suggestions.push({
+      id: "clear-tag",
+      label: "清除標籤",
+      type: "update",
+      key: "tag",
+      value: "",
+    });
+  }
+  if (String(props.journalFilters?.strategy_code || "").trim()) {
+    suggestions.push({
+      id: "clear-strategy",
+      label: "清除策略",
+      type: "update",
+      key: "strategy_code",
+      value: "",
+    });
+  }
+  if (String(props.journalFilters?.market || "").trim()) {
+    suggestions.push({
+      id: "clear-market",
+      label: "清除市場",
+      type: "update",
+      key: "market",
+      value: "",
+    });
+  }
+  if (activeJournalFilters.value.length) {
+    suggestions.push({
+      id: "reset-all",
+      label: "清除全部篩選",
+      type: "preset",
+      value: resetJournalFilterPreset,
+    });
+  }
+  return suggestions;
+});
+
+function applyJournalEmptySuggestion(suggestion) {
+  if (!suggestion) return;
+  if (suggestion.type === "preset") {
+    emit("apply-journal-filter-preset", suggestion.value);
+    return;
+  }
+  emit("update-journal-filter", { key: suggestion.key, value: suggestion.value });
+}
 </script>
 
 <style scoped>
@@ -1552,6 +1638,30 @@ const journalPresetResultSummary = computed(() => {
 
 .journal-preset-result-card {
   margin-top: 12px;
+}
+
+.journal-empty-state {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.journal-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.journal-empty-action {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
 }
 
 .journal-entry-tags {
