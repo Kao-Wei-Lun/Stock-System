@@ -159,4 +159,19 @@ describe("WatchlistPanel", () => {
       },
     ]);
   });
+
+  it("emits an alert shortcut payload from the watchlist item", async () => {
+    const wrapper = mount(WatchlistPanel, {
+      props: buildPanelProps(),
+    });
+
+    await wrapper.get('[data-testid="watch-alert-AAPL"]').trigger("click");
+
+    expect(wrapper.emitted("open-alert-modal")[0]).toEqual([
+      {
+        ticker: "AAPL",
+        type: "price",
+      },
+    ]);
+  });
 });

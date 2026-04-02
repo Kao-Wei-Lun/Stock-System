@@ -163,6 +163,14 @@
               >
                 日誌
               </button>
+              <button
+                class="wl-shortcut"
+                :data-testid="`watch-alert-${item.ticker}`"
+                title="建立警報"
+                @click.stop="openAlertShortcut(item)"
+              >
+                警報
+              </button>
             </div>
             <div v-if="manualOrderingEnabled" class="wl-ops">
               <button class="wl-op" title="上移" :disabled="!canMoveItem(item, -1)" @click.stop="moveItem(item, -1)">↑</button>
@@ -208,6 +216,7 @@ const emit = defineEmits([
   "reorder-items",
   "select-ticker",
   "open-journal-entry",
+  "open-alert-modal",
 ]);
 
 const createGroupOpen = ref(false);
@@ -488,6 +497,13 @@ function openJournalEntry(item) {
   });
 }
 
+function openAlertShortcut(item) {
+  emit("open-alert-modal", {
+    ticker: item.ticker,
+    type: "price",
+  });
+}
+
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
   if (!createGroupOpen.value) newGroupName.value = "";
@@ -589,6 +605,7 @@ function removeItem(item) {
 
 .wl-shortcuts {
   display: flex;
+  gap: 6px;
   justify-content: flex-end;
   margin-bottom: 6px;
 }

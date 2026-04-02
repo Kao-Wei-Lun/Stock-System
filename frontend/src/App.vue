@@ -38,6 +38,7 @@
         @reorder-items="reorderWatchlistItems"
         @select-ticker="handleSelectTicker"
         @open-journal-entry="handleWatchlistJournalEntry"
+        @open-alert-modal="openAlertModal"
       />
 
       <div
