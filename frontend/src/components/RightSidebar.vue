@@ -413,6 +413,26 @@
           </button>
         </div>
 
+        <div v-if="journalStats.strategy_breakdown?.length" class="journal-analytics-card">
+          <div class="bt-section-title">策略拆解</div>
+          <button
+            v-for="item in topStrategyBreakdown"
+            :key="`strategy-${item.key}`"
+            type="button"
+            class="journal-analytics-row"
+            :data-testid="`journal-strategy-${item.key}`"
+            @click="$emit('apply-journal-filter-preset', buildJournalStrategyPreset(item.key))"
+          >
+            <div>
+              <div>{{ item.key }}</div>
+              <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
+            </div>
+            <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
+              {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
+            </div>
+          </button>
+        </div>
+
         <div v-if="journalStats.market_posture_breakdown?.length" class="journal-analytics-card">
           <div class="bt-section-title">市場情境</div>
           <button
@@ -594,6 +614,13 @@ function formatPct(value) {
 function buildJournalTagPreset(tag) {
   return {
     tag,
+    search: "",
+  };
+}
+
+function buildJournalStrategyPreset(strategyCode) {
+  return {
+    strategy_code: strategyCode,
     search: "",
   };
 }
@@ -823,6 +850,7 @@ const backtestTradeRows = computed(() => (props.backtestResult?.trades || []).sl
 const backtestHistoryRows = computed(() => (props.backtestHistory || []).slice(0, 8));
 const journalEntryRows = computed(() => (props.journalEntries || []).slice(0, 12));
 const topSourceBreakdown = computed(() => (props.journalStats?.source_breakdown || []).slice(0, 3));
+const topStrategyBreakdown = computed(() => (props.journalStats?.strategy_breakdown || []).slice(0, 3));
 const topMarketPostureBreakdown = computed(() => (props.journalStats?.market_posture_breakdown || []).slice(0, 3));
 const topTagBreakdown = computed(() => (
   (props.journalStats?.tag_breakdown || [])

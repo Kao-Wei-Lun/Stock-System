@@ -331,6 +331,9 @@ def test_trade_journal_statistics_aggregation():
     assert stats["win_rate"] == 50.0
     assert stats["net_pnl"] == 1000
     assert stats["markets"][0]["key"] == "US"
+    assert stats["strategy_breakdown"][0]["key"] == "breakout"
+    assert stats["strategy_breakdown"][0]["count"] == 2
+    assert stats["strategy_breakdown"][0]["net_pnl"] == 1500
     assert stats["source_breakdown"][0]["key"] == "警報通知"
     assert stats["source_breakdown"][0]["count"] == 2
     assert stats["source_breakdown"][0]["closed_count"] == 1

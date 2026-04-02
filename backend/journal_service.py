@@ -75,6 +75,7 @@ def build_journal_stats(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         "worst_trade": min(((entry.get("result") or {}).get("pnl", 0) or 0 for entry in closed_entries), default=0.0),
         "markets": _aggregate_by_key(entries, "market"),
         "strategies": _aggregate_by_key(entries, "strategy_code"),
+        "strategy_breakdown": _aggregate_field_breakdown(entries, "strategy_code"),
         "emotions": _aggregate_by_key(entries, "emotion_tag"),
         "tag_breakdown": _aggregate_tag_breakdown(entries),
         "source_breakdown": _aggregate_prefixed_tags(entries, "來源:"),
@@ -102,6 +103,16 @@ def _aggregate_tag_breakdown(entries: List[Dict[str, Any]]) -> List[Dict[str, An
             if tag.startswith("來源:") or tag.startswith("市場:"):
                 continue
             buckets.setdefault(tag, []).append(entry)
+    return _summarize_entry_buckets(buckets)
+
+
+def _aggregate_field_breakdown(entries: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        value = str(entry.get(key) or "").strip()
+        if not value:
+            continue
+        buckets.setdefault(value, []).append(entry)
     return _summarize_entry_buckets(buckets)
 
 

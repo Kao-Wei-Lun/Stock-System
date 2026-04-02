@@ -366,6 +366,16 @@ describe("RightSidebar", () => {
               avg_return_pct: 2.5,
             },
           ],
+          strategy_breakdown: [
+            {
+              key: "breakout",
+              count: 1,
+              closed_count: 1,
+              win_rate: 100,
+              net_pnl: 500,
+              avg_return_pct: 2.5,
+            },
+          ],
           market_posture_breakdown: [
             {
               key: "選擇性出手",
@@ -406,6 +416,7 @@ describe("RightSidebar", () => {
     expect(wrapper.text()).toContain("統計摘要");
     expect(wrapper.text()).toContain("來源拆解");
     expect(wrapper.text()).toContain("警報通知");
+    expect(wrapper.text()).toContain("策略拆解");
     expect(wrapper.text()).toContain("市場情境");
     expect(wrapper.text()).toContain("選擇性出手");
     expect(wrapper.text()).toContain("高頻標籤");
@@ -414,6 +425,7 @@ describe("RightSidebar", () => {
     await wrapper.find(".journal-card .add-btn").trigger("click");
     await wrapper.findAll(".bt-history-row")[0].trigger("click");
     await wrapper.get('[data-testid="journal-source-警報通知"]').trigger("click");
+    await wrapper.get('[data-testid="journal-strategy-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-posture-選擇性出手"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-tag-5-breakout"]').trigger("click");
@@ -422,9 +434,10 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("add-journal-attachment")).toBeTruthy();
     expect(wrapper.emitted("select-journal-entry")[0]).toEqual([5]);
     expect(wrapper.emitted("apply-journal-filter-preset")[0]).toEqual([{ tag: "來源:警報通知", search: "" }]);
-    expect(wrapper.emitted("apply-journal-filter-preset")[1]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
-    expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[1]).toEqual([{ strategy_code: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[3]).toEqual([{ tag: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[4]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("save-journal-entry")).toBeTruthy();
   });
 
