@@ -185,6 +185,7 @@
                   <div class="action-row">
                     <button class="tiny-btn" @click="$emit('open-ticker', item.ticker)">開圖</button>
                     <button class="tiny-btn" @click="$emit('add-watchlist', buildWatchlistPayload(item))">自選</button>
+                    <button class="tiny-btn" @click="$emit('open-journal-entry', buildJournalSeed(item))">日誌</button>
                     <button class="tiny-btn" @click="$emit('add-alert', item.ticker)">警報</button>
                   </div>
                 </td>
@@ -248,6 +249,7 @@ const emit = defineEmits([
   "delete-preset",
   "open-ticker",
   "add-watchlist",
+  "open-journal-entry",
   "add-alert",
 ]);
 
@@ -359,6 +361,28 @@ function buildWatchlistPayload(item) {
   return {
     ticker: item?.ticker,
     tags,
+  };
+}
+
+function buildJournalSeed(item) {
+  const decisionCard = getDecisionCard(item);
+  const sectionSummary = (decisionCard?.sections || [])
+    .slice(0, 3)
+    .map((section) => `${section.label}:${section.summary}`)
+    .join(" | ");
+  return {
+    ticker: item?.ticker,
+    name: item?.name,
+    market: item?.market,
+    entry_price: item?.close,
+    entry_reason: decisionCard?.summary || "",
+    review_notes: `決策卡：${decisionCard?.verdict || "待判讀"}${sectionSummary ? ` | ${sectionSummary}` : ""}`,
+    tags: [
+      decisionCard?.verdict,
+      item?.setup_quality != null ? `Q${item.setup_quality}` : "",
+      marketContext.value?.trade_posture ? `市場:${postureLabel.value}` : "",
+      "來源:選股器",
+    ].filter(Boolean),
   };
 }
 

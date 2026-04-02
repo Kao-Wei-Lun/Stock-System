@@ -214,6 +214,7 @@
             @delete-preset="deleteScreenerPreset"
             @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
             @add-watchlist="addTickerToWatchlist"
+            @open-journal-entry="handleScreenerJournalEntry"
             @add-alert="openAlertModal($event)"
           />
         </div>
@@ -517,6 +518,13 @@ function handleMacroAlertShortcut(payload) {
     condition: payload?.condition || "high",
     value: "",
   });
+}
+
+function handleScreenerJournalEntry(payload) {
+  if (!payload?.ticker) return;
+  setWorkspaceTab("chart");
+  void selectTicker(payload.ticker, payload.name || payload.ticker);
+  startJournalEntry(payload);
 }
 
 function handleAlertField(payload) {

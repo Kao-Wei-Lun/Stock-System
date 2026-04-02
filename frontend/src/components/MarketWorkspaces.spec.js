@@ -152,12 +152,24 @@ describe("Market workspaces", () => {
     await actionButtons[0].trigger("click");
     await actionButtons[1].trigger("click");
     await actionButtons[2].trigger("click");
+    await actionButtons[3].trigger("click");
 
     expect(wrapper.emitted("open-ticker")[0]).toEqual(["AAPL"]);
     expect(wrapper.emitted("add-watchlist")[0]).toEqual([
       {
         ticker: "AAPL",
         tags: ["優先候選", "Q4", "市場:選擇性出手"],
+      },
+    ]);
+    expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
+      {
+        ticker: "AAPL",
+        name: "Apple",
+        market: "US",
+        entry_price: 210,
+        entry_reason: "趨勢、量價與確認條件同步，值得優先深挖進場劇本。",
+        review_notes: "決策卡：優先候選 | 趨勢結構:站上 MA20 / MA20 >= MA50 | 市場風險:市場 posture selective / 保留強勢候選",
+        tags: ["優先候選", "Q4", "市場:選擇性出手", "來源:選股器"],
       },
     ]);
     expect(wrapper.emitted("add-alert")[0]).toEqual(["AAPL"]);

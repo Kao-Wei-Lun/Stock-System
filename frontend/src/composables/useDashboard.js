@@ -1266,6 +1266,9 @@ export function useDashboard() {
       market: seed.market || inferMarketFromTicker(seed.ticker || currentTicker.value),
       entry_price: seed.entry_price ?? quote.price ?? "",
       strategy_code: seed.strategy_code || backtestResult.value?.strategy_key || "",
+      entry_reason: seed.entry_reason || "",
+      review_notes: seed.review_notes || "",
+      tags: Array.isArray(seed.tags) ? seed.tags : [],
       size: 1,
     });
     void loadJournalData();
