@@ -698,6 +698,106 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("select-journal-entry")[0]).toEqual([2]);
   });
 
+  it("toggles between condensed and full preset result rows", async () => {
+    const entries = Array.from({ length: 13 }, (_, index) => ({
+      id: index + 1,
+      ticker: `TK${index + 1}`,
+      direction: "long",
+      strategy_code: "breakout",
+      entry_time: `2026-04-${String(index + 1).padStart(2, "0")}T09:00`,
+      tags: ["來源:警報通知"],
+      result: { pnl: 100 + index },
+    }));
+
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: entries,
+        journalStats: {
+          total_entries: 13,
+          closed_entries: 13,
+          open_entries: 0,
+          win_rate: 100,
+          net_pnl: 1300,
+          avg_return_pct: 2.1,
+          source_breakdown: [],
+          strategy_breakdown: [],
+          market_posture_breakdown: [],
+          tag_breakdown: [],
+        },
+        journalLoading: false,
+        journalFilterPresets: [
+          {
+            id: 20,
+            name: "完整命中模板",
+            description: "測試展開清單",
+            scope: "all",
+            filters: {
+              market: "US",
+              strategy_code: "breakout",
+              tag: "來源:警報通知",
+              search: "",
+            },
+          },
+        ],
+        journalFilterScope: "all",
+        journalFilters: {
+          market: "US",
+          strategy_code: "breakout",
+          tag: "來源:警報通知",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="journal-preset-toggle-results"]').text()).toContain("查看全部命中 (13)");
+    expect(wrapper.findAll('[data-testid^="journal-history-entry-"]')).toHaveLength(12);
+
+    await wrapper.get('[data-testid="journal-preset-toggle-results"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="journal-preset-toggle-results"]').text()).toContain("收合至前 12 筆");
+    expect(wrapper.findAll('[data-testid^="journal-history-entry-"]')).toHaveLength(13);
+
+    await wrapper.get('[data-testid="journal-preset-toggle-results"]').trigger("click");
+
+    expect(wrapper.findAll('[data-testid^="journal-history-entry-"]')).toHaveLength(12);
+  });
+
   it("shows empty-result suggestions and emits recovery actions", async () => {
     const wrapper = mount(RightSidebar, {
       props: {

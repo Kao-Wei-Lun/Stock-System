@@ -388,6 +388,15 @@
             {{ Number(journalPresetLatestEntry.result?.pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(journalPresetLatestEntry.result?.pnl || 0)).toLocaleString() }}
           </div>
         </button>
+        <button
+          v-if="journalResultToggleVisible"
+          type="button"
+          class="journal-preset-expand-btn"
+          data-testid="journal-preset-toggle-results"
+          @click="toggleJournalResultRows"
+        >
+          {{ journalResultToggleLabel }}
+        </button>
         <div v-if="journalPresetResultSummary.totalEntries === 0" class="journal-empty-state">
           <div class="bt-trade-sub">目前條件沒有命中任何交易紀錄，可以先放寬一個篩選條件再看。</div>
           <div v-if="journalPresetEmptySuggestions.length" class="journal-empty-actions">
@@ -625,7 +634,14 @@
       <div class="journal-card">
         <div class="bt-section-title">歷史紀錄</div>
         <div v-if="journalEntries.length">
-          <button v-for="entry in journalEntryRows" :key="entry.id" type="button" class="bt-history-row" @click="$emit('select-journal-entry', entry.id)">
+          <button
+            v-for="entry in journalEntryRows"
+            :key="entry.id"
+            type="button"
+            class="bt-history-row"
+            :data-testid="`journal-history-entry-${entry.id}`"
+            @click="$emit('select-journal-entry', entry.id)"
+          >
             <span>
               <div>{{ entry.ticker }} · {{ entry.direction }} · {{ entry.strategy_code || "manual" }}</div>
               <div class="bt-trade-sub">{{ entry.entry_time }}</div>
@@ -702,7 +718,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps({
   rightTab: { type: String, required: true },
@@ -901,6 +917,7 @@ function isSameJournalFilterSnapshot(left, right) {
 const journalPresetName = ref("");
 const journalPresetDescription = ref("");
 const editingJournalPresetId = ref(null);
+const showAllJournalEntries = ref(false);
 
 function saveJournalPreset() {
   if (!journalPresetName.value) return;
@@ -1146,7 +1163,13 @@ const settingSections = computed(() => [
 const backtestEquityPath = computed(() => buildSparklinePath(props.backtestResult?.equity_curve || []));
 const backtestTradeRows = computed(() => (props.backtestResult?.trades || []).slice(-5).reverse());
 const backtestHistoryRows = computed(() => (props.backtestHistory || []).slice(0, 8));
-const journalEntryRows = computed(() => (props.journalEntries || []).slice(0, 12));
+const journalLoadedEntryCount = computed(() => (
+  Array.isArray(props.journalEntries) ? props.journalEntries.length : 0
+));
+const journalEntryRows = computed(() => {
+  const entries = Array.isArray(props.journalEntries) ? props.journalEntries : [];
+  return showAllJournalEntries.value ? entries : entries.slice(0, 12);
+});
 const topSourceBreakdown = computed(() => (props.journalStats?.source_breakdown || []).slice(0, 3));
 const topStrategyBreakdown = computed(() => (props.journalStats?.strategy_breakdown || []).slice(0, 3));
 const topMarketPostureBreakdown = computed(() => (props.journalStats?.market_posture_breakdown || []).slice(0, 3));
@@ -1166,6 +1189,9 @@ const currentJournalFilterSnapshot = computed(() => normalizeJournalFilterSnapsh
   scope: props.journalFilterScope,
   filters: props.journalFilters,
 }));
+watch(currentJournalFilterSnapshot, () => {
+  showAllJournalEntries.value = false;
+}, { deep: true });
 const activeJournalPreset = computed(() => (
   (props.journalFilterPresets || []).find((preset) =>
     isSameJournalFilterSnapshot(normalizeJournalFilterSnapshot(preset), currentJournalFilterSnapshot.value))
@@ -1239,6 +1265,22 @@ const journalPresetLatestEntry = computed(() => {
     return currentTime >= latestTime ? entry : latest;
   }, null);
 });
+
+const journalResultToggleVisible = computed(() => (
+  Boolean(journalPresetResultSummary.value)
+  && Number(journalPresetResultSummary.value?.totalEntries || 0) > 0
+  && journalLoadedEntryCount.value > 12
+));
+
+const journalResultToggleLabel = computed(() => (
+  showAllJournalEntries.value
+    ? "收合至前 12 筆"
+    : `查看全部命中 (${journalLoadedEntryCount.value})`
+));
+
+function toggleJournalResultRows() {
+  showAllJournalEntries.value = !showAllJournalEntries.value;
+}
 
 const journalPresetEmptySuggestions = computed(() => {
   if (!journalPresetResultSummary.value || journalPresetResultSummary.value.totalEntries !== 0) {
@@ -1685,6 +1727,19 @@ function applyJournalEmptySuggestion(suggestion) {
   justify-content: space-between;
   gap: 12px;
   text-align: left;
+  cursor: pointer;
+}
+
+.journal-preset-expand-btn {
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+  font-size: 10px;
+  line-height: 1.4;
   cursor: pointer;
 }
 
