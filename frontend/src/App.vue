@@ -37,6 +37,7 @@
         @remove-from-watchlist="removeTickerFromWatchlist"
         @reorder-items="reorderWatchlistItems"
         @select-ticker="handleSelectTicker"
+        @open-journal-entry="handleWatchlistJournalEntry"
       />
 
       <div
@@ -521,6 +522,13 @@ function handleMacroAlertShortcut(payload) {
 }
 
 function handleScreenerJournalEntry(payload) {
+  if (!payload?.ticker) return;
+  setWorkspaceTab("chart");
+  void selectTicker(payload.ticker, payload.name || payload.ticker);
+  startJournalEntry(payload);
+}
+
+function handleWatchlistJournalEntry(payload) {
   if (!payload?.ticker) return;
   setWorkspaceTab("chart");
   void selectTicker(payload.ticker, payload.name || payload.ticker);

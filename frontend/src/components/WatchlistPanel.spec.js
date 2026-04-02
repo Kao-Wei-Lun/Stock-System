@@ -140,4 +140,23 @@ describe("WatchlistPanel", () => {
       "MSFT",
     ]);
   });
+
+  it("emits a journal draft payload from the watchlist item", async () => {
+    const wrapper = mount(WatchlistPanel, {
+      props: buildPanelProps(),
+    });
+
+    await wrapper.get('[data-testid="watch-journal-AAPL"]').trigger("click");
+
+    expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
+      {
+        ticker: "AAPL",
+        name: "Apple",
+        entry_price: 210.5,
+        entry_reason: "觀察池跟蹤：優先候選 / Q4 / 市場:選擇性出手",
+        review_notes: "觀察池快照：優先候選 | Q4 | 市場:選擇性出手 | 來源:觀察池 | 資料源:Yahoo Finance | 狀態:延遲快照",
+        tags: ["優先候選", "Q4", "市場:選擇性出手", "來源:觀察池"],
+      },
+    ]);
+  });
 });

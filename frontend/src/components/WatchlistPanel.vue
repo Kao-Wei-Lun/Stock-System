@@ -154,6 +154,16 @@
             </div>
           </div>
           <div class="wl-side">
+            <div class="wl-shortcuts">
+              <button
+                class="wl-shortcut"
+                :data-testid="`watch-journal-${item.ticker}`"
+                title="建立日誌草稿"
+                @click.stop="openJournalEntry(item)"
+              >
+                日誌
+              </button>
+            </div>
             <div v-if="manualOrderingEnabled" class="wl-ops">
               <button class="wl-op" title="上移" :disabled="!canMoveItem(item, -1)" @click.stop="moveItem(item, -1)">↑</button>
               <button class="wl-op" title="下移" :disabled="!canMoveItem(item, 1)" @click.stop="moveItem(item, 1)">↓</button>
@@ -197,6 +207,7 @@ const emit = defineEmits([
   "remove-from-watchlist",
   "reorder-items",
   "select-ticker",
+  "open-journal-entry",
 ]);
 
 const createGroupOpen = ref(false);
@@ -459,6 +470,24 @@ function resetWatchView() {
   watchSortMode.value = "manual";
 }
 
+function openJournalEntry(item) {
+  const tags = [...new Set([...getTagList(item), "來源:觀察池"])];
+  const summaryParts = [];
+  const verdictTag = getVerdictTag(item);
+  if (verdictTag) summaryParts.push(verdictTag);
+  if (getSetupQuality(item)) summaryParts.push(`Q${getSetupQuality(item)}`);
+  if (getPostureTag(item)) summaryParts.push(getPostureTag(item));
+
+  emit("open-journal-entry", {
+    ticker: item.ticker,
+    name: item.name || item.ticker,
+    entry_price: item.close ?? "",
+    entry_reason: summaryParts.length ? `觀察池跟蹤：${summaryParts.join(" / ")}` : "觀察池跟蹤標的",
+    review_notes: `觀察池快照：${tags.join(" | ")} | 資料源:${formatSourceLabel(item.source)} | 狀態:${getFreshnessLabel(item)}`,
+    tags,
+  });
+}
+
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
   if (!createGroupOpen.value) newGroupName.value = "";
@@ -556,6 +585,22 @@ function removeItem(item) {
   font-size: 10px;
   line-height: 1.5;
   color: var(--text3);
+}
+
+.wl-shortcuts {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.wl-shortcut {
+  padding: 4px 8px;
+  border: 1px solid rgba(123, 231, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.08);
+  color: #bfefff;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .wl-meta-row {
