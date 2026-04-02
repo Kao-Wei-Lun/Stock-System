@@ -43,6 +43,15 @@
           <input type="number" step="1" min="1" max="5" :value="filters.min_setup_quality" @input="$emit('update-filter', { key: 'min_setup_quality', value: $event.target.value })" />
         </label>
         <label class="filter-row">
+          <span>Verdict</span>
+          <select :value="filters.decision_verdict" @change="$emit('update-filter', { key: 'decision_verdict', value: $event.target.value })">
+            <option value="any">全部</option>
+            <option value="priority">優先候選</option>
+            <option value="watch">觀察名單</option>
+            <option value="wait">等待名單</option>
+          </select>
+        </label>
+        <label class="filter-row">
           <span>PE 上限</span>
           <input type="number" step="0.1" :value="filters.max_pe_ratio" @input="$emit('update-filter', { key: 'max_pe_ratio', value: $event.target.value })" />
         </label>
@@ -121,6 +130,16 @@
         <span class="market-context-pill">{{ riskLabel }}</span>
         <strong>{{ postureLabel }}</strong>
         <span>{{ marketContext.decision_hint }}</span>
+      </div>
+      <div v-if="verdictSummary.length" class="verdict-summary-row">
+        <span
+          v-for="item in verdictSummary"
+          :key="item.key"
+          class="verdict-summary-chip"
+          :class="verdictClass(item.label)"
+        >
+          {{ item.label }} {{ item.count }}
+        </span>
       </div>
       <div v-if="results.items?.length" class="result-table-wrap">
         <table class="result-table">
@@ -249,6 +268,20 @@ const riskLabel = computed(() => {
   if (marketContext.value?.overall_risk === "low") return "低風險";
   return "未同步";
 });
+const verdictSummary = computed(() => {
+  const counts = { priority: 0, watch: 0, wait: 0 };
+  (props.results?.items || []).forEach((item) => {
+    const key = getDecisionCard(item).verdict_key;
+    if (Object.prototype.hasOwnProperty.call(counts, key)) {
+      counts[key] += 1;
+    }
+  });
+  return [
+    { key: "priority", label: "優先候選", count: counts.priority },
+    { key: "watch", label: "觀察名單", count: counts.watch },
+    { key: "wait", label: "等待名單", count: counts.wait },
+  ].filter((item) => item.count > 0);
+});
 
 function formatNumber(value) {
   const numeric = Number(value);
@@ -296,6 +329,7 @@ function sectionClass(section) {
 
 function buildFallbackDecisionCard(item) {
   return {
+    verdict_key: Number(item?.score || 0) >= 80 ? "priority" : Number(item?.score || 0) >= 60 ? "watch" : "wait",
     verdict: Number(item?.score || 0) >= 80 ? "優先候選" : Number(item?.score || 0) >= 60 ? "觀察名單" : "等待名單",
     summary: item?.macro_adjustment_reason || "決策卡尚未完整同步，先以總分與市場調整作為初步判斷。",
     sections: [
@@ -517,6 +551,31 @@ function savePreset() {
 .market-context-banner.is-offensive .market-context-pill {
   background: rgba(0, 217, 163, 0.2);
   color: #bfffea;
+}
+
+.verdict-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.verdict-summary-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text2);
+  font-size: 11px;
+}
+
+.verdict-summary-chip.positive {
+  background: rgba(0, 217, 163, 0.14);
+  color: #bfffea;
+}
+
+.verdict-summary-chip.risk {
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd5d5;
 }
 
 .result-table {

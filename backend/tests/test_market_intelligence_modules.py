@@ -180,6 +180,7 @@ def test_normalize_screener_filters_coerces_numeric_fields():
             "min_price": "100",
             "min_volume_ratio": "1.8",
             "min_setup_quality": "4",
+            "decision_verdict": "priority",
             "upcoming_event_days": "7",
             "limit": "500",
         }
@@ -189,6 +190,7 @@ def test_normalize_screener_filters_coerces_numeric_fields():
     assert filters["min_price"] == 100
     assert filters["min_volume_ratio"] == 1.8
     assert filters["min_setup_quality"] == 4
+    assert filters["decision_verdict"] == "priority"
     assert filters["upcoming_event_days"] == 7
     assert filters["limit"] == 200
 

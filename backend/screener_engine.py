@@ -56,6 +56,7 @@ def normalize_screener_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, A
         "max_price": _safe_float(source.get("max_price"), 0.0) or None,
         "min_volume_ratio": _safe_float(source.get("min_volume_ratio"), 0.0) or None,
         "min_setup_quality": _safe_int(source.get("min_setup_quality"), 0) or None,
+        "decision_verdict": str(source.get("decision_verdict") or "any").lower(),
         "max_pe_ratio": _safe_float(source.get("max_pe_ratio"), 0.0) or None,
         "min_dividend_yield": _safe_float(source.get("min_dividend_yield"), 0.0) or None,
         "near_52w_high_pct": _safe_float(source.get("near_52w_high_pct"), 0.0) or None,
@@ -239,20 +240,20 @@ def _format_pct(value: Optional[float]) -> str:
     return f"{value:.2f}%"
 
 
-def _decision_verdict(total_score: int, posture: str) -> tuple[str, str]:
+def _decision_verdict(total_score: int, posture: str) -> tuple[str, str, str]:
     normalized_posture = str(posture or "standby").lower()
     if normalized_posture == "defensive":
         if total_score >= 80:
-            return "逆風強勢候選", "市場偏防守，但這檔結構仍完整，可保留在高優先觀察名單。"
+            return "priority", "逆風強勢候選", "市場偏防守，但這檔結構仍完整，可保留在高優先觀察名單。"
         if total_score >= 60:
-            return "防守觀察", "目前偏高風險，建議只做觀察或極小倉位試單。"
-        return "暫緩出手", "分數不足以對抗當前風險環境，先等待更明確的趨勢。"
+            return "watch", "防守觀察", "目前偏高風險，建議只做觀察或極小倉位試單。"
+        return "wait", "暫緩出手", "分數不足以對抗當前風險環境，先等待更明確的趨勢。"
 
     if total_score >= 80:
-        return "優先候選", "趨勢、量價與確認條件同步，值得優先深挖進場劇本。"
+        return "priority", "優先候選", "趨勢、量價與確認條件同步，值得優先深挖進場劇本。"
     if total_score >= 60:
-        return "觀察名單", "結構仍有可取之處，但需要更明確的觸發點與風險控制。"
-    return "等待名單", "現階段條件偏弱，暫時不列為優先追蹤標的。"
+        return "watch", "觀察名單", "結構仍有可取之處，但需要更明確的觸發點與風險控制。"
+    return "wait", "等待名單", "現階段條件偏弱，暫時不列為優先追蹤標的。"
 
 
 def _build_decision_card(
@@ -376,7 +377,7 @@ def _build_decision_card(
         macro_adjustment_reason or "未額外調整",
     ]
 
-    verdict, summary = _decision_verdict(score, posture)
+    verdict_key, verdict, summary = _decision_verdict(score, posture)
     sections = [
         {
             "key": "trend",
@@ -431,6 +432,7 @@ def _build_decision_card(
 
     return {
         "verdict": verdict,
+        "verdict_key": verdict_key,
         "summary": summary,
         "total_score": score,
         "base_score": base_score,
@@ -586,6 +588,10 @@ class ScreenerEngine:
                 event_window_days=normalized_filters["upcoming_event_days"],
             )
             decision_card["setup_quality"] = setup_quality
+            if normalized_filters["decision_verdict"] in {"priority", "watch", "wait"} and (
+                decision_card.get("verdict_key") != normalized_filters["decision_verdict"]
+            ):
+                continue
 
             results.append(
                 {

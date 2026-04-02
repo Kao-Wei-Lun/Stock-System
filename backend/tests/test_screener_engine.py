@@ -201,3 +201,9 @@ async def test_screener_filters_and_sorts_by_setup_quality(monkeypatch):
     assert payload["total"] == 1
     assert payload["items"][0]["ticker"] == "AAPL"
     assert payload["items"][0]["setup_quality"] >= 4
+    assert payload["items"][0]["decision_card"]["verdict_key"] == "priority"
+
+    wait_payload = await engine.run({"market": "US", "decision_verdict": "wait", "limit": 10})
+    assert wait_payload["total"] == 1
+    assert wait_payload["items"][0]["ticker"] == "MSFT"
+    assert wait_payload["items"][0]["decision_card"]["verdict_key"] == "wait"

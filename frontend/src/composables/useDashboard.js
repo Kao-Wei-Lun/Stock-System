@@ -552,6 +552,7 @@ export function useDashboard() {
     max_price: "",
     min_volume_ratio: "",
     min_setup_quality: "",
+    decision_verdict: "any",
     max_pe_ratio: "",
     min_dividend_yield: "",
     near_52w_high_pct: "",

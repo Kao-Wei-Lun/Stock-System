@@ -84,6 +84,7 @@ describe("Market workspaces", () => {
           min_price: "",
           min_volume_ratio: "",
           min_setup_quality: "",
+          decision_verdict: "any",
           max_pe_ratio: "",
           min_dividend_yield: "",
           near_52w_high_pct: "",
@@ -115,6 +116,7 @@ describe("Market workspaces", () => {
               macro_adjustment: 6,
               setup_quality: 4,
               decision_card: {
+                verdict_key: "priority",
                 verdict: "優先候選",
                 summary: "趨勢、量價與確認條件同步，值得優先深挖進場劇本。",
                 source_note: "所有決策卡因子皆由本地資料庫快照與歷史資料重建。",
@@ -133,8 +135,10 @@ describe("Market workspaces", () => {
     expect(wrapper.text()).toContain("選股器");
     expect(wrapper.text()).toContain("AAPL");
     expect(wrapper.text()).toContain("Setup 品質");
+    expect(wrapper.text()).toContain("Verdict");
     expect(wrapper.text()).toContain("選擇性出手");
     expect(wrapper.text()).toContain("+6");
+    expect(wrapper.text()).toContain("優先候選 1");
 
     await wrapper.find(".preset-chip").trigger("click");
     expect(wrapper.emitted("load-preset")[0][0].name).toBe("量增突破");
