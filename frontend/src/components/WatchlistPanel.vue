@@ -78,6 +78,11 @@
           <div>
             <div class="wl-ticker">{{ item.ticker }}</div>
             <div class="wl-name">{{ item.name || "" }}<span v-if="item.category"> · {{ item.category }}</span></div>
+            <div class="wl-meta-row">
+              <span class="wl-meta-pill" :class="getFreshnessClass(item)">{{ getFreshnessLabel(item) }}</span>
+              <span class="wl-meta-text">{{ formatSourceLabel(item.source) }}</span>
+              <span class="wl-meta-text">{{ formatWatchTimestamp(item) }}</span>
+            </div>
           </div>
           <div class="wl-side">
             <div v-if="leftTab === 'watch' && selectedGroup" class="wl-ops">
@@ -153,6 +158,53 @@ const emptyLabel = computed(() => {
   return "這個群組目前還沒有股票";
 });
 
+const SOURCE_LABELS = {
+  yahoo_finance: "Yahoo Finance",
+  local_cache: "Local cache",
+};
+
+function parseWatchTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function resolveWatchTimestamp(item) {
+  return item?.quote_timestamp || item?.synced_at || item?.date || null;
+}
+
+function formatSourceLabel(source) {
+  return SOURCE_LABELS[source] || source || "Unknown source";
+}
+
+function formatWatchTimestamp(item) {
+  const parsed = parseWatchTimestamp(resolveWatchTimestamp(item));
+  if (!parsed) return "無時間戳";
+  return parsed.toLocaleString("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function isStaleItem(item) {
+  const parsed = parseWatchTimestamp(resolveWatchTimestamp(item));
+  if (!parsed) return true;
+  return Date.now() - parsed.getTime() > 24 * 60 * 60 * 1000;
+}
+
+function getFreshnessLabel(item) {
+  if (isStaleItem(item)) return "資料較舊";
+  return item?.is_delayed === false ? "即時" : "延遲快照";
+}
+
+function getFreshnessClass(item) {
+  if (isStaleItem(item)) return "stale";
+  return item?.is_delayed === false ? "live" : "delayed";
+}
+
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
   if (!createGroupOpen.value) newGroupName.value = "";
@@ -213,3 +265,42 @@ function removeItem(item) {
   emit("remove-from-watchlist", item.id);
 }
 </script>
+
+<style scoped>
+.wl-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.wl-meta-pill {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text2);
+}
+
+.wl-meta-pill.live {
+  background: rgba(0, 217, 163, 0.12);
+  color: var(--green);
+}
+
+.wl-meta-pill.delayed {
+  background: rgba(255, 209, 102, 0.14);
+  color: #ffd166;
+}
+
+.wl-meta-pill.stale {
+  background: rgba(255, 77, 106, 0.14);
+  color: #ff8a9d;
+}
+
+.wl-meta-text {
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--text3);
+}
+</style>

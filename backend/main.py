@@ -751,21 +751,38 @@ async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
 
 async def hydrate_watchlist_item(ticker: str, group: dict) -> dict:
     row = await db.get_latest_ohlcv(ticker)
+    quote = await db.get_market_quote(ticker)
     info = await db.get_stock_info(ticker)
-    prev = await db.get_prev_close(ticker) if row else None
-    chg_pct = ((row["close"] - prev) / prev * 100) if row and prev else 0
+    prev = None
+    if quote and quote.get("prev_close") not in (None, 0):
+        prev = quote.get("prev_close")
+    elif row:
+        prev = await db.get_prev_close(ticker)
+
+    latest_price = None
+    if quote and quote.get("price") is not None:
+        latest_price = quote.get("price")
+    elif row:
+        latest_price = row.get("close")
+
+    chg_pct = ((latest_price - prev) / prev * 100) if latest_price is not None and prev else 0
     display_name = resolve_display_name(ticker, info)
 
     return {
         "ticker": ticker,
         "name": display_name,
-        "close": row["close"] if row else None,
-        "open": row["open"] if row else None,
-        "high": row["high"] if row else None,
-        "low": row["low"] if row else None,
-        "volume": row["volume"] if row else None,
-        "change_pct": round(chg_pct, 2) if row else 0,
+        "close": latest_price,
+        "open": quote.get("open") if quote and quote.get("open") is not None else (row["open"] if row else None),
+        "high": quote.get("high") if quote and quote.get("high") is not None else (row["high"] if row else None),
+        "low": quote.get("low") if quote and quote.get("low") is not None else (row["low"] if row else None),
+        "volume": quote.get("volume") if quote and quote.get("volume") is not None else (row["volume"] if row else None),
+        "change_pct": round(chg_pct, 2) if latest_price is not None else 0,
         "date": row["date"] if row else None,
+        "source": (quote or {}).get("source") or (row or {}).get("source") or "local_cache",
+        "quote_type": (quote or {}).get("quote_type"),
+        "is_delayed": (quote or {}).get("is_delayed", True),
+        "quote_timestamp": (quote or {}).get("quote_timestamp"),
+        "synced_at": (quote or {}).get("synced_at") or (row.get("updated_at") if row else None),
         "category": categorize(ticker),
         "group_id": group["id"],
         "group_name": group["name"],
