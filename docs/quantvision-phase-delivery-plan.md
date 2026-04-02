@@ -11,6 +11,8 @@
 - 若測試失敗時，Codex 應如何自動修復並重跑
 - 若階段完成並提交成功，下一個階段如何接續
 
+建議搭配 [quantvision-phase-task-checklist.md](/c:/Users/Alan/Desktop/Stock-System/Stock-System/docs/quantvision-phase-task-checklist.md) 一起使用，作為逐階段的執行清單與驗收對照文件。
+
 ## 2. 執行總原則
 
 ### 2.1 一次只做一個階段
