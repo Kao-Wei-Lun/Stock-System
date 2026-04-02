@@ -23,25 +23,47 @@ from alert_engine import AlertEngine, evaluate_alert_rule
             True,
         ),
         (
-            {"type": "macd", "condition": "大於", "value": 0, "condition_payload": {}},
-            {"price": 100, "source": "yahoo_finance"},
-            False,
+            {"type": "rsi", "condition": "上穿", "value": 30, "condition_payload": {}},
+            {"rsi": 35, "rsi_prev": 28, "source": "yahoo_finance"},
+            True,
+        ),
+        (
+            {"type": "macd", "condition": "上穿", "value": None, "condition_payload": {}},
+            {"macd": 0.8, "macd_prev": -0.2, "macd_signal": 0.3, "macd_signal_prev": 0.1, "source": "yahoo_finance"},
+            True,
+        ),
+        (
+            {"type": "volume", "condition": "大於", "value": 1.8, "condition_payload": {}},
+            {"volume_ratio": 2.4, "source": "yahoo_finance"},
+            True,
         ),
     ],
 )
-def test_evaluate_alert_rule_supports_price_and_pct(alert, quote, expected_match):
+def test_evaluate_alert_rule_supports_indicator_types(alert, quote, expected_match):
     result = evaluate_alert_rule(alert, quote)
 
     assert result["matched"] is expected_match
-    assert "last_source" in result["condition_payload"] or result["reason"] == "unsupported_type"
+    assert result["reason"] == "matched"
+    assert result["condition_payload"]["last_source"] == "yahoo_finance"
+
+
+def test_evaluate_alert_rule_reports_unsupported_type():
+    result = evaluate_alert_rule(
+        {"type": "basis", "condition": "大於", "value": 0, "condition_payload": {}},
+        {"price": 100, "source": "yahoo_finance"},
+    )
+
+    assert result["matched"] is False
+    assert result["reason"] == "unsupported_type"
 
 
 class StubDb:
-    def __init__(self):
+    def __init__(self, rows=None):
         self.updated_alerts = []
         self.trigger_logs = []
         self.notifications = []
         self.stored_quotes = {}
+        self.rows = rows or []
 
     async def upsert_market_quote(self, quote):
         self.stored_quotes[quote["ticker"]] = dict(quote)
@@ -50,6 +72,9 @@ class StubDb:
     async def get_market_quote(self, ticker):
         quote = self.stored_quotes.get(ticker)
         return dict(quote) if quote else None
+
+    async def get_recent_ohlcv_rows(self, ticker, limit=80):
+        return [dict(item) for item in self.rows[-limit:]]
 
     async def update_alert(self, alert_id, payload, owner_id=1):
         self.updated_alerts.append((alert_id, payload, owner_id))
@@ -80,6 +105,23 @@ class StubQuoteProvider:
 
     async def fetch_quote(self, ticker):
         return dict(self.quote) if self.quote else None
+
+
+def _build_rows():
+    closes = list(range(160, 120, -1))
+    rows = []
+    for index, close in enumerate(closes):
+        rows.append(
+            {
+                "date": f"2026-02-{index + 1:02d}",
+                "open": close - 1,
+                "high": close + 1,
+                "low": close - 2,
+                "close": close,
+                "volume": 1_000_000 + (index * 5_000),
+            }
+        )
+    return rows
 
 
 @pytest.mark.anyio
@@ -116,6 +158,42 @@ async def test_alert_engine_triggers_and_persists_notifications():
     assert db.updated_alerts[-1][1]["active"] is False
     assert db.trigger_logs[0]["trigger_value"] == 212
     assert db.notifications[0]["category"] == "alert"
+
+
+@pytest.mark.anyio
+async def test_alert_engine_supports_macd_cross_alerts():
+    rows = _build_rows()
+    db = StubDb(rows=rows)
+    provider = StubQuoteProvider(
+        {
+            "ticker": "AAPL",
+            "price": 125,
+            "change_pct": 2.1,
+            "volume": 2_600_000,
+            "source": "yahoo_finance",
+            "quote_type": "delayed_snapshot",
+            "is_delayed": True,
+            "quote_timestamp": "2026-03-29T04:00:00+00:00",
+        }
+    )
+    engine = AlertEngine(db, provider)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 9,
+            "ticker": "AAPL",
+            "name": "AAPL MACD golden cross",
+            "notification_title": "AAPL MACD golden cross",
+            "type": "macd",
+            "condition": "上穿",
+            "value": None,
+            "condition_payload": {},
+        }
+    )
+
+    assert triggered is True
+    assert db.trigger_logs[0]["threshold_value"] is not None
+    assert "macd" in db.trigger_logs[0]["payload"]["alert"]["type"]
 
 
 def test_alert_trigger_log_api_smoke(client, monkeypatch):

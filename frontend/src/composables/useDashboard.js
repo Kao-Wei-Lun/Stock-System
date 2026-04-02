@@ -773,6 +773,24 @@ export function useDashboard() {
     };
   }
 
+  function alertRequiresNumericValue(type, condition) {
+    const normalizedType = String(type || "").toLowerCase();
+    const normalizedCondition = String(condition || "").toLowerCase();
+    if (normalizedType !== "macd") return true;
+    return !["上穿", "下穿", "cross_up", "cross_down"].includes(normalizedCondition);
+  }
+
+  function defaultAlertCondition(type) {
+    return String(type || "").toLowerCase() === "macd" ? "上穿" : "大於";
+  }
+
+  function resetAlertForm() {
+    alertForm.ticker = currentTicker.value || "AAPL";
+    alertForm.type = "price";
+    alertForm.cond = "大於";
+    alertForm.value = "";
+  }
+
   function mapRemoteNotification(item) {
     const iconByCategory = {
       alert: "⚡",
@@ -2453,6 +2471,7 @@ export function useDashboard() {
   }
 
   function openAlertModal() {
+    resetAlertForm();
     alertForm.ticker = currentTicker.value;
     alertModalOpen.value = true;
   }
@@ -2462,12 +2481,28 @@ export function useDashboard() {
   }
 
   function updateAlertField(key, value) {
+    if (key === "type") {
+      alertForm.type = value;
+      alertForm.cond = defaultAlertCondition(value);
+      if (!alertRequiresNumericValue(value, alertForm.cond)) {
+        alertForm.value = "";
+      }
+      return;
+    }
+    if (key === "cond") {
+      alertForm.cond = value;
+      if (!alertRequiresNumericValue(alertForm.type, value)) {
+        alertForm.value = "";
+      }
+      return;
+    }
     alertForm[key] = value;
   }
 
   async function saveAlert() {
-    const numericValue = Number(alertForm.value);
-    if (!alertForm.ticker || Number.isNaN(numericValue)) {
+    const requiresNumericValue = alertRequiresNumericValue(alertForm.type, alertForm.cond);
+    const numericValue = requiresNumericValue ? Number(alertForm.value) : null;
+    if (!alertForm.ticker || (requiresNumericValue && Number.isNaN(numericValue))) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: "請完整填寫股票代號與數值", type: "error" });
       return;
     }
@@ -2477,15 +2512,19 @@ export function useDashboard() {
       condition: alertForm.cond,
       value: numericValue,
       timeframe: "1d",
-      condition_payload: { operator: alertForm.cond },
+      condition_payload: {
+        operator: alertForm.cond,
+        metric: alertForm.type === "volume" ? "volume_ratio" : null,
+      },
       active: true,
     };
     try {
       const record = await dashboardApi.createAlert(payload);
       alerts.value = [mapAlertRecord(record), ...alerts.value];
       alertModalOpen.value = false;
-      alertForm.value = "";
-      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${record.ticker} ${record.condition} ${record.value}`, type: "success" });
+      resetAlertForm();
+      const displayValue = record.value == null ? "" : ` ${record.value}`;
+      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${record.ticker} ${record.condition}${displayValue}`.trim(), type: "success" });
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: error.message || "請稍後再試", type: "error" });
     }
