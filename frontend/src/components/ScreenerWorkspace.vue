@@ -204,6 +204,8 @@ function savePreset() {
   gap: 16px;
   padding: 18px;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(12, 18, 28, 0.98) 100%);
 }
 
@@ -387,5 +389,51 @@ function savePreset() {
   color: var(--text3);
   font-size: 12px;
   padding: 14px 0 4px;
+}
+
+@media (max-width: 820px) {
+  .screen-shell {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .screen-filters,
+  .preset-panel,
+  .result-panel {
+    padding: 12px;
+  }
+
+  .screen-head,
+  .panel-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .screen-btn.primary {
+    width: 100%;
+  }
+
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preset-save {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .preset-save input,
+  .preset-save .screen-btn {
+    width: 100%;
+  }
+
+  .preset-list {
+    flex-direction: column;
+  }
+
+  .preset-chip {
+    min-width: 0;
+    width: 100%;
+  }
 }
 </style>

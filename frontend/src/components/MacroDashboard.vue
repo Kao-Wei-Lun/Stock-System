@@ -84,6 +84,8 @@ function formatValue(value) {
   gap: 16px;
   padding: 18px;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(12, 18, 28, 0.98) 100%);
 }
 
@@ -248,5 +250,40 @@ function formatValue(value) {
 .empty-state {
   color: var(--text3);
   font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .macro-shell {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .macro-hero,
+  .summary-panel,
+  .metric-card {
+    padding: 14px;
+  }
+
+  .macro-hero {
+    flex-direction: column;
+  }
+
+  .hero-side {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .refresh-btn {
+    width: 100%;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-chip {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 </style>

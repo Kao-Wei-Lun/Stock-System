@@ -108,6 +108,8 @@ function importanceLabel(value) {
   gap: 16px;
   padding: 16px;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(12, 18, 28, 0.98) 100%);
 }
 
@@ -248,5 +250,39 @@ function importanceLabel(value) {
   text-align: center;
   color: var(--text3);
   font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .intel-shell {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .intel-panel,
+  .intel-card {
+    padding: 12px;
+  }
+
+  .intel-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .intel-btn {
+    width: 100%;
+  }
+
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .event-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .event-tag {
+    align-self: flex-start;
+  }
 }
 </style>
