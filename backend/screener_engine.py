@@ -223,6 +223,222 @@ def _macro_adjustment(
     return 0, None
 
 
+def _score_tone(score: int) -> str:
+    if score > 0:
+        return "positive"
+    if score < 0:
+        return "risk"
+    return "neutral"
+
+
+def _format_pct(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    return f"{value:.2f}%"
+
+
+def _decision_verdict(total_score: int, posture: str) -> tuple[str, str]:
+    normalized_posture = str(posture or "standby").lower()
+    if normalized_posture == "defensive":
+        if total_score >= 80:
+            return "逆風強勢候選", "市場偏防守，但這檔結構仍完整，可保留在高優先觀察名單。"
+        if total_score >= 60:
+            return "防守觀察", "目前偏高風險，建議只做觀察或極小倉位試單。"
+        return "暫緩出手", "分數不足以對抗當前風險環境，先等待更明確的趨勢。"
+
+    if total_score >= 80:
+        return "優先候選", "趨勢、量價與確認條件同步，值得優先深挖進場劇本。"
+    if total_score >= 60:
+        return "觀察名單", "結構仍有可取之處，但需要更明確的觸發點與風險控制。"
+    return "等待名單", "現階段條件偏弱，暫時不列為優先追蹤標的。"
+
+
+def _build_decision_card(
+    *,
+    score: int,
+    base_score: int,
+    macro_adjustment: int,
+    macro_adjustment_reason: Optional[str],
+    macro_summary: Dict[str, Any],
+    latest_close: float,
+    ma20: Optional[float],
+    ma50: Optional[float],
+    distance_to_high_pct: Optional[float],
+    change_pct: float,
+    volume_ratio: float,
+    pe_ratio: Optional[float],
+    dividend_yield: Optional[float],
+    chip_bias: Optional[str],
+    chip_summary: Optional[Dict[str, Any]],
+    institutional_signal: Optional[Dict[str, Any]],
+    earliest_event: Optional[Dict[str, Any]],
+    event_window_days: Optional[int],
+) -> Dict[str, Any]:
+    trend_score = 0
+    trend_fragments: List[str] = []
+    if ma20 is not None:
+        if latest_close >= ma20:
+            trend_score += 20
+            trend_fragments.append("站上 MA20")
+        else:
+            trend_fragments.append("跌破 MA20")
+    else:
+        trend_fragments.append("MA20 資料不足")
+
+    if ma20 is not None and ma50 is not None:
+        if ma20 >= ma50:
+            trend_score += 15
+            trend_fragments.append("MA20 >= MA50")
+        else:
+            trend_fragments.append("MA20 < MA50")
+    else:
+        trend_fragments.append("均線長週期不足")
+
+    relative_strength_score = 0
+    relative_strength_fragments: List[str] = []
+    if distance_to_high_pct is not None:
+        relative_strength_fragments.append(f"距 52W 高 {_format_pct(distance_to_high_pct)}")
+        if distance_to_high_pct <= 5:
+            relative_strength_score += 15
+    else:
+        relative_strength_fragments.append("缺少 52W 高點資料")
+
+    if change_pct > 0:
+        relative_strength_score += 10
+        relative_strength_fragments.append(f"單日動能 +{change_pct:.2f}%")
+    elif change_pct < 0:
+        relative_strength_score -= 5
+        relative_strength_fragments.append(f"單日動能 {change_pct:.2f}%")
+    else:
+        relative_strength_fragments.append("單日動能持平")
+
+    volume_score = 25 if volume_ratio >= 1.5 else 10 if volume_ratio >= 1.0 else 0
+    volume_fragments = [
+        f"量比 {volume_ratio:.2f}x",
+        "量能放大" if volume_ratio >= 1.5 else "量能平穩" if volume_ratio >= 1.0 else "量能不足",
+    ]
+
+    confirmation_score = 0
+    confirmation_fragments: List[str] = []
+    if chip_bias == "bullish":
+        confirmation_score += 15
+        confirmation_fragments.append("台股籌碼偏多")
+    elif chip_bias == "bearish":
+        confirmation_score -= 10
+        confirmation_fragments.append("台股籌碼偏空")
+    elif chip_summary:
+        confirmation_fragments.append("籌碼偏向中性")
+    else:
+        confirmation_fragments.append("無籌碼確認")
+
+    institutional_bias = (institutional_signal or {}).get("signal")
+    if institutional_bias == "bullish":
+        confirmation_score += 10
+        confirmation_fragments.append("法人基差偏多")
+    elif institutional_bias == "bearish":
+        confirmation_fragments.append("法人基差偏空")
+    elif institutional_signal:
+        confirmation_fragments.append("法人基差中性")
+    else:
+        confirmation_fragments.append("無法人基差確認")
+
+    if earliest_event:
+        event_label = earliest_event.get("title") or earliest_event.get("event_type") or "近期事件"
+        event_summary = f"{earliest_event.get('event_date') or '待定'} · {event_label}"
+        event_tone = "risk" if str(earliest_event.get("importance") or "").lower() == "high" else "neutral"
+    elif event_window_days:
+        event_summary = f"{event_window_days} 日內無重大事件"
+        event_tone = "positive"
+    else:
+        event_summary = "未啟用事件視窗"
+        event_tone = "neutral"
+
+    fundamental_fragments: List[str] = []
+    fundamental_tone = "neutral"
+    if pe_ratio is not None:
+        fundamental_fragments.append(f"PE {pe_ratio:.1f}")
+        if 0 < pe_ratio <= 25:
+            fundamental_tone = "positive"
+    else:
+        fundamental_fragments.append("PE 未同步")
+    if dividend_yield is not None:
+        fundamental_fragments.append(f"殖利率 {_format_pct(dividend_yield * 100.0)}")
+        if dividend_yield >= 0.02:
+            fundamental_tone = "positive"
+    else:
+        fundamental_fragments.append("殖利率未同步")
+
+    posture = str(macro_summary.get("trade_posture") or "standby").lower()
+    macro_fragments = [
+        f"市場 posture {posture}",
+        macro_adjustment_reason or "未額外調整",
+    ]
+
+    verdict, summary = _decision_verdict(score, posture)
+    sections = [
+        {
+            "key": "trend",
+            "label": "趨勢結構",
+            "score": trend_score,
+            "tone": _score_tone(trend_score),
+            "summary": " / ".join(trend_fragments),
+        },
+        {
+            "key": "relative_strength",
+            "label": "相對強弱",
+            "score": relative_strength_score,
+            "tone": _score_tone(relative_strength_score),
+            "summary": " / ".join(relative_strength_fragments),
+        },
+        {
+            "key": "volume",
+            "label": "量價動能",
+            "score": volume_score,
+            "tone": _score_tone(volume_score),
+            "summary": " / ".join(volume_fragments),
+        },
+        {
+            "key": "confirmation",
+            "label": "籌碼確認",
+            "score": confirmation_score,
+            "tone": _score_tone(confirmation_score),
+            "summary": " / ".join(confirmation_fragments),
+        },
+        {
+            "key": "event",
+            "label": "事件風險",
+            "score": 0,
+            "tone": event_tone,
+            "summary": event_summary,
+        },
+        {
+            "key": "fundamentals",
+            "label": "基本面",
+            "score": 0,
+            "tone": fundamental_tone,
+            "summary": " / ".join(fundamental_fragments),
+        },
+        {
+            "key": "macro",
+            "label": "市場風險",
+            "score": macro_adjustment,
+            "tone": _score_tone(macro_adjustment),
+            "summary": " / ".join(fragment for fragment in macro_fragments if fragment),
+        },
+    ]
+
+    return {
+        "verdict": verdict,
+        "summary": summary,
+        "total_score": score,
+        "base_score": base_score,
+        "macro_adjustment": macro_adjustment,
+        "setup_quality": None,
+        "sections": sections,
+        "source_note": "所有決策卡因子皆由本地資料庫快照與歷史資料重建。",
+    }
+
+
 class ScreenerEngine:
     async def run(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         normalized_filters = normalize_screener_filters(filters)
@@ -345,6 +561,27 @@ class ScreenerEngine:
                 change_pct,
             )
             score = base_score + macro_adjustment
+            decision_card = _build_decision_card(
+                score=score,
+                base_score=base_score,
+                macro_adjustment=macro_adjustment,
+                macro_adjustment_reason=macro_adjustment_reason,
+                macro_summary=macro_summary,
+                latest_close=latest_close,
+                ma20=ma20,
+                ma50=ma50,
+                distance_to_high_pct=distance_to_high_pct,
+                change_pct=change_pct,
+                volume_ratio=volume_ratio,
+                pe_ratio=pe_ratio,
+                dividend_yield=dividend_yield,
+                chip_bias=chip_bias,
+                chip_summary=chip_summary,
+                institutional_signal=institutional_signal,
+                earliest_event=earliest_event,
+                event_window_days=normalized_filters["upcoming_event_days"],
+            )
+            decision_card["setup_quality"] = setup_quality
 
             results.append(
                 {
@@ -369,6 +606,7 @@ class ScreenerEngine:
                     "macro_adjustment_reason": macro_adjustment_reason,
                     "setup_quality": setup_quality,
                     "score": score,
+                    "decision_card": decision_card,
                     "next_event": earliest_event,
                     "chip_summary": chip_summary,
                     "institutional_signal": institutional_signal,

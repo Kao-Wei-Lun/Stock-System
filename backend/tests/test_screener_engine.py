@@ -94,7 +94,20 @@ async def test_screener_uses_local_macro_context_in_score_adjustment(monkeypatch
     assert risk_off_payload["market_context"]["trade_posture"] == "defensive"
     assert risk_off_payload["items"][0]["macro_adjustment"] < 0
     assert risk_off_payload["items"][0]["macro_adjustment_reason"]
+    assert risk_off_payload["items"][0]["decision_card"]["verdict"]
+    assert risk_off_payload["items"][0]["decision_card"]["summary"]
+    assert risk_off_payload["items"][0]["decision_card"]["total_score"] == risk_off_payload["items"][0]["score"]
+    assert {section["key"] for section in risk_off_payload["items"][0]["decision_card"]["sections"]} >= {
+        "trend",
+        "relative_strength",
+        "volume",
+        "confirmation",
+        "event",
+        "fundamentals",
+        "macro",
+    }
 
     assert trend_payload["market_context"]["trade_posture"] == "offensive"
     assert trend_payload["items"][0]["macro_adjustment"] > 0
     assert trend_payload["items"][0]["score"] > risk_off_payload["items"][0]["score"]
+    assert trend_payload["items"][0]["decision_card"]["sections"][-1]["label"] == "市場風險"

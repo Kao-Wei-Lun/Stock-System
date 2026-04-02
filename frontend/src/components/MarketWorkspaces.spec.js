@@ -113,6 +113,15 @@ describe("Market workspaces", () => {
               score: 88,
               macro_adjustment: 6,
               setup_quality: 4,
+              decision_card: {
+                verdict: "優先候選",
+                summary: "趨勢、量價與確認條件同步，值得優先深挖進場劇本。",
+                source_note: "所有決策卡因子皆由本地資料庫快照與歷史資料重建。",
+                sections: [
+                  { key: "trend", label: "趨勢結構", score: 35, tone: "positive", summary: "站上 MA20 / MA20 >= MA50" },
+                  { key: "macro", label: "市場風險", score: 6, tone: "positive", summary: "市場 posture selective / 保留強勢候選" },
+                ],
+              },
               next_event: { event_date: "2026-04-10" },
             },
           ],
@@ -127,6 +136,11 @@ describe("Market workspaces", () => {
 
     await wrapper.find(".preset-chip").trigger("click");
     expect(wrapper.emitted("load-preset")[0][0].name).toBe("量增突破");
+
+    await wrapper.find(".detail-toggle-btn").trigger("click");
+    expect(wrapper.text()).toContain("優先候選");
+    expect(wrapper.text()).toContain("趨勢結構");
+    expect(wrapper.text()).toContain("市場風險");
 
     const actionButtons = wrapper.findAll(".tiny-btn");
     await actionButtons[0].trigger("click");

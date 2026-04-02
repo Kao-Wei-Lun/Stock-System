@@ -131,34 +131,70 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in results.items" :key="item.ticker" :class="{ active: item.ticker === currentTicker }">
-              <td>
-                <div class="ticker-cell">
-                  <strong>{{ item.ticker }}</strong>
-                  <small>{{ item.name }}</small>
-                </div>
-              </td>
-              <td>{{ item.market }}</td>
-              <td>{{ formatNumber(item.close) }}</td>
-              <td :class="Number(item.change_pct || 0) >= 0 ? 'up' : 'dn'">{{ formatSigned(item.change_pct) }}%</td>
-              <td>{{ formatNumber(item.volume_ratio) }}</td>
-              <td>
-                <div class="score-cell">
-                  <strong>{{ item.score }}</strong>
-                  <small :class="scoreAdjustmentClass(item.macro_adjustment)">
-                    {{ formatAdjustment(item.macro_adjustment) }} · Q{{ item.setup_quality ?? "—" }}
-                  </small>
-                </div>
-              </td>
-              <td>{{ item.next_event?.event_date || "—" }}</td>
-              <td>
-                <div class="action-row">
-                  <button class="tiny-btn" @click="$emit('open-ticker', item.ticker)">開圖</button>
-                  <button class="tiny-btn" @click="$emit('add-watchlist', item.ticker)">自選</button>
-                  <button class="tiny-btn" @click="$emit('add-alert', item.ticker)">警報</button>
-                </div>
-              </td>
-            </tr>
+            <template v-for="item in results.items" :key="item.ticker">
+              <tr :class="{ active: item.ticker === currentTicker }">
+                <td>
+                  <div class="ticker-cell">
+                    <strong>{{ item.ticker }}</strong>
+                    <small>{{ item.name }}</small>
+                  </div>
+                </td>
+                <td>{{ item.market }}</td>
+                <td>{{ formatNumber(item.close) }}</td>
+                <td :class="Number(item.change_pct || 0) >= 0 ? 'up' : 'dn'">{{ formatSigned(item.change_pct) }}%</td>
+                <td>{{ formatNumber(item.volume_ratio) }}</td>
+                <td>
+                  <div class="score-cell">
+                    <strong>{{ item.score }}</strong>
+                    <small :class="scoreAdjustmentClass(item.macro_adjustment)">
+                      {{ formatAdjustment(item.macro_adjustment) }} · Q{{ item.setup_quality ?? "—" }}
+                    </small>
+                    <button class="detail-toggle-btn" @click="toggleDecisionCard(item.ticker)">
+                      {{ isDecisionCardOpen(item.ticker) ? "收合決策卡" : "決策卡" }}
+                    </button>
+                  </div>
+                </td>
+                <td>{{ item.next_event?.event_date || "—" }}</td>
+                <td>
+                  <div class="action-row">
+                    <button class="tiny-btn" @click="$emit('open-ticker', item.ticker)">開圖</button>
+                    <button class="tiny-btn" @click="$emit('add-watchlist', item.ticker)">自選</button>
+                    <button class="tiny-btn" @click="$emit('add-alert', item.ticker)">警報</button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="isDecisionCardOpen(item.ticker)" class="decision-card-row">
+                <td colspan="8">
+                  <div class="decision-card">
+                    <div class="decision-card-head">
+                      <div>
+                        <div class="decision-verdict">{{ getDecisionCard(item).verdict }}</div>
+                        <div class="decision-summary">{{ getDecisionCard(item).summary }}</div>
+                      </div>
+                      <div class="decision-total">
+                        <strong>{{ item.score }}</strong>
+                        <small>{{ formatAdjustment(item.macro_adjustment) }} macro</small>
+                      </div>
+                    </div>
+                    <div class="decision-grid">
+                      <div
+                        v-for="section in getDecisionCard(item).sections || []"
+                        :key="`${item.ticker}-${section.key}`"
+                        class="decision-section"
+                        :class="sectionClass(section)"
+                      >
+                        <div class="decision-section-head">
+                          <span>{{ section.label }}</span>
+                          <strong>{{ formatSectionScore(section.score) }}</strong>
+                        </div>
+                        <div class="decision-section-summary">{{ section.summary }}</div>
+                      </div>
+                    </div>
+                    <div class="decision-source">{{ getDecisionCard(item).source_note }}</div>
+                  </div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -190,6 +226,7 @@ const emit = defineEmits([
 ]);
 
 const presetName = ref("");
+const expandedTicker = ref(null);
 const marketContext = computed(() => props.results?.market_context || null);
 const bannerClass = computed(() => `is-${marketContext.value?.trade_posture || "standby"}`);
 const postureLabel = computed(() => {
@@ -228,6 +265,49 @@ function scoreAdjustmentClass(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric === 0) return "";
   return numeric > 0 ? "up" : "dn";
+}
+
+function formatSectionScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "資訊";
+  if (numeric === 0) return "0";
+  return `${numeric > 0 ? "+" : ""}${numeric}`;
+}
+
+function sectionClass(section) {
+  if (section?.tone) return section.tone;
+  const numeric = Number(section?.score);
+  if (!Number.isFinite(numeric) || numeric === 0) return "neutral";
+  return numeric > 0 ? "positive" : "risk";
+}
+
+function buildFallbackDecisionCard(item) {
+  return {
+    verdict: Number(item?.score || 0) >= 80 ? "優先候選" : Number(item?.score || 0) >= 60 ? "觀察名單" : "等待名單",
+    summary: item?.macro_adjustment_reason || "決策卡尚未完整同步，先以總分與市場調整作為初步判斷。",
+    sections: [
+      {
+        key: "macro",
+        label: "市場風險",
+        score: Number(item?.macro_adjustment || 0),
+        tone: sectionClass({ score: Number(item?.macro_adjustment || 0) }),
+        summary: item?.macro_adjustment_reason || "未提供額外風險說明",
+      },
+    ],
+    source_note: "目前顯示為相容模式，完整決策卡會由後端逐步補齊。",
+  };
+}
+
+function getDecisionCard(item) {
+  return item?.decision_card || buildFallbackDecisionCard(item);
+}
+
+function isDecisionCardOpen(ticker) {
+  return expandedTicker.value === ticker;
+}
+
+function toggleDecisionCard(ticker) {
+  expandedTicker.value = expandedTicker.value === ticker ? null : ticker;
 }
 
 function savePreset() {
@@ -490,6 +570,116 @@ function savePreset() {
   color: var(--text3);
 }
 
+.detail-toggle-btn {
+  width: fit-content;
+  margin-top: 4px;
+  padding: 5px 8px;
+  border: 1px solid rgba(123, 231, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.08);
+  color: #bfefff;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.decision-card-row td {
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.decision-card {
+  margin: 0 8px 2px;
+  padding: 14px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(123, 231, 255, 0.12), transparent 28%),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.decision-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.decision-verdict {
+  color: var(--text1);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.decision-summary {
+  margin-top: 4px;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.decision-total {
+  min-width: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.decision-total strong {
+  color: var(--text1);
+  font-size: 22px;
+}
+
+.decision-total small {
+  color: var(--text3);
+  font-size: 11px;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.decision-section {
+  padding: 10px 11px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.decision-section.positive {
+  border-color: rgba(0, 217, 163, 0.16);
+  background: rgba(0, 217, 163, 0.08);
+}
+
+.decision-section.risk {
+  border-color: rgba(255, 107, 107, 0.16);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.decision-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text1);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.decision-section-summary {
+  margin-top: 6px;
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.decision-source {
+  margin-top: 12px;
+  color: var(--text3);
+  font-size: 10px;
+}
+
 .tiny-btn {
   padding: 6px 9px;
 }
@@ -543,6 +733,18 @@ function savePreset() {
   .preset-chip {
     min-width: 0;
     width: 100%;
+  }
+
+  .decision-card-head {
+    flex-direction: column;
+  }
+
+  .decision-total {
+    align-items: flex-start;
+  }
+
+  .decision-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
