@@ -115,6 +115,7 @@ function createProps() {
     institutionalOverlay: null,
     tickerEvents: [],
     tickerNews: [],
+    macroSummary: null,
     fundamentalsSummary: null,
     taiwanChipSummary: null,
     isFullscreen: false,
@@ -134,6 +135,23 @@ describe("ChartWorkspace", () => {
     const wrapper = mount(ChartWorkspace, { props: createProps() });
 
     expect(wrapper.text()).toContain("資料較舊");
+  });
+
+  it("surfaces macro posture inside the chart workflow", () => {
+    const wrapper = mount(ChartWorkspace, {
+      props: {
+        ...createProps(),
+        macroSummary: {
+          overall_risk: "medium",
+          trade_posture: "selective",
+          decision_hint: "環境偏震盪，只做最強標的，並縮小部位與嚴守停損。",
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("中風險");
+    expect(wrapper.text()).toContain("選擇性出手");
+    expect(wrapper.text()).toContain("只做最強標的");
   });
 
   it("emits workspace save and load actions", async () => {

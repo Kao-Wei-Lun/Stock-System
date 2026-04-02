@@ -9,6 +9,11 @@
         <div v-if="quoteFreshnessState !== 'live'" class="quote-risk-banner" :class="quoteFreshnessState">
           {{ quoteFreshnessHint }}
         </div>
+        <div v-if="showMacroRegimeBanner" class="market-regime-banner" :class="macroRegimeClass">
+          <span class="market-regime-pill">{{ macroRiskLabel }}</span>
+          <strong>{{ macroPostureLabel }}</strong>
+          <span>{{ macroDecisionHint }}</span>
+        </div>
       </div>
       <div class="ch-price" :class="quote.change_pct >= 0 ? 'up' : 'dn'">{{ displayPrice }}</div>
       <div class="ch-chg" :class="quote.change_pct >= 0 ? 'up' : 'dn'">{{ displayChange }}</div>
@@ -426,6 +431,7 @@ const props = defineProps({
   institutionalOverlay: { type: Object, default: null },
   tickerEvents: { type: Array, default: () => [] },
   tickerNews: { type: Array, default: () => [] },
+  macroSummary: { type: Object, default: null },
   fundamentalsSummary: { type: Object, default: null },
   taiwanChipSummary: { type: Object, default: null },
   isFullscreen: { type: Boolean, default: false },
@@ -596,6 +602,28 @@ const quoteFreshnessChipClass = computed(() => ({
   dn: quoteFreshnessState.value === "stale" || quoteFreshnessState.value === "missing",
   warn: quoteFreshnessState.value === "delayed",
 }));
+const showMacroRegimeBanner = computed(() => Boolean(
+  props.macroSummary?.trade_posture
+  || props.macroSummary?.overall_risk
+  || props.macroSummary?.decision_hint,
+));
+const macroRegimeClass = computed(() => `is-${props.macroSummary?.trade_posture || "standby"}`);
+const macroRiskLabel = computed(() => {
+  if (props.macroSummary?.overall_risk === "high") return "高風險";
+  if (props.macroSummary?.overall_risk === "medium") return "中風險";
+  if (props.macroSummary?.overall_risk === "low") return "低風險";
+  return "未同步";
+});
+const macroPostureLabel = computed(() => {
+  if (props.macroSummary?.trade_posture === "defensive") return "防守控倉";
+  if (props.macroSummary?.trade_posture === "selective") return "選擇性出手";
+  if (props.macroSummary?.trade_posture === "offensive") return "偏進攻";
+  if (props.macroSummary?.trade_posture === "balanced") return "平衡觀察";
+  return "暫停判斷";
+});
+const macroDecisionHint = computed(
+  () => props.macroSummary?.decision_hint || "尚未同步宏觀快照，先以個股與價格行為為主。",
+);
 const showIntelStrip = computed(() => Boolean(
   (props.tickerEvents || []).length
   || (props.tickerNews || []).length
@@ -1058,6 +1086,59 @@ onBeforeUnmount(() => {
 .quote-risk-banner.missing {
   background: rgba(255, 77, 106, 0.14);
   color: #ff8a9d;
+}
+
+.market-regime-banner {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text2);
+}
+
+.market-regime-banner strong {
+  color: var(--text1);
+}
+
+.market-regime-pill {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.market-regime-banner.is-defensive {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.market-regime-banner.is-defensive .market-regime-pill {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ffd0d0;
+}
+
+.market-regime-banner.is-selective,
+.market-regime-banner.is-balanced {
+  background: rgba(255, 209, 102, 0.12);
+}
+
+.market-regime-banner.is-selective .market-regime-pill,
+.market-regime-banner.is-balanced .market-regime-pill {
+  background: rgba(255, 209, 102, 0.2);
+  color: #ffe2a6;
+}
+
+.market-regime-banner.is-offensive {
+  background: rgba(0, 217, 163, 0.12);
+}
+
+.market-regime-banner.is-offensive .market-regime-pill {
+  background: rgba(0, 217, 163, 0.2);
+  color: #bfffea;
 }
 
 .meta-chip.warn {

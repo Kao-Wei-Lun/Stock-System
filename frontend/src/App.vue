@@ -80,6 +80,7 @@
                 :institutional-overlay="institutionalOverlay"
                 :ticker-events="tickerEvents"
                 :ticker-news="tickerNews"
+                :macro-summary="macroDashboard.summary || null"
                 :fundamentals-summary="fundamentalsSummary"
                 :taiwan-chip-summary="taiwanChipSummary"
                 :is-fullscreen="chartFullscreen"
