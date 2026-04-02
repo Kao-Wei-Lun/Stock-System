@@ -559,9 +559,20 @@
             <span>
               <div>{{ entry.ticker }} · {{ entry.direction }} · {{ entry.strategy_code || "manual" }}</div>
               <div class="bt-trade-sub">{{ entry.entry_time }}</div>
-              <div v-if="entry.tags?.length" class="journal-entry-tags">
+              <div v-if="getJournalEntryQuickFilters(entry).length" class="journal-entry-quick-filters">
                 <span
-                  v-for="tag in entry.tags.slice(0, 4)"
+                  v-for="chip in getJournalEntryQuickFilters(entry)"
+                  :key="`${entry.id}-${chip.kind}-${chip.value}`"
+                  class="journal-entry-meta-chip"
+                  :data-testid="`journal-entry-${chip.kind}-${entry.id}-${chip.value}`"
+                  @click.stop="$emit('apply-journal-filter-preset', chip.preset)"
+                >
+                  {{ chip.label }}
+                </span>
+              </div>
+              <div v-if="getJournalEntryPlainTags(entry).length" class="journal-entry-tags">
+                <span
+                  v-for="tag in getJournalEntryPlainTags(entry).slice(0, 4)"
                   :key="`${entry.id}-${tag}`"
                   class="journal-entry-tag"
                   :data-testid="`journal-entry-tag-${entry.id}-${tag}`"
@@ -570,7 +581,7 @@
                   {{ tag }}
                 </span>
               </div>
-              <div v-else class="bt-trade-sub">無標籤</div>
+              <div v-else-if="!getJournalEntryQuickFilters(entry).length" class="bt-trade-sub">無標籤</div>
             </span>
             <span :class="Number(entry.result?.pnl || 0) >= 0 ? 'up' : 'dn'">
               {{ Number(entry.result?.pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(entry.result?.pnl || 0)).toLocaleString() }}
@@ -701,6 +712,54 @@ function buildJournalStrategyPreset(strategyCode) {
     strategy_code: strategyCode,
     search: "",
   };
+}
+
+function getJournalEntryPlainTags(entry) {
+  return (entry?.tags || [])
+    .map((tag) => String(tag || "").trim())
+    .filter((tag) => tag && !tag.startsWith("來源:") && !tag.startsWith("市場:"));
+}
+
+function findJournalEntryPrefixedTag(entry, prefix) {
+  return (entry?.tags || [])
+    .map((tag) => String(tag || "").trim())
+    .find((tag) => tag.startsWith(prefix)) || "";
+}
+
+function getJournalEntryQuickFilters(entry) {
+  const quickFilters = [];
+  const strategyCode = String(entry?.strategy_code || "").trim();
+  const sourceTag = findJournalEntryPrefixedTag(entry, "來源:");
+  const marketPostureTag = findJournalEntryPrefixedTag(entry, "市場:");
+
+  if (sourceTag) {
+    quickFilters.push({
+      kind: "source",
+      value: sourceTag.slice(3),
+      label: `來源：${sourceTag.slice(3)}`,
+      preset: buildJournalTagPreset(sourceTag),
+    });
+  }
+
+  if (marketPostureTag) {
+    quickFilters.push({
+      kind: "posture",
+      value: marketPostureTag.slice(3),
+      label: `市場：${marketPostureTag.slice(3)}`,
+      preset: buildJournalTagPreset(marketPostureTag),
+    });
+  }
+
+  if (strategyCode) {
+    quickFilters.push({
+      kind: "strategy",
+      value: strategyCode,
+      label: `策略：${strategyCode}`,
+      preset: buildJournalStrategyPreset(strategyCode),
+    });
+  }
+
+  return quickFilters;
 }
 
 function buildJournalQuickSaveDraft(name, partialPreset, description) {
@@ -1382,6 +1441,26 @@ const activeJournalFilters = computed(() => {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.journal-entry-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.journal-entry-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 231, 255, 0.2);
+  background: rgba(8, 26, 36, 0.9);
+  color: var(--text2);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
 }
 
 .journal-entry-tag {

@@ -345,7 +345,7 @@ describe("RightSidebar", () => {
             direction: "long",
             strategy_code: "breakout",
             entry_time: "2026-04-01T09:00",
-            tags: ["breakout"],
+            tags: ["來源:警報通知", "市場:選擇性出手", "breakout"],
             result: { pnl: 500 },
           },
         ],
@@ -432,6 +432,9 @@ describe("RightSidebar", () => {
     await wrapper.get('[data-testid="journal-posture-save-選擇性出手"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-tag-save-breakout"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-source-5-警報通知"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-posture-5-選擇性出手"]').trigger("click");
+    await wrapper.get('[data-testid="journal-entry-strategy-5-breakout"]').trigger("click");
     await wrapper.get('[data-testid="journal-entry-tag-5-breakout"]').trigger("click");
     await wrapper.find(".journal-action-row .run-btn").trigger("click");
 
@@ -441,7 +444,10 @@ describe("RightSidebar", () => {
     expect(wrapper.emitted("apply-journal-filter-preset")[1]).toEqual([{ strategy_code: "breakout", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[2]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
     expect(wrapper.emitted("apply-journal-filter-preset")[3]).toEqual([{ tag: "breakout", search: "" }]);
-    expect(wrapper.emitted("apply-journal-filter-preset")[4]).toEqual([{ tag: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[4]).toEqual([{ tag: "來源:警報通知", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[5]).toEqual([{ tag: "市場:選擇性出手", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[6]).toEqual([{ strategy_code: "breakout", search: "" }]);
+    expect(wrapper.emitted("apply-journal-filter-preset")[7]).toEqual([{ tag: "breakout", search: "" }]);
     expect(wrapper.emitted("save-journal-filter-preset")[0]).toEqual([{
       name: "來源：警報通知",
       description: "由來源拆解快速建立",
