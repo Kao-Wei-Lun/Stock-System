@@ -1,0 +1,304 @@
+"""Market intelligence routes — events, news, macro, fundamentals, chips, screener, taifex."""
+
+import logging
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, HTTPException, Query
+
+from data_fetcher import normalize_ticker
+from database import db
+from fundamentals_provider import build_fundamental_summary
+from macro_regime import build_macro_dashboard_payload
+from providers import (
+    fundamentals_provider,
+    macro_snapshot_provider,
+    market_event_provider,
+    news_provider,
+    taiwan_chip_provider,
+    screener_engine,
+)
+from schemas import (
+    ScreenerPresetCreatePayload,
+    ScreenerPresetUpdatePayload,
+    ScreenerRunPayload,
+)
+from screener_engine import build_screener_presets, normalize_screener_filters
+from taifex_fetcher import taifex_fetcher
+from taiwan_chip_provider import build_taiwan_chip_summary
+
+log = logging.getLogger(__name__)
+
+# Injected from main.py
+_sync_market_intelligence_snapshot = None
+_fetch_and_store_quote_snapshot = None
+_APP_TZ = ZoneInfo("Asia/Taipei")
+TAIFEX_SPOT_REFERENCE = []
+
+router = APIRouter(prefix="/api", tags=["intelligence"])
+
+
+def configure(
+    *,
+    sync_market_intelligence_snapshot,
+    fetch_and_store_quote_snapshot,
+    app_tz,
+    taifex_spot_reference,
+):
+    """Inject helpers from main.py to avoid circular imports."""
+    global _sync_market_intelligence_snapshot, _fetch_and_store_quote_snapshot
+    global _APP_TZ, TAIFEX_SPOT_REFERENCE
+    _sync_market_intelligence_snapshot = sync_market_intelligence_snapshot
+    _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
+    _APP_TZ = app_tz
+    TAIFEX_SPOT_REFERENCE = taifex_spot_reference
+
+
+# ─── Events ──────────────────────────────────────────────────
+
+@router.get("/events/calendar")
+async def get_events_calendar(
+    days: int = Query(21, ge=1, le=180),
+    limit: int = Query(100, ge=1, le=500),
+    refresh: bool = Query(False),
+):
+    today = datetime.now(_APP_TZ).date()
+    date_from = today.isoformat()
+    date_to = (today + timedelta(days=days)).isoformat()
+    items = await db.list_market_events(date_from=date_from, date_to=date_to, limit=limit)
+    if refresh or not items:
+        await _sync_market_intelligence_snapshot(reason="events-calendar")
+        items = await db.list_market_events(date_from=date_from, date_to=date_to, limit=limit)
+    return {"items": items, "date_from": date_from, "date_to": date_to}
+
+
+@router.get("/events/{ticker}")
+async def get_ticker_events(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_market_events(ticker=normalized, limit=20)
+    if refresh or not items:
+        try:
+            items = await market_event_provider.sync_ticker_events(normalized)
+        except Exception as exc:
+            log.warning("ticker events sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+# ─── News ────────────────────────────────────────────────────
+
+@router.get("/news")
+async def get_news_feed(
+    limit: int = Query(20, ge=1, le=100),
+):
+    items = await db.list_news_articles(limit=limit)
+    return {"items": items}
+
+
+@router.get("/news/{ticker}")
+async def get_ticker_news(
+    ticker: str,
+    limit: int = Query(10, ge=1, le=30),
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_news_articles(ticker=normalized, limit=limit)
+    if refresh or not items:
+        try:
+            items = await news_provider.sync_ticker_news(normalized, limit=limit)
+        except Exception as exc:
+            log.warning("ticker news sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+# ─── Macro ───────────────────────────────────────────────────
+
+@router.get("/market/macro")
+async def get_macro_dashboard(
+    refresh: bool = Query(False),
+):
+    items = await db.list_macro_snapshots()
+    if refresh or not items:
+        items = await macro_snapshot_provider.sync_macro_snapshots()
+    return build_macro_dashboard_payload(items)
+
+
+# ─── Fundamentals ────────────────────────────────────────────
+
+@router.get("/fundamentals/{ticker}")
+async def get_fundamentals_detail(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    info = await db.get_stock_info(normalized)
+    if refresh or not info or not info.get("sector") or not info.get("industry"):
+        try:
+            info = await fundamentals_provider.sync_ticker_fundamentals(normalized)
+        except Exception as exc:
+            log.warning("fundamentals sync failed for %s: %s", normalized, exc)
+            info = await db.get_stock_info(normalized)
+    events = await db.list_market_events(ticker=normalized, limit=10)
+    return {
+        "ticker": normalized,
+        "detail": info,
+        "summary": build_fundamental_summary(info, events),
+    }
+
+
+@router.get("/fundamentals/{ticker}/events")
+async def get_fundamental_events(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    items = await db.list_market_events(ticker=normalized, limit=20)
+    if refresh or not items:
+        try:
+            items = await market_event_provider.sync_ticker_events(normalized)
+        except Exception as exc:
+            log.warning("fundamental event sync failed for %s: %s", normalized, exc)
+    return {"ticker": normalized, "items": items}
+
+
+# ─── Taiwan Chips ────────────────────────────────────────────
+
+@router.get("/tw/chips/{ticker}")
+async def get_taiwan_chip_detail(
+    ticker: str,
+    refresh: bool = Query(False),
+):
+    normalized = normalize_ticker(ticker)
+    snapshot = await db.get_taiwan_chip_snapshot(normalized)
+    if refresh or not snapshot:
+        try:
+            snapshot = await taiwan_chip_provider.sync_ticker_snapshot(normalized)
+        except Exception as exc:
+            log.warning("taiwan chip sync failed for %s: %s", normalized, exc)
+            snapshot = await db.get_taiwan_chip_snapshot(normalized)
+    return {
+        "ticker": normalized,
+        "detail": snapshot,
+        "summary": build_taiwan_chip_summary(snapshot),
+    }
+
+
+# ─── Screener ────────────────────────────────────────────────
+
+@router.get("/screener/presets")
+async def list_screener_presets():
+    presets = await db.list_screener_presets()
+    built_in = [
+        {
+            "id": f"builtin-{index + 1}",
+            "owner_id": 0,
+            "name": preset["name"],
+            "description": preset.get("description"),
+            "filters": normalize_screener_filters(preset.get("filters")),
+            "created_at": None,
+            "updated_at": None,
+            "builtin": True,
+        }
+        for index, preset in enumerate(build_screener_presets())
+    ]
+    return {"items": built_in + presets}
+
+
+@router.post("/screener/presets")
+async def create_screener_preset(payload: ScreenerPresetCreatePayload):
+    try:
+        created = await db.create_screener_preset(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return created
+
+
+@router.put("/screener/presets/{preset_id}")
+async def update_screener_preset(preset_id: int, payload: ScreenerPresetUpdatePayload):
+    try:
+        updated = await db.update_screener_preset(preset_id, payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not updated:
+        raise HTTPException(404, "Screener preset not found")
+    return updated
+
+
+@router.delete("/screener/presets/{preset_id}")
+async def delete_screener_preset(preset_id: int):
+    deleted = await db.delete_screener_preset(preset_id)
+    if not deleted:
+        raise HTTPException(404, "Screener preset not found")
+    return {"ok": True}
+
+
+@router.post("/screener/run")
+async def run_screener(payload: ScreenerRunPayload):
+    return await screener_engine.run(payload.filters)
+
+
+# ─── TAIFEX ──────────────────────────────────────────────────
+
+@router.get("/taifex/institutional")
+async def get_taifex_institutional(
+    date: str | None = Query(None, description="YYYY-MM-DD"),
+    refresh: bool = Query(False, description="Force refresh from remote sources"),
+):
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+
+    payload = await taifex_fetcher.fetch_dashboard(target_date, force_refresh=refresh)
+
+    spot_cards = []
+    for item in TAIFEX_SPOT_REFERENCE:
+        quote = await _fetch_and_store_quote_snapshot(item["ticker"])
+        if not quote:
+            quote = await db.get_market_quote(item["ticker"])
+        if not quote:
+            continue
+        spot_cards.append(
+            {
+                "ticker": item["ticker"],
+                "label": item["label"],
+                "price": quote.get("price"),
+                "change": quote.get("change"),
+                "change_pct": quote.get("change_pct"),
+                "open": quote.get("open"),
+                "high": quote.get("high"),
+                "low": quote.get("low"),
+                "volume": quote.get("volume"),
+            }
+        )
+
+    payload["spot_reference"] = spot_cards
+    return payload
+
+
+@router.get("/taifex/institutional/insights")
+async def get_taifex_institutional_insights(
+    date: str | None = Query(None, description="YYYY-MM-DD"),
+    futures_commodity: str | None = Query(None, description="期貨商品名稱"),
+    options_commodity: str | None = Query(None, description="選擇權商品名稱"),
+    days: int = Query(30, description="10 20 30 60 90"),
+    refresh: bool = Query(False, description="Force refresh from remote sources"),
+):
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+
+    return await taifex_fetcher.fetch_insights(
+        target_date,
+        futures_commodity.strip() if futures_commodity else None,
+        options_commodity.strip() if options_commodity else None,
+        days,
+        force_refresh=refresh,
+    )
