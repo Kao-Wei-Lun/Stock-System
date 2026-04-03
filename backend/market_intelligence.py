@@ -122,7 +122,13 @@ class MarketEventProvider:
             params={"modules": modules},
             timeout=10,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if response.status_code == 401:
+                log.debug("Yahoo quoteSummary unauthorized for %s modules=%s", ticker, modules)
+                return {}
+            raise exc
         return response.json()
 
 

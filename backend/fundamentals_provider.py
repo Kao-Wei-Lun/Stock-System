@@ -42,7 +42,13 @@ class FundamentalsProvider:
             params={"modules": "price,summaryDetail,defaultKeyStatistics,assetProfile"},
             timeout=10,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if response.status_code == 401:
+                log.debug("Yahoo quoteSummary unauthorized for %s fundamentals", ticker)
+                return {}
+            raise exc
         payload = response.json()
         result = payload.get("quoteSummary", {}).get("result") or []
         if not result:

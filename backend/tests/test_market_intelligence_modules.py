@@ -1,4 +1,5 @@
 import copy
+import requests
 
 import pytest
 
@@ -10,10 +11,13 @@ from taiwan_chip_provider import build_taiwan_chip_summary
 
 
 class StubResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error", response=self)
         return None
 
     def json(self):
@@ -21,12 +25,13 @@ class StubResponse:
 
 
 class StubSession:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
         self.headers = {}
 
     def get(self, *_args, **_kwargs):
-        return StubResponse(self.payload)
+        return StubResponse(self.payload, status_code=self.status_code)
 
 
 @pytest.mark.anyio
@@ -80,6 +85,22 @@ def test_news_provider_normalizes_search_payload():
     assert items[0]["ticker"] == "AAPL"
     assert items[0]["published_at"].startswith("2026-04-01")
     assert items[0]["summary"] == "Reuters"
+
+
+def test_market_event_provider_returns_empty_when_quote_summary_is_unauthorized():
+    provider = MarketEventProvider(session=StubSession({}, status_code=401))
+
+    items = provider._fetch_ticker_events_sync("AAPL")
+
+    assert items == []
+
+
+def test_fundamentals_provider_returns_empty_when_quote_summary_is_unauthorized():
+    provider = FundamentalsProvider(session=StubSession({}, status_code=401))
+
+    info = provider._fetch_ticker_fundamentals_sync("AAPL")
+
+    assert info == {}
 
 
 @pytest.mark.anyio

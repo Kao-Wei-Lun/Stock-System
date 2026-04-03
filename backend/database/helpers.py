@@ -327,6 +327,20 @@ def _deserialize_taiwan_chip_snapshot(row: Optional[Dict[str, Any]]) -> Optional
         "updated_at": _datetime_to_iso(row.get("updated_at")),
     }
 
+def _deserialize_institutional_snapshot(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    payload = _json_loads(row.get("payload_json"), {})
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(
+        {
+            "resolved_date": _date_to_iso(row.get("resolved_date")),
+            "query_date": _date_to_iso(row.get("query_date")),
+        }
+    )
+    return payload
+
 def _deserialize_screener_preset(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
         return None

@@ -147,7 +147,7 @@ class TaiwanChipMixin:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, params)
                 row = await cur.fetchone()
-        return self._deserialize_institutional_snapshot(row)
+        return _deserialize_institutional_snapshot(row)
 
     async def get_institutional_snapshot_exact(self, target_date: date) -> Optional[Dict[str, Any]]:
         sql = """
@@ -160,7 +160,7 @@ class TaiwanChipMixin:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, (target_date.isoformat(),))
                 row = await cur.fetchone()
-        return self._deserialize_institutional_snapshot(row)
+        return _deserialize_institutional_snapshot(row)
 
     async def get_institutional_snapshots(self, target_date: date, limit: int) -> List[Dict[str, Any]]:
         if limit <= 0:
@@ -181,7 +181,7 @@ class TaiwanChipMixin:
         snapshots = [
             snapshot
             for snapshot in (
-                self._deserialize_institutional_snapshot(row)
+                _deserialize_institutional_snapshot(row)
                 for row in rows
             )
             if snapshot
