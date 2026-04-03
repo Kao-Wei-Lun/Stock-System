@@ -692,10 +692,35 @@ describe("RightSidebar", () => {
     expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("最近命中");
     expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("MSFT");
     expect(wrapper.get('[data-testid="journal-preset-latest-entry"]').text()).toContain("+$250");
+    expect(wrapper.get('[data-testid="journal-preset-add-watchlist"]').text()).toContain("加入目前顯示到自選 (2)");
+    expect(wrapper.get('[data-testid="journal-preset-open-alert"]').text()).toContain("為最近命中設警報");
 
     await wrapper.get('[data-testid="journal-preset-latest-entry"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-add-watchlist"]').trigger("click");
+    await wrapper.get('[data-testid="journal-preset-open-alert"]').trigger("click");
 
     expect(wrapper.emitted("select-journal-entry")[0]).toEqual([2]);
+    expect(wrapper.emitted("add-watchlist")[0]).toEqual([[
+      {
+        ticker: "AAPL",
+        tags: ["日誌復盤", "警報通知模板", "來源:警報通知", "策略:breakout"],
+      },
+      {
+        ticker: "MSFT",
+        tags: ["日誌復盤", "警報通知模板", "來源:警報通知", "策略:breakout"],
+      },
+    ]]);
+    expect(wrapper.emitted("open-alert-modal")[0]).toEqual([{
+      ticker: "MSFT",
+      type: "price",
+      condition: "大於",
+      value: "",
+      context_source: "journal_result",
+      context_tags: ["日誌復盤", "警報通知模板", "來源:警報通知", "策略:breakout"],
+      snapshot_price: null,
+      snapshot_timestamp: "2026-04-02T09:00",
+      prefill_hint: "警報通知模板 最近命中",
+    }]);
   });
 
   it("toggles between condensed and full preset result rows", async () => {

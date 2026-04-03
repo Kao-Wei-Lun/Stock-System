@@ -144,7 +144,7 @@
                 @toggle-panel="togglePanel"
                 @update-indicator-setting="updateIndicatorSetting"
                 @apply-indicator-preset="applyIndicatorPreset"
-                @open-alert-modal="openAlertModal"
+                @open-alert-modal="handleRightSidebarAlertShortcut"
                 @toggle-alert-active="toggleAlertActive"
                 @toggle-alert-log="toggleAlertLog"
                 @delete-alert="deleteAlert"
@@ -163,6 +163,7 @@
                 @reset-journal-form="resetJournalForm"
                 @add-journal-attachment="addJournalAttachment"
                 @remove-journal-attachment="removeJournalAttachment"
+                @add-watchlist="handleJournalResultWatchlist"
                 @sync-all="syncAll"
               />
             </div>
@@ -377,6 +378,7 @@ const {
   renameWatchGroup,
   deleteWatchGroup,
   addTickerToWatchlist,
+  addTickersToWatchlistBatch,
   removeTickerFromWatchlist,
   reorderWatchlistItems,
   addCompareTicker,
@@ -553,6 +555,24 @@ function handleWatchlistJournalEntry(payload) {
   setWorkspaceTab("chart");
   void selectTicker(payload.ticker, payload.name || payload.ticker);
   startJournalEntry(payload);
+}
+
+function handleJournalResultWatchlist(items) {
+  if (!Array.isArray(items) || !items.length) return;
+  setLeftTab("watch");
+  void addTickersToWatchlistBatch(items);
+}
+
+function handleRightSidebarAlertShortcut(payload) {
+  if (!payload) {
+    openAlertModal();
+    return;
+  }
+  if (payload?.ticker) {
+    setWorkspaceTab("chart");
+    void selectTicker(payload.ticker, payload.name || payload.ticker);
+  }
+  openAlertModal(payload);
 }
 
 function handleAlertField(payload) {

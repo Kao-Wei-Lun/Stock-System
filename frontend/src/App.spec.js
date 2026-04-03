@@ -181,6 +181,7 @@ const dashboardMock = {
   renameWatchGroup: noop,
   deleteWatchGroup: noop,
   addTickerToWatchlist: noop,
+  addTickersToWatchlistBatch: noop,
   removeTickerFromWatchlist: noop,
   reorderWatchlistItems: noop,
   addCompareTicker: noop,

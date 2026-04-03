@@ -397,6 +397,26 @@
         >
           {{ journalResultToggleLabel }}
         </button>
+        <div v-if="journalResultWatchlistItems.length || journalResultAlertPayload" class="journal-result-actions">
+          <button
+            v-if="journalResultWatchlistItems.length"
+            type="button"
+            class="journal-result-action"
+            data-testid="journal-preset-add-watchlist"
+            @click="$emit('add-watchlist', journalResultWatchlistItems)"
+          >
+            加入目前顯示到自選 ({{ journalResultWatchlistItems.length }})
+          </button>
+          <button
+            v-if="journalResultAlertPayload"
+            type="button"
+            class="journal-result-action"
+            data-testid="journal-preset-open-alert"
+            @click="$emit('open-alert-modal', journalResultAlertPayload)"
+          >
+            為最近命中設警報
+          </button>
+        </div>
         <div v-if="journalPresetResultSummary.totalEntries === 0" class="journal-empty-state">
           <div class="bt-trade-sub">目前條件沒有命中任何交易紀錄，可以先放寬一個篩選條件再看。</div>
           <div v-if="journalPresetEmptySuggestions.length" class="journal-empty-actions">
@@ -772,6 +792,7 @@ const emit = defineEmits([
   "reset-journal-form",
   "add-journal-attachment",
   "remove-journal-attachment",
+  "add-watchlist",
   "sync-all",
 ]);
 
@@ -1282,6 +1303,49 @@ function toggleJournalResultRows() {
   showAllJournalEntries.value = !showAllJournalEntries.value;
 }
 
+const journalResultContextTags = computed(() => {
+  const tags = [
+    "日誌復盤",
+    String(activeJournalPreset.value?.name || "").trim(),
+    String(props.journalFilters?.tag || "").trim(),
+    String(props.journalFilters?.strategy_code || "").trim()
+      ? `策略:${String(props.journalFilters?.strategy_code || "").trim()}`
+      : "",
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(tags)).slice(0, 6);
+});
+
+const journalResultWatchlistItems = computed(() => {
+  const seen = new Set();
+  return journalEntryRows.value.reduce((items, entry) => {
+    const ticker = String(entry?.ticker || "").trim();
+    if (!ticker || seen.has(ticker)) return items;
+    seen.add(ticker);
+    items.push({
+      ticker,
+      tags: journalResultContextTags.value,
+    });
+    return items;
+  }, []);
+});
+
+const journalResultAlertPayload = computed(() => {
+  if (!journalPresetLatestEntry.value) return null;
+  return {
+    ticker: journalPresetLatestEntry.value.ticker,
+    type: "price",
+    condition: "大於",
+    value: "",
+    context_source: "journal_result",
+    context_tags: journalResultContextTags.value,
+    snapshot_price: journalPresetLatestEntry.value.entry_price ?? null,
+    snapshot_timestamp: journalPresetLatestEntry.value.entry_time || "",
+    prefill_hint: `${journalPresetResultSummary.value?.name || "自訂篩選"} 最近命中`,
+  };
+});
+
 const journalPresetEmptySuggestions = computed(() => {
   if (!journalPresetResultSummary.value || journalPresetResultSummary.value.totalEntries !== 0) {
     return [];
@@ -1738,6 +1802,25 @@ function applyJournalEmptySuggestion(suggestion) {
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text2);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.journal-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.journal-result-action {
+  flex: 1 1 180px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(123, 231, 255, 0.12);
+  color: #c9f6ff;
   font-size: 10px;
   line-height: 1.4;
   cursor: pointer;

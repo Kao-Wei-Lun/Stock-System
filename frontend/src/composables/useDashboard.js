@@ -1739,6 +1739,78 @@ export function useDashboard() {
     }
   }
 
+  async function addTickersToWatchlistBatch(inputs, groupId = activeWatchGroupId.value) {
+    const requests = (Array.isArray(inputs) ? inputs : [inputs])
+      .map((item) => (item && typeof item === "object" && !Array.isArray(item) ? item : { ticker: item, groupId }))
+      .filter(Boolean);
+    const targetGroupId = requests.find((item) => item.groupId)?.groupId || groupId;
+    if (!targetGroupId) {
+      pushNotification({
+        icon: "⚠️",
+        title: "加入自選股失敗",
+        msg: "請先選擇觀察群組",
+        type: "error",
+      });
+      return { added: 0, failed: 0 };
+    }
+
+    const seen = new Set();
+    const normalizedRequests = requests.reduce((items, request) => {
+      const ticker = normalizeTicker(request.ticker);
+      if (!ticker || seen.has(ticker)) return items;
+      seen.add(ticker);
+      items.push({
+        ticker,
+        tags: Array.isArray(request.tags)
+          ? request.tags.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 6)
+          : [],
+      });
+      return items;
+    }, []);
+
+    if (!normalizedRequests.length) {
+      return { added: 0, failed: 0 };
+    }
+
+    let addedCount = 0;
+    let failedCount = 0;
+    let groupName = activeWatchGroup.value?.name || "";
+
+    for (const request of normalizedRequests) {
+      try {
+        const added = await apiFetch("/api/watchlist/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ group_id: targetGroupId, ticker: request.ticker, tags: request.tags }),
+        });
+        addedCount += 1;
+        groupName = added.group_name || groupName;
+      } catch (error) {
+        failedCount += 1;
+        console.error(error);
+      }
+    }
+
+    if (addedCount > 0) {
+      await loadWatchlist();
+      pushNotification({
+        icon: failedCount > 0 ? "⚠️" : "⭐",
+        title: "已加入自選股",
+        msg: `已加入 ${addedCount} 檔${groupName ? ` → ${groupName}` : ""}${failedCount > 0 ? `，略過 ${failedCount} 檔` : ""}`,
+        type: failedCount > 0 ? "warning" : "success",
+      });
+      return { added: addedCount, failed: failedCount };
+    }
+
+    pushNotification({
+      icon: "⚠️",
+      title: "加入自選股失敗",
+      msg: "請確認觀察群組與代號設定",
+      type: "error",
+    });
+    return { added: 0, failed: failedCount };
+  }
+
   async function removeTickerFromWatchlist(itemId) {
     if (!itemId) return;
     try {
@@ -3163,6 +3235,7 @@ export function useDashboard() {
     renameWatchGroup,
     deleteWatchGroup,
     addTickerToWatchlist,
+    addTickersToWatchlistBatch,
     removeTickerFromWatchlist,
     reorderWatchlistItems,
     addCompareTicker,
