@@ -14,6 +14,8 @@ import {
   readLegacyWorkspacePresets,
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
+import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
+import { createDashboardTradeWorkbench } from "./dashboard/dashboardTradeWorkbench";
 
 const TIMEFRAME_OPTIONS = [
   { tf: "5d", iv: "1h", label: "5D" },
@@ -33,7 +35,6 @@ const KLINE_DISPLAY_OPTIONS = [
 ];
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
-const BACKTEST_COMPARE_LIMIT = 3;
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
@@ -490,10 +491,6 @@ export function useDashboard() {
   const selectedDrawingId = ref(null);
   const workspacePresets = ref([]);
   const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
-  const alerts = ref([]);
-  const alertTriggerLogs = ref({});
-  const alertLogLoading = ref({});
-  const expandedAlertLogId = ref(null);
   const localNotifications = ref([]);
   const remoteNotifications = ref([]);
   const notifications = computed(() =>
@@ -525,20 +522,7 @@ export function useDashboard() {
   const institutionalHistoryDays = ref(initialInstitutionalHistoryDays);
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
-  const alertModalOpen = ref(false);
   const activeTool = ref(initialTool);
-  const backtestResult = ref(null);
-  const backtestHistory = ref([]);
-  const backtestCompareIds = ref([]);
-  const backtestCompareRuns = computed(() => {
-    const idSet = new Set(backtestCompareIds.value.map((id) => String(id)));
-    return backtestHistory.value.filter((item) => idSet.has(String(item.id))).slice(0, BACKTEST_COMPARE_LIMIT);
-  });
-  const backtestLoading = ref(false);
-  const journalEntries = ref([]);
-  const journalStats = ref(null);
-  const journalLoading = ref(false);
-  const journalFilterPresets = ref([]);
   const calendarEvents = ref([]);
   const tickerEvents = ref([]);
   const tickerNews = ref([]);
@@ -568,13 +552,6 @@ export function useDashboard() {
     sort_by: "score",
     limit: 50,
     ...(storedPrefs.screenerFilters || {}),
-  });
-  const journalFilterScope = ref("ticker");
-  const journalFilters = reactive({
-    market: "",
-    strategy_code: "",
-    tag: "",
-    search: "",
   });
 
   const quote = reactive({
@@ -618,60 +595,6 @@ export function useDashboard() {
     low: "—",
     close: "—",
     volume: "—",
-  });
-  const alertForm = reactive({
-    ticker: "AAPL",
-    type: "price",
-    cond: "大於",
-    value: "",
-    metric: "",
-    futures_commodity: "",
-    options_commodity: "",
-    event_type: "",
-    event_title: "",
-    importance: "",
-    event_scope: "",
-    target_label: "",
-    prefill_hint: "",
-    context_tags: [],
-    context_source: "",
-    context_group_name: "",
-    snapshot_price: null,
-    snapshot_source: "",
-    snapshot_timestamp: "",
-  });
-  const backtestForm = reactive({
-    strategy: "MA 黃金/死亡交叉",
-    start: "2022-01-01",
-    end: new Date().toISOString().slice(0, 10),
-    capital: 100000,
-    positionSizing: "full_equity",
-    fee: 0.1,
-    slippage: 0,
-    sl: 5,
-    tp: 10,
-  });
-  const journalForm = reactive({
-    id: null,
-    ticker: "AAPL",
-    market: inferMarketFromTicker("AAPL"),
-    direction: "long",
-    strategy_code: "",
-    entry_time: getCurrentDateTimeInputValue(),
-    entry_price: "",
-    exit_time: "",
-    exit_price: "",
-    size: 1,
-    stop_loss: "",
-    take_profit: "",
-    entry_reason: "",
-    exit_reason: "",
-    emotion_tag: "",
-    review_notes: "",
-    tags_text: "",
-    attachment_path: "",
-    attachment_type: "",
-    attachments: [],
   });
 
   const ohlcData = computed(() => filterRowsForDisplayPeriod(
@@ -726,6 +649,79 @@ export function useDashboard() {
         : null,
       resolvedDate: insightMatch?.resolved_date || dataMatch?.resolved_date || null,
     };
+  });
+  const {
+    alerts,
+    alertTriggerLogs,
+    alertLogLoading,
+    expandedAlertLogId,
+    alertModalOpen,
+    alertForm,
+    loadAlerts,
+    openAlertModal,
+    closeAlertModal,
+    updateAlertField,
+    saveAlert,
+    createAlertsBatch,
+    toggleAlertLog,
+    toggleAlertActive,
+    deleteAlert,
+  } = createDashboardAlerting({
+    dashboardApi,
+    currentTicker,
+    institutionalFuturesCommodity,
+    institutionalOptionsCommodity,
+    institutionalHistoryDays,
+    institutionalOverlay,
+    pushNotification,
+    normalizeTicker,
+  });
+  const {
+    backtestForm,
+    backtestResult,
+    backtestHistory,
+    backtestCompareIds,
+    backtestCompareRuns,
+    backtestLoading,
+    journalForm,
+    journalEntries,
+    journalStats,
+    journalLoading,
+    journalFilterPresets,
+    journalFilterScope,
+    journalFilters,
+    loadBacktestHistory,
+    selectBacktestRun,
+    toggleBacktestCompare,
+    clearBacktestCompare,
+    loadJournalData,
+    loadJournalFilterPresets,
+    updateJournalField: updateJournalFieldAction,
+    updateJournalFilter: updateJournalFilterAction,
+    applyJournalFilterPreset: applyJournalFilterPresetAction,
+    saveJournalFilterPreset: saveJournalFilterPresetAction,
+    loadJournalFilterPreset: loadJournalFilterPresetAction,
+    deleteJournalFilterPreset: deleteJournalFilterPresetAction,
+    resetJournalForm: resetJournalFormAction,
+    addJournalAttachment: addJournalAttachmentAction,
+    removeJournalAttachment: removeJournalAttachmentAction,
+    startJournalEntry: startJournalEntryAction,
+    selectJournalEntry: selectJournalEntryAction,
+    saveJournalEntry: saveJournalEntryAction,
+    deleteJournalEntry: deleteJournalEntryAction,
+    updateBacktestField: updateBacktestFieldAction,
+    runBacktest: runBacktestAction,
+  } = createDashboardTradeWorkbench({
+    dashboardApi,
+    currentTicker,
+    currentInterval,
+    quote,
+    rightTab,
+    pushNotification,
+    normalizeTicker,
+    inferMarketFromTicker,
+    getCurrentDateTimeInputValue,
+    compareLimit: 3,
   });
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
@@ -821,188 +817,12 @@ export function useDashboard() {
     throw lastError;
   }
 
-  function mapAlertRecord(alert) {
-    return {
-      ...alert,
-      cond: alert.condition || alert.cond,
-    };
-  }
-
-  function mapAlertTriggerLog(record) {
-    const payload = record?.payload || {};
-    const evaluation = payload.evaluation || {};
-    return {
-      ...record,
-      trigger_value: record?.trigger_value ?? evaluation.current_value ?? null,
-      threshold_value: record?.threshold_value ?? evaluation.threshold_value ?? null,
-      payload,
-    };
-  }
-
-  function pruneAlertArtifacts(nextAlerts) {
-    const validIds = new Set((nextAlerts || []).map((item) => String(item.id)));
-    alertTriggerLogs.value = Object.fromEntries(
-      Object.entries(alertTriggerLogs.value).filter(([key]) => validIds.has(String(key))),
-    );
-    alertLogLoading.value = Object.fromEntries(
-      Object.entries(alertLogLoading.value).filter(([key]) => validIds.has(String(key))),
-    );
-    if (expandedAlertLogId.value != null && !validIds.has(String(expandedAlertLogId.value))) {
-      expandedAlertLogId.value = null;
-    }
-  }
-
-  function alertRequiresNumericValue(type, condition) {
-    const normalizedType = String(type || "").toLowerCase();
-    const normalizedCondition = String(condition || "").toLowerCase();
-    if (["market_risk", "institutional"].includes(normalizedType)) return false;
-    if (normalizedType !== "macd") return true;
-    return !["上穿", "下穿", "cross_up", "cross_down"].includes(normalizedCondition);
-  }
-
-  function defaultAlertCondition(type) {
-    const normalizedType = String(type || "").toLowerCase();
-    if (normalizedType === "market_risk") return "high";
-    if (normalizedType === "institutional") return "medium_or_high";
-    if (normalizedType === "event") return "within_days";
-    return normalizedType === "macd" ? "上穿" : "大於";
-  }
-
-  function resetAlertForm() {
-    alertForm.ticker = currentTicker.value || "AAPL";
-    alertForm.ticker = normalizeTicker(alertForm.ticker);
-    alertForm.type = "price";
-    alertForm.cond = "大於";
-    alertForm.value = "";
-    alertForm.metric = "";
-    alertForm.futures_commodity = "";
-    alertForm.options_commodity = "";
-    alertForm.event_type = "";
-    alertForm.event_title = "";
-    alertForm.importance = "";
-    alertForm.event_scope = "";
-    alertForm.target_label = "";
-    alertForm.prefill_hint = "";
-    alertForm.context_tags = [];
-    alertForm.context_source = "";
-    alertForm.context_group_name = "";
-    alertForm.snapshot_price = null;
-    alertForm.snapshot_source = "";
-    alertForm.snapshot_timestamp = "";
-  }
-
   function extractContextGroupName(payload = {}) {
     if (payload?.context_group_name) return String(payload.context_group_name);
     const groupTag = (Array.isArray(payload?.context_tags) ? payload.context_tags : []).find((tag) =>
       String(tag || "").startsWith("觀察群組:"),
     );
     return groupTag ? String(groupTag).slice("觀察群組:".length) : "";
-  }
-
-  function formatAlertConditionLabel(condition, type = "") {
-    const normalizedType = String(type || "").toLowerCase();
-    const normalizedCondition = String(condition || "").toLowerCase();
-    if (normalizedType === "institutional") {
-      const labels = {
-        high: "高異常",
-        medium_or_high: "中度以上異常",
-      };
-      return labels[normalizedCondition] || String(condition || "");
-    }
-    if (normalizedType === "event") {
-      const labels = {
-        within_days: "事件前提醒",
-      };
-      return labels[normalizedCondition] || String(condition || "");
-    }
-    const labels = {
-      gt: "大於",
-      lt: "小於",
-      eq: "等於",
-      "大於": "大於",
-      "小於": "小於",
-      "等於": "等於",
-      cross_up: "黃金交叉",
-      cross_down: "死亡交叉",
-      上穿: "黃金交叉",
-      下穿: "死亡交叉",
-      high: "進入高風險",
-      medium_or_high: "進入中風險以上",
-      risk_off: "進入 risk-off",
-      offensive: "進入偏進攻",
-    };
-    return labels[normalizedCondition] || labels[String(condition || "")] || String(condition || "");
-  }
-
-  function buildAlertCreatePayload(draft = {}) {
-    const type = String(draft.type || alertForm.type || "price").toLowerCase();
-    const condition = draft.condition || draft.cond || defaultAlertCondition(type);
-    const requiresNumericValue = alertRequiresNumericValue(type, condition);
-    const numericValue = requiresNumericValue ? Number(draft.value) : null;
-    const normalizedTicker = type === "market_risk"
-      ? "MARKET"
-      : normalizeTicker(draft.ticker || currentTicker.value);
-    const futuresCommodity = draft.futures_commodity
-      || institutionalFuturesCommodity.value
-      || institutionalOverlay.value?.commodity
-      || "";
-    const optionsCommodity = draft.options_commodity || institutionalOptionsCommodity.value || "";
-    if (!normalizedTicker || (requiresNumericValue && Number.isNaN(numericValue))) {
-      return null;
-    }
-    return {
-      ticker: normalizedTicker,
-      type,
-      condition,
-      value: numericValue,
-      timeframe: "1d",
-      condition_payload: {
-        operator: condition,
-        metric: type === "volume"
-          ? "volume_ratio"
-          : type === "basis"
-            ? (draft.metric || "basis_pct")
-            : type === "institutional"
-              ? (draft.metric || "anomaly_score")
-              : null,
-        spot_ticker: type === "basis" ? normalizedTicker : null,
-        futures_commodity: ["basis", "institutional"].includes(type) ? futuresCommodity || null : null,
-        options_commodity: type === "institutional" ? optionsCommodity || null : null,
-        event_type: type === "event" ? (draft.event_type || null) : null,
-        event_title: type === "event" ? (draft.event_title || null) : null,
-        importance: type === "event" ? (draft.importance || null) : null,
-        event_scope: type === "event" ? (draft.event_scope || "ticker") : null,
-        target_label: draft.target_label
-          || (type === "basis" && futuresCommodity
-            ? `${futuresCommodity} / ${normalizedTicker}`
-            : type === "institutional"
-              ? (futuresCommodity || normalizedTicker)
-              : normalizedTicker),
-        history_days: type === "institutional" ? institutionalHistoryDays.value : null,
-        context_source: draft.context_source || null,
-        context_group_name: draft.context_group_name || null,
-        context_tags: Array.isArray(draft.context_tags) && draft.context_tags.length ? draft.context_tags : null,
-        snapshot_price: draft.snapshot_price ?? null,
-        snapshot_source: draft.snapshot_source || null,
-        snapshot_timestamp: draft.snapshot_timestamp || null,
-        prefill_hint: draft.prefill_hint || null,
-      },
-      active: true,
-    };
-  }
-
-  function getAlertSignature(source = {}) {
-    const type = String(source.type || "").toLowerCase();
-    const ticker = type === "market_risk" ? "MARKET" : normalizeTicker(source.ticker || "");
-    const condition = String(source.condition || source.cond || "").trim();
-    if (!ticker || !type || !condition) return "";
-    const rawValue = source.value;
-    const valueKey = rawValue == null || rawValue === ""
-      ? "null"
-      : Number.isFinite(Number(rawValue))
-        ? String(Number(rawValue))
-        : String(rawValue).trim();
-    return [ticker, type, condition, valueKey].join("|");
   }
 
   function mapRemoteNotification(item) {
@@ -1050,94 +870,6 @@ export function useDashboard() {
     };
   }
 
-  function mapBacktestRun(item) {
-    if (!item) return null;
-    return {
-      ...item,
-      id: item.id,
-      strategy: item.strategy || item.strategy_name || item.strategyKey || item.strategy_key,
-      strategy_key: item.strategy_key || item.strategyKey || "",
-      start: item.start || item.start_date || "",
-      end: item.end || item.end_date || "",
-      capital: Number(item.capital ?? item.initial_capital ?? 0),
-      finalEquity: Number(item.finalEquity ?? item.final_equity ?? 0),
-      totalReturn: Number(item.totalReturn ?? item.total_return_pct ?? 0),
-      sellTrades: Number(item.sellTrades ?? item.trade_count ?? 0),
-      winRate: Number(item.winRate ?? item.win_rate_pct ?? 0),
-      maxDrawdown: Number(item.maxDrawdown ?? item.max_drawdown_pct ?? 0),
-      sharpe: Number(item.sharpe ?? item.sharpe_ratio ?? 0),
-      bars: Number(item.bars ?? item.bars_count ?? 0),
-      feeRate: Number(item.feeRate ?? item.fee_rate ?? 0),
-      slippageRate: Number(item.slippageRate ?? item.slippage_rate ?? 0),
-      positionSizing: String(item.positionSizing ?? item.position_sizing ?? "full_equity"),
-      stopLoss: item.stopLoss ?? item.stop_loss_pct ?? null,
-      takeProfit: item.takeProfit ?? item.take_profit_pct ?? null,
-      trades: Array.isArray(item.trades) ? item.trades : [],
-      equity_curve: Array.isArray(item.equity_curve) ? item.equity_curve : [],
-      created_at: item.created_at || null,
-    };
-  }
-
-  function applyBacktestRunToForm(record) {
-    if (!record) return;
-    backtestForm.strategy = record.strategy || backtestForm.strategy;
-    backtestForm.start = record.start || backtestForm.start;
-    backtestForm.end = record.end || backtestForm.end;
-    backtestForm.capital = Number(record.capital ?? backtestForm.capital);
-    backtestForm.positionSizing = String(record.positionSizing || "full_equity");
-    backtestForm.fee = Number((((record.feeRate ?? 0) || 0) * 100).toFixed(4));
-    backtestForm.slippage = Number((((record.slippageRate ?? 0) || 0) * 100).toFixed(4));
-    backtestForm.sl = record.stopLoss == null ? 0 : Number((Number(record.stopLoss) * 100).toFixed(4));
-    backtestForm.tp = record.takeProfit == null ? 0 : Number((Number(record.takeProfit) * 100).toFixed(4));
-  }
-
-  function mapJournalEntry(item) {
-    if (!item) return null;
-    return {
-      ...item,
-      id: item.id,
-      ticker: normalizeTicker(item.ticker),
-      tags: Array.isArray(item.tags) ? item.tags : [],
-      attachments: Array.isArray(item.attachments) ? item.attachments : [],
-      result: item.result || {},
-    };
-  }
-
-  function applyJournalEntryToForm(entry = null) {
-    const normalized = mapJournalEntry(entry);
-    journalForm.id = normalized?.id ?? null;
-    journalForm.ticker = normalized?.ticker || currentTicker.value;
-    journalForm.market = normalized?.market || inferMarketFromTicker(normalized?.ticker || currentTicker.value);
-    journalForm.direction = normalized?.direction || "long";
-    journalForm.strategy_code = normalized?.strategy_code || "";
-    journalForm.entry_time = normalized?.entry_time ? String(normalized.entry_time).slice(0, 16) : getCurrentDateTimeInputValue();
-    journalForm.entry_price = normalized?.entry_price ?? quote.price ?? "";
-    journalForm.exit_time = normalized?.exit_time ? String(normalized.exit_time).slice(0, 16) : "";
-    journalForm.exit_price = normalized?.exit_price ?? "";
-    journalForm.size = normalized?.size ?? 1;
-    journalForm.stop_loss = normalized?.stop_loss ?? "";
-    journalForm.take_profit = normalized?.take_profit ?? "";
-    journalForm.entry_reason = normalized?.entry_reason || "";
-    journalForm.exit_reason = normalized?.exit_reason || "";
-    journalForm.emotion_tag = normalized?.emotion_tag || "";
-    journalForm.review_notes = normalized?.review_notes || "";
-    journalForm.tags_text = (normalized?.tags || []).join(", ");
-    journalForm.attachment_path = "";
-    journalForm.attachment_type = "";
-    journalForm.attachments = Array.isArray(normalized?.attachments) ? [...normalized.attachments] : [];
-  }
-
-  function buildJournalQueryOptions() {
-    return {
-      ticker: journalFilterScope.value === "ticker" ? currentTicker.value : undefined,
-      market: journalFilters.market || undefined,
-      strategy_code: journalFilters.strategy_code || undefined,
-      tag: journalFilters.tag || undefined,
-      search: journalFilters.search || undefined,
-      limit: 50,
-    };
-  }
-
   function buildScreenerPayload() {
     const payload = {};
     Object.entries(screenerFilters).forEach(([key, value]) => {
@@ -1165,20 +897,6 @@ export function useDashboard() {
       summary: payload?.summary || {},
       snapshot_date: payload?.snapshot_date || null,
     };
-  }
-
-  async function loadAlerts({ silent = true } = {}) {
-    try {
-      const response = await dashboardApi.listAlerts();
-      const nextAlerts = Array.isArray(response?.items) ? response.items.map((item) => mapAlertRecord(item)) : [];
-      alerts.value = nextAlerts;
-      pruneAlertArtifacts(nextAlerts);
-    } catch (error) {
-      console.error(error);
-      if (!silent) {
-        pushNotification({ icon: "⚠️", title: "警報載入失敗", msg: "請稍後再試", type: "error" });
-      }
-    }
   }
 
   async function loadNotifications({ silent = true } = {}) {
@@ -1212,73 +930,6 @@ export function useDashboard() {
         msg: error.message || "Please try again later",
         type: "error",
       });
-    }
-  }
-
-  async function loadBacktestHistory({ ticker = currentTicker.value, silent = true } = {}) {
-    try {
-      const response = await dashboardApi.listBacktestRuns({ ticker, limit: 20 });
-      backtestHistory.value = Array.isArray(response?.items)
-        ? response.items.map((item) => mapBacktestRun(item)).filter(Boolean)
-        : [];
-      const validIds = new Set(backtestHistory.value.map((item) => String(item.id)));
-      backtestCompareIds.value = backtestCompareIds.value.filter((id) => validIds.has(String(id)));
-    } catch (error) {
-      console.error(error);
-      if (!silent) {
-        pushNotification({ icon: "⚠️", title: "回測紀錄載入失敗", msg: "請稍後再試", type: "error" });
-      }
-    }
-  }
-
-  async function selectBacktestRun(runId) {
-    if (!runId) return;
-    backtestLoading.value = true;
-    try {
-      const record = await dashboardApi.getBacktestRun(runId);
-      backtestResult.value = mapBacktestRun(record);
-      applyBacktestRunToForm(backtestResult.value);
-    } catch (error) {
-      console.error(error);
-      pushNotification({ icon: "⚠️", title: "回測紀錄讀取失敗", msg: error.message || "請稍後再試", type: "error" });
-    } finally {
-      backtestLoading.value = false;
-    }
-  }
-
-  function toggleBacktestCompare(runId) {
-    if (runId == null) return;
-    const targetId = String(runId);
-    if (backtestCompareIds.value.some((id) => String(id) === targetId)) {
-      backtestCompareIds.value = backtestCompareIds.value.filter((id) => String(id) !== targetId);
-      return;
-    }
-    backtestCompareIds.value = [...backtestCompareIds.value.slice(-(BACKTEST_COMPARE_LIMIT - 1)), runId];
-  }
-
-  function clearBacktestCompare() {
-    backtestCompareIds.value = [];
-  }
-
-  async function loadJournalData({ silent = true } = {}) {
-    journalLoading.value = !silent;
-    try {
-      const options = buildJournalQueryOptions();
-      const [entriesResponse, statsResponse] = await Promise.all([
-        dashboardApi.listJournalTrades(options),
-        dashboardApi.getJournalTradeStats(options),
-      ]);
-      journalEntries.value = Array.isArray(entriesResponse?.items)
-        ? entriesResponse.items.map((item) => mapJournalEntry(item)).filter(Boolean)
-        : [];
-      journalStats.value = statsResponse || null;
-    } catch (error) {
-      console.error(error);
-      if (!silent) {
-        pushNotification({ icon: "⚠️", title: "交易日誌載入失敗", msg: "請稍後再試", type: "error" });
-      }
-    } finally {
-      journalLoading.value = false;
     }
   }
 
@@ -1336,16 +987,6 @@ export function useDashboard() {
     } catch (error) {
       console.error(error);
       screenerPresets.value = [];
-    }
-  }
-
-  async function loadJournalFilterPresets() {
-    try {
-      const response = await dashboardApi.listJournalFilterPresets();
-      journalFilterPresets.value = Array.isArray(response?.items) ? response.items : [];
-    } catch (error) {
-      console.error(error);
-      journalFilterPresets.value = [];
     }
   }
 
@@ -2971,295 +2612,6 @@ export function useDashboard() {
     await selectTicker(result.ticker, result.name || result.ticker);
   }
 
-  function openAlertModal(ticker = currentTicker.value, overrides = {}) {
-    const options = ticker && typeof ticker === "object" && !Array.isArray(ticker)
-      ? ticker
-      : { ticker, ...overrides };
-    resetAlertForm();
-    alertForm.ticker = normalizeTicker(options.ticker || currentTicker.value || "AAPL");
-    if (options.type) {
-      updateAlertField("type", options.type);
-    }
-    if (options.condition) {
-      updateAlertField("cond", options.condition);
-    }
-    if ("value" in options) {
-      alertForm.value = options.value == null ? "" : String(options.value);
-    }
-    alertForm.metric = options.metric || "";
-    alertForm.futures_commodity = options.futures_commodity || "";
-    alertForm.options_commodity = options.options_commodity || "";
-    alertForm.event_type = options.event_type || "";
-    alertForm.event_title = options.event_title || "";
-    alertForm.importance = options.importance || "";
-    alertForm.event_scope = options.event_scope || "";
-    alertForm.target_label = options.target_label || "";
-    alertForm.prefill_hint = options.prefill_hint || "";
-    alertForm.context_tags = Array.isArray(options.context_tags) ? options.context_tags.filter(Boolean) : [];
-    alertForm.context_source = options.context_source || "";
-    alertForm.context_group_name = options.context_group_name || "";
-    alertForm.snapshot_price = options.snapshot_price ?? null;
-    alertForm.snapshot_source = options.snapshot_source || "";
-    alertForm.snapshot_timestamp = options.snapshot_timestamp || "";
-    alertModalOpen.value = true;
-  }
-
-  function closeAlertModal() {
-    alertModalOpen.value = false;
-  }
-
-  function updateAlertField(key, value) {
-    if (key === "type") {
-      const previousType = String(alertForm.type || "").toLowerCase();
-      const nextType = String(value || "").toLowerCase();
-      alertForm.type = value;
-      alertForm.cond = defaultAlertCondition(value);
-      if (nextType === "market_risk") {
-        alertForm.ticker = "MARKET";
-      } else if (
-        previousType === "market_risk"
-        && (!alertForm.ticker || String(alertForm.ticker).toUpperCase() === "MARKET")
-      ) {
-        alertForm.ticker = normalizeTicker(currentTicker.value || "AAPL");
-      }
-      if (!alertRequiresNumericValue(value, alertForm.cond)) {
-        alertForm.value = "";
-      }
-      return;
-    }
-    if (key === "cond") {
-      alertForm.cond = value;
-      if (!alertRequiresNumericValue(alertForm.type, value)) {
-        alertForm.value = "";
-      }
-      return;
-    }
-    alertForm[key] = value;
-  }
-
-  async function saveAlert() {
-    const payload = buildAlertCreatePayload({
-      ticker: alertForm.ticker,
-      type: alertForm.type,
-      condition: alertForm.cond,
-      value: alertForm.value,
-      metric: alertForm.metric,
-      futures_commodity: alertForm.futures_commodity,
-      options_commodity: alertForm.options_commodity,
-      event_type: alertForm.event_type,
-      event_title: alertForm.event_title,
-      importance: alertForm.importance,
-      event_scope: alertForm.event_scope,
-      target_label: alertForm.target_label,
-      context_source: alertForm.context_source,
-      context_group_name: alertForm.context_group_name,
-      context_tags: alertForm.context_tags,
-      snapshot_price: alertForm.snapshot_price,
-      snapshot_source: alertForm.snapshot_source,
-      snapshot_timestamp: alertForm.snapshot_timestamp,
-      prefill_hint: alertForm.prefill_hint,
-    });
-    if (!payload) {
-      pushNotification({
-        icon: "\u26A0\uFE0F",
-        title: "\u8b66\u5831\u8a2d\u5b9a\u5931\u6557",
-        msg: "\u8acb\u5b8c\u6574\u586b\u5beb\u8b66\u5831\u6240\u9700\u6b04\u4f4d",
-        type: "error",
-      });
-      return;
-    }
-    try {
-      const record = await dashboardApi.createAlert(payload);
-      alerts.value = [mapAlertRecord(record), ...alerts.value];
-      alertModalOpen.value = false;
-      resetAlertForm();
-      const displayValue = record.value == null ? "" : ` ${record.value}`;
-      const targetLabel = String(record.type || "").toLowerCase() === "market_risk"
-        ? "\u5e02\u5834"
-        : record.condition_payload?.target_label || record.ticker;
-      const conditionLabel = formatAlertConditionLabel(record.condition, record.type);
-      pushNotification({
-        icon: "\uD83D\uDD14",
-        title: "\u8b66\u5831\u5df2\u8a2d\u5b9a",
-        msg: `${targetLabel} ${conditionLabel}${displayValue}`.trim(),
-        type: "success",
-      });
-    } catch (error) {
-      pushNotification({
-        icon: "\u26A0\uFE0F",
-        title: "\u8b66\u5831\u8a2d\u5b9a\u5931\u6557",
-        msg: error.message || "\u8acb\u7a0d\u5f8c\u518d\u8a66",
-        type: "error",
-      });
-    }
-  }
-  async function createAlertsBatch(inputs) {
-    const drafts = Array.isArray(inputs) ? inputs : [inputs];
-    if (!drafts.length) {
-      return { created: 0, skipped: 0, invalid: 0, failed: 0 };
-    }
-
-    const existingSignatures = new Set(
-      alerts.value.map((item) => getAlertSignature(item)).filter(Boolean),
-    );
-    const stagedSignatures = new Set();
-    const payloads = [];
-    let skipped = 0;
-    let invalid = 0;
-
-    drafts.forEach((draft) => {
-      const payload = buildAlertCreatePayload(draft);
-      if (!payload) {
-        invalid += 1;
-        return;
-      }
-      const signature = getAlertSignature(payload);
-      if (!signature || existingSignatures.has(signature) || stagedSignatures.has(signature)) {
-        skipped += 1;
-        return;
-      }
-      stagedSignatures.add(signature);
-      payloads.push(payload);
-    });
-
-    const createdRecords = [];
-    let failed = 0;
-    let lastError = null;
-
-    for (const payload of payloads) {
-      try {
-        const record = await dashboardApi.createAlert(payload);
-        createdRecords.push(record);
-        existingSignatures.add(getAlertSignature(record));
-      } catch (error) {
-        failed += 1;
-        lastError = error;
-      }
-    }
-
-    if (createdRecords.length) {
-      alerts.value = [...createdRecords.map((item) => mapAlertRecord(item)), ...alerts.value];
-      const summary = [`已建立 ${createdRecords.length} 筆`];
-      if (skipped) summary.push(`略過 ${skipped} 筆重複`);
-      if (invalid) summary.push(`略過 ${invalid} 筆缺少快照`);
-      if (failed) summary.push(`失敗 ${failed} 筆`);
-      pushNotification({
-        icon: "🔔",
-        title: "批次警報已建立",
-        msg: summary.join(" · "),
-        type: failed ? "warning" : "success",
-      });
-      return { created: createdRecords.length, skipped, invalid, failed };
-    }
-
-    const failureSummary = [];
-    if (skipped) failureSummary.push(`重複 ${skipped} 筆`);
-    if (invalid) failureSummary.push(`缺少快照 ${invalid} 筆`);
-    if (failed) failureSummary.push(`失敗 ${failed} 筆`);
-    pushNotification({
-      icon: "⚠️",
-      title: "批次警報未建立",
-      msg: failureSummary.join(" · ") || lastError?.message || "請稍後再試",
-      type: "error",
-    });
-    return { created: 0, skipped, invalid, failed };
-  }
-
-  async function loadAlertTriggerLogs(alertId, { force = false } = {}) {
-    const cacheKey = String(alertId);
-    if (!force && Array.isArray(alertTriggerLogs.value[cacheKey])) {
-      return alertTriggerLogs.value[cacheKey];
-    }
-
-    alertLogLoading.value = {
-      ...alertLogLoading.value,
-      [cacheKey]: true,
-    };
-    try {
-      const response = await dashboardApi.listAlertTriggers(alertId, { limit: 20 });
-      const logs = Array.isArray(response?.items)
-        ? response.items.map((item) => mapAlertTriggerLog(item))
-        : [];
-      alertTriggerLogs.value = {
-        ...alertTriggerLogs.value,
-        [cacheKey]: logs,
-      };
-      return logs;
-    } catch (error) {
-      pushNotification({
-        icon: "!",
-        title: "Alert log load failed",
-        msg: error.message || "Please try again later",
-        type: "error",
-      });
-      return [];
-    } finally {
-      alertLogLoading.value = {
-        ...alertLogLoading.value,
-        [cacheKey]: false,
-      };
-    }
-  }
-
-  async function toggleAlertLog(alertId) {
-    if (alertId == null) return;
-    if (String(expandedAlertLogId.value) === String(alertId)) {
-      expandedAlertLogId.value = null;
-      return;
-    }
-    expandedAlertLogId.value = alertId;
-    await loadAlertTriggerLogs(alertId);
-  }
-
-  async function toggleAlertActive(alertId) {
-    if (alertId == null) return;
-    const target = alerts.value.find((item) => String(item.id) === String(alertId));
-    if (!target) return;
-
-    const nextActive = !target.active;
-    const payload = nextActive
-      ? { active: true, triggered: false, triggered_at: null }
-      : { active: false };
-
-    try {
-      const record = await dashboardApi.updateAlert(alertId, payload);
-      alerts.value = alerts.value.map((item) =>
-        String(item.id) === String(alertId) ? mapAlertRecord(record) : item,
-      );
-      pushNotification({
-        icon: nextActive ? ">" : "||",
-        title: nextActive ? "Alert resumed" : "Alert paused",
-        msg: `${record.ticker} ${record.condition || record.cond}`,
-        type: "success",
-      });
-    } catch (error) {
-      pushNotification({
-        icon: "!",
-        title: nextActive ? "Resume alert failed" : "Pause alert failed",
-        msg: error.message || "Please try again later",
-        type: "error",
-      });
-    }
-  }
-
-  async function deleteAlert(alertId) {
-    if (alertId == null) return;
-    const target = alerts.value.find((item) => String(item.id) === String(alertId));
-    try {
-      await dashboardApi.deleteAlert(alertId);
-      alerts.value = alerts.value.filter((item) => String(item.id) !== String(alertId));
-      pruneAlertArtifacts(alerts.value);
-      pushNotification({
-        icon: "🗑",
-        title: "警報已刪除",
-        msg: target ? `${target.ticker} ${target.condition || target.cond}` : "已移除警報",
-        type: "success",
-      });
-    } catch (error) {
-      pushNotification({ icon: "⚠️", title: "警報刪除失敗", msg: error.message || "請稍後再試", type: "error" });
-    }
-  }
-
   function updateBacktestField(key, value) {
     backtestForm[key] = ["capital", "fee", "slippage", "sl", "tp"].includes(key) ? Number(value) : value;
   }
@@ -3344,7 +2696,7 @@ export function useDashboard() {
     await loadAlerts();
     await loadNotifications();
     await loadBacktestHistory({ ticker: currentTicker.value });
-    applyJournalEntryToForm();
+    resetJournalFormAction();
     await loadJournalFilterPresets();
     await loadJournalData();
     await loadScreenerPresets();
@@ -3544,24 +2896,24 @@ export function useDashboard() {
     toggleAlertLog,
     toggleAlertActive,
     deleteAlert,
-    updateBacktestField,
-    runBacktest,
+    updateBacktestField: updateBacktestFieldAction,
+    runBacktest: runBacktestAction,
     selectBacktestRun,
     toggleBacktestCompare,
     clearBacktestCompare,
-    updateJournalField,
-    saveJournalEntry,
-    deleteJournalEntry,
-    selectJournalEntry,
-    resetJournalForm,
-    updateJournalFilter,
-    applyJournalFilterPreset,
-    saveJournalFilterPreset,
-    loadJournalFilterPreset,
-    deleteJournalFilterPreset,
-    addJournalAttachment,
-    removeJournalAttachment,
-    startJournalEntry,
+    updateJournalField: updateJournalFieldAction,
+    saveJournalEntry: saveJournalEntryAction,
+    deleteJournalEntry: deleteJournalEntryAction,
+    selectJournalEntry: selectJournalEntryAction,
+    resetJournalForm: resetJournalFormAction,
+    updateJournalFilter: updateJournalFilterAction,
+    applyJournalFilterPreset: applyJournalFilterPresetAction,
+    saveJournalFilterPreset: saveJournalFilterPresetAction,
+    loadJournalFilterPreset: loadJournalFilterPresetAction,
+    deleteJournalFilterPreset: deleteJournalFilterPresetAction,
+    addJournalAttachment: addJournalAttachmentAction,
+    removeJournalAttachment: removeJournalAttachmentAction,
+    startJournalEntry: startJournalEntryAction,
     updateScreenerFilter,
     runScreener,
     saveScreenerPreset,

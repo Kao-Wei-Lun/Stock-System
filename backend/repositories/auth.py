@@ -1,6 +1,12 @@
-from typing import Any, Dict, List, Optional
-from database.helpers import *
-from database.core import DEFAULT_OWNER_ID
+from typing import Any, Dict
+
+from database.helpers import _serialize_user_profile
+from database.core import (
+    DEFAULT_OWNER_DISPLAY_NAME,
+    DEFAULT_OWNER_ID,
+    DEFAULT_OWNER_TIMEZONE,
+    DEFAULT_OWNER_USERNAME,
+)
 # Import common serialization helpers here if needed
 
 class AuthMixin:

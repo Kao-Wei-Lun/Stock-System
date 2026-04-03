@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, time as time_of_day, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -360,30 +360,43 @@ async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
+    background_tasks: list[asyncio.Task] = []
+
+    def start_background_task(coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        background_tasks.append(task)
+        return task
+
     await init_db()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,
     )
     if STARTUP_DOWNLOAD_ENABLED:
-        asyncio.create_task(startup_download())
+        start_background_task(startup_download())
     else:
         log.info("Startup Yahoo history prefetch skipped (STARTUP_DOWNLOAD_ENABLED=false).")
     if INSTITUTIONAL_AUTO_SYNC_ENABLED:
-        asyncio.create_task(startup_institutional_snapshot())
+        start_background_task(startup_institutional_snapshot())
     else:
         log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
-    asyncio.create_task(daily_latest_sync_loop())
-    asyncio.create_task(realtime_polling_loop())
+    start_background_task(daily_latest_sync_loop())
+    start_background_task(realtime_polling_loop())
     if ALERT_EVALUATOR_ENABLED:
-        asyncio.create_task(alert_evaluator_loop())
+        start_background_task(alert_evaluator_loop())
     else:
         log.info("Alert evaluator skipped (ALERT_EVALUATOR_ENABLED=false).")
     if MARKET_INTELLIGENCE_SYNC_ENABLED:
-        asyncio.create_task(market_intelligence_sync_loop())
+        start_background_task(market_intelligence_sync_loop())
     else:
         log.info("Market intelligence sync skipped (MARKET_INTELLIGENCE_SYNC_ENABLED=false).")
     yield
+    for task in background_tasks:
+        if not task.done():
+            task.cancel()
+    for task in background_tasks:
+        with suppress(asyncio.CancelledError):
+            await task
     await db.close()
     log.info("QuantVision Pro backend stopped")
 

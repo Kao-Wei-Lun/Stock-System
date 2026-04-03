@@ -1,6 +1,19 @@
+import aiomysql
 import json
-from datetime import date, datetime
-from typing import Any, Dict, Optional, List, Set
+import os
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Set
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "quantvision")
+
 from journal_service import build_journal_stats, compute_trade_result
 from display_name_resolver import resolve_display_name
 
@@ -851,4 +864,6 @@ def _datetime_to_iso(value) -> Optional[str]:
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time()).isoformat()
     return str(value)
+
+__all__ = [name for name in globals() if not name.startswith("__")]
 
