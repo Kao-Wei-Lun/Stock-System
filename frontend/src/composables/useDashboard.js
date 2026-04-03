@@ -15,6 +15,7 @@ import {
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
+import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
 import { createDashboardTradeWorkbench } from "./dashboard/dashboardTradeWorkbench";
 
 const TIMEFRAME_OPTIONS = [
@@ -500,7 +501,6 @@ export function useDashboard() {
       return rightTime - leftTime;
     }),
   );
-  const wsConnected = ref(false);
   const latency = ref("—");
   const lastUpdate = ref("—");
   const clockTime = ref("—");
@@ -526,6 +526,13 @@ export function useDashboard() {
   const calendarEvents = ref([]);
   const tickerEvents = ref([]);
   const tickerNews = ref([]);
+  const dashboardRealtime = createDashboardRealtime({
+    wsUrl,
+    onMessage: (message) => {
+      if (message.type === "quote") handleRealtimeQuote(message);
+    },
+  });
+  const wsConnected = dashboardRealtime.wsConnected;
   const macroDashboard = ref({ items: [], summary: {}, snapshot_date: null });
   const fundamentalsDetail = ref(null);
   const fundamentalsSummary = ref(null);
@@ -735,8 +742,6 @@ export function useDashboard() {
     currentName.value = storedPrefs.currentName;
   }
 
-  let ws = null;
-  let wsReconnectTimer = null;
   let clockTimer = null;
   let watchlistTimer = null;
   let alertPollingTimer = null;
@@ -1362,36 +1367,6 @@ export function useDashboard() {
       }
     }
 
-  function wsSend(payload) {
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify(payload));
-  }
-
-  function connectWs() {
-    if (ws && ws.readyState < 2) return;
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = null;
-      wsConnected.value = true;
-      wsSend({ action: "subscribe", ticker: normalizeTicker(currentTicker.value) });
-    };
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === "quote") handleRealtimeQuote(message);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    ws.onclose = () => {
-      wsConnected.value = false;
-      wsReconnectTimer = window.setTimeout(connectWs, 5000);
-    };
-    ws.onerror = () => {
-      wsConnected.value = false;
-    };
-  }
-
   async function loadWatchlist() {
     watchlistLoading.value = true;
     watchlistError.value = false;
@@ -1748,9 +1723,9 @@ export function useDashboard() {
       });
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
-        wsSend({ action: "unsubscribe", ticker: currentTicker.value });
+        dashboardRealtime.unsubscribeTicker(currentTicker.value);
         currentTicker.value = resolvedTicker;
-        wsSend({ action: "subscribe", ticker: resolvedTicker });
+        dashboardRealtime.subscribeTicker(resolvedTicker);
       }
       rawOhlcData.value = data.data || [];
       crosshair.visible = false;
@@ -1780,7 +1755,7 @@ export function useDashboard() {
 
   async function selectTicker(ticker, name = ticker) {
     const normalized = normalizeTicker(ticker);
-    wsSend({ action: "unsubscribe", ticker: normalizeTicker(currentTicker.value) });
+    dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
     currentTicker.value = normalized;
     currentName.value = name || normalized;
     compareTickers.value = compareTickers.value.filter((item) => item !== normalized);
@@ -1788,7 +1763,7 @@ export function useDashboard() {
     selectedDrawingId.value = null;
     rawOhlcData.value = [];
     crosshair.visible = false;
-    wsSend({ action: "subscribe", ticker: normalized });
+    dashboardRealtime.subscribeTicker(normalized);
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
     void loadBacktestHistory({ ticker: normalized });
     void loadJournalData();
@@ -2446,7 +2421,7 @@ export function useDashboard() {
       }
     }
     const normalizedTicker = normalizeTicker(preset.currentTicker || currentTicker.value);
-    wsSend({ action: "unsubscribe", ticker: normalizeTicker(currentTicker.value) });
+    dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
     currentTicker.value = normalizedTicker;
     currentName.value = preset.currentName || normalizedTicker;
     currentPeriod.value = preset.currentPeriod || currentPeriod.value;
@@ -2481,7 +2456,7 @@ export function useDashboard() {
     if (rightTab.value === "db") {
       await loadDbStats();
     }
-    wsSend({ action: "subscribe", ticker: normalizedTicker });
+    dashboardRealtime.subscribeTicker(normalizedTicker);
     await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
     if (workspaceTab.value === "events") {
       await loadEventCalendar();
@@ -2691,7 +2666,8 @@ export function useDashboard() {
   onMounted(async () => {
     updateClock();
     clockTimer = window.setInterval(updateClock, 1000);
-    connectWs();
+    dashboardRealtime.connect();
+    dashboardRealtime.subscribeTicker(normalizeTicker(currentTicker.value));
     await loadWorkspacePresets();
     await loadAlerts();
     await loadNotifications();
@@ -2730,8 +2706,7 @@ export function useDashboard() {
     if (clockTimer) clearInterval(clockTimer);
     if (watchlistTimer) clearInterval(watchlistTimer);
     if (alertPollingTimer) clearInterval(alertPollingTimer);
-    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-    if (ws && ws.readyState < 2) ws.close();
+    dashboardRealtime.disconnect();
   });
 
   return {
