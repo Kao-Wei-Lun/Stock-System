@@ -672,6 +672,8 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
       adxSignal: `+DI ${EMPTY} / -DI ${EMPTY}`,
       cmf: EMPTY,
       techSummaryHtml: EMPTY,
+      techSummaryItems: [],
+      techSummaryVerdict: { text: EMPTY, cls: "" },
     };
   }
 
@@ -923,6 +925,15 @@ export function buildIndicatorSnapshot(data, inputSettings = DEFAULT_INDICATOR_S
     adxSignal: `+DI ${latestPlusDi?.toFixed(1) ?? EMPTY} / -DI ${latestMinusDi?.toFixed(1) ?? EMPTY}`,
     cmf: latestCmf?.toFixed(3) ?? EMPTY,
     techSummaryHtml: `${summaryParts.join("<br>")}<br><br>綜合評分：${verdict}`,
+    techSummaryItems: summaryParts.map((html) => {
+      const clsMatch = html.match(/class="(up|dn)"/);
+      const textMatch = html.match(/>([^<]+)</);
+      return { text: textMatch ? textMatch[1] : html.replace(/<[^>]+>/g, ""), cls: clsMatch ? clsMatch[1] : "" };
+    }),
+    techSummaryVerdict: {
+      text: `綜合評分：${verdict.replace(/<[^>]+>/g, "")}`,
+      cls: score >= 65 ? "up" : score <= 35 ? "dn" : "amber",
+    },
   };
 }
 

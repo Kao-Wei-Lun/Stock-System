@@ -5,3 +5,19 @@ backend/__pycache__/
 backend/*.pyc
 __pycache__/
 *.py[cod]
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

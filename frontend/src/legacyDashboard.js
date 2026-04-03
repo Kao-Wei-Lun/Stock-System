@@ -87,7 +87,7 @@ export async function mountLegacyDashboard(root) {
     <div class="legacy-loading">
       <div class="legacy-card">
         <h1>載入 QuantVision Vue 3 前端...</h1>
-        <p>正在載入原有 dashboard 內容與即時資料邏輯。</p>
+        <p>正在載入原有 dashboard 內容與資料同步邏輯。</p>
       </div>
     </div>
   `;

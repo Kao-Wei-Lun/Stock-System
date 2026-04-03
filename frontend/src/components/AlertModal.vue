@@ -152,7 +152,7 @@ const helperText = computed(() => {
     return "RSI 可設定大於 / 小於 / 上穿 / 下穿，例如 70 與 30。";
   }
   if (props.form.type === "market_risk") {
-    return "市場風險警報會直接讀取本地 macro_snapshots，不依賴外部即時報價。";
+    return "市場風險警報會直接讀取本地 macro_snapshots，不依賴外部串流報價。";
   }
   return "所有警報都會記錄觸發時間、數值與資料來源。";
 });

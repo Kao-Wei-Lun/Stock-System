@@ -71,7 +71,14 @@
 
       <div class="ind-group">
         <div class="ind-group-title">技術面總結</div>
-        <div class="tech-summary" v-html="indicatorSnapshot.techSummaryHtml"></div>
+        <div class="tech-summary">
+          <div v-for="(item, idx) in indicatorSnapshot.techSummaryItems || []" :key="idx">
+            <span :class="item.cls">{{ item.text }}</span>
+          </div>
+          <div v-if="indicatorSnapshot.techSummaryVerdict" style="margin-top:8px">
+            <span :class="indicatorSnapshot.techSummaryVerdict.cls">{{ indicatorSnapshot.techSummaryVerdict.text }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -756,7 +763,7 @@
       <div style="margin-top:10px;font-size:10px;color:var(--text3);line-height:1.8">
         資料庫：<span style="color:var(--text2)">MySQL / quantvision</span><br>
         資料來源：<span style="color:var(--text2)">Yahoo Finance</span><br>
-        更新頻率：<span style="color:var(--text2)">即時輪詢 + 每日自動更新</span><br>
+        更新頻率：<span style="color:var(--text2)">定時輪詢 + 每日自動更新</span><br>
         同步範圍：<span style="color:var(--text2)">自選股群組與全球大盤群組</span>
       </div>
     </div>

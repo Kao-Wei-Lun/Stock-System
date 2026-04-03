@@ -49,7 +49,7 @@ const freshnessState = computed(() => {
 const freshnessLabel = computed(() => {
   if (freshnessState.value === "missing") return "無時間戳";
   if (freshnessState.value === "stale") return "資料較舊";
-  return freshnessState.value === "live" ? "即時" : "延遲快照";
+  return freshnessState.value === "live" ? "最新快照" : "延遲快照";
 });
 
 const freshnessClass = computed(() => freshnessState.value);

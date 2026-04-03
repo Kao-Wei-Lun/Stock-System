@@ -237,7 +237,7 @@
       :backend-url="backendUrl"
       :latency="latency"
       :quote-source="quote.source || 'local_cache'"
-      :quote-mode="quote.is_delayed ? '延遲快照' : '即時報價'"
+      :quote-mode="quote.is_delayed ? '延遲快照' : '最新快照'"
       :quote-timestamp="quote.quote_timestamp"
       :quote-synced-at="quote.synced_at"
       :quote-delayed="quote.is_delayed"

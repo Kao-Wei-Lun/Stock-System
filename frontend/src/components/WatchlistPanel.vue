@@ -425,7 +425,7 @@ function isStaleItem(item) {
 
 function getFreshnessLabel(item) {
   if (isStaleItem(item)) return "資料較舊";
-  return item?.is_delayed === false ? "即時" : "延遲快照";
+  return item?.is_delayed === false ? "最新快照" : "延遲快照";
 }
 
 function getFreshnessClass(item) {

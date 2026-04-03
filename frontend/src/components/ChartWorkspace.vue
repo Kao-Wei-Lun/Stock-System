@@ -577,7 +577,7 @@ const quoteTimestampLabel = computed(() => {
 });
 
 const quoteSourceLabel = computed(() => `來源：${props.quote.source || "local_cache"}`);
-const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "即時報價"));
+const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "最新快照"));
 const quoteFreshnessState = computed(() => {
   const rawValue = props.quote.quote_timestamp || props.quote.synced_at;
   if (!rawValue) return "missing";
@@ -590,12 +590,12 @@ const quoteFreshnessState = computed(() => {
 const quoteFreshnessLabel = computed(() => {
   if (quoteFreshnessState.value === "missing") return "無時間戳";
   if (quoteFreshnessState.value === "stale") return "資料較舊";
-  return quoteFreshnessState.value === "live" ? "可用即時資料" : "盤中延遲資料";
+  return quoteFreshnessState.value === "live" ? "資料已更新" : "盤中延遲資料";
 });
 const quoteFreshnessHint = computed(() => {
   if (quoteFreshnessState.value === "missing") return "目前報價缺少時間戳，請先確認資料來源";
   if (quoteFreshnessState.value === "stale") return "目前顯示資料已超過 24 小時，建議先同步再下判斷";
-  return "盤中請留意本畫面為延遲快照，不適合超短線即時判斷";
+  return "盤中請留意本畫面為延遲快照，不適合超短線下單判斷";
 });
 const quoteFreshnessChipClass = computed(() => ({
   up: quoteFreshnessState.value === "live",
