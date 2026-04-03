@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import NotificationPanel from "./NotificationPanel.vue";
 
+async function openPanel(wrapper) {
+  await wrapper.get('[data-testid="notif-center-toggle"]').trigger("click");
+}
+
 describe("NotificationPanel", () => {
   it("filters notifications and emits read toggles", async () => {
     const wrapper = mount(NotificationPanel, {
@@ -43,6 +47,8 @@ describe("NotificationPanel", () => {
         ],
       },
     });
+
+    await openPanel(wrapper);
 
     expect(wrapper.text()).toContain("AAPL alert");
     expect(wrapper.text()).toContain("Bootstrap");
@@ -106,6 +112,8 @@ describe("NotificationPanel", () => {
       },
     });
 
+    await openPanel(wrapper);
+
     await wrapper.findAll(".notif-chip").find((node) => node.text() === "本次操作").trigger("click");
     expect(wrapper.text()).toContain("Saved");
     expect(wrapper.text()).not.toContain("AAPL alert");
@@ -165,12 +173,14 @@ describe("NotificationPanel", () => {
       },
     });
 
+    await openPanel(wrapper);
+
     await wrapper.findAll(".notif-action-btn").find((node) => node.text() === "開啟宏觀").trigger("click");
 
     expect(wrapper.emitted("open-workspace")[0]).toEqual(["macro"]);
   });
 
-  it("shows notification context tags for persisted alert cards", () => {
+  it("shows notification context tags for persisted alert cards", async () => {
     const wrapper = mount(NotificationPanel, {
       props: {
         notifications: [
@@ -197,6 +207,8 @@ describe("NotificationPanel", () => {
         ],
       },
     });
+
+    await openPanel(wrapper);
 
     expect(wrapper.text()).toContain("來源：觀察池");
     expect(wrapper.text()).toContain("風險：中");
@@ -235,6 +247,8 @@ describe("NotificationPanel", () => {
       },
     });
 
+    await openPanel(wrapper);
+
     expect(wrapper.text()).toContain("Journal Flow");
 
     const actionButtons = wrapper.findAll(".notif-action-btn");
@@ -250,5 +264,35 @@ describe("NotificationPanel", () => {
     expect(wrapper.emitted("open-journal-entry")[0][0].tags.some((tag) => tag.includes("Journal Flow"))).toBe(true);
     expect(wrapper.emitted("open-journal-entry")[0][0].tags.some((tag) => tag.includes("警報"))).toBe(true);
     expect(wrapper.emitted("save-journal-filter-preset")[0][0].filters.tag).toContain("Journal Flow");
+  });
+
+  it("can collapse and reopen the floating notification center", async () => {
+    const wrapper = mount(NotificationPanel, {
+      props: {
+        notifications: [
+          {
+            id: "local-1",
+            icon: "i",
+            title: "Saved",
+            msg: "Workspace stored",
+            time: "2026/04/02 09:31",
+            createdAt: "2026-04-02T09:31:00+08:00",
+            read: false,
+            persisted: false,
+            category: "session",
+            source: "session",
+            ticker: null,
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.find('[data-testid="notif-center-panel"]').exists()).toBe(false);
+
+    await openPanel(wrapper);
+    expect(wrapper.find('[data-testid="notif-center-panel"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="notif-center-collapse"]').trigger("click");
+    expect(wrapper.find('[data-testid="notif-center-panel"]').exists()).toBe(false);
   });
 });
