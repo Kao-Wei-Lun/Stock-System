@@ -171,7 +171,8 @@ async def test_alert_engine_triggers_and_persists_notifications():
             "condition": "大於",
             "value": 210,
             "condition_payload": {
-                "context_source": "watchlist",
+                "context_source": "watchlist_group",
+                "context_group_name": "Journal Flow",
                 "context_tags": ["優先候選", "Q4"],
                 "snapshot_price": 210.5,
             },
@@ -183,8 +184,10 @@ async def test_alert_engine_triggers_and_persists_notifications():
     assert db.updated_alerts[-1][1]["active"] is False
     assert db.trigger_logs[0]["trigger_value"] == 212
     assert db.trigger_logs[0]["payload"]["macro_summary"]["trade_posture"] == "balanced"
+    assert db.trigger_logs[0]["payload"]["context_group_name"] == "Journal Flow"
     assert db.notifications[0]["category"] == "alert"
-    assert db.notifications[0]["payload"]["context_source"] == "watchlist"
+    assert db.notifications[0]["payload"]["context_source"] == "watchlist_group"
+    assert db.notifications[0]["payload"]["context_group_name"] == "Journal Flow"
     assert db.notifications[0]["payload"]["context_tags"] == ["優先候選", "Q4"]
     assert db.notifications[0]["payload"]["snapshot_price"] == 210.5
     assert db.notifications[0]["payload"]["macro_summary"]["trade_posture"] == "balanced"

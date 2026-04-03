@@ -204,4 +204,51 @@ describe("NotificationPanel", () => {
     expect(wrapper.text()).toContain("優先候選");
     expect(wrapper.text()).toContain("Q4");
   });
+  it("surfaces watch group context and emits watch-group shortcuts", async () => {
+    const wrapper = mount(NotificationPanel, {
+      props: {
+        notifications: [
+          {
+            id: "remote-5",
+            icon: "!",
+            title: "Group alert",
+            msg: "AAPL reclaimed intraday pivot",
+            time: "2026/04/02 11:05",
+            createdAt: "2026-04-02T11:05:00+08:00",
+            read: false,
+            persisted: true,
+            category: "alert",
+            source: "yahoo_finance",
+            ticker: "AAPL",
+            contextSource: "watchlist_group",
+            contextGroupName: "Journal Flow",
+            contextTags: ["å„ªå…ˆå€™é¸"],
+            thresholdValue: 210,
+            triggerValue: 212,
+            payload: {
+              snapshot_price: 210.5,
+              snapshot_source: "yahoo_finance",
+              snapshot_timestamp: "2026-04-02T11:00:00+08:00",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.text()).toContain("Journal Flow");
+
+    const actionButtons = wrapper.findAll(".notif-action-btn");
+    await actionButtons[1].trigger("click");
+    await actionButtons[2].trigger("click");
+    await actionButtons[3].trigger("click");
+
+    expect(wrapper.emitted("open-watch-group")[0]).toEqual([
+      { groupName: "Journal Flow", ticker: "AAPL" },
+    ]);
+    expect(wrapper.emitted("open-journal-entry")[0][0].review_notes).toContain("Journal Flow");
+    expect(wrapper.emitted("open-journal-entry")[0][0].review_notes).toContain("210.5");
+    expect(wrapper.emitted("open-journal-entry")[0][0].tags.some((tag) => tag.includes("Journal Flow"))).toBe(true);
+    expect(wrapper.emitted("open-journal-entry")[0][0].tags.some((tag) => tag.includes("警報"))).toBe(true);
+    expect(wrapper.emitted("save-journal-filter-preset")[0][0].filters.tag).toContain("Journal Flow");
+  });
 });

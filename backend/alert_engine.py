@@ -311,6 +311,7 @@ class AlertEngine:
             return False
 
         alert_type = str(alert.get("type") or "").strip().lower()
+        condition_payload = dict(alert.get("condition_payload") or {})
         macro_summary = None
         if alert_type == "market_risk":
             macro_items = await self._db.list_macro_snapshots() if hasattr(self._db, "list_macro_snapshots") else []
@@ -385,6 +386,12 @@ class AlertEngine:
                 "quote": quote,
                 "macro_summary": macro_summary,
                 "evaluation": evaluation,
+                "context_source": condition_payload.get("context_source"),
+                "context_group_name": condition_payload.get("context_group_name"),
+                "context_tags": condition_payload.get("context_tags"),
+                "snapshot_price": condition_payload.get("snapshot_price"),
+                "snapshot_source": condition_payload.get("snapshot_source"),
+                "snapshot_timestamp": condition_payload.get("snapshot_timestamp"),
                 "alert": {
                     "id": alert.get("id"),
                     "name": alert.get("name"),
@@ -409,11 +416,12 @@ class AlertEngine:
                     "source": quote.get("source"),
                     "trigger_value": evaluation["current_value"],
                     "threshold_value": evaluation["threshold_value"],
-                    "context_source": alert.get("condition_payload", {}).get("context_source"),
-                    "context_tags": alert.get("condition_payload", {}).get("context_tags"),
-                    "snapshot_price": alert.get("condition_payload", {}).get("snapshot_price"),
-                    "snapshot_source": alert.get("condition_payload", {}).get("snapshot_source"),
-                    "snapshot_timestamp": alert.get("condition_payload", {}).get("snapshot_timestamp"),
+                    "context_source": condition_payload.get("context_source"),
+                    "context_group_name": condition_payload.get("context_group_name"),
+                    "context_tags": condition_payload.get("context_tags"),
+                    "snapshot_price": condition_payload.get("snapshot_price"),
+                    "snapshot_source": condition_payload.get("snapshot_source"),
+                    "snapshot_timestamp": condition_payload.get("snapshot_timestamp"),
                     "macro_summary": macro_summary,
                     "alert_type": alert.get("type"),
                     "alert_condition": alert.get("condition"),

@@ -369,6 +369,7 @@ const watchGroupAlertPayloads = computed(() => {
   return visibleItems.value
     .map((item) => buildAlertShortcutPayload(item, {
       context_source: "watchlist_group",
+      context_group_name: selectedGroup.value.name,
       extra_tags: [groupTag],
       prefill_hint: `${String.fromCharCode(32676, 32068, 25209, 27425, 35686, 22577, 65306)}${selectedGroup.value.name} - `
         + `${String.fromCharCode(30446, 21069, 39023, 31034)} ${visibleItems.value.length} ${String.fromCharCode(27284, 65292)}`
@@ -563,6 +564,7 @@ function buildAlertShortcutPayload(item, overrides = {}) {
     prefill_hint: overrides.prefill_hint || defaultHint,
     context_tags: contextTags,
     context_source: overrides.context_source || "watchlist",
+    context_group_name: overrides.context_group_name || selectedGroup.value?.name || "",
     snapshot_price: latestPrice,
     snapshot_source: item.source || "",
     snapshot_timestamp: latestTimestamp,

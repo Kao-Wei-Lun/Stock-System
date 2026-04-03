@@ -67,8 +67,11 @@
           <span>{{ item.time || "—" }}</span>
         </div>
 
-        <div v-if="item.contextSource || item.contextTags?.length || item.macroSummary" class="notif-context-row">
+        <div v-if="item.contextSource || item.contextGroupName || item.contextTags?.length || item.macroSummary" class="notif-context-row">
           <span v-if="item.contextSource">{{ formatContextSource(item.contextSource) }}</span>
+          <span v-if="item.contextGroupName" class="notif-context-tag">
+            {{ formatContextGroup(item.contextGroupName) }}
+          </span>
           <span v-if="item.macroSummary" class="notif-context-tag">
             {{ formatMacroRisk(item.macroSummary.overall_risk) }}
           </span>
@@ -91,6 +94,13 @@
             @click="$emit('open-ticker', item.ticker)"
           >
             開啟 {{ item.ticker }}
+          </button>
+          <button
+            v-if="item.contextGroupName"
+            class="notif-action-btn"
+            @click="$emit('open-watch-group', { groupName: item.contextGroupName, ticker: item.ticker || null })"
+          >
+            開啟群組
           </button>
           <button
             v-if="item.category === 'alert' && item.ticker"
@@ -141,7 +151,7 @@ const props = defineProps({
   notifications: { type: Array, required: true },
 });
 
-defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace", "open-journal-entry", "save-journal-filter-preset"]);
+defineEmits(["dismiss", "toggle-read", "open-ticker", "open-workspace", "open-watch-group", "open-journal-entry", "save-journal-filter-preset"]);
 
 const viewMode = ref("all");
 const categoryFilter = ref("all");
@@ -186,6 +196,7 @@ const visibleNotifications = computed(() => {
       item.msg,
       item.ticker,
       item.workspaceTarget,
+      item.contextGroupName,
       item.macroSummary?.overall_risk,
       item.macroSummary?.trade_posture,
       item.macroSummary?.decision_hint,
@@ -205,9 +216,15 @@ function formatSource(value) {
 }
 
 function formatContextSource(value) {
-  if (String(value || "").toLowerCase() === "watchlist") return "來源：觀察池";
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "watchlist") return "來源：觀察池";
+  if (normalized === "watchlist_group") return "來源：觀察群組";
   if (!value) return "";
   return `來源：${value}`;
+}
+
+function formatContextGroup(value) {
+  return `群組：${value}`;
 }
 
 function formatMacroRisk(value) {
@@ -232,21 +249,28 @@ function formatMacroPosture(value) {
 }
 
 function buildJournalSeed(item) {
+  const sourceTag = item.contextSource === "watchlist_group" ? "來源:觀察群組警報" : "來源:警報通知";
   const tags = [...new Set([
     ...(item.contextTags || []),
+    item.contextGroupName ? `觀察群組:${item.contextGroupName}` : "",
     item.macroSummary ? `市場:${formatMacroPosture(item.macroSummary.trade_posture)}` : "",
-    "來源:警報通知",
+    sourceTag,
   ].filter(Boolean))];
   const thresholdText = item.thresholdValue == null ? "—" : String(item.thresholdValue);
   const triggerText = item.triggerValue == null ? "—" : String(item.triggerValue);
   const macroContext = item.macroSummary
     ? `${formatMacroRisk(item.macroSummary.overall_risk)} | ${formatMacroPosture(item.macroSummary.trade_posture)}`
     : "";
+  const snapshotParts = [
+    item.payload?.snapshot_price == null ? "" : `快照:${item.payload.snapshot_price}`,
+    item.payload?.snapshot_source ? `來源:${item.payload.snapshot_source}` : "",
+    item.payload?.snapshot_timestamp ? `時間:${item.payload.snapshot_timestamp}` : "",
+  ].filter(Boolean);
   return {
     ticker: item.ticker,
     name: item.ticker,
     entry_reason: `通知回寫：${item.title || item.ticker}`,
-    review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}${macroContext ? ` | ${macroContext}` : ""}${item.macroSummary?.decision_hint ? ` | ${item.macroSummary.decision_hint}` : ""}`,
+    review_notes: `${item.msg || ""} | 門檻:${thresholdText} | 觸發:${triggerText}${item.contextSource ? ` | ${formatContextSource(item.contextSource)}` : ""}${item.contextGroupName ? ` | ${formatContextGroup(item.contextGroupName)}` : ""}${snapshotParts.length ? ` | ${snapshotParts.join(" / ")}` : ""}${macroContext ? ` | ${macroContext}` : ""}${item.macroSummary?.decision_hint ? ` | ${item.macroSummary.decision_hint}` : ""}`,
     tags,
   };
 }
@@ -261,7 +285,9 @@ function buildJournalPresetDraft(item) {
     filters: {
       market: "",
       strategy_code: "",
-      tag: postureLabel ? `市場:${postureLabel}` : "來源:警報通知",
+      tag: item?.contextGroupName
+        ? `觀察群組:${item.contextGroupName}`
+        : (postureLabel ? `市場:${postureLabel}` : "來源:警報通知"),
       search: item?.ticker || "",
     },
   };

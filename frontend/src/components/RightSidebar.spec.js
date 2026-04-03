@@ -22,7 +22,8 @@ describe("RightSidebar", () => {
             active: true,
             triggered: false,
             condition_payload: {
-              context_source: "watchlist",
+              context_source: "watchlist_group",
+              context_group_name: "Journal Flow",
               context_tags: ["優先候選", "Q4"],
               snapshot_price: 210.5,
             },
@@ -37,6 +38,8 @@ describe("RightSidebar", () => {
               trigger_value: 212,
               threshold_value: 210,
               payload: {
+                context_source: "watchlist_group",
+                context_group_name: "Journal Flow",
                 quote: {
                   source: "yahoo_finance",
                 },
@@ -95,7 +98,8 @@ describe("RightSidebar", () => {
 
     expect(wrapper.text()).toContain("AAPL");
     expect(wrapper.text()).toContain("MySQL / alerts");
-    expect(wrapper.text()).toContain("來源：觀察池");
+    expect(wrapper.text()).toContain("來源：觀察群組");
+    expect(wrapper.text()).toContain("Journal Flow");
     expect(wrapper.text()).toContain("優先候選");
     expect(wrapper.text()).toContain("Q4");
     expect(wrapper.text()).toContain("快照 210.5");
@@ -103,10 +107,13 @@ describe("RightSidebar", () => {
     expect(wrapper.text()).toContain("市場 中風險 / 選擇性出手");
     expect(wrapper.text()).toContain("監控中");
 
+    const alertButtons = wrapper.findAll(".alert-action-btn");
+    await alertButtons[0].trigger("click");
     await wrapper.find(".alert-action-btn.pause").trigger("click");
-    await wrapper.find(".alert-action-btn.log").trigger("click");
+    await alertButtons[2].trigger("click");
     await wrapper.find(".alert-action-btn.delete").trigger("click");
 
+    expect(wrapper.emitted("open-watch-group")[0]).toEqual([{ groupName: "Journal Flow", ticker: "AAPL" }]);
     expect(wrapper.emitted("toggle-alert-active")[0]).toEqual([7]);
     expect(wrapper.emitted("toggle-alert-log")[0]).toEqual([7]);
     expect(wrapper.emitted("delete-alert")[0]).toEqual([7]);

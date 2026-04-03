@@ -621,6 +621,7 @@ export function useDashboard() {
     prefill_hint: "",
     context_tags: [],
     context_source: "",
+    context_group_name: "",
     snapshot_price: null,
     snapshot_source: "",
     snapshot_timestamp: "",
@@ -858,9 +859,18 @@ export function useDashboard() {
     alertForm.prefill_hint = "";
     alertForm.context_tags = [];
     alertForm.context_source = "";
+    alertForm.context_group_name = "";
     alertForm.snapshot_price = null;
     alertForm.snapshot_source = "";
     alertForm.snapshot_timestamp = "";
+  }
+
+  function extractContextGroupName(payload = {}) {
+    if (payload?.context_group_name) return String(payload.context_group_name);
+    const groupTag = (Array.isArray(payload?.context_tags) ? payload.context_tags : []).find((tag) =>
+      String(tag || "").startsWith("觀察群組:"),
+    );
+    return groupTag ? String(groupTag).slice("觀察群組:".length) : "";
   }
 
   function formatAlertConditionLabel(condition) {
@@ -905,6 +915,7 @@ export function useDashboard() {
         operator: condition,
         metric: type === "volume" ? "volume_ratio" : null,
         context_source: draft.context_source || null,
+        context_group_name: draft.context_group_name || null,
         context_tags: Array.isArray(draft.context_tags) && draft.context_tags.length ? draft.context_tags : null,
         snapshot_price: draft.snapshot_price ?? null,
         snapshot_source: draft.snapshot_source || null,
@@ -945,6 +956,7 @@ export function useDashboard() {
     const isMacroNotification = String(rawTicker || "").toUpperCase() === "MARKET" || Boolean(quote.macro_summary);
     const contextTags = Array.isArray(item.payload?.context_tags) ? item.payload.context_tags.filter(Boolean).slice(0, 4) : [];
     const macroSummary = item.payload?.macro_summary || null;
+    const contextGroupName = extractContextGroupName(item.payload);
     return {
       id: `remote-${item.id}`,
       remoteId: item.id,
@@ -960,6 +972,7 @@ export function useDashboard() {
       ticker: isMacroNotification ? null : rawTicker,
       workspaceTarget: isMacroNotification ? "macro" : null,
       contextSource: item.payload?.context_source || "",
+      contextGroupName,
       contextTags,
       macroSummary,
       triggerValue: item.payload?.trigger_value ?? null,
@@ -2880,6 +2893,7 @@ export function useDashboard() {
     alertForm.prefill_hint = options.prefill_hint || "";
     alertForm.context_tags = Array.isArray(options.context_tags) ? options.context_tags.filter(Boolean) : [];
     alertForm.context_source = options.context_source || "";
+    alertForm.context_group_name = options.context_group_name || "";
     alertForm.snapshot_price = options.snapshot_price ?? null;
     alertForm.snapshot_source = options.snapshot_source || "";
     alertForm.snapshot_timestamp = options.snapshot_timestamp || "";
@@ -2926,6 +2940,7 @@ export function useDashboard() {
       condition: alertForm.cond,
       value: alertForm.value,
       context_source: alertForm.context_source,
+      context_group_name: alertForm.context_group_name,
       context_tags: alertForm.context_tags,
       snapshot_price: alertForm.snapshot_price,
       snapshot_source: alertForm.snapshot_source,

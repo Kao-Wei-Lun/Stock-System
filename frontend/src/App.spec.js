@@ -383,4 +383,85 @@ describe("App", () => {
       { ticker: "MSFT", type: "price", condition: "大於", value: 410.2 },
     ]);
   });
+  it("routes watch-group notifications back to the matching watchlist group", async () => {
+    dashboardMock.userWatchGroups = ref([
+      { id: 7, name: "Journal Flow" },
+      { id: 8, name: "Momentum Board" },
+    ]);
+    dashboardMock.setLeftTab = vi.fn();
+    dashboardMock.setActiveWatchGroup = vi.fn();
+
+    const wrapper = shallowMount(App, {
+      global: {
+        stubs: {
+          DashboardTopbar: true,
+          WatchlistPanel: true,
+          ChartWorkspace: true,
+          RightSidebar: true,
+          InstitutionalDashboard: true,
+          EventCenter: true,
+          MacroDashboard: true,
+          ScreenerWorkspace: true,
+          StatusBar: true,
+          NotificationPanel: {
+            name: "NotificationPanel",
+            template: `
+              <button
+                data-testid="notification-watch-group-trigger"
+                @click="$emit('open-watch-group', { groupName: 'Journal Flow', ticker: 'AAPL' })"
+              />
+            `,
+          },
+          AlertModal: true,
+        },
+      },
+    });
+
+    await wrapper.get('[data-testid="notification-watch-group-trigger"]').trigger("click");
+    await flushPromises();
+
+    expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
+    expect(dashboardMock.setActiveWatchGroup).toHaveBeenCalledWith(7);
+  });
+
+  it("routes alert-center watch-group shortcuts back to the matching watchlist group", async () => {
+    dashboardMock.userWatchGroups = ref([
+      { id: 7, name: "Journal Flow" },
+      { id: 8, name: "Momentum Board" },
+    ]);
+    dashboardMock.setLeftTab = vi.fn();
+    dashboardMock.setActiveWatchGroup = vi.fn();
+
+    const wrapper = shallowMount(App, {
+      global: {
+        stubs: {
+          DashboardTopbar: true,
+          WatchlistPanel: true,
+          ChartWorkspace: true,
+          RightSidebar: {
+            name: "RightSidebar",
+            template: `
+              <button
+                data-testid="right-sidebar-watch-group-trigger"
+                @click="$emit('open-watch-group', { groupName: 'Journal Flow', ticker: 'AAPL' })"
+              />
+            `,
+          },
+          InstitutionalDashboard: true,
+          EventCenter: true,
+          MacroDashboard: true,
+          ScreenerWorkspace: true,
+          StatusBar: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    await wrapper.get('[data-testid="right-sidebar-watch-group-trigger"]').trigger("click");
+    await flushPromises();
+
+    expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
+    expect(dashboardMock.setActiveWatchGroup).toHaveBeenCalledWith(7);
+  });
 });

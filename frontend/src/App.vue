@@ -146,6 +146,7 @@
                 @update-indicator-setting="updateIndicatorSetting"
                 @apply-indicator-preset="applyIndicatorPreset"
                 @open-alert-modal="handleRightSidebarAlertShortcut"
+                @open-watch-group="handleNotificationWatchGroup"
                 @toggle-alert-active="toggleAlertActive"
                 @toggle-alert-log="toggleAlertLog"
                 @delete-alert="deleteAlert"
@@ -250,6 +251,7 @@
       @toggle-read="handleNotificationReadToggle"
       @open-ticker="handleOpenNotificationTicker"
       @open-workspace="handleOpenNotificationWorkspace"
+      @open-watch-group="handleNotificationWatchGroup"
       @open-journal-entry="handleNotificationJournalEntry"
       @save-journal-filter-preset="saveJournalFilterPreset"
     />
@@ -535,6 +537,18 @@ function handleNotificationJournalEntry(payload) {
   setWorkspaceTab("chart");
   void selectTicker(payload.ticker, payload.name || payload.ticker);
   startJournalEntry(payload);
+}
+
+function handleNotificationWatchGroup(payload) {
+  const groupName = String(payload?.groupName || "").trim();
+  if (!groupName) return;
+  setLeftTab("watch");
+  const targetGroup = (userWatchGroups.value || []).find(
+    (group) => String(group?.name || "").trim() === groupName,
+  );
+  if (targetGroup?.id) {
+    setActiveWatchGroup(targetGroup.id);
+  }
 }
 
 function handleMacroAlertShortcut(payload) {

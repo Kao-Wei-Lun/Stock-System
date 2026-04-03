@@ -116,12 +116,19 @@
             </div>
           </div>
 
-          <div v-if="getAlertContextSource(alert) || getAlertContextTags(alert).length" class="alert-context-card">
+          <div v-if="getAlertContextSource(alert) || getAlertContextGroupName(alert) || getAlertContextTags(alert).length" class="alert-context-card">
             <div class="alert-context-head">
               <span>{{ getAlertContextSource(alert) || "研究上下文" }}</span>
               <span v-if="getAlertSnapshotLabel(alert)">{{ getAlertSnapshotLabel(alert) }}</span>
             </div>
-            <div v-if="getAlertContextTags(alert).length" class="alert-context-tags">
+            <div v-if="getAlertContextGroupName(alert) || getAlertContextTags(alert).length" class="alert-context-tags">
+              <span
+                v-if="getAlertContextGroupName(alert)"
+                :key="`${alert.id}-context-group`"
+                class="alert-context-tag"
+              >
+                {{ `群組：${getAlertContextGroupName(alert)}` }}
+              </span>
               <span
                 v-for="tag in getAlertContextTags(alert)"
                 :key="`${alert.id}-${tag}`"
@@ -133,6 +140,13 @@
           </div>
 
           <div class="alert-actions">
+            <button
+              v-if="getAlertContextGroupName(alert)"
+              class="alert-action-btn log"
+              @click="$emit('open-watch-group', { groupName: getAlertContextGroupName(alert), ticker: alert.ticker || null })"
+            >
+              回到群組
+            </button>
             <button class="alert-action-btn pause" @click="$emit('toggle-alert-active', alert.id)">
               {{ alert.active ? "暫停" : "恢復" }}
             </button>
@@ -161,6 +175,9 @@
                 </div>
                 <div v-if="formatLogMacroContext(log)" class="alert-log-row-bottom">
                   <span>{{ formatLogMacroContext(log) }}</span>
+                </div>
+                <div v-if="formatLogContextSummary(log)" class="alert-log-row-bottom">
+                  <span>{{ formatLogContextSummary(log) }}</span>
                 </div>
               </div>
             </div>
@@ -783,6 +800,7 @@ const emit = defineEmits([
   "update-indicator-setting",
   "apply-indicator-preset",
   "open-alert-modal",
+  "open-watch-group",
   "toggle-alert-active",
   "toggle-alert-log",
   "delete-alert",
@@ -1095,14 +1113,29 @@ function formatLogMacroContext(log) {
 function getAlertContextSource(alert) {
   const source = String(alert?.condition_payload?.context_source || "").toLowerCase();
   if (source === "watchlist") return "來源：觀察池";
+  if (source === "watchlist_group") return "來源：觀察群組";
   if (!source) return "";
   return `來源：${source}`;
+}
+
+function getAlertContextGroupName(alert) {
+  return String(alert?.condition_payload?.context_group_name || "").trim();
 }
 
 function getAlertContextTags(alert) {
   return Array.isArray(alert?.condition_payload?.context_tags)
     ? alert.condition_payload.context_tags.filter(Boolean).slice(0, 4)
     : [];
+}
+
+function formatLogContextSummary(log) {
+  const source = String(log?.payload?.context_source || "").toLowerCase();
+  const parts = [];
+  if (source === "watchlist_group") parts.push("來源：觀察群組");
+  else if (source === "watchlist") parts.push("來源：觀察池");
+  else if (source) parts.push(`來源：${source}`);
+  if (log?.payload?.context_group_name) parts.push(`群組：${log.payload.context_group_name}`);
+  return parts.join(" / ");
 }
 
 function getAlertSnapshotLabel(alert) {
