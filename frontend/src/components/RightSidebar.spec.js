@@ -206,6 +206,89 @@ describe("RightSidebar", () => {
     expect(wrapper.text()).toContain("門檻 高風險");
   });
 
+  it("renders basis and event alerts with human-readable labels", () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "alerts",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [
+          {
+            id: 18,
+            ticker: "^TWII",
+            type: "basis",
+            condition: "大於",
+            value: 1.8,
+            active: true,
+            triggered: false,
+            condition_payload: {
+              metric: "basis_pct",
+              target_label: "臺股期貨 / 加權指數",
+            },
+          },
+          {
+            id: 19,
+            ticker: "AAPL",
+            type: "event",
+            condition: "within_days",
+            value: 3,
+            active: true,
+            triggered: false,
+          },
+        ],
+        alertTriggerLogs: {},
+        alertLogLoading: {},
+        expandedAlertLogId: null,
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("臺股期貨 / 加權指數");
+    expect(wrapper.text()).toContain("Basis · 大於 1.80%");
+    expect(wrapper.text()).toContain("事件提醒 · 事件前提醒 3 日內");
+  });
+
   it("renders backtest results and loads persisted runs", async () => {
     const wrapper = mount(RightSidebar, {
       props: {

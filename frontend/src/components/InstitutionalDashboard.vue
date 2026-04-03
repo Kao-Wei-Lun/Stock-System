@@ -147,8 +147,18 @@
           <div class="institutional-ranking-grid">
             <div class="institutional-card">
               <div class="institutional-section-head">
-                <div class="ind-group-title">法人籌碼異常值警報</div>
-                <div class="institutional-section-note">用近 {{ historyDaysLabel }} 的基準偵測極端口數、資金流與期現貨偏離</div>
+                <div>
+                  <div class="ind-group-title">法人籌碼異常值警報</div>
+                  <div class="institutional-section-note">用近 {{ historyDaysLabel }} 的基準偵測極端口數、資金流與期現貨偏離</div>
+                </div>
+                <button
+                  v-if="anomalyAlerts.length"
+                  type="button"
+                  class="tool-btn institutional-action-btn"
+                  @click="$emit('create-alert', buildInstitutionalAlertShortcut(anomalyAlerts[0]))"
+                >
+                  設異常警報
+                </button>
               </div>
               <div v-if="anomalyAlerts.length" class="institutional-rows compact">
                 <div v-for="alert in anomalyAlerts" :key="alert.title" class="inst-row wide">
@@ -179,8 +189,18 @@
 
         <div class="institutional-section">
           <div class="institutional-section-head">
-            <div class="ind-group-title">法人期現貨偏離 / Basis 分析</div>
-            <div class="institutional-section-note">比較法人合成成本、散戶對手成本與現貨參考價的偏離程度</div>
+            <div>
+              <div class="ind-group-title">法人期現貨偏離 / Basis 分析</div>
+              <div class="institutional-section-note">比較法人合成成本、散戶對手成本與現貨參考價的偏離程度</div>
+            </div>
+            <button
+              v-if="basisMetrics"
+              type="button"
+              class="tool-btn institutional-action-btn"
+              @click="$emit('create-alert', buildBasisAlertShortcut())"
+            >
+              設 Basis 警報
+            </button>
           </div>
           <template v-if="basisMetrics">
             <div class="institutional-kpi-strip">
@@ -539,6 +559,7 @@ defineEmits([
   "set-futures-commodity",
   "set-options-commodity",
   "set-history-days",
+  "create-alert",
 ]);
 
 const institutionFilter = ref("");
@@ -689,6 +710,20 @@ const selectedSpotReference = computed(() => {
   return (props.data?.spot_reference || []).find((item) => item.ticker === mappedTicker) || null;
 });
 
+const alertTicker = computed(() => (
+  selectedSpotReference.value?.ticker
+  || (props.data?.spot_reference || []).find((item) => item?.ticker)?.ticker
+  || ""
+));
+
+function roundBasisThreshold(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "";
+  const absValue = Math.abs(numeric);
+  const stepped = Math.ceil((absValue + 0.15) * 10) / 10;
+  return numeric >= 0 ? stepped.toFixed(1) : (-stepped).toFixed(1);
+}
+
 const basisMetrics = computed(() => {
   const spot = selectedSpotReference.value;
   const spotPrice = spot?.price == null ? Number.NaN : Number(spot.price);
@@ -789,6 +824,39 @@ const basisNarrative = computed(() => {
   }
   return points;
 });
+
+function buildInstitutionalAlertShortcut(alert = anomalyAlerts.value[0]) {
+  const targetLabel = props.selectedFuturesCommodity || "法人籌碼";
+  return {
+    ticker: alertTicker.value || "MARKET",
+    type: "institutional",
+    condition: alert?.severityClass === "high" ? "high" : "medium_or_high",
+    value: "",
+    futures_commodity: props.selectedFuturesCommodity || "",
+    options_commodity: props.selectedOptionsCommodity || "",
+    target_label: targetLabel,
+    prefill_hint: alert
+      ? `法人異常警報會追蹤「${alert.title}」是否再次進入${alert.severityClass === "high" ? "高異常" : "中度以上異常"}。`
+      : `${targetLabel} 法人異常警報會追蹤近窗籌碼是否再次放大。`,
+    context_tags: ["法人異常", targetLabel, alert?.levelLabel].filter(Boolean),
+  };
+}
+
+function buildBasisAlertShortcut() {
+  if (!basisMetrics.value) return null;
+  const basisPct = Number(basisMetrics.value.basisPct || 0);
+  return {
+    ticker: alertTicker.value || "MARKET",
+    type: "basis",
+    condition: basisPct >= 0 ? "大於" : "小於",
+    value: roundBasisThreshold(basisPct),
+    metric: "basis_pct",
+    futures_commodity: props.selectedFuturesCommodity || "",
+    target_label: `${props.selectedFuturesCommodity || "Basis"} / ${basisMetrics.value.spotLabel}`,
+    prefill_hint: `${basisMetrics.value.spotLabel} 與法人合成成本目前偏離 ${basisPct >= 0 ? "+" : ""}${basisPct.toFixed(2)}%，可直接調整成你想追蹤的 Basis 門檻。`,
+    context_tags: ["Basis", props.selectedFuturesCommodity || "", basisMetrics.value.spotLabel].filter(Boolean),
+  };
+}
 
 const narrativePoints = computed(() => {
   const points = [];

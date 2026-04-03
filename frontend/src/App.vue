@@ -190,6 +190,7 @@
             @set-futures-commodity="setInstitutionalFuturesCommodity"
             @set-options-commodity="setInstitutionalOptionsCommodity"
             @set-history-days="setInstitutionalHistoryDays"
+            @create-alert="openAlertModal($event)"
           />
 
           <EventCenter
@@ -202,6 +203,7 @@
             @refresh-events="loadEventCalendar(true)"
             @refresh-news="loadTickerIntelligence(currentTicker, true)"
             @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
+            @create-alert="openAlertModal($event)"
           />
 
           <MacroDashboard

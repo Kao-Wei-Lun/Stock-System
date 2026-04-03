@@ -21,6 +21,9 @@
           <option value="macd">MACD 交叉</option>
           <option value="pct">單日漲跌幅</option>
           <option value="volume">量比異常</option>
+          <option value="basis">Basis 偏離</option>
+          <option value="institutional">法人異常</option>
+          <option value="event">事件提醒</option>
           <option value="market_risk">市場風險</option>
         </select>
       </div>
@@ -93,6 +96,20 @@ const volumeConditions = [
   { label: "小於", value: "小於" },
 ];
 
+const basisConditions = [
+  { label: "大於", value: "大於" },
+  { label: "小於", value: "小於" },
+];
+
+const institutionalConditions = [
+  { label: "高異常", value: "high" },
+  { label: "中度以上異常", value: "medium_or_high" },
+];
+
+const eventConditions = [
+  { label: "事件前提醒", value: "within_days" },
+];
+
 const marketRiskConditions = [
   { label: "進入高風險", value: "high" },
   { label: "進入中風險以上", value: "medium_or_high" },
@@ -103,12 +120,15 @@ const marketRiskConditions = [
 const conditionOptions = computed(() => {
   if (props.form.type === "macd") return macdConditions;
   if (props.form.type === "volume") return volumeConditions;
+  if (props.form.type === "basis") return basisConditions;
+  if (props.form.type === "institutional") return institutionalConditions;
+  if (props.form.type === "event") return eventConditions;
   if (props.form.type === "market_risk") return marketRiskConditions;
   return genericConditions;
 });
 
 const requiresNumericValue = computed(() => {
-  if (props.form.type === "market_risk") return false;
+  if (["market_risk", "institutional"].includes(props.form.type)) return false;
   return !(
     props.form.type === "macd" && ["上穿", "下穿", "cross_up", "cross_down"].includes(props.form.cond)
   );
@@ -120,6 +140,9 @@ const tickerPlaceholder = computed(() => (props.form.type === "market_risk" ? "M
 
 const valueLabel = computed(() => {
   if (props.form.type === "market_risk") return "市場條件";
+  if (props.form.type === "institutional") return "異常條件";
+  if (props.form.type === "event") return "提前天數";
+  if (props.form.type === "basis") return "Basis(%)";
   if (props.form.type === "volume") return "量比門檻";
   if (props.form.type === "pct") return "漲跌幅(%)";
   if (props.form.type === "rsi") return "RSI 數值";
@@ -128,7 +151,10 @@ const valueLabel = computed(() => {
 
 const valuePlaceholder = computed(() => {
   if (props.form.type === "market_risk") return "市場型警報不需填數值";
+  if (props.form.type === "institutional") return "法人異常警報不需填數值";
   if (!requiresNumericValue.value) return "交叉條件不需填寫";
+  if (props.form.type === "event") return "例如 3 或 7";
+  if (props.form.type === "basis") return "1.5 或 -1.5";
   if (props.form.type === "rsi") return "70 或 30";
   if (props.form.type === "pct") return "5 或 -3";
   if (props.form.type === "volume") return "2.0";
@@ -150,6 +176,15 @@ const helperText = computed(() => {
   }
   if (props.form.type === "rsi") {
     return "RSI 可設定大於 / 小於 / 上穿 / 下穿，例如 70 與 30。";
+  }
+  if (props.form.type === "basis") {
+    return "Basis 偏離預設以期現貨差值百分比判斷，適合追蹤法人合成成本與現貨的背離。";
+  }
+  if (props.form.type === "institutional") {
+    return "法人異常警報會根據近窗期貨、選擇權與現貨資料，自動判斷是否進入中度或高異常。";
+  }
+  if (props.form.type === "event") {
+    return "事件提醒會在未來 N 日內出現符合條件的事件時觸發，例如財報、法說會或市場事件。";
   }
   if (props.form.type === "market_risk") {
     return "市場風險警報會直接讀取本地 macro_snapshots，不依賴外部串流報價。";

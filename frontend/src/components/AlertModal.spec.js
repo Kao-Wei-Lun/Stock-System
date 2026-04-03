@@ -72,6 +72,62 @@ describe("AlertModal", () => {
     expect(wrapper.text()).toContain("市場風險警報會直接讀取本地 macro_snapshots");
   });
 
+  it("supports basis alerts with percentage thresholds", () => {
+    const wrapper = mount(AlertModal, {
+      props: {
+        isOpen: true,
+        form: {
+          ticker: "^TWII",
+          type: "basis",
+          cond: "大於",
+          value: "1.5",
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Basis 偏離預設以期現貨差值百分比判斷");
+    expect(wrapper.find('input[type="number"]').attributes("placeholder")).toBe("1.5 或 -1.5");
+  });
+
+  it("supports institutional anomaly alerts without numeric input", () => {
+    const wrapper = mount(AlertModal, {
+      props: {
+        isOpen: true,
+        form: {
+          ticker: "^TWII",
+          type: "institutional",
+          cond: "high",
+          value: "",
+        },
+      },
+    });
+
+    const conditionOptions = wrapper.findAll("select")[1].findAll("option").map((item) => item.text());
+    expect(conditionOptions).toContain("高異常");
+    expect(conditionOptions).toContain("中度以上異常");
+    expect(wrapper.find('input[type="number"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("法人異常警報會根據近窗期貨、選擇權與現貨資料");
+  });
+
+  it("supports event reminders with lead-day thresholds", () => {
+    const wrapper = mount(AlertModal, {
+      props: {
+        isOpen: true,
+        form: {
+          ticker: "AAPL",
+          type: "event",
+          cond: "within_days",
+          value: "3",
+        },
+      },
+    });
+
+    const conditionOptions = wrapper.findAll("select")[1].findAll("option").map((item) => item.text());
+    expect(conditionOptions).toContain("事件前提醒");
+    expect(wrapper.find('input[type="number"]').attributes("placeholder")).toBe("例如 3 或 7");
+    expect(wrapper.text()).toContain("事件提醒會在未來 N 日內出現符合條件的事件時觸發");
+  });
+
   it("shows watchlist prefill hint and context tags", () => {
     const wrapper = mount(AlertModal, {
       props: {

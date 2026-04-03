@@ -47,6 +47,21 @@ from alert_engine import AlertEngine, evaluate_alert_rule
             },
             True,
         ),
+        (
+            {"type": "basis", "condition": "大於", "value": 1.2, "condition_payload": {"metric": "basis_pct"}},
+            {"basis_pct": 1.56, "basis": 34, "source": "local_db"},
+            True,
+        ),
+        (
+            {"type": "institutional", "condition": "high", "value": None, "condition_payload": {}},
+            {"institutional_anomaly_level": "high", "institutional_anomaly_score": 3.1, "source": "local_db"},
+            True,
+        ),
+        (
+            {"type": "event", "condition": "within_days", "value": 7, "condition_payload": {}},
+            {"days_until_event": 3, "event_title": "Earnings", "source": "local_db"},
+            True,
+        ),
     ],
 )
 def test_evaluate_alert_rule_supports_indicator_types(alert, quote, expected_match):
@@ -59,7 +74,7 @@ def test_evaluate_alert_rule_supports_indicator_types(alert, quote, expected_mat
 
 def test_evaluate_alert_rule_reports_unsupported_type():
     result = evaluate_alert_rule(
-        {"type": "basis", "condition": "大於", "value": 0, "condition_payload": {}},
+        {"type": "mystery", "condition": "大於", "value": 0, "condition_payload": {}},
         {"price": 100, "source": "yahoo_finance"},
     )
 
@@ -68,13 +83,15 @@ def test_evaluate_alert_rule_reports_unsupported_type():
 
 
 class StubDb:
-    def __init__(self, rows=None, macro_items=None):
+    def __init__(self, rows=None, macro_items=None, snapshots=None, market_events=None):
         self.updated_alerts = []
         self.trigger_logs = []
         self.notifications = []
         self.stored_quotes = {}
         self.rows = rows or []
         self.macro_items = macro_items or []
+        self.snapshots = snapshots or []
+        self.market_events = market_events or []
 
     async def upsert_market_quote(self, quote):
         self.stored_quotes[quote["ticker"]] = dict(quote)
@@ -89,6 +106,30 @@ class StubDb:
 
     async def list_macro_snapshots(self, snapshot_date=None):
         return [dict(item) for item in self.macro_items]
+
+    async def get_institutional_snapshot(self, target_date=None):
+        if target_date:
+            candidates = [item for item in self.snapshots if item.get("resolved_date") <= target_date.isoformat()]
+            return dict(candidates[-1]) if candidates else None
+        return dict(self.snapshots[-1]) if self.snapshots else None
+
+    async def get_institutional_snapshots(self, target_date, limit):
+        items = [item for item in self.snapshots if item.get("resolved_date") <= target_date.isoformat()]
+        return [dict(item) for item in items[-limit:]]
+
+    async def list_market_events(self, ticker=None, date_from=None, date_to=None, limit=100):
+        items = []
+        for item in self.market_events:
+            event_ticker = item.get("ticker")
+            if ticker and event_ticker != ticker:
+                continue
+            event_date = item.get("event_date")
+            if date_from and event_date < date_from:
+                continue
+            if date_to and event_date > date_to:
+                continue
+            items.append(dict(item))
+        return items[:limit]
 
     async def update_alert(self, alert_id, payload, owner_id=1):
         self.updated_alerts.append((alert_id, payload, owner_id))
@@ -136,6 +177,87 @@ def _build_rows():
             }
         )
     return rows
+
+
+def _build_institutional_snapshots():
+    return [
+        {
+            "resolved_date": "2026-03-30",
+            "default_futures_commodity": "臺股期貨",
+            "default_options_commodity": "臺指選擇權",
+            "futures_commodities": ["臺股期貨"],
+            "options_commodities": ["臺指選擇權"],
+            "spot_reference": [{"ticker": "^TWII", "label": "加權指數", "price": 19980}],
+            "cost_estimates": {"futures": {"institution_estimate": {"price": 20010}}},
+            "futures": [
+                {"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 10, "trade_net_volume": 8},
+                {"commodity": "臺股期貨", "institution": "投信", "oi_net_volume": 2, "trade_net_volume": 1},
+                {"commodity": "臺股期貨", "institution": "自營商", "oi_net_volume": 1, "trade_net_volume": 1},
+            ],
+            "call_puts": [
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "買權", "oi_net_volume": 30},
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "賣權", "oi_net_volume": 12},
+            ],
+            "cash_summary_aggregated": [{"institution": "合計", "net_amount": 120}],
+        },
+        {
+            "resolved_date": "2026-03-31",
+            "default_futures_commodity": "臺股期貨",
+            "default_options_commodity": "臺指選擇權",
+            "futures_commodities": ["臺股期貨"],
+            "options_commodities": ["臺指選擇權"],
+            "spot_reference": [{"ticker": "^TWII", "label": "加權指數", "price": 20020}],
+            "cost_estimates": {"futures": {"institution_estimate": {"price": 20045}}},
+            "futures": [
+                {"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 12, "trade_net_volume": 9},
+                {"commodity": "臺股期貨", "institution": "投信", "oi_net_volume": 1, "trade_net_volume": 1},
+                {"commodity": "臺股期貨", "institution": "自營商", "oi_net_volume": 1, "trade_net_volume": 2},
+            ],
+            "call_puts": [
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "買權", "oi_net_volume": 32},
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "賣權", "oi_net_volume": 14},
+            ],
+            "cash_summary_aggregated": [{"institution": "合計", "net_amount": 150}],
+        },
+        {
+            "resolved_date": "2026-04-01",
+            "default_futures_commodity": "臺股期貨",
+            "default_options_commodity": "臺指選擇權",
+            "futures_commodities": ["臺股期貨"],
+            "options_commodities": ["臺指選擇權"],
+            "spot_reference": [{"ticker": "^TWII", "label": "加權指數", "price": 20060}],
+            "cost_estimates": {"futures": {"institution_estimate": {"price": 20100}}},
+            "futures": [
+                {"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 11, "trade_net_volume": 10},
+                {"commodity": "臺股期貨", "institution": "投信", "oi_net_volume": 2, "trade_net_volume": 1},
+                {"commodity": "臺股期貨", "institution": "自營商", "oi_net_volume": 1, "trade_net_volume": 1},
+            ],
+            "call_puts": [
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "買權", "oi_net_volume": 35},
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "賣權", "oi_net_volume": 13},
+            ],
+            "cash_summary_aggregated": [{"institution": "合計", "net_amount": 130}],
+        },
+        {
+            "resolved_date": "2026-04-02",
+            "default_futures_commodity": "臺股期貨",
+            "default_options_commodity": "臺指選擇權",
+            "futures_commodities": ["臺股期貨"],
+            "options_commodities": ["臺指選擇權"],
+            "spot_reference": [{"ticker": "^TWII", "label": "加權指數", "price": 20120}],
+            "cost_estimates": {"futures": {"institution_estimate": {"price": 20570}}},
+            "futures": [
+                {"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 42, "trade_net_volume": 28},
+                {"commodity": "臺股期貨", "institution": "投信", "oi_net_volume": 9, "trade_net_volume": 7},
+                {"commodity": "臺股期貨", "institution": "自營商", "oi_net_volume": 5, "trade_net_volume": 3},
+            ],
+            "call_puts": [
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "買權", "oi_net_volume": 90},
+                {"commodity": "臺指選擇權", "institution": "外資", "option_side": "賣權", "oi_net_volume": 12},
+            ],
+            "cash_summary_aggregated": [{"institution": "合計", "net_amount": 640}],
+        },
+    ]
 
 
 @pytest.mark.anyio
@@ -260,6 +382,112 @@ async def test_alert_engine_supports_market_risk_alerts():
     assert db.trigger_logs[0]["ticker"] == "MARKET"
     assert db.notifications[0]["payload"]["source"] == "local_db"
     assert "ticker" not in db.notifications[0]["payload"]
+
+
+@pytest.mark.anyio
+async def test_alert_engine_supports_basis_alerts():
+    snapshots = _build_institutional_snapshots()
+    db = StubDb(snapshots=snapshots)
+    provider = StubQuoteProvider(
+        {
+            "ticker": "^TWII",
+            "price": 20100,
+            "source": "yahoo_finance",
+            "quote_timestamp": "2026-04-02T05:00:00+00:00",
+        }
+    )
+    engine = AlertEngine(db, provider)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 12,
+            "ticker": "^TWII",
+            "name": "Basis divergence",
+            "notification_title": "Basis divergence",
+            "type": "basis",
+            "condition": "大於",
+            "value": 2.0,
+            "condition_payload": {
+                "metric": "basis_pct",
+                "futures_commodity": "臺股期貨",
+                "spot_ticker": "^TWII",
+            },
+        }
+    )
+
+    assert triggered is True
+    assert db.trigger_logs[0]["trigger_value"] > 2.0
+    assert db.trigger_logs[0]["payload"]["quote"]["basis_futures_commodity"] == "臺股期貨"
+    assert "Basis" in db.notifications[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_alert_engine_supports_institutional_anomaly_alerts():
+    db = StubDb(snapshots=_build_institutional_snapshots())
+    provider = StubQuoteProvider(None)
+    engine = AlertEngine(db, provider)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 13,
+            "ticker": "^TWII",
+            "name": "Institutional anomaly",
+            "notification_title": "Institutional anomaly",
+            "type": "institutional",
+            "condition": "high",
+            "value": None,
+            "condition_payload": {
+                "futures_commodity": "臺股期貨",
+                "options_commodity": "臺指選擇權",
+                "history_days": 20,
+            },
+        }
+    )
+
+    assert triggered is True
+    assert db.trigger_logs[0]["payload"]["quote"]["institutional_anomaly_level"] == "high"
+    assert "法人異常警報觸發" in db.notifications[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_alert_engine_supports_event_alerts():
+    db = StubDb(
+        market_events=[
+            {
+                "ticker": "AAPL",
+                "event_type": "earnings",
+                "title": "AAPL Earnings Call",
+                "description": "Quarterly results",
+                "event_date": "2026-04-05",
+                "event_time": None,
+                "importance": "high",
+                "url": "https://example.com/aapl",
+            },
+        ]
+    )
+    provider = StubQuoteProvider(None)
+    engine = AlertEngine(db, provider)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 14,
+            "ticker": "AAPL",
+            "name": "AAPL event reminder",
+            "notification_title": "AAPL event reminder",
+            "type": "event",
+            "condition": "within_days",
+            "value": 3,
+            "condition_payload": {
+                "event_type": "earnings",
+                "reference_date": "2026-04-03",
+                "event_scope": "ticker",
+            },
+        }
+    )
+
+    assert triggered is True
+    assert db.trigger_logs[0]["payload"]["quote"]["event_title"] == "AAPL Earnings Call"
+    assert db.notifications[0]["payload"]["trigger_value"] == 2
 
 
 def test_alert_trigger_log_api_smoke(client, monkeypatch):

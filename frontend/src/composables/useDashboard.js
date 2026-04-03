@@ -618,6 +618,14 @@ export function useDashboard() {
     type: "price",
     cond: "大於",
     value: "",
+    metric: "",
+    futures_commodity: "",
+    options_commodity: "",
+    event_type: "",
+    event_title: "",
+    importance: "",
+    event_scope: "",
+    target_label: "",
     prefill_hint: "",
     context_tags: [],
     context_source: "",
@@ -840,14 +848,17 @@ export function useDashboard() {
   function alertRequiresNumericValue(type, condition) {
     const normalizedType = String(type || "").toLowerCase();
     const normalizedCondition = String(condition || "").toLowerCase();
-    if (normalizedType === "market_risk") return false;
+    if (["market_risk", "institutional"].includes(normalizedType)) return false;
     if (normalizedType !== "macd") return true;
     return !["上穿", "下穿", "cross_up", "cross_down"].includes(normalizedCondition);
   }
 
   function defaultAlertCondition(type) {
-    if (String(type || "").toLowerCase() === "market_risk") return "high";
-    return String(type || "").toLowerCase() === "macd" ? "上穿" : "大於";
+    const normalizedType = String(type || "").toLowerCase();
+    if (normalizedType === "market_risk") return "high";
+    if (normalizedType === "institutional") return "medium_or_high";
+    if (normalizedType === "event") return "within_days";
+    return normalizedType === "macd" ? "上穿" : "大於";
   }
 
   function resetAlertForm() {
@@ -856,6 +867,14 @@ export function useDashboard() {
     alertForm.type = "price";
     alertForm.cond = "大於";
     alertForm.value = "";
+    alertForm.metric = "";
+    alertForm.futures_commodity = "";
+    alertForm.options_commodity = "";
+    alertForm.event_type = "";
+    alertForm.event_title = "";
+    alertForm.importance = "";
+    alertForm.event_scope = "";
+    alertForm.target_label = "";
     alertForm.prefill_hint = "";
     alertForm.context_tags = [];
     alertForm.context_source = "";
@@ -873,8 +892,22 @@ export function useDashboard() {
     return groupTag ? String(groupTag).slice("觀察群組:".length) : "";
   }
 
-  function formatAlertConditionLabel(condition) {
+  function formatAlertConditionLabel(condition, type = "") {
+    const normalizedType = String(type || "").toLowerCase();
     const normalizedCondition = String(condition || "").toLowerCase();
+    if (normalizedType === "institutional") {
+      const labels = {
+        high: "高異常",
+        medium_or_high: "中度以上異常",
+      };
+      return labels[normalizedCondition] || String(condition || "");
+    }
+    if (normalizedType === "event") {
+      const labels = {
+        within_days: "事件前提醒",
+      };
+      return labels[normalizedCondition] || String(condition || "");
+    }
     const labels = {
       gt: "大於",
       lt: "小於",
@@ -902,6 +935,11 @@ export function useDashboard() {
     const normalizedTicker = type === "market_risk"
       ? "MARKET"
       : normalizeTicker(draft.ticker || currentTicker.value);
+    const futuresCommodity = draft.futures_commodity
+      || institutionalFuturesCommodity.value
+      || institutionalOverlay.value?.commodity
+      || "";
+    const optionsCommodity = draft.options_commodity || institutionalOptionsCommodity.value || "";
     if (!normalizedTicker || (requiresNumericValue && Number.isNaN(numericValue))) {
       return null;
     }
@@ -913,7 +951,27 @@ export function useDashboard() {
       timeframe: "1d",
       condition_payload: {
         operator: condition,
-        metric: type === "volume" ? "volume_ratio" : null,
+        metric: type === "volume"
+          ? "volume_ratio"
+          : type === "basis"
+            ? (draft.metric || "basis_pct")
+            : type === "institutional"
+              ? (draft.metric || "anomaly_score")
+              : null,
+        spot_ticker: type === "basis" ? normalizedTicker : null,
+        futures_commodity: ["basis", "institutional"].includes(type) ? futuresCommodity || null : null,
+        options_commodity: type === "institutional" ? optionsCommodity || null : null,
+        event_type: type === "event" ? (draft.event_type || null) : null,
+        event_title: type === "event" ? (draft.event_title || null) : null,
+        importance: type === "event" ? (draft.importance || null) : null,
+        event_scope: type === "event" ? (draft.event_scope || "ticker") : null,
+        target_label: draft.target_label
+          || (type === "basis" && futuresCommodity
+            ? `${futuresCommodity} / ${normalizedTicker}`
+            : type === "institutional"
+              ? (futuresCommodity || normalizedTicker)
+              : normalizedTicker),
+        history_days: type === "institutional" ? institutionalHistoryDays.value : null,
         context_source: draft.context_source || null,
         context_group_name: draft.context_group_name || null,
         context_tags: Array.isArray(draft.context_tags) && draft.context_tags.length ? draft.context_tags : null,
@@ -2890,6 +2948,14 @@ export function useDashboard() {
     if ("value" in options) {
       alertForm.value = options.value == null ? "" : String(options.value);
     }
+    alertForm.metric = options.metric || "";
+    alertForm.futures_commodity = options.futures_commodity || "";
+    alertForm.options_commodity = options.options_commodity || "";
+    alertForm.event_type = options.event_type || "";
+    alertForm.event_title = options.event_title || "";
+    alertForm.importance = options.importance || "";
+    alertForm.event_scope = options.event_scope || "";
+    alertForm.target_label = options.target_label || "";
     alertForm.prefill_hint = options.prefill_hint || "";
     alertForm.context_tags = Array.isArray(options.context_tags) ? options.context_tags.filter(Boolean) : [];
     alertForm.context_source = options.context_source || "";
@@ -2939,6 +3005,14 @@ export function useDashboard() {
       type: alertForm.type,
       condition: alertForm.cond,
       value: alertForm.value,
+      metric: alertForm.metric,
+      futures_commodity: alertForm.futures_commodity,
+      options_commodity: alertForm.options_commodity,
+      event_type: alertForm.event_type,
+      event_title: alertForm.event_title,
+      importance: alertForm.importance,
+      event_scope: alertForm.event_scope,
+      target_label: alertForm.target_label,
       context_source: alertForm.context_source,
       context_group_name: alertForm.context_group_name,
       context_tags: alertForm.context_tags,
@@ -2951,7 +3025,7 @@ export function useDashboard() {
       pushNotification({
         icon: "\u26A0\uFE0F",
         title: "\u8b66\u5831\u8a2d\u5b9a\u5931\u6557",
-        msg: "\u8acb\u5b8c\u6574\u586b\u5beb\u80a1\u7968\u4ee3\u865f\u8207\u6578\u503c",
+        msg: "\u8acb\u5b8c\u6574\u586b\u5beb\u8b66\u5831\u6240\u9700\u6b04\u4f4d",
         type: "error",
       });
       return;
@@ -2964,8 +3038,8 @@ export function useDashboard() {
       const displayValue = record.value == null ? "" : ` ${record.value}`;
       const targetLabel = String(record.type || "").toLowerCase() === "market_risk"
         ? "\u5e02\u5834"
-        : record.ticker;
-      const conditionLabel = formatAlertConditionLabel(record.condition);
+        : record.condition_payload?.target_label || record.ticker;
+      const conditionLabel = formatAlertConditionLabel(record.condition, record.type);
       pushNotification({
         icon: "\uD83D\uDD14",
         title: "\u8b66\u5831\u5df2\u8a2d\u5b9a",

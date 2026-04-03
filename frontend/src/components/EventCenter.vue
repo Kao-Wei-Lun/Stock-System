@@ -6,7 +6,10 @@
           <div class="intel-title">事件中心</div>
           <div class="intel-subtitle">近期市場事件與目前標的事件風險</div>
         </div>
-        <button class="intel-btn" @click="$emit('refresh-events')">重新整理</button>
+        <div class="intel-head-actions">
+          <button class="intel-btn secondary" @click="$emit('create-alert', buildTickerEventAlert())">事件提醒</button>
+          <button class="intel-btn" @click="$emit('refresh-events')">重新整理</button>
+        </div>
       </div>
 
       <div class="intel-grid two-col">
@@ -74,7 +77,7 @@
 </template>
 
 <script setup>
-defineProps({
+const props = defineProps({
   currentTicker: { type: String, required: true },
   currentName: { type: String, default: "" },
   calendarEvents: { type: Array, default: () => [] },
@@ -82,7 +85,38 @@ defineProps({
   tickerNews: { type: Array, default: () => [] },
 });
 
-defineEmits(["refresh-events", "refresh-news", "open-ticker"]);
+defineEmits(["refresh-events", "refresh-news", "open-ticker", "create-alert"]);
+
+function daysUntil(value) {
+  if (!value) return null;
+  const target = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function buildTickerEventAlert() {
+  const nextItem = props.tickerEvents.find((item) => item?.event_date) || null;
+  const days = daysUntil(nextItem?.event_date);
+  const suggestedDays = Number.isFinite(days) ? Math.max(Math.min(days, 7), 1) : 7;
+  const targetName = props.currentName || props.currentTicker;
+  return {
+    ticker: props.currentTicker,
+    type: "event",
+    condition: "within_days",
+    value: String(suggestedDays),
+    event_type: nextItem?.event_type || "",
+    event_title: nextItem?.title || "",
+    importance: nextItem?.importance || "",
+    event_scope: "ticker",
+    target_label: targetName,
+    prefill_hint: nextItem
+      ? `事件提醒將追蹤 ${nextItem.title}（${nextItem.event_date}）。`
+      : `${targetName} 事件提醒會監控未來幾日的新事件。`,
+    context_tags: ["事件提醒", targetName].filter(Boolean),
+  };
+}
 
 function formatTs(value) {
   if (!value) return "—";
@@ -133,6 +167,12 @@ function importanceLabel(value) {
   margin-bottom: 14px;
 }
 
+.intel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .intel-title {
   font-size: 18px;
   font-weight: 700;
@@ -152,6 +192,11 @@ function importanceLabel(value) {
   border-radius: 999px;
   padding: 8px 12px;
   cursor: pointer;
+}
+
+.intel-btn.secondary {
+  background: rgba(0, 212, 255, 0.08);
+  color: #9fe7ff;
 }
 
 .intel-grid {

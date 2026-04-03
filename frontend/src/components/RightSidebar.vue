@@ -1010,6 +1010,9 @@ const ALERT_TYPE_LABELS = {
   rsi: "RSI",
   macd: "MACD",
   volume: "量比",
+  basis: "Basis",
+  institutional: "法人異常",
+  event: "事件提醒",
   market_risk: "市場風險",
 };
 
@@ -1056,7 +1059,28 @@ function formatAlertType(alert) {
   return ALERT_TYPE_LABELS[String(alert?.type || "").toLowerCase()] || alert?.type || "警報";
 }
 
+function formatAlertCondition(alert) {
+  const normalizedType = String(alert?.type || "").toLowerCase();
+  const rawCondition = alert?.condition || alert?.cond || "";
+  const normalizedCondition = String(rawCondition).toLowerCase();
+  if (normalizedType === "institutional") {
+    const labels = {
+      high: "高異常",
+      medium_or_high: "中度以上異常",
+    };
+    return labels[normalizedCondition] || rawCondition || "—";
+  }
+  if (normalizedType === "event") {
+    const labels = {
+      within_days: "事件前提醒",
+    };
+    return labels[normalizedCondition] || rawCondition || "—";
+  }
+  return ALERT_CONDITION_LABELS[rawCondition] || ALERT_CONDITION_LABELS[normalizedCondition] || rawCondition || "—";
+}
+
 function formatAlertTarget(alert) {
+  if (alert?.condition_payload?.target_label) return alert.condition_payload.target_label;
   if (String(alert?.type || "").toLowerCase() === "market_risk") return "市場";
   if (String(alert?.ticker || "").toUpperCase() === "MARKET") return "市場";
   return alert?.ticker || "—";
@@ -1070,6 +1094,12 @@ function formatAlertMetricValue(alert, value) {
   }
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return String(value);
+  if (normalizedType === "basis" && alert?.condition_payload?.metric === "basis_pct") {
+    return `${numericValue.toFixed(2)}%`;
+  }
+  if (normalizedType === "event") {
+    return `${numericValue.toFixed(0)} 日內`;
+  }
   if (normalizedType === "pct") {
     return `${numericValue.toFixed(2)}%`;
   }
@@ -1080,7 +1110,7 @@ function formatAlertMetricValue(alert, value) {
 }
 
 function formatAlertSummary(alert) {
-  const condition = ALERT_CONDITION_LABELS[alert?.condition || alert?.cond] || alert?.condition || alert?.cond || "—";
+  const condition = formatAlertCondition(alert);
   const valueLabel = formatAlertMetricValue(alert, alert?.value);
   return valueLabel === "—"
     ? `${formatAlertType(alert)} · ${condition}`
