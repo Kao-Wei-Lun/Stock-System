@@ -303,6 +303,7 @@ describe("RightSidebar", () => {
           start: "2024-01-01",
           end: "2024-12-31",
           capital: 100000,
+          positionSizing: "full_equity",
           fee: 0.1,
           slippage: 0,
           sl: 5,
@@ -321,6 +322,7 @@ describe("RightSidebar", () => {
           sharpe: 1.4,
           bars: 120,
           slippageRate: 0,
+          positionSizing: "full_equity",
           stopLoss: 0.05,
           takeProfit: 0.1,
           equity_curve: [{ equity: 100000 }, { equity: 112000 }],
@@ -388,9 +390,121 @@ describe("RightSidebar", () => {
     expect(wrapper.text()).toContain("交易明細");
     expect(wrapper.text()).toContain("歷史回測");
 
-    await wrapper.find(".bt-history-row").trigger("click");
+    expect(wrapper.text()).toContain("100%");
+
+    await wrapper.get('[data-testid="backtest-load-21"]').trigger("click");
 
     expect(wrapper.emitted("load-backtest")[0]).toEqual([21]);
+  });
+
+  it("renders backtest comparison controls and emits compare actions", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "backtest",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {
+          strategy: "MA",
+          start: "2024-01-01",
+          end: "2024-12-31",
+          capital: 100000,
+          positionSizing: "half_equity",
+          fee: 0.1,
+          slippage: 0,
+          sl: 5,
+          tp: 10,
+        },
+        backtestResult: null,
+        backtestHistory: [
+          {
+            id: 21,
+            strategy: "MA",
+            start: "2024-01-01",
+            end: "2024-12-31",
+            totalReturn: 12,
+            finalEquity: 112000,
+            maxDrawdown: 4.2,
+            winRate: 66.7,
+            positionSizing: "half_equity",
+          },
+          {
+            id: 22,
+            strategy: "RSI",
+            start: "2023-01-01",
+            end: "2023-12-31",
+            totalReturn: -4,
+            finalEquity: 96000,
+            maxDrawdown: 8.1,
+            winRate: 45.3,
+            positionSizing: "quarter_equity",
+          },
+        ],
+        backtestCompareIds: [21],
+        backtestCompareRuns: [
+          {
+            id: 21,
+            strategy: "MA",
+            start: "2024-01-01",
+            end: "2024-12-31",
+            totalReturn: 12,
+            finalEquity: 112000,
+            maxDrawdown: 4.2,
+            winRate: 66.7,
+            positionSizing: "half_equity",
+          },
+        ],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="backtest-compare-card"]').text()).toContain("50% 資金");
+
+    await wrapper.get('[data-testid="backtest-compare-toggle-22"]').trigger("click");
+    await wrapper.get('[data-testid="backtest-compare-clear"]').trigger("click");
+    await wrapper.get('[data-testid="backtest-compare-remove-21"]').trigger("click");
+
+    expect(wrapper.emitted("toggle-backtest-compare")[0]).toEqual([22]);
+    expect(wrapper.emitted("clear-backtest-compare")[0]).toEqual([]);
+    expect(wrapper.emitted("toggle-backtest-compare")[1]).toEqual([21]);
   });
 
   it("emits journal actions", async () => {

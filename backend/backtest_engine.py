@@ -29,6 +29,11 @@ STRATEGY_ALIASES = {
         item.name.lower(),
     }
 }
+POSITION_SIZING_RATIOS = {
+    "full_equity": 1.0,
+    "half_equity": 0.5,
+    "quarter_equity": 0.25,
+}
 
 
 def list_backtest_strategies() -> List[Dict[str, Any]]:
@@ -64,7 +69,7 @@ def run_backtest(rows: List[Dict[str, Any]], options: Dict[str, Any]) -> Dict[st
     slippage_rate = max(float(options.get("slippage_rate") or 0), 0.0)
     stop_loss_pct = _normalize_optional_pct(options.get("stop_loss_pct"))
     take_profit_pct = _normalize_optional_pct(options.get("take_profit_pct"))
-    position_sizing = str(options.get("position_sizing") or "full_equity")
+    position_sizing = _normalize_position_sizing(options.get("position_sizing"))
 
     indicator_context = _build_indicator_context(filtered_rows)
     cash = capital
@@ -284,9 +289,10 @@ def _open_position(
     position_sizing: str,
     ticker: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    if entry_price <= 0 or cash <= 0 or position_sizing != "full_equity":
+    if entry_price <= 0 or cash <= 0:
         return None
-    quantity = int(cash / (entry_price * (1 + fee_rate)))
+    deployable_cash = cash * _resolve_position_sizing_ratio(position_sizing)
+    quantity = int(deployable_cash / (entry_price * (1 + fee_rate)))
     if quantity <= 0:
         return None
     entry_fee = quantity * entry_price * fee_rate
@@ -594,6 +600,17 @@ def _normalize_optional_pct(value: Any) -> Optional[float]:
     if value in (None, "", 0, 0.0):
         return None
     return max(float(value), 0.0)
+
+
+def _normalize_position_sizing(value: Any) -> str:
+    key = str(value or "full_equity").strip().lower()
+    if key not in POSITION_SIZING_RATIOS:
+        raise ValueError(f"Unsupported position sizing: {value}")
+    return key
+
+
+def _resolve_position_sizing_ratio(position_sizing: str) -> float:
+    return POSITION_SIZING_RATIOS[_normalize_position_sizing(position_sizing)]
 
 
 def _apply_buy_slippage(price: float, slippage_rate: float) -> float:

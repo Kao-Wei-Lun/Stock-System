@@ -33,6 +33,7 @@ const KLINE_DISPLAY_OPTIONS = [
 ];
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
+const BACKTEST_COMPARE_LIMIT = 3;
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
@@ -528,6 +529,11 @@ export function useDashboard() {
   const activeTool = ref(initialTool);
   const backtestResult = ref(null);
   const backtestHistory = ref([]);
+  const backtestCompareIds = ref([]);
+  const backtestCompareRuns = computed(() => {
+    const idSet = new Set(backtestCompareIds.value.map((id) => String(id)));
+    return backtestHistory.value.filter((item) => idSet.has(String(item.id))).slice(0, BACKTEST_COMPARE_LIMIT);
+  });
   const backtestLoading = ref(false);
   const journalEntries = ref([]);
   const journalStats = ref(null);
@@ -639,6 +645,7 @@ export function useDashboard() {
     start: "2022-01-01",
     end: new Date().toISOString().slice(0, 10),
     capital: 100000,
+    positionSizing: "full_equity",
     fee: 0.1,
     slippage: 0,
     sl: 5,
@@ -1062,12 +1069,26 @@ export function useDashboard() {
       bars: Number(item.bars ?? item.bars_count ?? 0),
       feeRate: Number(item.feeRate ?? item.fee_rate ?? 0),
       slippageRate: Number(item.slippageRate ?? item.slippage_rate ?? 0),
+      positionSizing: String(item.positionSizing ?? item.position_sizing ?? "full_equity"),
       stopLoss: item.stopLoss ?? item.stop_loss_pct ?? null,
       takeProfit: item.takeProfit ?? item.take_profit_pct ?? null,
       trades: Array.isArray(item.trades) ? item.trades : [],
       equity_curve: Array.isArray(item.equity_curve) ? item.equity_curve : [],
       created_at: item.created_at || null,
     };
+  }
+
+  function applyBacktestRunToForm(record) {
+    if (!record) return;
+    backtestForm.strategy = record.strategy || backtestForm.strategy;
+    backtestForm.start = record.start || backtestForm.start;
+    backtestForm.end = record.end || backtestForm.end;
+    backtestForm.capital = Number(record.capital ?? backtestForm.capital);
+    backtestForm.positionSizing = String(record.positionSizing || "full_equity");
+    backtestForm.fee = Number((((record.feeRate ?? 0) || 0) * 100).toFixed(4));
+    backtestForm.slippage = Number((((record.slippageRate ?? 0) || 0) * 100).toFixed(4));
+    backtestForm.sl = record.stopLoss == null ? 0 : Number((Number(record.stopLoss) * 100).toFixed(4));
+    backtestForm.tp = record.takeProfit == null ? 0 : Number((Number(record.takeProfit) * 100).toFixed(4));
   }
 
   function mapJournalEntry(item) {
@@ -1200,6 +1221,8 @@ export function useDashboard() {
       backtestHistory.value = Array.isArray(response?.items)
         ? response.items.map((item) => mapBacktestRun(item)).filter(Boolean)
         : [];
+      const validIds = new Set(backtestHistory.value.map((item) => String(item.id)));
+      backtestCompareIds.value = backtestCompareIds.value.filter((id) => validIds.has(String(id)));
     } catch (error) {
       console.error(error);
       if (!silent) {
@@ -1214,12 +1237,27 @@ export function useDashboard() {
     try {
       const record = await dashboardApi.getBacktestRun(runId);
       backtestResult.value = mapBacktestRun(record);
+      applyBacktestRunToForm(backtestResult.value);
     } catch (error) {
       console.error(error);
       pushNotification({ icon: "⚠️", title: "回測紀錄讀取失敗", msg: error.message || "請稍後再試", type: "error" });
     } finally {
       backtestLoading.value = false;
     }
+  }
+
+  function toggleBacktestCompare(runId) {
+    if (runId == null) return;
+    const targetId = String(runId);
+    if (backtestCompareIds.value.some((id) => String(id) === targetId)) {
+      backtestCompareIds.value = backtestCompareIds.value.filter((id) => String(id) !== targetId);
+      return;
+    }
+    backtestCompareIds.value = [...backtestCompareIds.value.slice(-(BACKTEST_COMPARE_LIMIT - 1)), runId];
+  }
+
+  function clearBacktestCompare() {
+    backtestCompareIds.value = [];
   }
 
   async function loadJournalData({ silent = true } = {}) {
@@ -3236,6 +3274,7 @@ export function useDashboard() {
         end: backtestForm.end,
         interval: currentInterval.value,
         capital: Number(backtestForm.capital),
+        position_sizing: backtestForm.positionSizing,
         fee: Number(backtestForm.fee),
         slippage: Number(backtestForm.slippage),
         sl: Number(backtestForm.sl),
@@ -3426,6 +3465,8 @@ export function useDashboard() {
     backtestForm,
     backtestResult,
     backtestHistory,
+    backtestCompareIds,
+    backtestCompareRuns,
     backtestLoading,
     journalForm,
     journalEntries,
@@ -3506,6 +3547,8 @@ export function useDashboard() {
     updateBacktestField,
     runBacktest,
     selectBacktestRun,
+    toggleBacktestCompare,
+    clearBacktestCompare,
     updateJournalField,
     saveJournalEntry,
     deleteJournalEntry,

@@ -94,6 +94,50 @@ def test_backtest_engine_uses_next_bar_execution_without_lookahead():
     assert first_trade["entry_price"] != rows[57]["close"]
 
 
+@pytest.mark.parametrize(
+    ("position_sizing", "expected_ratio"),
+    [
+        ("full_equity", 1.0),
+        ("half_equity", 0.5),
+        ("quarter_equity", 0.25),
+    ],
+)
+def test_backtest_engine_supports_position_sizing_modes(position_sizing, expected_ratio):
+    result = run_backtest(
+        build_rows(MA_CLOSES),
+        {
+            "ticker": "AAPL",
+            "strategy": "MA 黃金/死亡交叉",
+            "start": "2024-01-01",
+            "end": "2024-12-31",
+            "capital": 100_000,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+            "take_profit_pct": 0.05,
+            "position_sizing": position_sizing,
+        },
+    )
+
+    first_trade = result["trades"][0]
+    assert result["positionSizing"] == position_sizing
+    assert first_trade["quantity"] == int((100_000 * expected_ratio) / first_trade["entry_price"])
+
+
+def test_backtest_engine_rejects_unknown_position_sizing():
+    with pytest.raises(ValueError, match="Unsupported position sizing"):
+        run_backtest(
+            build_rows(MA_CLOSES),
+            {
+                "ticker": "AAPL",
+                "strategy": "MA 黃金/死亡交叉",
+                "start": "2024-01-01",
+                "end": "2024-12-31",
+                "capital": 100_000,
+                "position_sizing": "custom",
+            },
+        )
+
+
 def test_list_backtest_strategies_includes_phase_four_registry():
     strategies = list_backtest_strategies()
 
@@ -169,6 +213,7 @@ def test_backtest_api_persists_runs(client, monkeypatch):
             "sl": 5,
             "tp": 10,
             "slippage": 0.0,
+            "position_sizing": "half_equity",
             "interval": "1d",
         },
     )
@@ -176,6 +221,7 @@ def test_backtest_api_persists_runs(client, monkeypatch):
     assert create_response.status_code == 200
     payload = create_response.json()
     assert payload["strategy_key"] == "ma_cross"
+    assert payload["positionSizing"] == "half_equity"
     assert payload["trades"]
 
     list_response = client.get("/api/backtests/runs?limit=10")

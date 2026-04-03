@@ -128,6 +128,8 @@
                 :backtest-form="backtestForm"
                 :backtest-result="backtestResult"
                 :backtest-history="backtestHistory"
+                :backtest-compare-ids="backtestCompareIds"
+                :backtest-compare-runs="backtestCompareRuns"
                 :backtest-loading="backtestLoading"
                 :journal-form="journalForm"
                 :journal-entries="journalEntries"
@@ -153,6 +155,8 @@
                 @update-backtest-field="handleBacktestField"
                 @run-backtest="runBacktest"
                 @load-backtest="selectBacktestRun"
+                @toggle-backtest-compare="toggleBacktestCompare"
+                @clear-backtest-compare="clearBacktestCompare"
                 @update-journal-field="handleJournalField"
                 @update-journal-filter="handleJournalFilter"
                 @apply-journal-filter-preset="handleJournalFilterPreset"
@@ -365,6 +369,8 @@ const {
   backtestForm,
   backtestResult,
   backtestHistory,
+  backtestCompareIds,
+  backtestCompareRuns,
   backtestLoading,
   journalForm,
   journalEntries,
@@ -445,6 +451,8 @@ const {
     updateBacktestField,
     runBacktest,
     selectBacktestRun,
+    toggleBacktestCompare,
+    clearBacktestCompare,
     updateJournalField,
     updateJournalFilter,
     applyJournalFilterPreset,
