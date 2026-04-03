@@ -1,4 +1,5 @@
-import { shallowMount } from "@vue/test-utils";
+import { flushPromises, shallowMount } from "@vue/test-utils";
+import { ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 
 const noop = vi.fn();
@@ -286,5 +287,56 @@ describe("App", () => {
     });
 
     expect(wrapper.find(".app-shell").exists()).toBe(true);
+  });
+
+  it("creates a dedicated watch group from journal result shortcuts", async () => {
+    dashboardMock.userWatchGroups = ref([{ id: 1, name: "警報通知模板 命中池" }]);
+    dashboardMock.setLeftTab = vi.fn();
+    dashboardMock.createWatchGroup = vi.fn().mockImplementation(async (name) => {
+      dashboardMock.userWatchGroups.value = [
+        ...dashboardMock.userWatchGroups.value,
+        { id: 88, name },
+      ];
+    });
+    dashboardMock.addTickersToWatchlistBatch = vi.fn().mockResolvedValue({ added: 2, failed: 0 });
+
+    const wrapper = shallowMount(App, {
+      global: {
+        stubs: {
+          DashboardTopbar: true,
+          WatchlistPanel: true,
+          ChartWorkspace: true,
+          RightSidebar: {
+            name: "RightSidebar",
+            template: `
+              <button
+                data-testid="right-sidebar-trigger"
+                @click="$emit('create-watch-group', {
+                  name: '警報通知模板 命中池',
+                  items: [{ ticker: 'AAPL' }, { ticker: 'MSFT' }],
+                })"
+              />
+            `,
+          },
+          InstitutionalDashboard: true,
+          EventCenter: true,
+          MacroDashboard: true,
+          ScreenerWorkspace: true,
+          StatusBar: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    await wrapper.get('[data-testid="right-sidebar-trigger"]').trigger("click");
+    await flushPromises();
+
+    expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
+    expect(dashboardMock.createWatchGroup).toHaveBeenCalledWith("警報通知模板 命中池 (2)");
+    expect(dashboardMock.addTickersToWatchlistBatch).toHaveBeenCalledWith(
+      [{ ticker: "AAPL" }, { ticker: "MSFT" }],
+      88,
+    );
   });
 });

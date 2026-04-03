@@ -163,6 +163,7 @@
                 @reset-journal-form="resetJournalForm"
                 @add-journal-attachment="addJournalAttachment"
                 @remove-journal-attachment="removeJournalAttachment"
+                @create-watch-group="handleJournalResultWatchGroup"
                 @add-watchlist="handleJournalResultWatchlist"
                 @sync-all="syncAll"
               />
@@ -561,6 +562,36 @@ function handleJournalResultWatchlist(items) {
   if (!Array.isArray(items) || !items.length) return;
   setLeftTab("watch");
   void addTickersToWatchlistBatch(items);
+}
+
+function getUniqueWatchGroupName(baseName) {
+  const trimmed = String(baseName || "").trim() || "日誌命中池";
+  const existingNames = new Set(
+    (userWatchGroups.value || [])
+      .map((group) => String(group?.name || "").trim())
+      .filter(Boolean),
+  );
+  if (!existingNames.has(trimmed)) return trimmed;
+  let index = 2;
+  let candidate = `${trimmed} (${index})`;
+  while (existingNames.has(candidate)) {
+    index += 1;
+    candidate = `${trimmed} (${index})`;
+  }
+  return candidate;
+}
+
+async function handleJournalResultWatchGroup(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!items.length) return;
+  setLeftTab("watch");
+  const groupName = getUniqueWatchGroupName(payload?.name);
+  await createWatchGroup(groupName);
+  const group = (userWatchGroups.value || []).find(
+    (item) => String(item?.name || "").trim() === groupName,
+  );
+  if (!group?.id) return;
+  await addTickersToWatchlistBatch(items, group.id);
 }
 
 function handleRightSidebarAlertShortcut(payload) {

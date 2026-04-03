@@ -723,6 +723,120 @@ describe("RightSidebar", () => {
     }]);
   });
 
+  it("emits a dedicated watch-group payload from active preset results", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "journal",
+        indicatorSnapshot: {},
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        alerts: [],
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "TW",
+          direction: "long",
+          strategy_code: "breakout",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [
+          {
+            id: 1,
+            ticker: "AAPL",
+            direction: "long",
+            strategy_code: "breakout",
+            entry_time: "2026-04-01T09:00",
+            tags: ["來源:警報通知"],
+            result: { pnl: 500 },
+          },
+          {
+            id: 2,
+            ticker: "MSFT",
+            direction: "long",
+            strategy_code: "breakout",
+            entry_time: "2026-04-02T09:00",
+            tags: ["來源:警報通知"],
+            result: { pnl: 250 },
+          },
+        ],
+        journalStats: {
+          total_entries: 3,
+          closed_entries: 2,
+          open_entries: 1,
+          win_rate: 50,
+          net_pnl: 750,
+          avg_return_pct: 1.75,
+          source_breakdown: [],
+          strategy_breakdown: [],
+          market_posture_breakdown: [],
+          tag_breakdown: [],
+        },
+        journalLoading: false,
+        journalFilterPresets: [
+          {
+            id: 9,
+            name: "警報通知模板",
+            description: "只看 alert flow",
+            scope: "all",
+            filters: {
+              market: "TW",
+              strategy_code: "breakout",
+              tag: "來源:警報通知",
+              search: "selective",
+            },
+          },
+        ],
+        journalFilterScope: "all",
+        journalFilters: {
+          market: "TW",
+          strategy_code: "breakout",
+          tag: "來源:警報通知",
+          search: "selective",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="journal-preset-create-watch-group"]').text()).toContain("(2)");
+    await wrapper.get('[data-testid="journal-preset-create-watch-group"]').trigger("click");
+
+    expect(wrapper.emitted("create-watch-group")[0]).toEqual([{
+      name: "警報通知模板 命中池",
+      items: [
+        {
+          ticker: "AAPL",
+          tags: ["日誌復盤", "警報通知模板", "來源:警報通知", "策略:breakout"],
+        },
+        {
+          ticker: "MSFT",
+          tags: ["日誌復盤", "警報通知模板", "來源:警報通知", "策略:breakout"],
+        },
+      ],
+    }]);
+  });
+
   it("toggles between condensed and full preset result rows", async () => {
     const entries = Array.from({ length: 13 }, (_, index) => ({
       id: index + 1,

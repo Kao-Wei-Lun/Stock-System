@@ -399,6 +399,15 @@
         </button>
         <div v-if="journalResultWatchlistItems.length || journalResultAlertPayload" class="journal-result-actions">
           <button
+            v-if="journalResultWatchGroupPayload"
+            type="button"
+            class="journal-result-action"
+            data-testid="journal-preset-create-watch-group"
+            @click="$emit('create-watch-group', journalResultWatchGroupPayload)"
+          >
+            建立專屬觀察群組 ({{ journalResultWatchlistItems.length }})
+          </button>
+          <button
             v-if="journalResultWatchlistItems.length"
             type="button"
             class="journal-result-action"
@@ -792,6 +801,7 @@ const emit = defineEmits([
   "reset-journal-form",
   "add-journal-attachment",
   "remove-journal-attachment",
+  "create-watch-group",
   "add-watchlist",
   "sync-all",
 ]);
@@ -1329,6 +1339,19 @@ const journalResultWatchlistItems = computed(() => {
     });
     return items;
   }, []);
+});
+
+const journalResultWatchGroupPayload = computed(() => {
+  if (!journalResultWatchlistItems.value.length) return null;
+  const presetName = String(journalPresetResultSummary.value?.name || "").trim();
+  const strategy = String(props.journalFilters?.strategy_code || "").trim();
+  const tag = String(props.journalFilters?.tag || "").trim();
+  const baseName = presetName || strategy || tag || "日誌";
+  const groupName = baseName.includes("命中池") ? baseName : `${baseName} 命中池`;
+  return {
+    name: groupName,
+    items: journalResultWatchlistItems.value,
+  };
 });
 
 const journalResultAlertPayload = computed(() => {
