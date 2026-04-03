@@ -6,7 +6,6 @@ This file retains app creation, middleware, lifespan, and background tasks.
 """
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -17,23 +16,27 @@ from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from data_fetcher import normalize_ticker
 from database import db, init_db
+from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
     fetcher,
+    fundamentals_provider,
     macro_snapshot_provider,
     market_event_provider,
     news_provider,
     quote_provider,
+    screener_engine,
+    taiwan_chip_provider,
     ws_manager,
 )
-from routers import watchlist, alerts, journal, backtest, market_data, intelligence
+from routers import alerts, backtest, intelligence, journal, market_data, system, watchlist, workspace
+from routers.watchlist import hydrate_watchlist_item
 from taifex_fetcher import taifex_fetcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -438,57 +441,19 @@ intelligence.configure(
     app_tz=APP_TZ,
     taifex_spot_reference=TAIFEX_SPOT_REFERENCE,
 )
+system.configure(
+    frontend_dev_url=FRONTEND_DEV_URL,
+    frontend_dist_dir=FRONTEND_DIST_DIR,
+)
 
 app.include_router(watchlist.router)
+app.include_router(workspace.router)
 app.include_router(alerts.router)
 app.include_router(journal.router)
 app.include_router(backtest.router)
 app.include_router(market_data.router)
 app.include_router(intelligence.router)
-
-
-# ─── Health + root routes ────────────────────────────────────
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await ws_manager.connect(websocket)
-    try:
-        while True:
-            msg = await websocket.receive_text()
-            data = json.loads(msg)
-            action = data.get("action")
-            if action == "subscribe":
-                ticker = normalize_ticker(data.get("ticker", ""))
-                ws_manager.subscribe(websocket, ticker)
-            elif action == "unsubscribe":
-                ticker = normalize_ticker(data.get("ticker", ""))
-                ws_manager.unsubscribe(websocket, ticker)
-            elif action == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
-    except Exception as exc:
-        log.error("WS error: %s", exc)
-        ws_manager.disconnect(websocket)
-
-
-@app.get("/")
-async def root():
-    if FRONTEND_DIST_DIR.exists():
-        return RedirectResponse(url="/app/", status_code=307)
-    return RedirectResponse(url=FRONTEND_DEV_URL, status_code=307)
-
-
-@app.get("/app")
-async def frontend_entry():
-    if FRONTEND_DIST_DIR.exists():
-        return RedirectResponse(url="/app/", status_code=307)
-    return RedirectResponse(url=FRONTEND_DEV_URL, status_code=307)
+app.include_router(system.router)
 
 
 if __name__ == "__main__":
