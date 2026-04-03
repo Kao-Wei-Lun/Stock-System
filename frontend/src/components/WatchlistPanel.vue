@@ -20,6 +20,14 @@
         <button class="group-pill add" @click="toggleCreateGroup">
           {{ createGroupOpen ? "取消" : "＋ 群組" }}
         </button>
+        <button
+          v-if="watchGroupAlertPayloads.length"
+          class="reset-view-btn"
+          data-testid="watch-batch-alerts"
+          @click="$emit('create-alerts-batch', watchGroupAlertPayloads)"
+        >
+          &#25209;&#27425;&#35686;&#22577; ({{ watchGroupAlertPayloads.length }})
+        </button>
       </div>
 
       <div v-if="createGroupOpen" class="watchlist-form">
@@ -137,7 +145,7 @@
         >
           <div>
             <div class="wl-ticker">{{ item.ticker }}</div>
-            <div class="wl-name">{{ item.name || "" }}<span v-if="item.category"> · {{ item.category }}</span></div>
+            <div class="wl-name">{{ item.name || "" }}<span v-if="item.category"> &#183; {{ item.category }}</span></div>
             <div class="wl-meta-row">
               <span class="wl-meta-pill" :class="getFreshnessClass(item)">{{ getFreshnessLabel(item) }}</span>
               <span class="wl-meta-text">{{ formatSourceLabel(item.source) }}</span>
@@ -217,6 +225,7 @@ const emit = defineEmits([
   "select-ticker",
   "open-journal-entry",
   "open-alert-modal",
+  "create-alerts-batch",
 ]);
 
 const createGroupOpen = ref(false);
@@ -343,15 +352,29 @@ const watchSummary = computed(() => {
     watchVerdictCounts.value.priority ? `優先 ${watchVerdictCounts.value.priority}` : "",
     watchVerdictCounts.value.watch ? `觀察 ${watchVerdictCounts.value.watch}` : "",
     watchVerdictCounts.value.wait ? `等待 ${watchVerdictCounts.value.wait}` : "",
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).join(" \u00B7 ");
 
   const baseSummary = verdictSummary
-    ? `顯示 ${visibleItems.value.length} / ${totalCount} 檔 · ${verdictSummary}`
+    ? `顯示 ${visibleItems.value.length} / ${totalCount} 檔 \u00B7 ${verdictSummary}`
     : `顯示 ${visibleItems.value.length} / ${totalCount} 檔`;
   if (!manualOrderingEnabled.value) {
-    return `${baseSummary} · 目前為篩選/排序視圖，已暫停手動上下移`;
+    return `${baseSummary} \u00B7 目前為篩選/排序視圖，已暫停手動上下移`;
   }
   return baseSummary;
+});
+
+const watchGroupAlertPayloads = computed(() => {
+  if (props.leftTab !== "watch" || !selectedGroup.value) return [];
+  const groupTag = `${String.fromCharCode(35264, 23519, 32676, 32068)}:${selectedGroup.value.name}`;
+  return visibleItems.value
+    .map((item) => buildAlertShortcutPayload(item, {
+      context_source: "watchlist_group",
+      extra_tags: [groupTag],
+      prefill_hint: `${String.fromCharCode(32676, 32068, 25209, 27425, 35686, 22577, 65306)}${selectedGroup.value.name} - `
+        + `${String.fromCharCode(30446, 21069, 39023, 31034)} ${visibleItems.value.length} ${String.fromCharCode(27284, 65292)}`
+        + `${String.fromCharCode(20351, 29992, 21508, 33258, 24555, 29031, 20729, 26684, 20316, 28858, 38272, 27383, 12290)}`,
+    }))
+    .filter((payload) => payload && payload.snapshot_price != null);
 });
 
 watch(
@@ -517,27 +540,40 @@ function openJournalEntry(item) {
   });
 }
 
-function openAlertShortcut(item) {
-  const contextTags = getTagList(item);
+function buildAlertShortcutPayload(item, overrides = {}) {
+  const ticker = String(item?.ticker || "").trim();
+  if (!ticker) return null;
+  const extraTags = Array.isArray(overrides.extra_tags) ? overrides.extra_tags : [];
+  const contextTags = Array.from(new Set([...getTagList(item), ...extraTags.filter(Boolean)])).slice(0, 6);
   const hasPrice = Number.isFinite(Number(item.close));
   const latestPrice = hasPrice ? Number(item.close) : null;
-  const latestPriceLabel = hasPrice ? fmtPrice(item.close) : "—";
+  const latestPriceLabel = hasPrice ? fmtPrice(item.close) : String.fromCharCode(8212);
   const latestTimeLabel = formatWatchTimestamp(item);
   const latestTimestamp = resolveWatchTimestamp(item) || "";
-  emit("open-alert-modal", {
-    ticker: item.ticker,
-    type: "price",
-    condition: Number(item.change_pct || 0) >= 0 ? "大於" : "小於",
-    value: latestPrice,
-    prefill_hint: `觀察池快捷警報：以 ${latestPriceLabel} 為基準，資料源 ${formatSourceLabel(item.source)}，時間 ${latestTimeLabel}。`,
+  const defaultHint = `${String.fromCharCode(35264, 23519, 27744, 24555, 25463, 35686, 22577, 65306)}`
+    + `${String.fromCharCode(20197)} ${latestPriceLabel} ${String.fromCharCode(28858, 22522, 28310, 65292)}`
+    + `${String.fromCharCode(36039, 26009, 28304)} ${formatSourceLabel(item.source)}${String.fromCharCode(65292)}`
+    + `${String.fromCharCode(26178, 38291)} ${latestTimeLabel}${String.fromCharCode(12290)}`;
+  return {
+    ticker,
+    name: item.name || ticker,
+    type: overrides.type || "price",
+    condition: overrides.condition || (Number(item.change_pct || 0) >= 0 ? String.fromCharCode(22823, 26044) : String.fromCharCode(23567, 26044)),
+    value: "value" in overrides ? overrides.value : latestPrice,
+    prefill_hint: overrides.prefill_hint || defaultHint,
     context_tags: contextTags,
-    context_source: "watchlist",
+    context_source: overrides.context_source || "watchlist",
     snapshot_price: latestPrice,
     snapshot_source: item.source || "",
     snapshot_timestamp: latestTimestamp,
-  });
+  };
 }
 
+function openAlertShortcut(item) {
+  const payload = buildAlertShortcutPayload(item);
+  if (!payload) return;
+  emit("open-alert-modal", payload);
+}
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
   if (!createGroupOpen.value) newGroupName.value = "";

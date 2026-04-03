@@ -38,7 +38,8 @@
         @reorder-items="reorderWatchlistItems"
         @select-ticker="handleSelectTicker"
         @open-journal-entry="handleWatchlistJournalEntry"
-        @open-alert-modal="openAlertModal"
+        @open-alert-modal="handleWatchlistAlertShortcut"
+        @create-alerts-batch="handleWatchlistAlertBatch"
       />
 
       <div
@@ -433,6 +434,7 @@ const {
     closeAlertModal,
     updateAlertField,
     saveAlert,
+    createAlertsBatch,
     toggleAlertLog,
     toggleAlertActive,
     deleteAlert,
@@ -556,6 +558,20 @@ function handleWatchlistJournalEntry(payload) {
   setWorkspaceTab("chart");
   void selectTicker(payload.ticker, payload.name || payload.ticker);
   startJournalEntry(payload);
+}
+
+function handleWatchlistAlertShortcut(payload) {
+  if (!payload) {
+    openAlertModal();
+    return;
+  }
+  openAlertModal(payload);
+}
+
+function handleWatchlistAlertBatch(payloads) {
+  if (!Array.isArray(payloads) || !payloads.length) return;
+  setRightTab("alerts");
+  void createAlertsBatch(payloads);
 }
 
 function handleJournalResultWatchlist(items) {

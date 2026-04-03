@@ -236,6 +236,7 @@ const dashboardMock = {
   closeAlertModal: noop,
   updateAlertField: noop,
   saveAlert: noop,
+  createAlertsBatch: noop,
   deleteAlert: noop,
   updateBacktestField: noop,
   runBacktest: noop,
@@ -338,5 +339,48 @@ describe("App", () => {
       [{ ticker: "AAPL" }, { ticker: "MSFT" }],
       88,
     );
+  });
+
+  it("routes watchlist batch alerts to the alert helper", async () => {
+    dashboardMock.setRightTab = vi.fn();
+    dashboardMock.createAlertsBatch = vi.fn().mockResolvedValue({ created: 2, skipped: 0, invalid: 0, failed: 0 });
+
+    const wrapper = shallowMount(App, {
+      global: {
+        stubs: {
+          DashboardTopbar: true,
+          WatchlistPanel: {
+            name: "WatchlistPanel",
+            template: `
+              <button
+                data-testid="watchlist-batch-alerts-trigger"
+                @click="$emit('create-alerts-batch', [
+                  { ticker: 'AAPL', type: 'price', condition: '大於', value: 210.5 },
+                  { ticker: 'MSFT', type: 'price', condition: '大於', value: 410.2 },
+                ])"
+              />
+            `,
+          },
+          ChartWorkspace: true,
+          RightSidebar: true,
+          InstitutionalDashboard: true,
+          EventCenter: true,
+          MacroDashboard: true,
+          ScreenerWorkspace: true,
+          StatusBar: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    await wrapper.get('[data-testid="watchlist-batch-alerts-trigger"]').trigger("click");
+    await flushPromises();
+
+    expect(dashboardMock.setRightTab).toHaveBeenCalledWith("alerts");
+    expect(dashboardMock.createAlertsBatch).toHaveBeenCalledWith([
+      { ticker: "AAPL", type: "price", condition: "大於", value: 210.5 },
+      { ticker: "MSFT", type: "price", condition: "大於", value: 410.2 },
+    ]);
   });
 });

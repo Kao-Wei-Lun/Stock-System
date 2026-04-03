@@ -134,7 +134,6 @@ function getDrawingDefaults(type) {
 
   return { ...defaults, ...(byType[type] || {}) };
 }
-
 function createDrawingEntry(drawing) {
   const defaults = getDrawingDefaults(drawing.type);
   return {
@@ -883,6 +882,51 @@ export function useDashboard() {
       offensive: "進入偏進攻",
     };
     return labels[normalizedCondition] || labels[String(condition || "")] || String(condition || "");
+  }
+
+  function buildAlertCreatePayload(draft = {}) {
+    const type = String(draft.type || alertForm.type || "price").toLowerCase();
+    const condition = draft.condition || draft.cond || defaultAlertCondition(type);
+    const requiresNumericValue = alertRequiresNumericValue(type, condition);
+    const numericValue = requiresNumericValue ? Number(draft.value) : null;
+    const normalizedTicker = type === "market_risk"
+      ? "MARKET"
+      : normalizeTicker(draft.ticker || currentTicker.value);
+    if (!normalizedTicker || (requiresNumericValue && Number.isNaN(numericValue))) {
+      return null;
+    }
+    return {
+      ticker: normalizedTicker,
+      type,
+      condition,
+      value: numericValue,
+      timeframe: "1d",
+      condition_payload: {
+        operator: condition,
+        metric: type === "volume" ? "volume_ratio" : null,
+        context_source: draft.context_source || null,
+        context_tags: Array.isArray(draft.context_tags) && draft.context_tags.length ? draft.context_tags : null,
+        snapshot_price: draft.snapshot_price ?? null,
+        snapshot_source: draft.snapshot_source || null,
+        snapshot_timestamp: draft.snapshot_timestamp || null,
+        prefill_hint: draft.prefill_hint || null,
+      },
+      active: true,
+    };
+  }
+
+  function getAlertSignature(source = {}) {
+    const type = String(source.type || "").toLowerCase();
+    const ticker = type === "market_risk" ? "MARKET" : normalizeTicker(source.ticker || "");
+    const condition = String(source.condition || source.cond || "").trim();
+    if (!ticker || !type || !condition) return "";
+    const rawValue = source.value;
+    const valueKey = rawValue == null || rawValue === ""
+      ? "null"
+      : Number.isFinite(Number(rawValue))
+        ? String(Number(rawValue))
+        : String(rawValue).trim();
+    return [ticker, type, condition, valueKey].join("|");
   }
 
   function mapRemoteNotification(item) {
@@ -2876,45 +2920,122 @@ export function useDashboard() {
   }
 
   async function saveAlert() {
-    const requiresNumericValue = alertRequiresNumericValue(alertForm.type, alertForm.cond);
-    const numericValue = requiresNumericValue ? Number(alertForm.value) : null;
-    const normalizedTicker = String(alertForm.type || "").toLowerCase() === "market_risk"
-      ? "MARKET"
-      : normalizeTicker(alertForm.ticker || currentTicker.value);
-    if (!normalizedTicker || (requiresNumericValue && Number.isNaN(numericValue))) {
-      pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: "請完整填寫股票代號與數值", type: "error" });
-      return;
-    }
-    const payload = {
-      ticker: normalizedTicker,
+    const payload = buildAlertCreatePayload({
+      ticker: alertForm.ticker,
       type: alertForm.type,
       condition: alertForm.cond,
-      value: numericValue,
-      timeframe: "1d",
-      condition_payload: {
-        operator: alertForm.cond,
-        metric: alertForm.type === "volume" ? "volume_ratio" : null,
-        context_source: alertForm.context_source || null,
-        context_tags: alertForm.context_tags.length ? alertForm.context_tags : null,
-        snapshot_price: alertForm.snapshot_price ?? null,
-        snapshot_source: alertForm.snapshot_source || null,
-        snapshot_timestamp: alertForm.snapshot_timestamp || null,
-        prefill_hint: alertForm.prefill_hint || null,
-      },
-      active: true,
-    };
+      value: alertForm.value,
+      context_source: alertForm.context_source,
+      context_tags: alertForm.context_tags,
+      snapshot_price: alertForm.snapshot_price,
+      snapshot_source: alertForm.snapshot_source,
+      snapshot_timestamp: alertForm.snapshot_timestamp,
+      prefill_hint: alertForm.prefill_hint,
+    });
+    if (!payload) {
+      pushNotification({
+        icon: "\u26A0\uFE0F",
+        title: "\u8b66\u5831\u8a2d\u5b9a\u5931\u6557",
+        msg: "\u8acb\u5b8c\u6574\u586b\u5beb\u80a1\u7968\u4ee3\u865f\u8207\u6578\u503c",
+        type: "error",
+      });
+      return;
+    }
     try {
       const record = await dashboardApi.createAlert(payload);
       alerts.value = [mapAlertRecord(record), ...alerts.value];
       alertModalOpen.value = false;
       resetAlertForm();
       const displayValue = record.value == null ? "" : ` ${record.value}`;
-      const targetLabel = String(record.type || "").toLowerCase() === "market_risk" ? "市場" : record.ticker;
+      const targetLabel = String(record.type || "").toLowerCase() === "market_risk"
+        ? "\u5e02\u5834"
+        : record.ticker;
       const conditionLabel = formatAlertConditionLabel(record.condition);
-      pushNotification({ icon: "🔔", title: "警報已設定", msg: `${targetLabel} ${conditionLabel}${displayValue}`.trim(), type: "success" });
+      pushNotification({
+        icon: "\uD83D\uDD14",
+        title: "\u8b66\u5831\u5df2\u8a2d\u5b9a",
+        msg: `${targetLabel} ${conditionLabel}${displayValue}`.trim(),
+        type: "success",
+      });
     } catch (error) {
-      pushNotification({ icon: "⚠️", title: "警報設定失敗", msg: error.message || "請稍後再試", type: "error" });
+      pushNotification({
+        icon: "\u26A0\uFE0F",
+        title: "\u8b66\u5831\u8a2d\u5b9a\u5931\u6557",
+        msg: error.message || "\u8acb\u7a0d\u5f8c\u518d\u8a66",
+        type: "error",
+      });
     }
+  }
+  async function createAlertsBatch(inputs) {
+    const drafts = Array.isArray(inputs) ? inputs : [inputs];
+    if (!drafts.length) {
+      return { created: 0, skipped: 0, invalid: 0, failed: 0 };
+    }
+
+    const existingSignatures = new Set(
+      alerts.value.map((item) => getAlertSignature(item)).filter(Boolean),
+    );
+    const stagedSignatures = new Set();
+    const payloads = [];
+    let skipped = 0;
+    let invalid = 0;
+
+    drafts.forEach((draft) => {
+      const payload = buildAlertCreatePayload(draft);
+      if (!payload) {
+        invalid += 1;
+        return;
+      }
+      const signature = getAlertSignature(payload);
+      if (!signature || existingSignatures.has(signature) || stagedSignatures.has(signature)) {
+        skipped += 1;
+        return;
+      }
+      stagedSignatures.add(signature);
+      payloads.push(payload);
+    });
+
+    const createdRecords = [];
+    let failed = 0;
+    let lastError = null;
+
+    for (const payload of payloads) {
+      try {
+        const record = await dashboardApi.createAlert(payload);
+        createdRecords.push(record);
+        existingSignatures.add(getAlertSignature(record));
+      } catch (error) {
+        failed += 1;
+        lastError = error;
+      }
+    }
+
+    if (createdRecords.length) {
+      alerts.value = [...createdRecords.map((item) => mapAlertRecord(item)), ...alerts.value];
+      const summary = [`已建立 ${createdRecords.length} 筆`];
+      if (skipped) summary.push(`略過 ${skipped} 筆重複`);
+      if (invalid) summary.push(`略過 ${invalid} 筆缺少快照`);
+      if (failed) summary.push(`失敗 ${failed} 筆`);
+      pushNotification({
+        icon: "🔔",
+        title: "批次警報已建立",
+        msg: summary.join(" · "),
+        type: failed ? "warning" : "success",
+      });
+      return { created: createdRecords.length, skipped, invalid, failed };
+    }
+
+    const failureSummary = [];
+    if (skipped) failureSummary.push(`重複 ${skipped} 筆`);
+    if (invalid) failureSummary.push(`缺少快照 ${invalid} 筆`);
+    if (failed) failureSummary.push(`失敗 ${failed} 筆`);
+    pushNotification({
+      icon: "⚠️",
+      title: "批次警報未建立",
+      msg: failureSummary.join(" · ") || lastError?.message || "請稍後再試",
+      type: "error",
+    });
+    return { created: 0, skipped, invalid, failed };
   }
 
   async function loadAlertTriggerLogs(alertId, { force = false } = {}) {
@@ -3289,6 +3410,7 @@ export function useDashboard() {
     closeAlertModal,
     updateAlertField,
     saveAlert,
+    createAlertsBatch,
     toggleAlertLog,
     toggleAlertActive,
     deleteAlert,
@@ -3318,3 +3440,4 @@ export function useDashboard() {
     fmtMktCap,
   };
 }
+

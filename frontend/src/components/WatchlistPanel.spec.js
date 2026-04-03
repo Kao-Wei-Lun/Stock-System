@@ -184,4 +184,58 @@ describe("WatchlistPanel", () => {
     expect(payload.prefill_hint).toContain("觀察池快捷警報：以 210.50 為基準");
     expect(payload.prefill_hint).toContain("資料源 Yahoo Finance");
   });
+  it("emits batch alert payloads for the visible watch group", async () => {
+    const freshTimestamp = new Date().toISOString();
+    const wrapper = mount(WatchlistPanel, {
+      props: buildPanelProps({
+        groups: [
+          {
+            id: 1,
+            name: "Journal Flow",
+            items: [
+              buildWatchItem(freshTimestamp, {
+                id: 10,
+                ticker: "AAPL",
+                close: 210.5,
+                change_pct: 2.68,
+                tags: ["優先候選", "Q4"],
+              }),
+              buildWatchItem(freshTimestamp, {
+                id: 11,
+                ticker: "MSFT",
+                close: 410.2,
+                change_pct: -1.2,
+                tags: ["觀察名單", "Q3"],
+              }),
+            ],
+          },
+        ],
+      }),
+    });
+
+    await wrapper.get('[data-testid="watch-batch-alerts"]').trigger("click");
+
+    const [payloads] = wrapper.emitted("create-alerts-batch")[0];
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]).toMatchObject({
+      ticker: "AAPL",
+      type: "price",
+      condition: "大於",
+      value: 210.5,
+      context_source: "watchlist_group",
+      snapshot_price: 210.5,
+      snapshot_source: "yahoo_finance",
+    });
+    expect(payloads[0].context_tags).toContain("觀察群組:Journal Flow");
+    expect(payloads[1]).toMatchObject({
+      ticker: "MSFT",
+      type: "price",
+      condition: "小於",
+      value: 410.2,
+      context_source: "watchlist_group",
+      snapshot_price: 410.2,
+    });
+    expect(payloads[1].prefill_hint).toContain("Journal Flow");
+    expect(payloads[1].prefill_hint).toContain("2 檔");
+  });
 });
