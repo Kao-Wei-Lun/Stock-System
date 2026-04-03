@@ -304,68 +304,6 @@
       </div>
     </div>
 
-    <div v-if="showIntelStrip" class="intel-strip">
-      <section class="intel-mini-card">
-        <div class="intel-mini-head">
-          <strong>事件焦點</strong>
-          <span>{{ tickerEvents.length }} 筆</span>
-        </div>
-        <button
-          v-for="item in tickerEvents.slice(0, 4)"
-          :key="`${item.event_type}-${item.event_date}`"
-          type="button"
-          class="intel-mini-row"
-          @click="jumpToEvent(item)"
-        >
-          <span>{{ item.title }}</span>
-          <small>{{ item.event_date }}</small>
-        </button>
-      </section>
-
-      <section v-if="fundamentalsSummary" class="intel-mini-card">
-        <div class="intel-mini-head">
-          <strong>基本面摘要</strong>
-          <span>{{ fundamentalsSummary.updated_at ? "已同步" : "local" }}</span>
-        </div>
-        <div class="intel-mini-title">{{ fundamentalsSummary.headline }}</div>
-        <div class="intel-badge-row">
-          <span v-for="signal in fundamentalsSummary.signals || []" :key="`${signal.label}-${signal.value}`" class="intel-badge">
-            {{ signal.label }} · {{ signal.value }}
-          </span>
-        </div>
-      </section>
-
-      <section v-if="taiwanChipSummary" class="intel-mini-card">
-        <div class="intel-mini-head">
-          <strong>台股籌碼</strong>
-          <span :class="`bias-${taiwanChipSummary.bias || 'neutral'}`">{{ taiwanChipSummary.bias || "neutral" }}</span>
-        </div>
-        <div class="intel-badge-row">
-          <span v-for="signal in taiwanChipSummary.signals || []" :key="`${signal.label}-${signal.value}`" class="intel-badge">
-            {{ signal.label }} · {{ signal.value }}
-          </span>
-        </div>
-      </section>
-
-      <section class="intel-mini-card">
-        <div class="intel-mini-head">
-          <strong>新聞快照</strong>
-          <span>{{ tickerNews.length }} 則</span>
-        </div>
-        <a
-          v-for="article in tickerNews.slice(0, 3)"
-          :key="`${article.title}-${article.published_at}`"
-          class="intel-mini-row link"
-          :href="article.url"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span>{{ article.title }}</span>
-          <small>{{ formatTimestamp(article.published_at) }}</small>
-        </a>
-      </section>
-    </div>
-
     <div v-if="layoutPanes.length" class="sync-layout-grid" :class="`is-${chartLayout}`">
       <div v-for="pane in layoutPanes" :key="pane.key" class="sync-pane-card">
         <div class="sync-pane-head">
@@ -430,10 +368,7 @@ const props = defineProps({
   comparisonMode: { type: String, default: "percent" },
   institutionalOverlay: { type: Object, default: null },
   tickerEvents: { type: Array, default: () => [] },
-  tickerNews: { type: Array, default: () => [] },
   macroSummary: { type: Object, default: null },
-  fundamentalsSummary: { type: Object, default: null },
-  taiwanChipSummary: { type: Object, default: null },
   isFullscreen: { type: Boolean, default: false },
 });
 
@@ -624,12 +559,6 @@ const macroPostureLabel = computed(() => {
 const macroDecisionHint = computed(
   () => props.macroSummary?.decision_hint || "尚未同步宏觀快照，先以個股與價格行為為主。",
 );
-const showIntelStrip = computed(() => Boolean(
-  (props.tickerEvents || []).length
-  || (props.tickerNews || []).length
-  || props.fundamentalsSummary
-  || props.taiwanChipSummary,
-));
 const visibleEventMarkers = computed(() => {
   const rows = visibleData.value || [];
   if (!rows.length || !(props.tickerEvents || []).length) return [];
@@ -741,13 +670,6 @@ function findEventAbsoluteIndex(eventDate) {
   if (exactIndex >= 0) return exactIndex;
   const fallbackIndex = props.ohlcData.findLastIndex((row) => String(row?.date || "").slice(0, 10) <= target);
   return fallbackIndex >= 0 ? fallbackIndex : -1;
-}
-
-function formatTimestamp(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("zh-TW", { hour12: false });
 }
 
 function jumpToEvent(eventItem) {

@@ -82,10 +82,7 @@
                 :comparison-mode="comparisonMode"
                 :institutional-overlay="institutionalOverlay"
                 :ticker-events="tickerEvents"
-                :ticker-news="tickerNews"
                 :macro-summary="macroDashboard.summary || null"
-                :fundamentals-summary="fundamentalsSummary"
-                :taiwan-chip-summary="taiwanChipSummary"
                 :is-fullscreen="chartFullscreen"
                 @set-tool="setTool"
                 @add-signal="addSignal"
@@ -117,10 +114,16 @@
 
               <RightSidebar
                 :right-tab="rightTab"
+                :current-ticker="currentTicker"
                 :indicator-snapshot="indicatorSnapshot"
                 :active-ind="activeInd"
                 :active-panels="activePanels"
                 :indicator-settings="indicatorSettings"
+                :macro-summary="macroDashboard.summary || null"
+                :ticker-events="tickerEvents"
+                :ticker-news="tickerNews"
+                :fundamentals-summary="fundamentalsSummary"
+                :taiwan-chip-summary="taiwanChipSummary"
                 :alerts="alerts"
                 :alert-trigger-logs="alertTriggerLogs"
                 :alert-log-loading="alertLogLoading"
@@ -147,6 +150,7 @@
                 @toggle-panel="togglePanel"
                 @update-indicator-setting="updateIndicatorSetting"
                 @apply-indicator-preset="applyIndicatorPreset"
+                @focus-event="focusTickerEvent"
                 @open-alert-modal="handleRightSidebarAlertShortcut"
                 @open-watch-group="handleNotificationWatchGroup"
                 @toggle-alert-active="toggleAlertActive"
@@ -436,6 +440,7 @@ const {
   deleteWorkspacePreset,
   updateCrosshair,
   hideCrosshair,
+  focusTickerEvent,
   syncCurrentTicker,
   syncAll,
   dismissNotification,

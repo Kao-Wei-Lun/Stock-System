@@ -114,10 +114,7 @@ function createProps() {
     comparisonMode: "percent",
     institutionalOverlay: null,
     tickerEvents: [],
-    tickerNews: [],
     macroSummary: null,
-    fundamentalsSummary: null,
-    taiwanChipSummary: null,
     isFullscreen: false,
   };
 }
@@ -185,19 +182,11 @@ describe("ChartWorkspace", () => {
         tickerEvents: [
           { event_type: "earnings", title: "AAPL Earnings", event_date: "2026-04-02", importance: "high" },
         ],
-        tickerNews: [
-          { title: "Apple AI rollout", published_at: "2026-04-02T00:00:00+00:00", url: "https://example.com/apple" },
-        ],
-        fundamentalsSummary: {
-          headline: "Apple / Technology / Consumer Electronics",
-          signals: [{ label: "近期事件", value: "2026-04-02" }],
-          updated_at: "2026-04-02T00:00:00+00:00",
-        },
       },
     });
 
     expect(wrapper.find(".chart-event-marker").exists()).toBe(true);
-    await wrapper.find(".intel-mini-row").trigger("click");
+    await wrapper.find(".chart-event-marker").trigger("click");
 
     expect(wrapper.emitted("add-drawing")[0]).toEqual([
       { type: "vline", index: 1, label: "AAPL Earnings" },

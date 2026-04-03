@@ -4,6 +4,97 @@ import { describe, expect, it } from "vitest";
 import RightSidebar from "./RightSidebar.vue";
 
 describe("RightSidebar", () => {
+  it("renders moved market intelligence under the indicators tab", async () => {
+    const wrapper = mount(RightSidebar, {
+      props: {
+        rightTab: "indicators",
+        currentTicker: "AAPL",
+        indicatorSnapshot: {
+          techSummaryItems: [{ text: "MA20 上彎", cls: "up" }],
+          techSummaryVerdict: { text: "偏多觀察", cls: "up" },
+        },
+        activeInd: {},
+        activePanels: {},
+        indicatorSettings: {},
+        macroSummary: {
+          overall_risk: "medium",
+          trade_posture: "selective",
+          decision_hint: "環境偏震盪，控制部位。",
+        },
+        tickerEvents: [
+          { event_type: "earnings", title: "AAPL Earnings", event_date: "2026-04-10" },
+        ],
+        tickerNews: [
+          { title: "Apple AI rollout", published_at: "2026-04-03T08:00:00+08:00", url: "https://example.com/apple" },
+        ],
+        fundamentalsSummary: {
+          headline: "Apple / Technology / Consumer Electronics",
+          signals: [{ label: "EPS", value: "4.21" }],
+          updated_at: "2026-04-03T08:00:00+08:00",
+        },
+        taiwanChipSummary: {
+          bias: "neutral",
+          signals: [{ label: "主力", value: "觀望" }],
+        },
+        alerts: [],
+        alertTriggerLogs: {},
+        alertLogLoading: {},
+        expandedAlertLogId: null,
+        backtestForm: {},
+        backtestResult: null,
+        backtestHistory: [],
+        backtestLoading: false,
+        journalForm: {
+          id: null,
+          ticker: "AAPL",
+          market: "US",
+          direction: "long",
+          strategy_code: "",
+          entry_time: "2026-04-01T09:00",
+          entry_price: "",
+          exit_time: "",
+          exit_price: "",
+          size: 1,
+          stop_loss: "",
+          take_profit: "",
+          entry_reason: "",
+          exit_reason: "",
+          emotion_tag: "",
+          review_notes: "",
+          tags_text: "",
+          attachment_path: "",
+          attachment_type: "",
+          attachments: [],
+        },
+        journalEntries: [],
+        journalStats: null,
+        journalLoading: false,
+        journalFilterScope: "ticker",
+        journalFilters: {
+          market: "",
+          strategy_code: "",
+          tag: "",
+          search: "",
+        },
+        dbStats: null,
+        dbStatsLoading: false,
+        dbStatsError: "",
+        syncingAll: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("市場資訊");
+    expect(wrapper.text()).toContain("事件焦點");
+    expect(wrapper.text()).toContain("基本面摘要");
+    expect(wrapper.text()).toContain("新聞快照");
+
+    await wrapper.find(".intel-event-btn").trigger("click");
+
+    expect(wrapper.emitted("focus-event")[0]).toEqual([
+      { event_type: "earnings", title: "AAPL Earnings", event_date: "2026-04-10" },
+    ]);
+  });
+
   it("renders persisted alerts, trigger logs, and emits alert actions", async () => {
     const wrapper = mount(RightSidebar, {
       props: {

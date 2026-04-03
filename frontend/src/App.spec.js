@@ -231,6 +231,7 @@ const dashboardMock = {
   deleteWorkspacePreset: noop,
   updateCrosshair: noop,
   hideCrosshair: noop,
+  focusTickerEvent: noop,
   syncCurrentTicker: noop,
   syncAll: noop,
   dismissNotification: noop,

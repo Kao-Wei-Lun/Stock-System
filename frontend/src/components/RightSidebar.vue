@@ -80,6 +80,16 @@
           </div>
         </div>
       </div>
+
+      <MarketIntelPanel
+        :current-ticker="currentTicker"
+        :macro-summary="macroSummary"
+        :ticker-events="tickerEvents"
+        :ticker-news="tickerNews"
+        :fundamentals-summary="fundamentalsSummary"
+        :taiwan-chip-summary="taiwanChipSummary"
+        @focus-event="$emit('focus-event', $event)"
+      />
     </div>
 
     <div v-show="rightTab === 'alerts'" class="rp-content">
@@ -195,14 +205,21 @@ import { computed, ref } from "vue";
 import AlertConfigPanel from "./AlertConfigPanel.vue";
 import BacktestPanel from "./BacktestPanel.vue";
 import JournalPanel from "./JournalPanel.vue";
+import MarketIntelPanel from "./MarketIntelPanel.vue";
 
 
 const props = defineProps({
   rightTab: { type: String, required: true },
+  currentTicker: { type: String, default: "" },
   indicatorSnapshot: { type: Object, required: true },
   activeInd: { type: Object, required: true },
   activePanels: { type: Object, required: true },
   indicatorSettings: { type: Object, required: true },
+  macroSummary: { type: Object, default: null },
+  tickerEvents: { type: Array, default: () => [] },
+  tickerNews: { type: Array, default: () => [] },
+  fundamentalsSummary: { type: Object, default: null },
+  taiwanChipSummary: { type: Object, default: null },
   alerts: { type: Array, required: true },
   alertTriggerLogs: { type: Object, default: () => ({}) },
   alertLogLoading: { type: Object, default: () => ({}) },
@@ -232,6 +249,7 @@ const emit = defineEmits([
   "toggle-panel",
   "update-indicator-setting",
   "apply-indicator-preset",
+  "focus-event",
   "open-alert-modal",
   "open-watch-group",
   "toggle-alert-active",
