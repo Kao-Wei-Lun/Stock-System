@@ -40,12 +40,12 @@
 **對應問題**：缺乏快捷鍵操作、載入體驗不佳。
 **預期效益**：大幅提升交易員的使用意願與操作流暢度。
 
-- [ ] **任務 3.1**：引入 Skeleton Screen（骨架屏）套件或手寫 CSS Skeleton，取代 `ChartWorkspace` 的傳統 Spinner。
-- [ ] **任務 3.2**：建立全域的快捷鍵 Hook (`useHotkeys`)：
+- [x] **任務 3.1**：引入 Skeleton Screen（骨架屏）套件或手寫 CSS Skeleton，取代 `ChartWorkspace` 的傳統 Spinner。
+- [x] **任務 3.2**：建立全域的快捷鍵 Hook (`useHotkeys`)：
   - `/` : 聚焦到搜尋列
   - `Shift + 方向鍵` : 切換不同週期的 K 線
   - `Ctrl/Cmd + S` : 存檔工作區
-- [ ] **任務 3.3**：將基礎 `alert()` 修改為全域 Toast 系統（如整合 Vue-toastification 或自寫元件），用於「同步成功」、「警報已建立」等提示。
+- [x] **任務 3.3**：將基礎 `alert()` 修改為全域 Toast 系統（如整合 Vue-toastification 或自寫元件），用於「同步成功」、「警報已建立」等提示。
 
 ---
 

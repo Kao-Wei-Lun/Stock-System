@@ -5,6 +5,7 @@
     <div class="search-wrap">
       <span style="color: var(--text3); font-size: 13px">⌕</span>
       <input
+        ref="searchInputRef"
         :value="searchQuery"
         type="text"
         placeholder="搜尋代號..."
@@ -77,12 +78,22 @@ const emit = defineEmits([
 ]);
 
 const rootRef = ref(null);
+const searchInputRef = ref(null);
 
 function handleDocumentClick(event) {
   if (!rootRef.value?.contains(event.target)) {
     emit("close-search");
   }
 }
+
+function focusSearchInput() {
+  searchInputRef.value?.focus();
+  searchInputRef.value?.select?.();
+}
+
+defineExpose({
+  focusSearchInput,
+});
 
 onMounted(() => {
   window.addEventListener("click", handleDocumentClick);

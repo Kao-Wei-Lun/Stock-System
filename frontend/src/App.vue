@@ -1,6 +1,7 @@
 <template>
   <div class="app-shell">
     <DashboardTopbar
+      ref="dashboardTopbarRef"
       :search-query="searchQuery"
       :search-results="searchResults"
       :search-open="searchOpen"
@@ -255,6 +256,11 @@
       :clock-time="clockTime"
     />
 
+    <ToastStack
+      :notifications="notifications"
+      @dismiss="dismissNotification"
+    />
+
     <NotificationPanel
       :notifications="notifications"
       @dismiss="dismissNotification"
@@ -289,8 +295,10 @@ import {
 
 import DashboardTopbar from "./components/DashboardTopbar.vue";
 import StatusBar from "./components/StatusBar.vue";
+import ToastStack from "./components/ToastStack.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
 import { useDashboard } from "./composables/useDashboard";
+import { useHotkeys } from "./composables/useHotkeys";
 
 const ChartWorkspace = defineAsyncComponent(() => import("./components/ChartWorkspace.vue"));
 const RightSidebar = defineAsyncComponent(() => import("./components/RightSidebar.vue"));
@@ -309,6 +317,7 @@ const props = defineProps({
 
 const emit = defineEmits(["route-change"]);
 
+const dashboardTopbarRef = ref(null);
 const workspaceStageRef = ref(null);
 const chartFullscreen = ref(false);
 const pseudoFullscreen = ref(false);
@@ -317,6 +326,7 @@ const applyingRouteState = ref(false);
 
 const {
   timeframeOptions,
+  klineDisplayOptions,
   searchQuery,
   searchResults,
   searchOpen,
@@ -749,6 +759,82 @@ function handleScreenerFilter(payload) {
   if (!payload?.key) return;
   updateScreenerFilter(payload.key, payload.value);
 }
+
+function focusSearchInput() {
+  dashboardTopbarRef.value?.focusSearchInput?.();
+}
+
+function shiftTimeframe(step) {
+  const currentIndex = timeframeOptions.findIndex(
+    (option) => option.tf === readStateValue(currentPeriod) && option.iv === readStateValue(currentInterval),
+  );
+  if (currentIndex < 0) return;
+  const nextIndex = Math.max(0, Math.min(timeframeOptions.length - 1, currentIndex + step));
+  if (nextIndex === currentIndex) return;
+  void setTimeframe(timeframeOptions[nextIndex]);
+}
+
+function shiftKlineDisplay(step) {
+  const optionKeys = (klineDisplayOptions || []).map((option) => option.key).filter(Boolean);
+  const currentIndex = optionKeys.indexOf(String(readStateValue(klineDisplayMode) || "day"));
+  if (currentIndex < 0) return;
+  const nextIndex = Math.max(0, Math.min(optionKeys.length - 1, currentIndex + step));
+  if (nextIndex === currentIndex) return;
+  void setKlineDisplayMode(optionKeys[nextIndex]);
+}
+
+function getShortcutWorkspaceName() {
+  const activeId = readStateValue(activeWorkspacePresetId);
+  const presets = readStateValue(workspacePresets) || [];
+  const activePreset = presets.find((item) => String(item?.id ?? "") === String(activeId ?? ""));
+  if (activePreset?.name) return activePreset.name;
+  return `${String(readStateValue(currentTicker) || "WORKSPACE").trim().toUpperCase()} Quick Save`;
+}
+
+async function handleSaveWorkspaceShortcut() {
+  await saveWorkspacePreset(getShortcutWorkspaceName());
+}
+
+useHotkeys(() => [
+  {
+    key: "/",
+    preventDefault: true,
+    handler: focusSearchInput,
+  },
+  {
+    key: "ArrowLeft",
+    shiftKey: true,
+    preventDefault: true,
+    handler: () => shiftTimeframe(-1),
+  },
+  {
+    key: "ArrowRight",
+    shiftKey: true,
+    preventDefault: true,
+    handler: () => shiftTimeframe(1),
+  },
+  {
+    key: "ArrowDown",
+    shiftKey: true,
+    preventDefault: true,
+    handler: () => shiftKlineDisplay(-1),
+  },
+  {
+    key: "ArrowUp",
+    shiftKey: true,
+    preventDefault: true,
+    handler: () => shiftKlineDisplay(1),
+  },
+  {
+    key: "s",
+    ctrlOrMeta: true,
+    allowInInputs: true,
+    preventDefault: true,
+    handler: () => {
+      void handleSaveWorkspaceShortcut();
+    },
+  },
+]);
 
 onMounted(() => {
   document.addEventListener("fullscreenchange", handleFullscreenChange);

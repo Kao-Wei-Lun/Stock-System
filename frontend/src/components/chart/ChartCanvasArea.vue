@@ -13,8 +13,17 @@
       @dblclick="onDoubleClick"
     ></canvas>
 
-    <div v-show="loading" class="chart-loading">
-      <div class="spinner"></div>
+    <div v-show="loading" class="chart-loading chart-loading-skeleton">
+      <div class="chart-skeleton-ribbon">
+        <span class="chart-skeleton-block wide"></span>
+        <span class="chart-skeleton-block"></span>
+        <span class="chart-skeleton-block"></span>
+      </div>
+      <div class="chart-skeleton-surface"></div>
+      <div class="chart-skeleton-ribbon compact">
+        <span class="chart-skeleton-block"></span>
+        <span class="chart-skeleton-block narrow"></span>
+      </div>
       <p>{{ loadingMessage }}</p>
     </div>
 
@@ -145,5 +154,62 @@ onBeforeUnmount(() => {
 .chart-event-marker.active .chart-event-dot {
   background: #00d4ff;
   box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.14);
+}
+
+.chart-loading-skeleton {
+  gap: 16px;
+}
+
+.chart-skeleton-ribbon {
+  width: min(420px, 100%);
+  display: flex;
+  gap: 10px;
+}
+
+.chart-skeleton-ribbon.compact {
+  width: min(280px, 80%);
+}
+
+.chart-skeleton-block,
+.chart-skeleton-surface {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chart-skeleton-block::after,
+.chart-skeleton-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(123, 231, 255, 0.22) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: chart-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.chart-skeleton-block {
+  height: 12px;
+  flex: 1;
+}
+
+.chart-skeleton-block.wide {
+  flex: 1.8;
+}
+
+.chart-skeleton-block.narrow {
+  flex: 0.7;
+}
+
+.chart-skeleton-surface {
+  width: min(620px, 100%);
+  height: clamp(180px, 44vh, 320px);
+  border-radius: 26px;
+}
+
+@keyframes chart-skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 </style>
