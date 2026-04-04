@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 
-import App from "./App.vue";
+import AppRoot from "./AppRoot.vue";
+import { router } from "./router";
 import "./styles/dashboard.css";
 
-createApp(App).mount("#app");
+createApp(AppRoot).use(router).mount("#app");

@@ -277,24 +277,43 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  defineAsyncComponent,
+  isRef,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 
-import AlertModal from "./components/AlertModal.vue";
-import ChartWorkspace from "./components/ChartWorkspace.vue";
 import DashboardTopbar from "./components/DashboardTopbar.vue";
-import EventCenter from "./components/EventCenter.vue";
-import InstitutionalDashboard from "./components/InstitutionalDashboard.vue";
-import MacroDashboard from "./components/MacroDashboard.vue";
-import NotificationPanel from "./components/NotificationPanel.vue";
-import RightSidebar from "./components/RightSidebar.vue";
-import ScreenerWorkspace from "./components/ScreenerWorkspace.vue";
 import StatusBar from "./components/StatusBar.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
 import { useDashboard } from "./composables/useDashboard";
 
+const ChartWorkspace = defineAsyncComponent(() => import("./components/ChartWorkspace.vue"));
+const RightSidebar = defineAsyncComponent(() => import("./components/RightSidebar.vue"));
+const InstitutionalDashboard = defineAsyncComponent(() => import("./components/InstitutionalDashboard.vue"));
+const EventCenter = defineAsyncComponent(() => import("./components/EventCenter.vue"));
+const MacroDashboard = defineAsyncComponent(() => import("./components/MacroDashboard.vue"));
+const ScreenerWorkspace = defineAsyncComponent(() => import("./components/ScreenerWorkspace.vue"));
+const NotificationPanel = defineAsyncComponent(() => import("./components/NotificationPanel.vue"));
+const AlertModal = defineAsyncComponent(() => import("./components/AlertModal.vue"));
+
+const props = defineProps({
+  routeWorkspaceTab: { type: String, default: "chart" },
+  routeRightTab: { type: String, default: "indicators" },
+  routeTicker: { type: String, default: "" },
+});
+
+const emit = defineEmits(["route-change"]);
+
 const workspaceStageRef = ref(null);
 const chartFullscreen = ref(false);
 const pseudoFullscreen = ref(false);
+const routeStateReady = ref(false);
+const applyingRouteState = ref(false);
 
 const {
   timeframeOptions,
@@ -477,6 +496,56 @@ const {
   loadScreenerPreset,
   deleteScreenerPreset,
   } = useDashboard();
+
+function readStateValue(source) {
+  return isRef(source) ? source.value : source;
+}
+
+async function applyIncomingRouteState() {
+  const nextTicker = String(props.routeTicker || "").trim().toUpperCase();
+  const nextWorkspaceTab = String(props.routeWorkspaceTab || "chart");
+  const nextRightTab = String(props.routeRightTab || "indicators");
+
+  applyingRouteState.value = true;
+  try {
+    if (nextTicker && nextTicker !== readStateValue(currentTicker)) {
+      await selectTicker(nextTicker, nextTicker);
+    }
+    if (nextWorkspaceTab !== readStateValue(workspaceTab)) {
+      await setWorkspaceTab(nextWorkspaceTab);
+    }
+    if (nextWorkspaceTab === "chart" && nextRightTab !== readStateValue(rightTab)) {
+      await setRightTab(nextRightTab);
+    }
+  } finally {
+    applyingRouteState.value = false;
+    routeStateReady.value = true;
+  }
+}
+
+watch(
+  () => [props.routeWorkspaceTab, props.routeRightTab, props.routeTicker],
+  () => {
+    void applyIncomingRouteState();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [
+    readStateValue(workspaceTab),
+    readStateValue(rightTab),
+    readStateValue(currentTicker),
+  ],
+  ([nextWorkspaceTab, nextRightTab, nextTicker]) => {
+    if (!routeStateReady.value || applyingRouteState.value) return;
+    emit("route-change", {
+      workspaceTab: nextWorkspaceTab,
+      rightTab: nextRightTab,
+      currentTicker: nextTicker,
+    });
+  },
+);
 
 function syncChartFullscreenState() {
   chartFullscreen.value = pseudoFullscreen.value || document.fullscreenElement === workspaceStageRef.value;
