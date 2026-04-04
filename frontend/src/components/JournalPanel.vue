@@ -218,258 +218,50 @@
         </div>
       </div>
 
-      <div class="journal-card">
-        <div class="bt-section-title">{{ journalForm.id ? "編輯紀錄" : "新增紀錄" }}</div>
-        <div class="bt-row"><div class="bt-label">Ticker</div><input class="bt-inp" :value="journalForm.ticker" @input="$emit('update-journal-field', { key: 'ticker', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">市場</div><input class="bt-inp" :value="journalForm.market" @input="$emit('update-journal-field', { key: 'market', value: $event.target.value })"></div>
-        <div class="bt-row">
-          <div class="bt-label">方向</div>
-          <select class="bt-sel" :value="journalForm.direction" @change="$emit('update-journal-field', { key: 'direction', value: $event.target.value })">
-            <option value="long">Long</option>
-            <option value="short">Short</option>
-          </select>
-        </div>
-        <div class="bt-row"><div class="bt-label">策略碼</div><input class="bt-inp" :value="journalForm.strategy_code" @input="$emit('update-journal-field', { key: 'strategy_code', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">進場時間</div><input class="bt-inp" type="datetime-local" :value="journalForm.entry_time" @input="$emit('update-journal-field', { key: 'entry_time', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">進場價格</div><input class="bt-inp" type="number" :value="journalForm.entry_price" @input="$emit('update-journal-field', { key: 'entry_price', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">出場時間</div><input class="bt-inp" type="datetime-local" :value="journalForm.exit_time" @input="$emit('update-journal-field', { key: 'exit_time', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">出場價格</div><input class="bt-inp" type="number" :value="journalForm.exit_price" @input="$emit('update-journal-field', { key: 'exit_price', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">部位</div><input class="bt-inp" type="number" :value="journalForm.size" @input="$emit('update-journal-field', { key: 'size', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">停損</div><input class="bt-inp" type="number" :value="journalForm.stop_loss" @input="$emit('update-journal-field', { key: 'stop_loss', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">停利</div><input class="bt-inp" type="number" :value="journalForm.take_profit" @input="$emit('update-journal-field', { key: 'take_profit', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">標籤</div><input class="bt-inp" :value="journalForm.tags_text" @input="$emit('update-journal-field', { key: 'tags_text', value: $event.target.value })" placeholder="breakout, earnings"></div>
-        <div class="bt-row"><div class="bt-label">情緒</div><input class="bt-inp" :value="journalForm.emotion_tag" @input="$emit('update-journal-field', { key: 'emotion_tag', value: $event.target.value })" placeholder="calm"></div>
-        <div class="journal-text-row">
-          <div class="bt-label">進場理由</div>
-          <textarea class="journal-textarea" :value="journalForm.entry_reason" @input="$emit('update-journal-field', { key: 'entry_reason', value: $event.target.value })"></textarea>
-        </div>
-        <div class="journal-text-row">
-          <div class="bt-label">出場理由</div>
-          <textarea class="journal-textarea" :value="journalForm.exit_reason" @input="$emit('update-journal-field', { key: 'exit_reason', value: $event.target.value })"></textarea>
-        </div>
-        <div class="journal-text-row">
-          <div class="bt-label">檢討</div>
-          <textarea class="journal-textarea" :value="journalForm.review_notes" @input="$emit('update-journal-field', { key: 'review_notes', value: $event.target.value })"></textarea>
-        </div>
+      <JournalEntryForm
+        :journal-form="journalForm"
+        :journal-loading="journalLoading"
+        @update-journal-field="$emit('update-journal-field', $event)"
+        @add-journal-attachment="$emit('add-journal-attachment')"
+        @remove-journal-attachment="$emit('remove-journal-attachment', $event)"
+        @save-journal-entry="$emit('save-journal-entry')"
+        @reset-journal-form="$emit('reset-journal-form')"
+        @delete-journal-entry="$emit('delete-journal-entry', $event)"
+      />
 
-        <div class="bt-row"><div class="bt-label">附件路徑</div><input class="bt-inp" :value="journalForm.attachment_path" @input="$emit('update-journal-field', { key: 'attachment_path', value: $event.target.value })" placeholder="C:/screenshots/trade.png"></div>
-        <div class="bt-row"><div class="bt-label">附件類型</div><input class="bt-inp" :value="journalForm.attachment_type" @input="$emit('update-journal-field', { key: 'attachment_type', value: $event.target.value })" placeholder="image/png"></div>
-        <button class="add-btn" style="margin-top:0" @click="$emit('add-journal-attachment')">＋ 加入附件</button>
-        <div v-if="journalForm.attachments?.length" class="journal-attachment-list">
-          <div v-for="(attachment, index) in journalForm.attachments" :key="`${attachment.file_path}-${index}`" class="bt-trade-row">
-            <div>
-              <div>{{ attachment.file_path }}</div>
-              <div class="bt-trade-sub">{{ attachment.file_type || "metadata only" }}</div>
-            </div>
-            <button class="journal-inline-btn" @click="$emit('remove-journal-attachment', index)">移除</button>
-          </div>
-        </div>
-
-        <div class="journal-action-row">
-          <button class="run-btn" :disabled="journalLoading" @click="$emit('save-journal-entry')">{{ journalLoading ? "儲存中..." : (journalForm.id ? "更新交易紀錄" : "建立交易紀錄") }}</button>
-          <button class="sync-btn" type="button" @click="$emit('reset-journal-form')">清空表單</button>
-          <button v-if="journalForm.id" class="sync-btn" type="button" @click="$emit('delete-journal-entry', journalForm.id)">刪除紀錄</button>
-        </div>
-      </div>
-
-      <div v-if="journalStats" class="journal-card">
-        <div class="bt-section-title">統計摘要</div>
-        <div class="bt-metric"><span>總筆數</span><span>{{ journalStats.total_entries }}</span></div>
-        <div class="bt-metric"><span>已平倉</span><span>{{ journalStats.closed_entries }}</span></div>
-        <div class="bt-metric"><span>未平倉</span><span>{{ journalStats.open_entries }}</span></div>
-        <div class="bt-metric"><span>勝率</span><span :class="journalStats.win_rate >= 50 ? 'up' : 'dn'">{{ Number(journalStats.win_rate || 0).toFixed(1) }}%</span></div>
-        <div class="bt-metric"><span>淨損益</span><span :class="Number(journalStats.net_pnl || 0) >= 0 ? 'up' : 'dn'">${{ Math.round(Number(journalStats.net_pnl || 0)).toLocaleString() }}</span></div>
-        <div class="bt-metric"><span>平均報酬</span><span :class="Number(journalStats.avg_return_pct || 0) >= 0 ? 'up' : 'dn'">{{ Number(journalStats.avg_return_pct || 0).toFixed(2) }}%</span></div>
-
-        <div v-if="journalStats.source_breakdown?.length" class="journal-analytics-card">
-          <div class="bt-section-title">來源拆解</div>
-          <div
-            v-for="item in topSourceBreakdown"
-            :key="`source-${item.key}`"
-            class="journal-analytics-row-wrap"
-          >
-            <button
-              type="button"
-              class="journal-analytics-row"
-              :data-testid="`journal-source-${item.key}`"
-              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`來源:${item.key}`))"
-            >
-              <div>
-                <div>{{ item.key }}</div>
-                <div class="bt-trade-sub">{{ item.closed_count }} 筆平倉 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-              </div>
-              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-              </div>
-            </button>
-            <button
-              type="button"
-              class="journal-analytics-save"
-              :data-testid="`journal-source-save-${item.key}`"
-              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`來源：${item.key}`, buildJournalTagPreset(`來源:${item.key}`), '由來源拆解快速建立'))"
-            >
-              存
-            </button>
-          </div>
-        </div>
-
-        <div v-if="journalStats.strategy_breakdown?.length" class="journal-analytics-card">
-          <div class="bt-section-title">策略拆解</div>
-          <div
-            v-for="item in topStrategyBreakdown"
-            :key="`strategy-${item.key}`"
-            class="journal-analytics-row-wrap"
-          >
-            <button
-              type="button"
-              class="journal-analytics-row"
-              :data-testid="`journal-strategy-${item.key}`"
-              @click="$emit('apply-journal-filter-preset', buildJournalStrategyPreset(item.key))"
-            >
-              <div>
-                <div>{{ item.key }}</div>
-                <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-              </div>
-              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-              </div>
-            </button>
-            <button
-              type="button"
-              class="journal-analytics-save"
-              :data-testid="`journal-strategy-save-${item.key}`"
-              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`策略：${item.key}`, buildJournalStrategyPreset(item.key), '由策略拆解快速建立'))"
-            >
-              存
-            </button>
-          </div>
-        </div>
-
-        <div v-if="journalStats.market_posture_breakdown?.length" class="journal-analytics-card">
-          <div class="bt-section-title">市場情境</div>
-          <div
-            v-for="item in topMarketPostureBreakdown"
-            :key="`posture-${item.key}`"
-            class="journal-analytics-row-wrap"
-          >
-            <button
-              type="button"
-              class="journal-analytics-row"
-              :data-testid="`journal-posture-${item.key}`"
-              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(`市場:${item.key}`))"
-            >
-              <div>
-                <div>{{ item.key }}</div>
-                <div class="bt-trade-sub">{{ item.count }} 筆 · 平均報酬 {{ Number(item.avg_return_pct || 0).toFixed(2) }}%</div>
-              </div>
-              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-              </div>
-            </button>
-            <button
-              type="button"
-              class="journal-analytics-save"
-              :data-testid="`journal-posture-save-${item.key}`"
-              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`市場：${item.key}`, buildJournalTagPreset(`市場:${item.key}`), '由市場情境快速建立'))"
-            >
-              存
-            </button>
-          </div>
-        </div>
-
-        <div v-if="journalStats.tag_breakdown?.length" class="journal-analytics-card">
-          <div class="bt-section-title">高頻標籤</div>
-          <div
-            v-for="item in topTagBreakdown"
-            :key="`tag-${item.key}`"
-            class="journal-analytics-row-wrap"
-          >
-            <button
-              type="button"
-              class="journal-analytics-row"
-              :data-testid="`journal-tag-${item.key}`"
-              @click="$emit('apply-journal-filter-preset', buildJournalTagPreset(item.key))"
-            >
-              <div>
-                <div>{{ item.key }}</div>
-                <div class="bt-trade-sub">{{ item.count }} 筆 · 勝率 {{ Number(item.win_rate || 0).toFixed(1) }}%</div>
-              </div>
-              <div :class="Number(item.net_pnl || 0) >= 0 ? 'up' : 'dn'">
-                {{ Number(item.net_pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(item.net_pnl || 0)).toLocaleString() }}
-              </div>
-            </button>
-            <button
-              type="button"
-              class="journal-analytics-save"
-              :data-testid="`journal-tag-save-${item.key}`"
-              @click="$emit('save-journal-filter-preset', buildJournalQuickSaveDraft(`標籤：${item.key}`, buildJournalTagPreset(item.key), '由高頻標籤快速建立'))"
-            >
-              存
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="journal-card">
-        <div class="bt-section-title">歷史紀錄</div>
-        <div v-if="journalEntries.length">
-          <button
-            v-for="entry in journalEntryRows"
-            :key="entry.id"
-            type="button"
-            class="bt-history-row"
-            :data-testid="`journal-history-entry-${entry.id}`"
-            @click="$emit('select-journal-entry', entry.id)"
-          >
-            <span>
-              <div>{{ entry.ticker }} · {{ entry.direction }} · {{ entry.strategy_code || "manual" }}</div>
-              <div class="bt-trade-sub">{{ entry.entry_time }}</div>
-              <div v-if="getJournalEntryQuickFilters(entry).length" class="journal-entry-quick-filters">
-                <span
-                  v-for="chip in getJournalEntryQuickFilters(entry)"
-                  :key="`${entry.id}-${chip.kind}-${chip.value}`"
-                  class="journal-entry-quick-filter-group"
-                >
-                  <span
-                    class="journal-entry-meta-chip"
-                    :data-testid="`journal-entry-${chip.kind}-${entry.id}-${chip.value}`"
-                    @click.stop="$emit('apply-journal-filter-preset', chip.preset)"
-                  >
-                    {{ chip.label }}
-                  </span>
-                  <span
-                    class="journal-entry-meta-save"
-                    :data-testid="`journal-entry-save-${chip.kind}-${entry.id}-${chip.value}`"
-                    @click.stop="$emit('save-journal-filter-preset', chip.saveDraft)"
-                  >
-                    存
-                  </span>
-                </span>
-              </div>
-              <div v-if="getJournalEntryPlainTags(entry).length" class="journal-entry-tags">
-                <span
-                  v-for="tag in getJournalEntryPlainTags(entry).slice(0, 4)"
-                  :key="`${entry.id}-${tag}`"
-                  class="journal-entry-tag"
-                  :data-testid="`journal-entry-tag-${entry.id}-${tag}`"
-                  @click.stop="$emit('apply-journal-filter-preset', buildJournalTagPreset(tag))"
-                >
-                  {{ tag }}
-                </span>
-              </div>
-              <div v-else-if="!getJournalEntryQuickFilters(entry).length" class="bt-trade-sub">無標籤</div>
-            </span>
-            <span :class="Number(entry.result?.pnl || 0) >= 0 ? 'up' : 'dn'">
-              {{ Number(entry.result?.pnl || 0) >= 0 ? "+" : "" }}${{ Math.round(Number(entry.result?.pnl || 0)).toLocaleString() }}
-            </span>
-          </button>
-        </div>
-        <div v-else class="bt-history-empty">尚無交易日誌</div>
-      </div>
+      <JournalStatsView
+        :journal-stats="journalStats"
+        :journal-entries="journalEntries"
+        :journal-entry-rows="journalEntryRows"
+        :top-source-breakdown="topSourceBreakdown"
+        :top-strategy-breakdown="topStrategyBreakdown"
+        :top-market-posture-breakdown="topMarketPostureBreakdown"
+        :top-tag-breakdown="topTagBreakdown"
+        :build-journal-tag-preset="buildJournalTagPreset"
+        :build-journal-strategy-preset="buildJournalStrategyPreset"
+        :build-journal-quick-save-draft="buildJournalQuickSaveDraft"
+        :get-journal-entry-quick-filters="getJournalEntryQuickFilters"
+        :get-journal-entry-plain-tags="getJournalEntryPlainTags"
+        @apply-journal-filter-preset="$emit('apply-journal-filter-preset', $event)"
+        @save-journal-filter-preset="$emit('save-journal-filter-preset', $event)"
+        @select-journal-entry="$emit('select-journal-entry', $event)"
+      />
     </div>
 </template>
 <script setup>
 import { computed, watch } from "vue";
+
+import JournalEntryForm from "./journal/JournalEntryForm.vue";
+import JournalStatsView from "./journal/JournalStatsView.vue";
+import {
+  buildJournalQuickSaveDraft as buildSharedJournalQuickSaveDraft,
+  buildJournalStrategyPreset as buildSharedJournalStrategyPreset,
+  buildJournalTagPreset as buildSharedJournalTagPreset,
+  getJournalEntryPlainTags as getSharedJournalEntryPlainTags,
+  getJournalEntryQuickFilters as buildSharedJournalEntryQuickFilters,
+  isSameJournalFilterSnapshot,
+  normalizeJournalFilterSnapshot,
+} from "./journal/journalFilterUtils";
 
 const props = defineProps({
   journalForm: { type: Object, required: true },
@@ -505,121 +297,29 @@ const editingJournalPresetId = defineModel("editingJournalPresetId", { default: 
 const journalPresetName = defineModel("journalPresetName", { type: String, default: "" });
 const journalPresetDescription = defineModel("journalPresetDescription", { type: String, default: "" });
 
+const journalQuickFilterContext = computed(() => ({
+  journalFilters: props.journalFilters,
+  journalFilterScope: props.journalFilterScope,
+}));
+
 function buildJournalTagPreset(tag) {
-  return {
-    tag,
-    search: "",
-  };
+  return buildSharedJournalTagPreset(tag);
 }
 
 function buildJournalStrategyPreset(strategyCode) {
-  return {
-    strategy_code: strategyCode,
-    search: "",
-  };
+  return buildSharedJournalStrategyPreset(strategyCode);
 }
 
 function getJournalEntryPlainTags(entry) {
-  return (entry?.tags || [])
-    .map((tag) => String(tag || "").trim())
-    .filter((tag) => tag && !tag.startsWith("來源:") && !tag.startsWith("市場:"));
-}
-
-function findJournalEntryPrefixedTag(entry, prefix) {
-  return (entry?.tags || [])
-    .map((tag) => String(tag || "").trim())
-    .find((tag) => tag.startsWith(prefix)) || "";
+  return getSharedJournalEntryPlainTags(entry);
 }
 
 function buildJournalQuickSaveDraft(name, partialPreset, description) {
-  const filters = {
-    market: props.journalFilters?.market || "",
-    strategy_code: props.journalFilters?.strategy_code || "",
-    tag: props.journalFilters?.tag || "",
-    search: props.journalFilters?.search || "",
-  };
-  const source = partialPreset && typeof partialPreset === "object" ? partialPreset : {};
-  const mergedFilters = source.filters && typeof source.filters === "object"
-    ? { ...filters, ...source.filters }
-    : { ...filters, ...source };
-  return {
-    name,
-    description,
-    scope: Object.prototype.hasOwnProperty.call(source, "scope")
-      ? (source.scope === "all" ? "all" : "ticker")
-      : (props.journalFilterScope === "all" ? "all" : "ticker"),
-    filters: {
-      market: mergedFilters.market || "",
-      strategy_code: mergedFilters.strategy_code || "",
-      tag: mergedFilters.tag || "",
-      search: mergedFilters.search || "",
-    },
-  };
+  return buildSharedJournalQuickSaveDraft(journalQuickFilterContext.value, name, partialPreset, description);
 }
 
 function getJournalEntryQuickFilters(entry) {
-  const quickFilters = [];
-  const strategyCode = String(entry?.strategy_code || "").trim();
-  const sourceTag = findJournalEntryPrefixedTag(entry, "來源:");
-  const marketPostureTag = findJournalEntryPrefixedTag(entry, "市場:");
-
-  if (sourceTag) {
-    const label = `來源：${sourceTag.slice(3)}`;
-    quickFilters.push({
-      kind: "source",
-      value: sourceTag.slice(3),
-      label,
-      preset: buildJournalTagPreset(sourceTag),
-      saveDraft: buildJournalQuickSaveDraft(label, buildJournalTagPreset(sourceTag), "由歷史紀錄快速建立"),
-    });
-  }
-
-  if (marketPostureTag) {
-    const label = `市場：${marketPostureTag.slice(3)}`;
-    quickFilters.push({
-      kind: "posture",
-      value: marketPostureTag.slice(3),
-      label,
-      preset: buildJournalTagPreset(marketPostureTag),
-      saveDraft: buildJournalQuickSaveDraft(label, buildJournalTagPreset(marketPostureTag), "由歷史紀錄快速建立"),
-    });
-  }
-
-  if (strategyCode) {
-    const label = `策略：${strategyCode}`;
-    quickFilters.push({
-      kind: "strategy",
-      value: strategyCode,
-      label,
-      preset: buildJournalStrategyPreset(strategyCode),
-      saveDraft: buildJournalQuickSaveDraft(label, buildJournalStrategyPreset(strategyCode), "由歷史紀錄快速建立"),
-    });
-  }
-
-  return quickFilters;
-}
-
-function normalizeJournalFilterSnapshot(source) {
-  const filters = source?.filters && typeof source.filters === "object"
-    ? source.filters
-    : source || {};
-  return {
-    scope: source?.scope === "all" ? "all" : "ticker",
-    filters: {
-      market: String(filters.market || "").trim(),
-      strategy_code: String(filters.strategy_code || "").trim(),
-      tag: String(filters.tag || "").trim(),
-      search: String(filters.search || "").trim(),
-    },
-  };
-}
-
-function isSameJournalFilterSnapshot(left, right) {
-  if (!left || !right) return false;
-  if (left.scope !== right.scope) return false;
-  return ["market", "strategy_code", "tag", "search"].every(
-    (key) => String(left.filters?.[key] || "") === String(right.filters?.[key] || ""),
-  );
+  return buildSharedJournalEntryQuickFilters(entry, journalQuickFilterContext.value);
 }
 
 function saveJournalPreset() {
@@ -905,7 +605,7 @@ function applyJournalEmptySuggestion(suggestion) {
   emit("update-journal-filter", { key: suggestion.key, value: suggestion.value });
 }
 </script>
-<style scoped>
+<style>
 .journal-analytics-card {
   margin-top: 12px;
   padding-top: 10px;

@@ -274,29 +274,6 @@ vi.mock("./composables/useDashboard", () => ({
 import App from "./App.vue";
 
 describe("App", () => {
-  it("mounts the application shell", () => {
-    const wrapper = shallowMount(App, {
-      global: {
-        stubs: {
-          DashboardTopbar: true,
-          WatchlistPanel: true,
-          ChartWorkspace: true,
-          RightSidebar: true,
-          InstitutionalDashboard: true,
-          EventCenter: true,
-          MacroDashboard: true,
-          ScreenerWorkspace: true,
-          StatusBar: true,
-          ToastStack: true,
-          NotificationPanel: true,
-          AlertModal: true,
-        },
-      },
-    });
-
-    expect(wrapper.find(".app-shell").exists()).toBe(true);
-  });
-
   it("creates a dedicated watch group from journal result shortcuts", async () => {
     dashboardMock.userWatchGroups = ref([{ id: 1, name: "警報通知模板 命中池" }]);
     dashboardMock.setLeftTab = vi.fn();

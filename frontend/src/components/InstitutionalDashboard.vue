@@ -40,84 +40,15 @@
         {{ data.cash_summary_warning }}
       </div>
 
-      <div class="institutional-grid">
-        <div class="institutional-card">
-          <div class="ind-group-title">現貨參考</div>
-          <div class="institutional-kpis">
-            <div v-for="item in data.spot_reference || []" :key="item.ticker" class="inst-kpi">
-              <div class="inst-kpi-label">{{ item.label }}</div>
-              <div class="inst-kpi-value">{{ fmtPrice(item.price) }}</div>
-              <div class="inst-kpi-change" :class="Number(item.change_pct) >= 0 ? 'up' : 'dn'">
-                {{ Number(item.change_pct) >= 0 ? "+" : "" }}{{ Number(item.change_pct || 0).toFixed(2) }}%
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="institutional-card">
-          <div class="ind-group-title">現貨三大法人買賣超</div>
-          <div class="institutional-rows compact">
-            <div v-for="row in aggregatedCashSummary" :key="row.institution" class="inst-row">
-              <span>{{ row.institution }}</span>
-              <span :class="Number(row.net_amount) >= 0 ? 'up' : 'dn'">
-                {{ formatSigned(row.net_amount, true) }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="institutional-card">
-          <div class="ind-group-title">期貨 / 選擇權總覽</div>
-          <div class="institutional-rows">
-            <div v-for="row in data.overview || []" :key="row.institution" class="inst-row wide">
-              <div>
-                <strong>{{ row.institution }}</strong>
-                <div class="inst-row-sub">
-                  期貨淨口數
-                  <span :class="row.trade_net_futures_volume >= 0 ? 'up' : 'dn'">
-                    {{ formatSigned(row.trade_net_futures_volume) }}
-                  </span>
-                </div>
-              </div>
-              <div class="inst-row-metrics">
-                <span :class="row.trade_net_futures_volume_change >= 0 ? 'up' : 'dn'">
-                  Δ {{ formatSigned(row.trade_net_futures_volume_change) }}
-                </span>
-                <span :class="row.trade_net_options_volume >= 0 ? 'up' : 'dn'">
-                  選擇權 {{ formatSigned(row.trade_net_options_volume) }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="institutional-card">
-          <div class="ind-group-title">重點籌碼</div>
-          <div class="institutional-rows">
-            <div class="inst-row wide">
-              <div>
-                <strong>{{ selectedFuturesCommodity || "—" }}</strong>
-                <div class="inst-row-sub">法人合成淨未平倉 / 散戶推估對手方</div>
-              </div>
-              <div class="inst-row-metrics">
-                <span :class="futuresCostEstimate?.institution_estimate?.net_volume >= 0 ? 'up' : 'dn'">
-                  {{ formatSigned(futuresCostEstimate?.institution_estimate?.net_volume) }}
-                </span>
-                <span>{{ futuresCostEstimate?.institution_estimate?.side || "—" }} / {{ fmtPrice(futuresCostEstimate?.institution_estimate?.price) }}</span>
-              </div>
-            </div>
-            <div class="inst-row wide">
-              <div>
-                <strong>{{ selectedOptionsCommodity || "—" }}</strong>
-                <div class="inst-row-sub">外資 Put / Call OI 差</div>
-              </div>
-              <div class="inst-row-metrics">
-                <span :class="foreignCallPutBalance >= 0 ? 'up' : 'dn'">{{ formatSigned(foreignCallPutBalance) }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <InstitutionalOverviewGrid
+        :data="data"
+        :aggregated-cash-summary="aggregatedCashSummary"
+        :selected-futures-commodity="selectedFuturesCommodity"
+        :selected-options-commodity="selectedOptionsCommodity"
+        :futures-cost-estimate="futuresCostEstimate"
+        :foreign-call-put-balance="foreignCallPutBalance"
+        :format-signed="formatSigned"
+      />
 
       <div class="institutional-filters">
         <select class="workspace-select" :value="selectedFuturesCommodity" @change="$emit('set-futures-commodity', $event.target.value)">
@@ -143,391 +74,47 @@
       <div v-else-if="insightsLoading" class="institutional-inline-loading">正在彙整法人歷史趨勢與成本推估...</div>
 
       <template v-if="insights">
-        <div class="institutional-section">
-          <div class="institutional-ranking-grid">
-            <div class="institutional-card">
-              <div class="institutional-section-head">
-                <div>
-                  <div class="ind-group-title">法人籌碼異常值警報</div>
-                  <div class="institutional-section-note">用近 {{ historyDaysLabel }} 的基準偵測極端口數、資金流與期現貨偏離</div>
-                </div>
-                <button
-                  v-if="anomalyAlerts.length"
-                  type="button"
-                  class="tool-btn institutional-action-btn"
-                  @click="$emit('create-alert', buildInstitutionalAlertShortcut(anomalyAlerts[0]))"
-                >
-                  設異常警報
-                </button>
-              </div>
-              <div v-if="anomalyAlerts.length" class="institutional-rows compact">
-                <div v-for="alert in anomalyAlerts" :key="alert.title" class="inst-row wide">
-                  <div>
-                    <strong>{{ alert.title }}</strong>
-                    <div class="inst-row-sub">{{ alert.detail }}</div>
-                  </div>
-                  <div class="inst-row-metrics">
-                    <span :class="alert.directionClass">{{ alert.value }}</span>
-                    <span class="institutional-alert-badge" :class="alert.severityClass">{{ alert.levelLabel }}</span>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="institutional-empty institutional-empty-compact">近 {{ historyDaysLabel }} 暫未偵測到顯著異常值</div>
-            </div>
+        <InstitutionalInsightsSummary
+          :history-days-label="historyDaysLabel"
+          :anomaly-alerts="anomalyAlerts"
+          :narrative-points="narrativePoints"
+          :basis-metrics="basisMetrics"
+          :basis-narrative="basisNarrative"
+          :build-institutional-alert-shortcut="buildInstitutionalAlertShortcut"
+          :build-basis-alert-shortcut="buildBasisAlertShortcut"
+          :format-price-signed="formatPriceSigned"
+          @create-alert="$emit('create-alert', $event)"
+        />
 
-            <div class="institutional-card">
-              <div class="institutional-section-head">
-                <div class="ind-group-title">自動產出法人觀點摘要</div>
-                <div class="institutional-section-note">綜合法人未平倉、現貨、選擇權與 Basis 變化自動整理重點</div>
-              </div>
-              <ul class="institutional-summary-list">
-                <li v-for="point in narrativePoints" :key="point">{{ point }}</li>
-              </ul>
-            </div>
-          </div>
-        </div>
+        <InstitutionalTrendPanels
+          :insights="insights"
+          :selected-futures-commodity="selectedFuturesCommodity"
+          :selected-options-commodity="selectedOptionsCommodity"
+          :trend-series="trendSeries"
+          :cost-series="costSeries"
+        />
 
-        <div class="institutional-section">
-          <div class="institutional-section-head">
-            <div>
-              <div class="ind-group-title">法人期現貨偏離 / Basis 分析</div>
-              <div class="institutional-section-note">比較法人合成成本、散戶對手成本與現貨參考價的偏離程度</div>
-            </div>
-            <button
-              v-if="basisMetrics"
-              type="button"
-              class="tool-btn institutional-action-btn"
-              @click="$emit('create-alert', buildBasisAlertShortcut())"
-            >
-              設 Basis 警報
-            </button>
-          </div>
-          <template v-if="basisMetrics">
-            <div class="institutional-kpi-strip">
-              <div class="inst-kpi">
-                <div class="inst-kpi-label">現貨參考</div>
-                <div class="inst-kpi-value">{{ basisMetrics.spotLabel }}</div>
-                <div class="inst-kpi-change">{{ fmtPrice(basisMetrics.spotPrice) }}</div>
-              </div>
-              <div class="inst-kpi">
-                <div class="inst-kpi-label">法人 Basis</div>
-                <div class="inst-kpi-value" :class="basisMetrics.basis >= 0 ? 'up' : 'dn'">{{ formatPriceSigned(basisMetrics.basis) }}</div>
-                <div class="inst-kpi-change">{{ basisMetrics.basisPct >= 0 ? '+' : '' }}{{ Number(basisMetrics.basisPct || 0).toFixed(2) }}%</div>
-              </div>
-              <div class="inst-kpi">
-                <div class="inst-kpi-label">散戶對手 Basis</div>
-                <div class="inst-kpi-value" :class="basisMetrics.retailBasis >= 0 ? 'up' : 'dn'">{{ formatPriceSigned(basisMetrics.retailBasis) }}</div>
-                <div class="inst-kpi-change">{{ basisMetrics.bandWidth ? `成本帶寬 ${fmtPrice(basisMetrics.bandWidth)}` : '—' }}</div>
-              </div>
-              <div class="inst-kpi">
-                <div class="inst-kpi-label">成本帶位置</div>
-                <div class="inst-kpi-value">{{ basisMetrics.spotPosition }}</div>
-                <div class="inst-kpi-change">{{ fmtPrice(basisMetrics.bandLow) }} → {{ fmtPrice(basisMetrics.bandHigh) }}</div>
-              </div>
-            </div>
-            <div class="institutional-card">
-              <ul class="institutional-summary-list">
-                <li v-for="point in basisNarrative" :key="point">{{ point }}</li>
-              </ul>
-            </div>
-          </template>
-          <div v-else class="institutional-card">
-            <div class="institutional-empty institutional-empty-compact">目前所選期貨商品沒有可對照的現貨參考價，暫時無法產生 Basis 分析。</div>
-          </div>
-        </div>
+        <InstitutionalLeaderboards
+          :top-long-rank="topLongRank"
+          :top-short-rank="topShortRank"
+          :top-trade-long-rank="topTradeLongRank"
+          :top-trade-short-rank="topTradeShortRank"
+          :format-signed="formatSigned"
+        />
 
-        <div class="institutional-section">
-          <div class="institutional-section-head">
-            <div class="ind-group-title">法人籌碼歷史趨勢</div>
-            <div class="institutional-section-note">期貨淨口數、選擇權買賣權失衡、現貨買賣超與未平倉成本帶</div>
-          </div>
-          <div class="institutional-trend-grid">
-            <InstitutionalTrendChart
-              title="期貨未平倉淨口數"
-              :subtitle="selectedFuturesCommodity"
-              :points="insights.history?.futures_oi || []"
-              :series="trendSeries"
-            />
-            <InstitutionalTrendChart
-              title="期貨交易淨口數"
-              :subtitle="selectedFuturesCommodity"
-              :points="insights.history?.futures_trade || []"
-              :series="trendSeries"
-            />
-            <InstitutionalTrendChart
-              title="選擇權未平倉淨口數"
-              :subtitle="selectedOptionsCommodity"
-              :points="insights.history?.options_oi || []"
-              :series="trendSeries"
-            />
-            <InstitutionalTrendChart
-              title="買權 / 賣權 OI 失衡"
-              :subtitle="selectedOptionsCommodity"
-              :points="insights.history?.call_put_balance || []"
-              :series="trendSeries"
-            />
-            <InstitutionalTrendChart
-              title="現貨三大法人買賣超"
-              subtitle="TWSE 現貨市場"
-              :points="insights.history?.cash_net || []"
-              :series="trendSeries"
-              value-format="amount"
-            />
-            <InstitutionalTrendChart
-              title="未平倉成本帶"
-              :subtitle="selectedFuturesCommodity"
-              :points="insights.history?.cost_band || []"
-              :series="costSeries"
-              band-min-key="成本帶低"
-              band-max-key="成本帶高"
-              value-format="price"
-            />
-          </div>
-        </div>
-
-        <div class="institutional-section">
-          <div class="institutional-section-head">
-            <div class="ind-group-title">主力多空排行</div>
-            <div class="institutional-section-note">依未平倉與交易淨口數排序，快速抓出最強多頭與空頭商品</div>
-          </div>
-          <div class="institutional-ranking-grid">
-            <div class="institutional-card">
-              <div class="ind-group-title">未平倉偏多排行</div>
-              <div class="institutional-rows compact">
-                <div v-for="row in topLongRank" :key="`long-${row.commodity}-${row.institution}`" class="inst-row wide">
-                  <div>
-                    <strong>{{ row.commodity }}</strong>
-                    <div class="inst-row-sub">{{ row.institution }}</div>
-                  </div>
-                  <div class="inst-row-metrics">
-                    <span class="up">{{ formatSigned(row.oi_net_volume) }}</span>
-                    <span :class="row.trade_net_volume >= 0 ? 'up' : 'dn'">交易 {{ formatSigned(row.trade_net_volume) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="institutional-card">
-              <div class="ind-group-title">未平倉偏空排行</div>
-              <div class="institutional-rows compact">
-                <div v-for="row in topShortRank" :key="`short-${row.commodity}-${row.institution}`" class="inst-row wide">
-                  <div>
-                    <strong>{{ row.commodity }}</strong>
-                    <div class="inst-row-sub">{{ row.institution }}</div>
-                  </div>
-                  <div class="inst-row-metrics">
-                    <span class="dn">{{ formatSigned(row.oi_net_volume) }}</span>
-                    <span :class="row.trade_net_volume >= 0 ? 'up' : 'dn'">交易 {{ formatSigned(row.trade_net_volume) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="institutional-card">
-              <div class="ind-group-title">當日偏多交易排行</div>
-              <div class="institutional-rows compact">
-                <div v-for="row in topTradeLongRank" :key="`trade-long-${row.commodity}-${row.institution}`" class="inst-row wide">
-                  <div>
-                    <strong>{{ row.commodity }}</strong>
-                    <div class="inst-row-sub">{{ row.institution }}</div>
-                  </div>
-                  <div class="inst-row-metrics">
-                    <span class="up">{{ formatSigned(row.trade_net_volume) }}</span>
-                    <span :class="row.oi_net_volume >= 0 ? 'up' : 'dn'">OI {{ formatSigned(row.oi_net_volume) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="institutional-card">
-              <div class="ind-group-title">當日偏空交易排行</div>
-              <div class="institutional-rows compact">
-                <div v-for="row in topTradeShortRank" :key="`trade-short-${row.commodity}-${row.institution}`" class="inst-row wide">
-                  <div>
-                    <strong>{{ row.commodity }}</strong>
-                    <div class="inst-row-sub">{{ row.institution }}</div>
-                  </div>
-                  <div class="inst-row-metrics">
-                    <span class="dn">{{ formatSigned(row.trade_net_volume) }}</span>
-                    <span :class="row.oi_net_volume >= 0 ? 'up' : 'dn'">OI {{ formatSigned(row.oi_net_volume) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="institutional-section">
-          <div class="institutional-section-head">
-            <div class="ind-group-title">未平倉成本帶與成本推估</div>
-            <div class="institutional-section-note">依契約價值反推三大法人長短倉平均持倉成本，並估計非三大法人對手方成本</div>
-          </div>
-
-          <div class="institutional-kpi-strip">
-            <div class="inst-kpi">
-              <div class="inst-kpi-label">法人合成成本</div>
-              <div class="inst-kpi-value">{{ fmtPrice(futuresCostEstimate?.institution_estimate?.price) }}</div>
-              <div class="inst-kpi-change">{{ futuresCostEstimate?.institution_estimate?.side || "—" }}</div>
-            </div>
-            <div class="inst-kpi">
-              <div class="inst-kpi-label">散戶 / 非三大法人推估</div>
-              <div class="inst-kpi-value">{{ fmtPrice(futuresCostEstimate?.retail_estimate?.price) }}</div>
-              <div class="inst-kpi-change">{{ futuresCostEstimate?.retail_estimate?.side || "—" }}</div>
-            </div>
-            <div class="inst-kpi">
-              <div class="inst-kpi-label">成本帶下緣</div>
-              <div class="inst-kpi-value">{{ fmtPrice(futuresCostEstimate?.band_low) }}</div>
-              <div class="inst-kpi-change">Low</div>
-            </div>
-            <div class="inst-kpi">
-              <div class="inst-kpi-label">成本帶上緣</div>
-              <div class="inst-kpi-value">{{ fmtPrice(futuresCostEstimate?.band_high) }}</div>
-              <div class="inst-kpi-change">High</div>
-            </div>
-          </div>
-
-          <div class="institutional-ranking-grid">
-            <div class="institutional-table-wrap">
-              <table class="institutional-table">
-                <thead>
-                  <tr>
-                    <th>法人</th>
-                    <th>淨未平倉</th>
-                    <th>偏向</th>
-                    <th>多方均價</th>
-                    <th>空方均價</th>
-                    <th>主成本</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in futuresCostEstimate?.institutions || []" :key="`cost-${row.institution}`">
-                    <td>{{ row.institution }}</td>
-                    <td :class="row.net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.net_volume) }}</td>
-                    <td>{{ row.dominant_side }}</td>
-                    <td>{{ fmtPrice(row.avg_long_price) }}</td>
-                    <td>{{ fmtPrice(row.avg_short_price) }}</td>
-                    <td>{{ fmtPrice(row.dominant_price) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="institutional-table-wrap">
-              <table class="institutional-table">
-                <thead>
-                  <tr>
-                    <th>法人</th>
-                    <th>買權 OI</th>
-                    <th>賣權 OI</th>
-                    <th>Call / Put 差</th>
-                    <th>買權均價</th>
-                    <th>賣權均價</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in optionsCostEstimate?.institutions || []" :key="`opt-cost-${row.institution}`">
-                    <td>{{ row.institution }}</td>
-                    <td :class="row.call_oi_net >= 0 ? 'up' : 'dn'">{{ formatSigned(row.call_oi_net) }}</td>
-                    <td :class="row.put_oi_net >= 0 ? 'up' : 'dn'">{{ formatSigned(row.put_oi_net) }}</td>
-                    <td :class="row.balance >= 0 ? 'up' : 'dn'">{{ formatSigned(row.balance) }}</td>
-                    <td>{{ fmtPrice(row.call_avg_buy) }}</td>
-                    <td>{{ fmtPrice(row.put_avg_buy) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <InstitutionalCostAnalysis
+          :futures-cost-estimate="futuresCostEstimate"
+          :options-cost-estimate="optionsCostEstimate"
+          :format-signed="formatSigned"
+        />
       </template>
 
-      <div class="institutional-section">
-        <div class="institutional-section-head">
-          <div class="ind-group-title">期貨法人籌碼</div>
-          <div class="institutional-section-note">依未平倉淨口數排序，右側顯示與前一交易日差異</div>
-        </div>
-        <div class="institutional-table-wrap">
-          <table class="institutional-table">
-            <thead>
-              <tr>
-                <th>商品</th>
-                <th>法人</th>
-                <th>交易淨口數</th>
-                <th>未平倉淨口數</th>
-                <th>未平倉淨變化</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in filteredFutures" :key="`f-${row.commodity}-${row.institution}`">
-                <td>{{ row.commodity }}</td>
-                <td>{{ row.institution }}</td>
-                <td :class="row.trade_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.trade_net_volume) }}</td>
-                <td :class="row.oi_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume) }}</td>
-                <td :class="row.oi_net_volume_change >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume_change) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="institutional-section">
-        <div class="institutional-section-head">
-          <div class="ind-group-title">選擇權法人籌碼</div>
-          <div class="institutional-section-note">觀察各契約交易與未平倉淨口數</div>
-        </div>
-        <div class="institutional-table-wrap">
-          <table class="institutional-table">
-            <thead>
-              <tr>
-                <th>商品</th>
-                <th>法人</th>
-                <th>交易淨口數</th>
-                <th>未平倉淨口數</th>
-                <th>未平倉淨變化</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in filteredOptions" :key="`o-${row.commodity}-${row.institution}`">
-                <td>{{ row.commodity }}</td>
-                <td>{{ row.institution }}</td>
-                <td :class="row.trade_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.trade_net_volume) }}</td>
-                <td :class="row.oi_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume) }}</td>
-                <td :class="row.oi_net_volume_change >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume_change) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="institutional-section">
-        <div class="institutional-section-head">
-          <div class="ind-group-title">選擇權買賣權分計</div>
-          <div class="institutional-section-note">買權 / 賣權拆開看，更容易判斷偏多偏空部位</div>
-        </div>
-        <div class="institutional-table-wrap">
-          <table class="institutional-table">
-            <thead>
-              <tr>
-                <th>商品</th>
-                <th>權別</th>
-                <th>法人</th>
-                <th>交易買賣差</th>
-                <th>未平倉買賣差</th>
-                <th>未平倉差變化</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in filteredCallPuts" :key="`cp-${row.commodity}-${row.option_side}-${row.institution}`">
-                <td>{{ row.commodity }}</td>
-                <td>{{ row.option_side }}</td>
-                <td>{{ row.institution }}</td>
-                <td :class="row.trade_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.trade_net_volume) }}</td>
-                <td :class="row.oi_net_volume >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume) }}</td>
-                <td :class="row.oi_net_volume_change >= 0 ? 'up' : 'dn'">{{ formatSigned(row.oi_net_volume_change) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <InstitutionalPositionTables
+        :filtered-futures="filteredFutures"
+        :filtered-options="filteredOptions"
+        :filtered-call-puts="filteredCallPuts"
+        :format-signed="formatSigned"
+      />
     </template>
   </div>
 </template>
@@ -535,7 +122,12 @@
 <script setup>
 import { computed, ref } from "vue";
 
-import InstitutionalTrendChart from "./InstitutionalTrendChart.vue";
+import InstitutionalCostAnalysis from "./institutional/InstitutionalCostAnalysis.vue";
+import InstitutionalInsightsSummary from "./institutional/InstitutionalInsightsSummary.vue";
+import InstitutionalLeaderboards from "./institutional/InstitutionalLeaderboards.vue";
+import InstitutionalOverviewGrid from "./institutional/InstitutionalOverviewGrid.vue";
+import InstitutionalPositionTables from "./institutional/InstitutionalPositionTables.vue";
+import InstitutionalTrendPanels from "./institutional/InstitutionalTrendPanels.vue";
 import { fmtPrice } from "../utils/formatters";
 
 const props = defineProps({

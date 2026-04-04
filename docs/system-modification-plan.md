@@ -28,9 +28,9 @@
 **對應問題**：`JournalPanel.vue` (44KB) 與 `InstitutionalDashboard.vue` (40KB) 尚未重構，且測試檔案 `App.spec.js` (13KB) 過度集中。
 **預期效益**：全面落實組件單一職責，提升前端測試可測性。
 
-- [ ] **任務 4.1**：拆分 `JournalPanel.vue`：將日誌紀錄表單與歷史績效圖表切分為兩個主要的子組件 (`JournalEntryForm.vue`, `JournalStatsView.vue`)。
-- [ ] **任務 4.2**：拆解 `InstitutionalDashboard.vue`：分離三大法人買賣超、期權未平倉圖表至獨立子元件。
-- [ ] **任務 4.3**：重構測試檔，將 `App.spec.js` 打散，對應至新建立的 `DashboardView.spec.js` 或 Router 級別的整合測試。
+- [x] **任務 4.1**：拆分 `JournalPanel.vue`：將日誌紀錄表單與歷史績效圖表切分為兩個主要的子組件 (`JournalEntryForm.vue`, `JournalStatsView.vue`)。
+- [x] **任務 4.2**：拆解 `InstitutionalDashboard.vue`：分離三大法人買賣超、期權未平倉圖表至獨立子元件。
+- [x] **任務 4.3**：重構測試檔，將 `App.spec.js` 打散，對應至新建立的 `DashboardView.spec.js` 或 Router 級別的整合測試。
 
 ### Phase 5: 券商抽象層與正式報價準備 (Broker & Provider Abstraction)
 **對應問題**：規格書 §9 及 §3.4 要求的 `BrokerProvider` 尚未完全定義，阻礙未來下單與真實券商串流的實作。
@@ -59,4 +59,4 @@
 
 ## 🗓️ 下一步建議
 
-恭喜完成第一輪大重構！接下來建議先從 **Phase 4: 前端剩餘巨型組件拆分** 切入，延續之前的經驗來收斂前端架構。完成後，再次呼叫 `/analyze-frontend` 或 `/full-system-review` 來進行新一輪的掃描。
+恭喜完成第一輪大重構！目前 **Phase 4 已完成**，接下來建議先直接推進 **Phase 6: 測試覆蓋率與前視偏誤防護**。**Phase 5 先暫停**，待券商 API 申請完成後再恢復製作。
