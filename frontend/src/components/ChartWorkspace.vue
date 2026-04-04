@@ -15,7 +15,7 @@
       :macro-decision-hint="macroDecisionHint"
     />
 
-    <ChartWorkspaceToolbar
+    <ChartToolbar
       :active-tool="activeTool"
       :can-go-back-history="canGoBackHistory"
       :can-go-forward-history="canGoForwardHistory"
@@ -93,7 +93,7 @@
       @remove-compare="emit('remove-compare', $event)"
     />
 
-    <ChartDrawingManager
+    <DrawingManager
       :drawings="drawings"
       :selected-drawing-id="selectedDrawingId"
       :selected-drawing="selectedDrawing"
@@ -164,13 +164,13 @@ import { useChartEngine } from "../composables/useChartEngine";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
 import ChartCanvasArea from "./chart/ChartCanvasArea.vue";
-import ChartDrawingManager from "./chart/ChartDrawingManager.vue";
+import DrawingManager from "./chart/DrawingManager.vue";
 import ChartIndicatorPanel from "./chart/ChartIndicatorPanel.vue";
 import ChartSyncPaneGrid from "./chart/ChartSyncPaneGrid.vue";
 import ChartWorkspaceControls from "./chart/ChartWorkspaceControls.vue";
 import ChartWorkspaceHeader from "./chart/ChartWorkspaceHeader.vue";
 import ChartWorkspaceMetaBar from "./chart/ChartWorkspaceMetaBar.vue";
-import ChartWorkspaceToolbar from "./chart/ChartWorkspaceToolbar.vue";
+import ChartToolbar from "./chart/ChartToolbar.vue";
 
 const props = defineProps({
   currentTicker: { type: String, required: true },

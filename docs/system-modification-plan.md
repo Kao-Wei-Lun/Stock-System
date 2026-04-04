@@ -19,9 +19,9 @@
 **對應問題**：組件肥大 (`ChartWorkspace.vue`)、缺乏路由 (`Router`)
 **預期效益**：載入速度提升，降低單一檔案維護難度，可用 URL 直接分享具體頁面。
 
-- [ ] **任務 1.1**：安裝並設置 `vue-router`，建立 `src/router/index.js`。
-- [ ] **任務 1.2**：將 `App.vue` 中的條件渲染切分為獨立視圖元件：`DashboardView`, `JournalView`, `BacktestView`。
-- [ ] **任務 1.3**：拆解 `ChartWorkspace.vue`：
+- [x] **任務 1.1**：安裝並設置 `vue-router`，建立 `src/router/index.js`。
+- [x] **任務 1.2**：將 `App.vue` 中的條件渲染切分為獨立視圖元件：`DashboardView`, `JournalView`, `BacktestView`。
+- [x] **任務 1.3**：拆解 `ChartWorkspace.vue`：
   - 抽離出 `ChartToolbar.vue` 處理上方面板與工具列。
   - 抽離出 `DrawingManager.vue` 負責圖形與左/右側繪圖選單。
   - 主體僅保留 canvas 與 `useChartEngine` 的整合。

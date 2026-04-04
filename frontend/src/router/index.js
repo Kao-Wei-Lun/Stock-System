@@ -1,6 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-const AppRoutePage = () => import("../pages/AppRoutePage.vue");
+const DashboardView = () => import("../views/DashboardView.vue");
+const AlertsView = () => import("../views/AlertsView.vue");
+const BacktestView = () => import("../views/BacktestView.vue");
+const JournalView = () => import("../views/JournalView.vue");
+const DatabaseView = () => import("../views/DatabaseView.vue");
+const InstitutionalView = () => import("../views/InstitutionalView.vue");
+const EventsView = () => import("../views/EventsView.vue");
+const MacroView = () => import("../views/MacroView.vue");
+const ScreenerView = () => import("../views/ScreenerView.vue");
 
 const routes = [
   {
@@ -10,47 +18,47 @@ const routes = [
   {
     path: "/dashboard/:ticker?",
     name: "dashboard",
-    component: AppRoutePage,
+    component: DashboardView,
   },
   {
     path: "/alerts/:ticker?",
     name: "alerts",
-    component: AppRoutePage,
+    component: AlertsView,
   },
   {
     path: "/backtest/:ticker?",
     name: "backtest",
-    component: AppRoutePage,
+    component: BacktestView,
   },
   {
     path: "/journal/:ticker?",
     name: "journal",
-    component: AppRoutePage,
+    component: JournalView,
   },
   {
     path: "/db/:ticker?",
     name: "db",
-    component: AppRoutePage,
+    component: DatabaseView,
   },
   {
     path: "/institutional/:ticker?",
     name: "institutional",
-    component: AppRoutePage,
+    component: InstitutionalView,
   },
   {
     path: "/events/:ticker?",
     name: "events",
-    component: AppRoutePage,
+    component: EventsView,
   },
   {
     path: "/macro/:ticker?",
     name: "macro",
-    component: AppRoutePage,
+    component: MacroView,
   },
   {
     path: "/screener/:ticker?",
     name: "screener",
-    component: AppRoutePage,
+    component: ScreenerView,
   },
 ];
 
