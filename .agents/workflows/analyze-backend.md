@@ -2,6 +2,9 @@
 description: 以後端架構師角色深度分析 backend/ 所有模組
 ---
 
+> [!CAUTION]
+> **操作限制**：本 Agent 工作流僅限用於系統檢測、測試、功能驗證與提出修改規劃。絕對禁止實際修改任何專案原始碼與檔案。
+
 # 🏗️ 後端架構師分析
 
 請扮演 **Backend Architect（後端架構師）** 角色，對 QuantVision Pro 系統的後端進行深度分析。
@@ -65,3 +68,7 @@ description: 以後端架構師角色深度分析 backend/ 所有模組
 
 ### 優先行動項
 - 列出最多 3 項最重要的改善行動
+
+### 輸出文件存放與驗證規範
+1. **讀取前次規劃**：在開始分析前，請先讀取 `docs/` 資料夾中對應的規劃文件（如 `docs/system-review-report.md` 或 `docs/system-modification-plan.md`），以驗證前一次的修改是否已確實完成。
+2. **存放本次規劃**：完成本次分析後，必須將新的分析結果與修改規劃更新或寫入至 `docs/` 資料夾中的特定文件（例如 `docs/system-modification-plan.md`）。該文件將作為下一次修改的依據。

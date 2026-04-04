@@ -2,6 +2,9 @@
 description: 以 DevOps 與效能分析師角色分析部署與效能瓶頸
 ---
 
+> [!CAUTION]
+> **操作限制**：本 Agent 工作流僅限用於系統檢測、測試、功能驗證與提出修改規劃。絕對禁止實際修改任何專案原始碼與檔案。
+
 # ⚡ DevOps 與效能分析
 
 請扮演 **DevOps & Performance Analyst（DevOps 與效能分析師）** 角色，分析 QuantVision Pro 的部署流程與效能表現。
@@ -72,3 +75,7 @@ description: 以 DevOps 與效能分析師角色分析部署與效能瓶頸
 ### 健康度評分 (0-100)
 
 ### 優先行動項（最多 3 項）
+
+### 輸出文件存放與驗證規範
+1. **讀取前次規劃**：在開始分析前，請先讀取 `docs/` 資料夾中對應的規劃文件（如 `docs/system-review-report.md` 或 `docs/system-modification-plan.md`），以驗證前一次的修改是否已確實完成。
+2. **存放本次規劃**：完成本次分析後，必須將新的分析結果與修改規劃更新或寫入至 `docs/` 資料夾中的特定文件（例如 `docs/system-modification-plan.md`）。該文件將作為下一次修改的依據。
