@@ -94,6 +94,62 @@ def test_backtest_engine_uses_next_bar_execution_without_lookahead():
     assert first_trade["entry_price"] != rows[57]["close"]
 
 
+def test_backtest_engine_uses_next_bar_open_for_strategy_exit_without_lookahead():
+    closes = [100.0] * 14 + [98, 95, 92, 89, 86, 84, 82, 80, 78, 79, 81, 84, 88, 92, 96, 101, 105, 109, 112, 110, 108, 105, 101, 98]
+    opens = [closes[index - 1] if index else closes[0] for index in range(len(closes))]
+    opens[26] = 91.25
+    opens[35] = 97.5
+    rows = build_rows(closes, opens=opens)
+
+    result = run_backtest(
+        rows,
+        {
+            "ticker": "AAPL",
+            "strategy": "rsi_reversion",
+            "start": "2024-01-01",
+            "end": "2024-12-31",
+            "capital": 100_000,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+
+    first_trade = result["trades"][0]
+    assert first_trade["entry_date"] == rows[26]["date"]
+    assert first_trade["entry_price"] == rows[26]["open"]
+    assert first_trade["exit_date"] == rows[35]["date"]
+    assert first_trade["exit_price"] == rows[35]["open"]
+    assert first_trade["exit_price"] != rows[34]["close"]
+
+
+def test_backtest_engine_does_not_use_entry_bar_high_for_take_profit():
+    closes = [100.0] * 14 + [98, 95, 92, 89, 86, 84, 82, 80, 78, 79, 81, 84, 88, 92, 96, 101, 105, 109, 112, 110, 108, 105, 101, 98]
+    opens = [closes[index - 1] if index else closes[0] for index in range(len(closes))]
+    opens[26] = 91.25
+    rows = build_rows(closes, opens=opens)
+    rows[26]["high"] = 130.0
+
+    result = run_backtest(
+        rows,
+        {
+            "ticker": "AAPL",
+            "strategy": "rsi_reversion",
+            "start": "2024-01-01",
+            "end": "2024-12-31",
+            "capital": 100_000,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+            "take_profit_pct": 0.05,
+        },
+    )
+
+    first_trade = result["trades"][0]
+    assert first_trade["entry_date"] == rows[26]["date"]
+    assert first_trade["exit_reason"] == "take_profit"
+    assert first_trade["exit_date"] == rows[28]["date"]
+    assert first_trade["exit_date"] != rows[26]["date"]
+
+
 @pytest.mark.parametrize(
     ("position_sizing", "expected_ratio"),
     [

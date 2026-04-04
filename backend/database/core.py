@@ -1,27 +1,27 @@
 import asyncio
-import os
 from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
 from dotenv import load_dotenv
 from pymysql.err import OperationalError
 
+from env_validation import read_int_env, read_text_env, read_timezone_env
 from .helpers import _build_mysql_error_message, _build_mysql_connection_error_message, _escape_identifier
 from models.schema import build_schema_plan
 
 load_dotenv()
 
-MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "quantvision")
-MYSQL_CHARSET = os.getenv("MYSQL_CHARSET", "utf8mb4")
+MYSQL_HOST = read_text_env("MYSQL_HOST", "127.0.0.1")
+MYSQL_PORT = read_int_env("MYSQL_PORT", "3306", minimum=1, maximum=65535)
+MYSQL_USER = read_text_env("MYSQL_USER", "root")
+MYSQL_PASSWORD = read_text_env("MYSQL_PASSWORD", "")
+MYSQL_DATABASE = read_text_env("MYSQL_DATABASE", "quantvision")
+MYSQL_CHARSET = read_text_env("MYSQL_CHARSET", "utf8mb4")
 
 DEFAULT_OWNER_ID = 1
 DEFAULT_OWNER_USERNAME = "local-owner"
 DEFAULT_OWNER_DISPLAY_NAME = "Local Owner"
-DEFAULT_OWNER_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
+DEFAULT_OWNER_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 
 class DatabaseCore:
     def __init__(self):

@@ -7,7 +7,6 @@ This file retains app creation, middleware, lifespan, and scheduler wiring.
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, time as time_of_day, timedelta, timezone
 from pathlib import Path
@@ -21,6 +20,15 @@ from fastapi.staticfiles import StaticFiles
 
 from data_fetcher import normalize_ticker
 from database import db, init_db
+from env_validation import (
+    read_bool_env,
+    read_hhmm_env,
+    read_int_env,
+    read_text_env,
+    read_timezone_env,
+    read_url_env,
+    validate_runtime_environment,
+)
 from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
@@ -47,31 +55,19 @@ load_dotenv()
 # ─── Configuration ───────────────────────────────────────────
 
 STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
-APP_PORT = int(os.getenv("APP_PORT", "8001"))
-FRONTEND_DEV_URL = os.getenv("FRONTEND_DEV_URL", "http://localhost:5173").rstrip("/")
-STARTUP_DOWNLOAD_ENABLED = os.getenv("STARTUP_DOWNLOAD_ENABLED", "false").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-INSTITUTIONAL_AUTO_SYNC_ENABLED = os.getenv("INSTITUTIONAL_AUTO_SYNC_ENABLED", "true").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-LATEST_DATA_SYNC_PERIOD = os.getenv("LATEST_DATA_SYNC_PERIOD", "1y").strip().lower() or "1y"
-LATEST_DATA_SYNC_INTERVAL = os.getenv("LATEST_DATA_SYNC_INTERVAL", "1d").strip().lower() or "1d"
-LATEST_DATA_SYNC_ON_STARTUP = os.getenv("LATEST_DATA_SYNC_ON_STARTUP", "true").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-ALERT_EVALUATOR_ENABLED = os.getenv("ALERT_EVALUATOR_ENABLED", "true").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-ALERT_POLL_INTERVAL_SECONDS = max(10, int(os.getenv("ALERT_POLL_INTERVAL_SECONDS", "30")))
-MARKET_INTELLIGENCE_SYNC_ENABLED = os.getenv("MARKET_INTELLIGENCE_SYNC_ENABLED", "true").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-MARKET_INTELLIGENCE_STARTUP_SYNC = os.getenv("MARKET_INTELLIGENCE_STARTUP_SYNC", "true").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei"
-DAILY_LATEST_SYNC_TIME_RAW = os.getenv("DAILY_LATEST_SYNC_TIME", "18:10").strip() or "18:10"
+APP_PORT = read_int_env("APP_PORT", "8001", minimum=1, maximum=65535)
+FRONTEND_DEV_URL = read_url_env("FRONTEND_DEV_URL", "http://localhost:5173")
+STARTUP_DOWNLOAD_ENABLED = read_bool_env("STARTUP_DOWNLOAD_ENABLED", False)
+INSTITUTIONAL_AUTO_SYNC_ENABLED = read_bool_env("INSTITUTIONAL_AUTO_SYNC_ENABLED", True)
+LATEST_DATA_SYNC_PERIOD = read_text_env("LATEST_DATA_SYNC_PERIOD", "1y").strip().lower() or "1y"
+LATEST_DATA_SYNC_INTERVAL = read_text_env("LATEST_DATA_SYNC_INTERVAL", "1d").strip().lower() or "1d"
+LATEST_DATA_SYNC_ON_STARTUP = read_bool_env("LATEST_DATA_SYNC_ON_STARTUP", True)
+ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
+ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
+MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
+MARKET_INTELLIGENCE_STARTUP_SYNC = read_bool_env("MARKET_INTELLIGENCE_STARTUP_SYNC", True)
+APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
+DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
@@ -293,6 +289,7 @@ background_scheduler = BackgroundScheduler(
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
 
+    validate_runtime_environment()
     await init_db()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
@@ -374,4 +371,5 @@ app.include_router(system.router)
 
 
 if __name__ == "__main__":
+    validate_runtime_environment()
     uvicorn.run("main:app", host="0.0.0.0", port=APP_PORT, reload=False, log_level="info")

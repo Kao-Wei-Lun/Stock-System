@@ -1,18 +1,19 @@
 import aiomysql
 import json
-import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
 
+from env_validation import read_int_env, read_text_env
+
 load_dotenv()
 
-MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "quantvision")
+MYSQL_HOST = read_text_env("MYSQL_HOST", "127.0.0.1")
+MYSQL_PORT = read_int_env("MYSQL_PORT", "3306", minimum=1, maximum=65535)
+MYSQL_USER = read_text_env("MYSQL_USER", "root")
+MYSQL_PASSWORD = read_text_env("MYSQL_PASSWORD", "")
+MYSQL_DATABASE = read_text_env("MYSQL_DATABASE", "quantvision")
 
 from journal_service import build_journal_stats, compute_trade_result
 from display_name_resolver import resolve_display_name
