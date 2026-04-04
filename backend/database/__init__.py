@@ -33,7 +33,12 @@ db = Database()
 import logging
 log = logging.getLogger(__name__)
 from .core import MYSQL_USER, MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE
-from models.schema import CREATE_TABLE_STATEMENTS, REQUIRED_COLUMN_MIGRATIONS, build_schema_plan
+from models.schema import (
+    CREATE_TABLE_STATEMENTS,
+    REQUIRED_COLUMN_MIGRATIONS,
+    REQUIRED_INDEX_MIGRATIONS,
+    build_schema_plan,
+)
 
 async def init_db():
     await db.connect()

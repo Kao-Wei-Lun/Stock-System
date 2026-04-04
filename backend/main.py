@@ -2,14 +2,13 @@
 QuantVision Pro backend API server.
 
 Refactored: routes are in backend/routers/*, schemas in backend/schemas.py.
-This file retains app creation, middleware, lifespan, and background tasks.
+This file retains app creation, middleware, lifespan, and scheduler wiring.
 """
 
 import asyncio
 import logging
 import os
-import time
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import datetime, time as time_of_day, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -37,6 +36,7 @@ from providers import (
 )
 from routers import alerts, backtest, intelligence, journal, market_data, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
+from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -168,32 +168,6 @@ def _has_suspicious_daily_rows(ticker: str, rows, interval: str) -> bool:
 
 # ─── Background tasks ────────────────────────────────────────
 
-async def startup_download():
-    log.info("Starting history download for %s tickers...", len(STARTUP_DOWNLOAD_TICKERS))
-    for ticker in STARTUP_DOWNLOAD_TICKERS:
-        try:
-            count = await fetcher.fetch_and_store(ticker, period="2y", include_info=False)
-            if count:
-                log.info("  %s: %s candle rows stored", ticker, count)
-            else:
-                log.warning("  %s: no history fetched, will retry on demand", ticker)
-            await asyncio.sleep(STARTUP_DOWNLOAD_DELAY_SECONDS)
-        except Exception as exc:
-            log.warning("  %s download failed: %s", ticker, exc)
-    log.info("History download finished")
-
-
-async def startup_institutional_snapshot():
-    try:
-        payload = await taifex_fetcher.ensure_daily_snapshot()
-        log.info(
-            "Institutional snapshot ready: query=%s resolved=%s",
-            payload.get("query_date"), payload.get("resolved_date"),
-        )
-    except Exception as exc:
-        log.warning("Institutional snapshot sync failed: %s", exc)
-
-
 async def get_tracked_sync_tickers() -> list[str]:
     groups = await db.get_watchlist_groups()
     tickers = [
@@ -255,80 +229,6 @@ async def sync_tracked_market_data(
         }
 
 
-async def daily_latest_sync_loop():
-    await asyncio.sleep(15)
-    if LATEST_DATA_SYNC_ON_STARTUP:
-        try:
-            await sync_tracked_market_data(reason="startup-latest")
-        except Exception as exc:
-            log.warning("Startup latest market sync failed: %s", exc)
-
-    while True:
-        now = datetime.now(APP_TZ)
-        next_run_date = now.date()
-        next_run = datetime.combine(next_run_date, DAILY_LATEST_SYNC_TIME, tzinfo=APP_TZ)
-        if now >= next_run:
-            next_run_date += timedelta(days=1)
-            next_run = datetime.combine(next_run_date, DAILY_LATEST_SYNC_TIME, tzinfo=APP_TZ)
-        sleep_seconds = max(60, int((next_run - now).total_seconds()))
-        await asyncio.sleep(sleep_seconds)
-        try:
-            await sync_tracked_market_data(reason="daily-latest")
-        except Exception as exc:
-            log.warning("Daily latest market sync failed: %s", exc)
-
-
-async def realtime_polling_loop():
-    await asyncio.sleep(5)
-    while True:
-        subscribed = ws_manager.get_subscribed_tickers()
-        if subscribed:
-            for ticker in subscribed:
-                try:
-                    quote = await fetch_and_store_quote_snapshot(ticker)
-                    if quote:
-                        await ws_manager.broadcast_to_ticker(
-                            ticker,
-                            {
-                                "type": "quote", "ticker": ticker,
-                                "data": quote, "ts": int(time.time() * 1000),
-                            },
-                        )
-                except Exception as exc:
-                    log.debug("quote error %s: %s", ticker, exc)
-                await asyncio.sleep(0.2)
-        await asyncio.sleep(15)
-
-
-async def alert_evaluator_loop():
-    await asyncio.sleep(10)
-    while True:
-        try:
-            triggered = await alert_engine.evaluate_active_alerts()
-            if triggered:
-                log.info("Alert evaluator triggered %s alert(s)", triggered)
-        except Exception as exc:
-            log.warning("Alert evaluator loop failed: %s", exc)
-        await asyncio.sleep(ALERT_POLL_INTERVAL_SECONDS)
-
-
-async def market_intelligence_sync_loop():
-    await asyncio.sleep(12)
-    if MARKET_INTELLIGENCE_STARTUP_SYNC:
-        try:
-            summary = await sync_market_intelligence_snapshot(reason="startup-market-intelligence")
-            log.info("Market intelligence startup sync finished: %s", summary)
-        except Exception as exc:
-            log.warning("Market intelligence startup sync failed: %s", exc)
-    while True:
-        await asyncio.sleep(6 * 60 * 60)
-        try:
-            summary = await sync_market_intelligence_snapshot(reason="scheduled-market-intelligence")
-            log.info("Market intelligence scheduled sync finished: %s", summary)
-        except Exception as exc:
-            log.warning("Market intelligence scheduled sync failed: %s", exc)
-
-
 async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
     ticker = normalize_ticker(ticker)
     quote = await quote_provider.fetch_quote(ticker)
@@ -355,48 +255,52 @@ async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
     }
 
 
+async def fetch_startup_history_for_ticker(ticker: str) -> int:
+    return await fetcher.fetch_and_store(ticker, period="2y", include_info=False)
+
+
+background_scheduler = BackgroundScheduler(
+    settings=SchedulerSettings(
+        startup_download_enabled=STARTUP_DOWNLOAD_ENABLED,
+        institutional_auto_sync_enabled=INSTITUTIONAL_AUTO_SYNC_ENABLED,
+        latest_data_sync_on_startup=LATEST_DATA_SYNC_ON_STARTUP,
+        alert_evaluator_enabled=ALERT_EVALUATOR_ENABLED,
+        market_intelligence_sync_enabled=MARKET_INTELLIGENCE_SYNC_ENABLED,
+        market_intelligence_startup_sync=MARKET_INTELLIGENCE_STARTUP_SYNC,
+        alert_poll_interval_seconds=ALERT_POLL_INTERVAL_SECONDS,
+        app_tz=APP_TZ,
+        daily_latest_sync_time=DAILY_LATEST_SYNC_TIME,
+        startup_download_delay_seconds=STARTUP_DOWNLOAD_DELAY_SECONDS,
+    ),
+    dependencies=SchedulerDependencies(
+        startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
+        fetch_history_for_ticker=fetch_startup_history_for_ticker,
+        sync_institutional_snapshot=taifex_fetcher.ensure_daily_snapshot,
+        sync_tracked_market_data=sync_tracked_market_data,
+        fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
+        evaluate_active_alerts=alert_engine.evaluate_active_alerts,
+        sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
+        get_subscribed_tickers=ws_manager.get_subscribed_tickers,
+        broadcast_to_ticker=ws_manager.broadcast_to_ticker,
+    ),
+    logger=log,
+)
+
+
 # ─── App lifecycle ───────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
-    background_tasks: list[asyncio.Task] = []
-
-    def start_background_task(coro) -> asyncio.Task:
-        task = asyncio.create_task(coro)
-        background_tasks.append(task)
-        return task
 
     await init_db()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,
     )
-    if STARTUP_DOWNLOAD_ENABLED:
-        start_background_task(startup_download())
-    else:
-        log.info("Startup Yahoo history prefetch skipped (STARTUP_DOWNLOAD_ENABLED=false).")
-    if INSTITUTIONAL_AUTO_SYNC_ENABLED:
-        start_background_task(startup_institutional_snapshot())
-    else:
-        log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
-    start_background_task(daily_latest_sync_loop())
-    start_background_task(realtime_polling_loop())
-    if ALERT_EVALUATOR_ENABLED:
-        start_background_task(alert_evaluator_loop())
-    else:
-        log.info("Alert evaluator skipped (ALERT_EVALUATOR_ENABLED=false).")
-    if MARKET_INTELLIGENCE_SYNC_ENABLED:
-        start_background_task(market_intelligence_sync_loop())
-    else:
-        log.info("Market intelligence sync skipped (MARKET_INTELLIGENCE_SYNC_ENABLED=false).")
+    background_scheduler.start()
     yield
-    for task in background_tasks:
-        if not task.done():
-            task.cancel()
-    for task in background_tasks:
-        with suppress(asyncio.CancelledError):
-            await task
+    await background_scheduler.shutdown()
     await db.close()
     log.info("QuantVision Pro backend stopped")
 

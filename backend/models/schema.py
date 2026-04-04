@@ -18,7 +18,8 @@ CREATE_TABLE_STATEMENTS = {
             `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             UNIQUE KEY `uq_ohlcv_ticker_date_interval` (`ticker`, `date`, `interval`),
-            KEY `idx_ohlcv_ticker_date` (`ticker`, `interval`, `date`)
+            KEY `idx_ohlcv_ticker_interval_date` (`ticker`, `interval`, `date`),
+            KEY `idx_ohlcv_ticker_date_lookup` (`ticker`, `date`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     "stock_info": """
@@ -122,7 +123,8 @@ CREATE_TABLE_STATEMENTS = {
             `payload_json` LONGTEXT NOT NULL,
             `synced_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`ticker`),
-            KEY `idx_market_quotes_latest_synced_at` (`synced_at`)
+            KEY `idx_market_quotes_latest_synced_at` (`synced_at`),
+            KEY `idx_market_quotes_latest_quote_recency` (`quote_timestamp`, `synced_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     "alerts": """
@@ -564,8 +566,29 @@ REQUIRED_COLUMN_MIGRATIONS = {
 }
 
 
-def build_schema_plan(existing_tables: Set[str], existing_columns: Dict[str, Set[str]]) -> List[str]:
+REQUIRED_INDEX_MIGRATIONS = {
+    "ohlcv": {
+        "idx_ohlcv_ticker_date_lookup": """
+            ALTER TABLE `ohlcv`
+            ADD INDEX `idx_ohlcv_ticker_date_lookup` (`ticker`, `date`)
+        """,
+    },
+    "market_quotes_latest": {
+        "idx_market_quotes_latest_quote_recency": """
+            ALTER TABLE `market_quotes_latest`
+            ADD INDEX `idx_market_quotes_latest_quote_recency` (`quote_timestamp`, `synced_at`)
+        """,
+    },
+}
+
+
+def build_schema_plan(
+    existing_tables: Set[str],
+    existing_columns: Dict[str, Set[str]],
+    existing_indexes: Dict[str, Set[str]] | None = None,
+) -> List[str]:
     plan: List[str] = []
+    normalized_indexes = existing_indexes or {}
     for table_name, statement in CREATE_TABLE_STATEMENTS.items():
         if table_name not in existing_tables:
             plan.append(statement.strip())
@@ -576,6 +599,14 @@ def build_schema_plan(existing_tables: Set[str], existing_columns: Dict[str, Set
         present_columns = existing_columns.get(table_name, set())
         for column_name, statement in column_statements.items():
             if column_name not in present_columns:
+                plan.append(statement.strip())
+
+    for table_name, index_statements in REQUIRED_INDEX_MIGRATIONS.items():
+        if table_name not in existing_tables:
+            continue
+        present_indexes = normalized_indexes.get(table_name, set())
+        for index_name, statement in index_statements.items():
+            if index_name not in present_indexes:
                 plan.append(statement.strip())
 
     return plan

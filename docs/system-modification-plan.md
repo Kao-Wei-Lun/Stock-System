@@ -30,9 +30,9 @@
 **對應問題**：`main.py` 耦合度過高、資料庫缺乏針對性索引。
 **預期效益**：後端服務啟動更加穩定，K 線歷史拉取不再卡頓。
 
-- [ ] **任務 2.1**：建立 `backend/scheduler` 目錄或 `backend/tasks.py`，將 `startup_download()`, `daily_latest_sync_loop()`, `alert_evaluator_loop()` 抽離。
-- [ ] **任務 2.2**：修改 `backend/main.py` 的 Lifespan，改為呼叫 `scheduler.start()`。
-- [ ] **任務 2.3**：修改 MySQL Schema (在 `backend/database` 中)：
+- [x] **任務 2.1**：建立 `backend/scheduler` 目錄或 `backend/tasks.py`，將 `startup_download()`, `daily_latest_sync_loop()`, `alert_evaluator_loop()` 抽離。
+- [x] **任務 2.2**：修改 `backend/main.py` 的 Lifespan，改為呼叫 `scheduler.start()`。
+- [x] **任務 2.3**：修改 MySQL Schema (在 `backend/database` 中)：
   - 針對 `ohlcv` 資料表加上 `INDEX(ticker, date)` 複合索引。
   - 針對 `market_quotes_latest` 加上針對欄位更新的索引。
 

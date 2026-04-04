@@ -110,8 +110,20 @@ class DatabaseCore:
                 existing_columns: Dict[str, Set[str]] = {}
                 for row in await cur.fetchall():
                     existing_columns.setdefault(row["table_name"], set()).add(row["column_name"])
+                await cur.execute(
+                    """
+                    SELECT `TABLE_NAME` AS `table_name`, `INDEX_NAME` AS `index_name`
+                    FROM `INFORMATION_SCHEMA`.`STATISTICS`
+                    WHERE `TABLE_SCHEMA`=%s
+                      AND `INDEX_NAME`<>'PRIMARY'
+                    """,
+                    (MYSQL_DATABASE,),
+                )
+                existing_indexes: Dict[str, Set[str]] = {}
+                for row in await cur.fetchall():
+                    existing_indexes.setdefault(row["table_name"], set()).add(row["index_name"])
             async with conn.cursor() as cur:
-                for statement in build_schema_plan(existing_tables, existing_columns):
+                for statement in build_schema_plan(existing_tables, existing_columns, existing_indexes):
                     await cur.execute(statement)
         if hasattr(self, "ensure_default_owner"):
             await self.ensure_default_owner()

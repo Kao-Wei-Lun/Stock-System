@@ -1,4 +1,9 @@
-from database import CREATE_TABLE_STATEMENTS, REQUIRED_COLUMN_MIGRATIONS, build_schema_plan
+from database import (
+    CREATE_TABLE_STATEMENTS,
+    REQUIRED_COLUMN_MIGRATIONS,
+    REQUIRED_INDEX_MIGRATIONS,
+    build_schema_plan,
+)
 
 
 def test_build_schema_plan_adds_missing_tables_and_columns():
@@ -33,7 +38,7 @@ def test_build_schema_plan_adds_missing_tables_and_columns():
         },
     }
 
-    plan = build_schema_plan(existing_tables, existing_columns)
+    plan = build_schema_plan(existing_tables, existing_columns, {})
 
     assert any("CREATE TABLE `workspace_presets`" in statement for statement in plan)
     assert any("CREATE TABLE `market_quotes_latest`" in statement for statement in plan)
@@ -50,9 +55,14 @@ def test_build_schema_plan_adds_missing_tables_and_columns():
     assert any("CREATE TABLE `taiwan_chip_snapshots`" in statement for statement in plan)
     assert any("CREATE TABLE `screener_presets`" in statement for statement in plan)
     assert any("ALTER TABLE `ohlcv`" in statement and "`source`" in statement for statement in plan)
+    assert any("ALTER TABLE `ohlcv`" in statement and "idx_ohlcv_ticker_date_lookup" in statement for statement in plan)
     assert any("ALTER TABLE `watchlist_groups`" in statement and "`owner_id`" in statement for statement in plan)
     assert any("ALTER TABLE `watchlist_items`" in statement and "`tags_json`" in statement for statement in plan)
     assert any("ALTER TABLE `alerts`" in statement and "`condition_json`" in statement for statement in plan)
+    assert any(
+        "CREATE TABLE `market_quotes_latest`" in statement and "idx_market_quotes_latest_quote_recency" in statement
+        for statement in plan
+    )
 
 
 def test_build_schema_plan_noops_when_schema_is_complete():
@@ -61,7 +71,11 @@ def test_build_schema_plan_noops_when_schema_is_complete():
         table_name: set(column_map.keys())
         for table_name, column_map in REQUIRED_COLUMN_MIGRATIONS.items()
     }
+    existing_indexes = {
+        table_name: set(index_map.keys())
+        for table_name, index_map in REQUIRED_INDEX_MIGRATIONS.items()
+    }
 
-    plan = build_schema_plan(existing_tables, existing_columns)
+    plan = build_schema_plan(existing_tables, existing_columns, existing_indexes)
 
     assert plan == []
