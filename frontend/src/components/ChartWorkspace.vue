@@ -33,6 +33,7 @@
       :chart-mode="chartMode"
       :engine-mode="engineMode"
       :kline-display-mode="klineDisplayMode"
+      :indicator-deck-open="indicatorDeckOpen"
       :is-fullscreen="isFullscreen"
       :chart-layout="chartLayout"
       :syncing-current="syncingCurrent"
@@ -59,10 +60,21 @@
       @set-engine-mode="emit('set-engine-mode', $event)"
       @set-kline-display-mode="emit('set-kline-display-mode', $event)"
       @clear-indicators="handleClearIndicators"
+      @toggle-indicator-deck="indicatorDeckOpen = !indicatorDeckOpen"
       @toggle-fullscreen="emit('toggle-fullscreen')"
       @set-chart-layout="emit('set-chart-layout', $event)"
       @sync-current="emit('sync-current')"
       @open-journal-entry="emit('open-journal-entry', $event)"
+    />
+
+    <ChartIndicatorDeck
+      :open="indicatorDeckOpen"
+      :active-ind="activeInd"
+      :active-panels="activePanels"
+      @close="indicatorDeckOpen = false"
+      @toggle-indicator="emit('toggle-indicator', $event)"
+      @toggle-panel="emit('toggle-panel', $event)"
+      @apply-indicator-preset="emit('apply-indicator-preset', $event)"
     />
 
     <ChartWorkspaceMetaBar
@@ -153,24 +165,24 @@
     />
 
     <ChartSyncPaneGrid
-      v-if="!isLwcMode && !isFullscreen"
+      v-if="!isLwcMode"
       :layout-panes="layoutPanes"
       :current-ticker="currentTicker"
       :set-sync-pane-ref="setSyncPaneRef"
     />
 
     <ChartIndicatorPanel
-      v-if="!isLwcMode && showComparePanel && !isFullscreen"
+      v-if="!isLwcMode && showComparePanel"
       :visible="true"
       :label="`COMPARE (${comparisonMode === 'percent' ? '%' : 'PRICE'})`"
       :canvas-target="compareCanvasTarget"
       panel-class="visible compare-panel"
     />
 
-    <div v-if="!isLwcMode && showVolumePanel && !isFullscreen" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
+    <div v-if="!isLwcMode && showVolumePanel" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
 
     <ChartIndicatorPanel
-      v-if="!isLwcMode && !isFullscreen"
+      v-if="!isLwcMode"
       v-for="panel in indicatorPanels"
       :key="panel.key"
       :visible="panel.visible"
@@ -189,6 +201,7 @@ import { useLWCChart } from "../composables/useLWCChart";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
 import ChartCanvasArea from "./chart/ChartCanvasArea.vue";
+import ChartIndicatorDeck from "./chart/ChartIndicatorDeck.vue";
 import DrawingManager from "./chart/DrawingManager.vue";
 import ChartIndicatorPanel from "./chart/ChartIndicatorPanel.vue";
 import ChartSyncPaneGrid from "./chart/ChartSyncPaneGrid.vue";
@@ -255,6 +268,9 @@ const emit = defineEmits([
   "set-compare-mode",
   "set-kline-display-mode",
   "set-engine-mode",
+  "toggle-indicator",
+  "toggle-panel",
+  "apply-indicator-preset",
   "set-chart-layout",
   "clear-indicators",
   "toggle-fullscreen",
@@ -285,6 +301,7 @@ const compareInput = ref("");
 const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
 const focusedEventKey = ref("");
+const indicatorDeckOpen = ref(false);
 const chartAreaTarget = { target: chartAreaRef };
 const chartContainerTarget = { target: chartContainerRef };
 const mainCanvasTarget = { target: mainCanvas };
@@ -771,11 +788,12 @@ onBeforeUnmount(() => {
 }
 
 .center.is-chart-fullscreen {
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .center.is-chart-fullscreen :deep(.chart-area) {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: clamp(360px, 62vh, 780px);
 }
 </style>

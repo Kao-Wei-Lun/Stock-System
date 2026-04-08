@@ -30,7 +30,7 @@
     <button class="tool-btn" :disabled="!canZoomIn" @click="$emit('zoom-in')">＋ 放大</button>
     <button class="tool-btn" :disabled="!canZoomOut" @click="$emit('zoom-out')">－ 縮小</button>
     <button class="tool-btn" @click="$emit('jump-to-latest')">最新</button>
-    <button class="tool-btn" @click="$emit('reset-view')">重置</button>
+    <button class="tool-btn" @click="$emit('reset-view')">重設</button>
 
     <div class="tool-sep"></div>
 
@@ -77,6 +77,9 @@
     <button class="tool-btn" :class="{ active: klineDisplayMode === 'month' }" @click="$emit('set-kline-display-mode', 'month')">月K</button>
     <button class="tool-btn" :class="{ active: klineDisplayMode === 'quarter' }" @click="$emit('set-kline-display-mode', 'quarter')">季K</button>
     <button class="tool-btn" @click="$emit('clear-indicators')">清指標</button>
+    <button class="tool-btn" :class="{ active: indicatorDeckOpen }" @click="$emit('toggle-indicator-deck')">
+      {{ indicatorDeckOpen ? "收合指標" : "指標面板" }}
+    </button>
 
     <button class="tool-btn" :class="{ active: isFullscreen }" @click="$emit('toggle-fullscreen')">
       {{ isFullscreen ? "退出全螢幕" : "K線全螢幕" }}
@@ -116,6 +119,7 @@ defineProps({
   chartMode: { type: String, required: true },
   engineMode: { type: String, default: "legacy" },
   klineDisplayMode: { type: String, required: true },
+  indicatorDeckOpen: { type: Boolean, default: false },
   isFullscreen: { type: Boolean, default: false },
   chartLayout: { type: String, required: true },
   syncingCurrent: { type: Boolean, default: false },
@@ -145,6 +149,7 @@ defineEmits([
   "set-engine-mode",
   "set-kline-display-mode",
   "clear-indicators",
+  "toggle-indicator-deck",
   "toggle-fullscreen",
   "set-chart-layout",
   "sync-current",

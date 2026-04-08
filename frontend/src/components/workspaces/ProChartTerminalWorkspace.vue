@@ -111,6 +111,9 @@
           @set-timeframe="$emit('set-timeframe', $event)"
           @set-kline-display-mode="$emit('set-kline-display-mode', $event)"
           @set-engine-mode="$emit('set-chart-engine-mode', $event)"
+          @toggle-indicator="$emit('toggle-indicator', $event)"
+          @toggle-panel="$emit('toggle-panel', $event)"
+          @apply-indicator-preset="$emit('apply-indicator-preset', $event)"
           @set-chart-layout="$emit('set-chart-layout', $event)"
           @clear-indicators="$emit('clear-indicators')"
           @open-journal-entry="$emit('open-journal-entry', $event)"
@@ -248,6 +251,9 @@ const emit = defineEmits([
   "set-timeframe",
   "set-kline-display-mode",
   "set-chart-engine-mode",
+  "toggle-indicator",
+  "toggle-panel",
+  "apply-indicator-preset",
   "set-chart-layout",
   "clear-indicators",
   "open-journal-entry",

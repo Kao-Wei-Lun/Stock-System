@@ -112,6 +112,9 @@
         @set-timeframe="setTimeframe"
         @set-kline-display-mode="setKlineDisplayMode"
         @set-chart-engine-mode="setChartEngineMode"
+        @toggle-indicator="toggleIndicator"
+        @toggle-panel="togglePanel"
+        @apply-indicator-preset="applyIndicatorPreset"
         @set-chart-layout="setChartLayout"
         @clear-indicators="clearIndicators"
         @open-journal-entry="handleTerminalJournalEntry"
@@ -425,6 +428,9 @@ const {
   setTimeframe,
   setKlineDisplayMode,
   setChartEngineMode,
+  toggleIndicator,
+  togglePanel,
+  applyIndicatorPreset,
   setLeftTab,
   setActiveWatchGroup,
   setRightTab,

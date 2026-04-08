@@ -266,6 +266,22 @@ describe("ChartWorkspace", () => {
     expect(wrapper.find(".workspace-toolbar").exists()).toBe(false);
     expect(wrapper.find(".drawing-manager").exists()).toBe(false);
     expect(wrapper.find(".chart-toolbar").exists()).toBe(true);
+    expect(wrapper.find(".indicator-deck").exists()).toBe(false);
+    expect(wrapper.find(".volume-area").exists()).toBe(true);
+    expect(wrapper.findAll(".ind-panel.visible").length).toBeGreaterThan(0);
+  });
+
+  it("opens the indicator deck and emits panel toggles", async () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+    const deckToggle = wrapper.findAll(".chart-toolbar .tool-btn").find((button) => button.text() === "指標面板");
+
+    await deckToggle.trigger("click");
+
+    const macdToggle = wrapper.findAll(".indicator-chip").find((button) => button.text().startsWith("MACD"));
+    await macdToggle.trigger("click");
+
+    expect(wrapper.find(".indicator-deck").exists()).toBe(true);
+    expect(wrapper.emitted("toggle-panel")[0]).toEqual(["macd"]);
   });
 
   it("renders event markers and links event rows to vertical lines", async () => {
