@@ -1,5 +1,5 @@
 <template>
-  <AppShellRouteView workspace-tab="macro" right-tab="indicators" />
+  <AppShellRouteView workspace-tab="overview" right-tab="indicators" />
 </template>
 
 <script setup>

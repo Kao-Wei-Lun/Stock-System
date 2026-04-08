@@ -1,7 +1,9 @@
 <template>
   <div class="app-shell">
-    <DashboardTopbar
-      ref="dashboardTopbarRef"
+    <AppNavbar
+      ref="appNavbarRef"
+      :workspace-page="activeWorkspacePage"
+      :review-tab="reviewTab"
       :search-query="searchQuery"
       :search-results="searchResults"
       :search-open="searchOpen"
@@ -10,25 +12,130 @@
       :current-interval="currentInterval"
       :market-status="marketStatus"
       :ws-connected="wsConnected"
+      @navigate="handleNavigate"
+      @set-review-tab="handleReviewTabChange"
       @search-change="searchSymbols"
       @submit-search="submitSearch"
       @select-search-result="selectSearchResult"
       @close-search="closeSearch"
-      @open-alert-modal="openAlertModal"
-      @open-db-tab="handleOpenDbTab"
       @set-timeframe="setTimeframe"
+      @open-alert-modal="openAlertModal"
     />
 
-    <div class="main">
-      <WatchlistPanel
+    <div
+      v-if="activeWorkspacePage === 'terminal'"
+      ref="workspaceStageRef"
+      class="workspace-stage terminal-stage-shell"
+      :class="{ 'is-pseudo-fullscreen': pseudoFullscreen }"
+    >
+      <ProChartTerminalWorkspace
+        :groups="userWatchGroups"
+        :active-group-id="activeWatchGroupId"
+        :watchlist="watchlist"
+        :current-ticker="currentTicker"
+        :current-name="currentName"
+        :quote="quote"
+        :active-tool="activeTool"
+        :active-panels="activePanels"
+        :kline-display-mode="klineDisplayMode"
+        :clean-chart-mode="cleanChartMode"
+        :chart-layout="chartLayout"
+        :chart-loading="chartLoading"
+        :loading-message="loadingMessage"
+        :crosshair="crosshair"
+        :ohlc-data="ohlcData"
+        :active-ind="activeInd"
+        :indicator-settings="indicatorSettings"
+        :drawings="drawings"
+        :selected-drawing-id="selectedDrawingId"
+        :workspace-presets="workspacePresets"
+        :active-workspace-preset-id="activeWorkspacePresetId"
+        :syncing-current="syncingCurrent"
+        :compare-series="compareSeries"
+        :comparison-mode="comparisonMode"
+        :institutional-overlay="institutionalOverlay"
+        :ticker-events="tickerEvents"
+        :macro-summary="macroDashboard.summary || null"
+        :alerts="alerts"
+        :alert-trigger-logs="alertTriggerLogs"
+        :alert-log-loading="alertLogLoading"
+        :expanded-alert-log-id="expandedAlertLogId"
+        :journal-form="journalForm"
+        :journal-loading="journalLoading"
+        :right-tab="drawerTab"
+        :left-collapsed="terminalLeftCollapsed"
+        :right-collapsed="terminalRightCollapsed"
+        :chart-fullscreen="chartFullscreen"
+        @open-overview="handleNavigate('overview')"
+        @toggle-left="toggleTerminalLeft"
+        @toggle-right="toggleTerminalRight"
+        @select-ticker="handleSelectTicker"
+        @set-right-tab="handleDrawerTabChange"
+        @toggle-fullscreen="toggleChartFullscreen"
+        @open-watch-group="handleNotificationWatchGroup"
+        @toggle-alert-active="toggleAlertActive"
+        @toggle-alert-log="toggleAlertLog"
+        @delete-alert="deleteAlert"
+        @open-alert-modal="handleTerminalAlertShortcut"
+        @update-journal-field="handleJournalField"
+        @add-journal-attachment="addJournalAttachment"
+        @remove-journal-attachment="removeJournalAttachment"
+        @save-journal-entry="saveJournalEntry"
+        @reset-journal-form="resetJournalForm"
+        @delete-journal-entry="deleteJournalEntry"
+        @set-tool="setTool"
+        @add-signal="addSignal"
+        @clear-drawings="clearDrawings"
+        @remove-last-drawing="removeLastDrawing"
+        @sync-current="syncCurrentTicker"
+        @add-horizontal-line="addHorizontalLine"
+        @add-drawing="addDrawing"
+        @select-drawing="selectDrawing"
+        @remove-drawing="removeDrawing"
+        @update-drawing="updateDrawing"
+        @toggle-drawing-visibility="toggleDrawingVisibility"
+        @toggle-drawing-lock="toggleDrawingLock"
+        @save-workspace="saveWorkspacePreset"
+        @load-workspace="loadWorkspacePreset"
+        @delete-workspace="deleteWorkspacePreset"
+        @update-crosshair="updateCrosshair"
+        @hide-crosshair="hideCrosshair"
+        @add-compare="addCompareTicker"
+        @remove-compare="removeCompareTicker"
+        @clear-compare="clearCompareTickers"
+        @set-compare-mode="setComparisonMode"
+        @set-kline-display-mode="setKlineDisplayMode"
+        @set-chart-layout="setChartLayout"
+        @clear-indicators="clearIndicators"
+        @open-journal-entry="handleTerminalJournalEntry"
+      />
+    </div>
+
+    <div v-else class="workspace-stage page-stage-shell">
+      <MarketOverviewWorkspace
+        v-if="activeWorkspacePage === 'overview'"
         :groups="userWatchGroups"
         :market-items="marketWatchItems"
         :active-group-id="activeWatchGroupId"
-        :items="watchlist"
+        :watchlist="watchlist"
+        :watchlist-loading="watchlistLoading"
+        :watchlist-error="watchlistError"
         :left-tab="leftTab"
-        :active-ticker="currentTicker"
-        :loading="watchlistLoading"
-        :error="watchlistError"
+        :current-ticker="currentTicker"
+        :current-name="currentName"
+        :macro-dashboard="macroDashboard"
+        :calendar-events="calendarEvents"
+        :ticker-events="tickerEvents"
+        :ticker-news="tickerNews"
+        :screener-filters="screenerFilters"
+        :screener-results="screenerResults"
+        :screener-presets="screenerPresets"
+        :screener-loading="screenerLoading"
+        @open-terminal="handleOpenTerminal"
+        @refresh-macro="loadMacroDashboard(true)"
+        @refresh-events="loadEventCalendar(true)"
+        @refresh-news="loadTickerIntelligence(currentTicker, true)"
+        @create-alert="handleOverviewAlertShortcut"
         @set-left-tab="setLeftTab"
         @select-group="setActiveWatchGroup"
         @create-group="createWatchGroup"
@@ -38,209 +145,79 @@
         @remove-from-watchlist="removeTickerFromWatchlist"
         @reorder-items="reorderWatchlistItems"
         @select-ticker="handleSelectTicker"
-        @open-journal-entry="handleWatchlistJournalEntry"
-        @open-alert-modal="handleWatchlistAlertShortcut"
+        @open-journal-entry="handleOverviewJournalEntry"
+        @open-alert-modal="handleOverviewAlertShortcut"
         @create-alerts-batch="handleWatchlistAlertBatch"
+        @update-screener-filter="handleScreenerFilter"
+        @run-screener="runScreener"
+        @save-screener-preset="saveScreenerPreset"
+        @load-screener-preset="loadScreenerPreset"
+        @delete-screener-preset="deleteScreenerPreset"
       />
 
-      <div
-        ref="workspaceStageRef"
-        class="workspace-stage"
-        :class="{ 'is-pseudo-fullscreen': pseudoFullscreen }"
-      >
-        <div class="workspace-shell">
-            <div class="workspace-mode-tabs">
-              <button class="tool-btn" :class="{ active: workspaceTab === 'chart' }" @click="setWorkspaceTab('chart')">圖表分析</button>
-              <button class="tool-btn" :class="{ active: workspaceTab === 'institutional' }" @click="setWorkspaceTab('institutional')">法人籌碼</button>
-              <button class="tool-btn" :class="{ active: workspaceTab === 'events' }" @click="setWorkspaceTab('events')">事件中心</button>
-              <button class="tool-btn" :class="{ active: workspaceTab === 'macro' }" @click="setWorkspaceTab('macro')">宏觀風險</button>
-              <button class="tool-btn" :class="{ active: workspaceTab === 'screener' }" @click="setWorkspaceTab('screener')">選股器</button>
-            </div>
+      <InstitutionalAnalysisWorkspace
+        v-else-if="activeWorkspacePage === 'institutional'"
+        :data="institutionalData"
+        :insights="institutionalInsights"
+        :loading="institutionalLoading"
+        :error="institutionalError"
+        :insights-loading="institutionalInsightsLoading"
+        :insights-error="institutionalInsightsError"
+        :selected-date="institutionalDate"
+        :selected-futures-commodity="institutionalFuturesCommodity"
+        :selected-options-commodity="institutionalOptionsCommodity"
+        :history-days="institutionalHistoryDays"
+        @open-terminal="handleOpenTerminal(currentTicker)"
+        @set-date="setInstitutionalDate"
+        @shift-date="shiftInstitutionalDate"
+        @refresh-dashboard="loadInstitutionalData(institutionalDate, true)"
+        @refresh-insights="loadInstitutionalInsights(institutionalDate, institutionalFuturesCommodity, institutionalOptionsCommodity, institutionalHistoryDays, true)"
+        @set-futures-commodity="setInstitutionalFuturesCommodity"
+        @set-options-commodity="setInstitutionalOptionsCommodity"
+        @set-history-days="setInstitutionalHistoryDays"
+        @create-alert="openAlertModal($event)"
+      />
 
-          <template v-if="workspaceTab === 'chart'">
-            <div class="workspace-content">
-              <ChartWorkspace
-                :current-ticker="currentTicker"
-                :current-name="currentName"
-                :quote="quote"
-                :active-tool="activeTool"
-                :active-panels="activePanels"
-                :kline-display-mode="klineDisplayMode"
-                :clean-chart-mode="cleanChartMode"
-                :chart-layout="chartLayout"
-                :loading="chartLoading"
-                :loading-message="loadingMessage"
-                :crosshair="crosshair"
-                :ohlc-data="ohlcData"
-                :active-ind="activeInd"
-                :indicator-settings="indicatorSettings"
-                :drawings="drawings"
-                :selected-drawing-id="selectedDrawingId"
-                :workspace-presets="workspacePresets"
-                :active-workspace-preset-id="activeWorkspacePresetId"
-                :syncing-current="syncingCurrent"
-                :compare-series="compareSeries"
-                :comparison-mode="comparisonMode"
-                :institutional-overlay="institutionalOverlay"
-                :ticker-events="tickerEvents"
-                :macro-summary="macroDashboard.summary || null"
-                :is-fullscreen="chartFullscreen"
-                @set-tool="setTool"
-                @add-signal="addSignal"
-                @clear-drawings="clearDrawings"
-                @remove-last-drawing="removeLastDrawing"
-                @sync-current="syncCurrentTicker"
-                @add-horizontal-line="addHorizontalLine"
-                @add-drawing="addDrawing"
-                @select-drawing="selectDrawing"
-                @remove-drawing="removeDrawing"
-                @update-drawing="updateDrawing"
-                @toggle-drawing-visibility="toggleDrawingVisibility"
-                @toggle-drawing-lock="toggleDrawingLock"
-                @save-workspace="saveWorkspacePreset"
-                @load-workspace="loadWorkspacePreset"
-                @delete-workspace="deleteWorkspacePreset"
-                @update-crosshair="updateCrosshair"
-                @hide-crosshair="hideCrosshair"
-                @add-compare="addCompareTicker"
-                @remove-compare="removeCompareTicker"
-                @clear-compare="clearCompareTickers"
-                @set-compare-mode="setComparisonMode"
-                @set-kline-display-mode="setKlineDisplayMode"
-                @set-chart-layout="setChartLayout"
-                @clear-indicators="clearIndicators"
-                @open-journal-entry="startJournalEntry"
-                @toggle-fullscreen="toggleChartFullscreen"
-              />
-
-              <RightSidebar
-                :right-tab="rightTab"
-                :current-ticker="currentTicker"
-                :indicator-snapshot="indicatorSnapshot"
-                :active-ind="activeInd"
-                :active-panels="activePanels"
-                :indicator-settings="indicatorSettings"
-                :macro-summary="macroDashboard.summary || null"
-                :ticker-events="tickerEvents"
-                :ticker-news="tickerNews"
-                :fundamentals-summary="fundamentalsSummary"
-                :taiwan-chip-summary="taiwanChipSummary"
-                :alerts="alerts"
-                :alert-trigger-logs="alertTriggerLogs"
-                :alert-log-loading="alertLogLoading"
-                :expanded-alert-log-id="expandedAlertLogId"
-                :backtest-form="backtestForm"
-                :backtest-result="backtestResult"
-                :backtest-history="backtestHistory"
-                :backtest-compare-ids="backtestCompareIds"
-                :backtest-compare-runs="backtestCompareRuns"
-                :backtest-loading="backtestLoading"
-                :journal-form="journalForm"
-                :journal-entries="journalEntries"
-                :journal-stats="journalStats"
-                :journal-loading="journalLoading"
-                :journal-filter-presets="journalFilterPresets"
-                :journal-filter-scope="journalFilterScope"
-                :journal-filters="journalFilters"
-                :db-stats="dbStats"
-                :db-stats-loading="dbStatsLoading"
-                :db-stats-error="dbStatsError"
-                :syncing-all="syncingAll"
-                @set-right-tab="setRightTab"
-                @toggle-indicator="toggleIndicator"
-                @toggle-panel="togglePanel"
-                @update-indicator-setting="updateIndicatorSetting"
-                @apply-indicator-preset="applyIndicatorPreset"
-                @focus-event="focusTickerEvent"
-                @open-alert-modal="handleRightSidebarAlertShortcut"
-                @open-watch-group="handleNotificationWatchGroup"
-                @toggle-alert-active="toggleAlertActive"
-                @toggle-alert-log="toggleAlertLog"
-                @delete-alert="deleteAlert"
-                @update-backtest-field="handleBacktestField"
-                @run-backtest="runBacktest"
-                @load-backtest="selectBacktestRun"
-                @toggle-backtest-compare="toggleBacktestCompare"
-                @clear-backtest-compare="clearBacktestCompare"
-                @update-journal-field="handleJournalField"
-                @update-journal-filter="handleJournalFilter"
-                @apply-journal-filter-preset="handleJournalFilterPreset"
-                @save-journal-filter-preset="saveJournalFilterPreset"
-                @load-journal-filter-preset="loadJournalFilterPreset"
-                @delete-journal-filter-preset="deleteJournalFilterPreset"
-                @save-journal-entry="saveJournalEntry"
-                @delete-journal-entry="deleteJournalEntry"
-                @select-journal-entry="selectJournalEntry"
-                @reset-journal-form="resetJournalForm"
-                @add-journal-attachment="addJournalAttachment"
-                @remove-journal-attachment="removeJournalAttachment"
-                @create-watch-group="handleJournalResultWatchGroup"
-                @add-watchlist="handleJournalResultWatchlist"
-                @sync-all="syncAll"
-              />
-            </div>
-          </template>
-          <InstitutionalDashboard
-            v-else-if="workspaceTab === 'institutional'"
-            :data="institutionalData"
-            :insights="institutionalInsights"
-            :loading="institutionalLoading"
-            :error="institutionalError"
-            :insights-loading="institutionalInsightsLoading"
-            :insights-error="institutionalInsightsError"
-            :selected-date="institutionalDate"
-            :selected-futures-commodity="institutionalFuturesCommodity"
-            :selected-options-commodity="institutionalOptionsCommodity"
-            :history-days="institutionalHistoryDays"
-            @set-date="setInstitutionalDate"
-            @shift-date="shiftInstitutionalDate"
-            @refresh-dashboard="loadInstitutionalData(institutionalDate, true)"
-            @refresh-insights="loadInstitutionalInsights(institutionalDate, institutionalFuturesCommodity, institutionalOptionsCommodity, institutionalHistoryDays, true)"
-            @set-futures-commodity="setInstitutionalFuturesCommodity"
-            @set-options-commodity="setInstitutionalOptionsCommodity"
-            @set-history-days="setInstitutionalHistoryDays"
-            @create-alert="openAlertModal($event)"
-          />
-
-          <EventCenter
-            v-else-if="workspaceTab === 'events'"
-            :current-ticker="currentTicker"
-            :current-name="currentName"
-            :calendar-events="calendarEvents"
-            :ticker-events="tickerEvents"
-            :ticker-news="tickerNews"
-            @refresh-events="loadEventCalendar(true)"
-            @refresh-news="loadTickerIntelligence(currentTicker, true)"
-            @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
-            @create-alert="openAlertModal($event)"
-          />
-
-          <MacroDashboard
-            v-else-if="workspaceTab === 'macro'"
-            :macro-dashboard="macroDashboard"
-            @refresh="loadMacroDashboard(true)"
-            @create-alert="handleMacroAlertShortcut"
-          />
-
-          <ScreenerWorkspace
-            v-else
-            :filters="screenerFilters"
-            :results="screenerResults"
-            :presets="screenerPresets"
-            :loading="screenerLoading"
-            :current-ticker="currentTicker"
-            @update-filter="handleScreenerFilter"
-            @run-screen="runScreener"
-            @save-preset="saveScreenerPreset"
-            @load-preset="loadScreenerPreset"
-            @delete-preset="deleteScreenerPreset"
-            @open-ticker="handleSelectTicker({ ticker: $event, name: $event })"
-            @add-watchlist="addTickerToWatchlist"
-            @open-journal-entry="handleScreenerJournalEntry"
-            @add-alert="openAlertModal($event)"
-          />
-        </div>
-      </div>
+      <ReviewWorkspace
+        v-else
+        :right-tab="reviewTab"
+        :current-ticker="currentTicker"
+        :backtest-form="backtestForm"
+        :backtest-result="backtestResult"
+        :backtest-history="backtestHistory"
+        :backtest-compare-ids="backtestCompareIds"
+        :backtest-compare-runs="backtestCompareRuns"
+        :backtest-loading="backtestLoading"
+        :journal-form="journalForm"
+        :journal-entries="journalEntries"
+        :journal-stats="journalStats"
+        :journal-loading="journalLoading"
+        :journal-filter-presets="journalFilterPresets"
+        :journal-filter-scope="journalFilterScope"
+        :journal-filters="journalFilters"
+        @open-terminal="handleOpenTerminal(currentTicker)"
+        @set-right-tab="handleReviewWorkspaceTabChange"
+        @update-backtest-field="handleBacktestField"
+        @run-backtest="runBacktest"
+        @load-backtest="selectBacktestRun"
+        @toggle-backtest-compare="toggleBacktestCompare"
+        @clear-backtest-compare="clearBacktestCompare"
+        @update-journal-field="handleJournalField"
+        @update-journal-filter="handleJournalFilter"
+        @apply-journal-filter-preset="handleJournalFilterPreset"
+        @save-journal-filter-preset="saveJournalFilterPreset"
+        @load-journal-filter-preset="loadJournalFilterPreset"
+        @delete-journal-filter-preset="deleteJournalFilterPreset"
+        @save-journal-entry="saveJournalEntry"
+        @delete-journal-entry="deleteJournalEntry"
+        @select-journal-entry="selectJournalEntry"
+        @reset-journal-form="resetJournalForm"
+        @add-journal-attachment="addJournalAttachment"
+        @remove-journal-attachment="removeJournalAttachment"
+        @create-watch-group="handleJournalResultWatchGroup"
+        @add-watchlist="handleJournalResultWatchlist"
+        @open-alert-modal="openAlertModal($event)"
+      />
     </div>
 
     <StatusBar
@@ -259,6 +236,7 @@
     <ToastStack
       :notifications="notifications"
       @dismiss="dismissNotification"
+      @select="handleToastSelect"
     />
 
     <NotificationPanel
@@ -284,7 +262,6 @@
 
 <script setup>
 import {
-  defineAsyncComponent,
   isRef,
   nextTick,
   onBeforeUnmount,
@@ -293,36 +270,35 @@ import {
   watch,
 } from "vue";
 
-import DashboardTopbar from "./components/DashboardTopbar.vue";
+import AppNavbar from "./components/AppNavbar.vue";
+import AlertModal from "./components/AlertModal.vue";
+import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import ToastStack from "./components/ToastStack.vue";
-import WatchlistPanel from "./components/WatchlistPanel.vue";
+import InstitutionalAnalysisWorkspace from "./components/workspaces/InstitutionalAnalysisWorkspace.vue";
+import MarketOverviewWorkspace from "./components/workspaces/MarketOverviewWorkspace.vue";
+import ProChartTerminalWorkspace from "./components/workspaces/ProChartTerminalWorkspace.vue";
+import ReviewWorkspace from "./components/workspaces/ReviewWorkspace.vue";
 import { useDashboard } from "./composables/useDashboard";
 import { useHotkeys } from "./composables/useHotkeys";
 
-const ChartWorkspace = defineAsyncComponent(() => import("./components/ChartWorkspace.vue"));
-const RightSidebar = defineAsyncComponent(() => import("./components/RightSidebar.vue"));
-const InstitutionalDashboard = defineAsyncComponent(() => import("./components/InstitutionalDashboard.vue"));
-const EventCenter = defineAsyncComponent(() => import("./components/EventCenter.vue"));
-const MacroDashboard = defineAsyncComponent(() => import("./components/MacroDashboard.vue"));
-const ScreenerWorkspace = defineAsyncComponent(() => import("./components/ScreenerWorkspace.vue"));
-const NotificationPanel = defineAsyncComponent(() => import("./components/NotificationPanel.vue"));
-const AlertModal = defineAsyncComponent(() => import("./components/AlertModal.vue"));
-
 const props = defineProps({
-  routeWorkspaceTab: { type: String, default: "chart" },
+  routeWorkspaceTab: { type: String, default: "overview" },
   routeRightTab: { type: String, default: "indicators" },
   routeTicker: { type: String, default: "" },
 });
 
 const emit = defineEmits(["route-change"]);
 
-const dashboardTopbarRef = ref(null);
+const appNavbarRef = ref(null);
 const workspaceStageRef = ref(null);
 const chartFullscreen = ref(false);
 const pseudoFullscreen = ref(false);
 const routeStateReady = ref(false);
 const applyingRouteState = ref(false);
+const activeWorkspacePage = ref("overview");
+const terminalLeftCollapsed = ref(true);
+const terminalRightCollapsed = ref(true);
 
 const {
   timeframeOptions,
@@ -330,7 +306,6 @@ const {
   searchQuery,
   searchResults,
   searchOpen,
-  watchlistGroups,
   userWatchGroups,
   marketWatchItems,
   activeWatchGroupId,
@@ -343,7 +318,6 @@ const {
   watchlistError,
   leftTab,
   rightTab,
-  workspaceTab,
   currentTicker,
   currentName,
   currentPeriod,
@@ -365,9 +339,6 @@ const {
   latency,
   lastUpdate,
   clockTime,
-  dbStats,
-  dbStatsLoading,
-  dbStatsError,
   institutionalDate,
   institutionalData,
   institutionalLoading,
@@ -382,14 +353,11 @@ const {
   tickerEvents,
   tickerNews,
   macroDashboard,
-  fundamentalsSummary,
-  taiwanChipSummary,
   screenerFilters,
   screenerResults,
   screenerPresets,
   screenerLoading,
   syncingCurrent,
-  syncingAll,
   quote,
   marketStatus,
   activeInd,
@@ -412,7 +380,6 @@ const {
   journalFilterPresets,
   journalFilterScope,
   journalFilters,
-  indicatorSnapshot,
   institutionalOverlay,
   backendUrl,
   searchSymbols,
@@ -448,10 +415,6 @@ const {
   loadTickerIntelligence,
   setChartLayout,
   selectTicker,
-  toggleIndicator,
-  togglePanel,
-  updateIndicatorSetting,
-  applyIndicatorPreset,
   clearIndicators,
   setTool,
   addSignal,
@@ -469,35 +432,33 @@ const {
   deleteWorkspacePreset,
   updateCrosshair,
   hideCrosshair,
-  focusTickerEvent,
   syncCurrentTicker,
-  syncAll,
   dismissNotification,
   setNotificationRead,
   openAlertModal,
-    closeAlertModal,
-    updateAlertField,
-    saveAlert,
-    createAlertsBatch,
-    toggleAlertLog,
-    toggleAlertActive,
-    deleteAlert,
-    updateBacktestField,
-    runBacktest,
-    selectBacktestRun,
-    toggleBacktestCompare,
-    clearBacktestCompare,
-    updateJournalField,
-    updateJournalFilter,
-    applyJournalFilterPreset,
-    saveJournalFilterPreset,
-    loadJournalFilterPreset,
-    deleteJournalFilterPreset,
-    saveJournalEntry,
-    deleteJournalEntry,
-    selectJournalEntry,
-    resetJournalForm,
-    addJournalAttachment,
+  closeAlertModal,
+  updateAlertField,
+  saveAlert,
+  createAlertsBatch,
+  toggleAlertLog,
+  toggleAlertActive,
+  deleteAlert,
+  updateBacktestField,
+  runBacktest,
+  selectBacktestRun,
+  toggleBacktestCompare,
+  clearBacktestCompare,
+  updateJournalField,
+  updateJournalFilter,
+  applyJournalFilterPreset,
+  saveJournalFilterPreset,
+  loadJournalFilterPreset,
+  deleteJournalFilterPreset,
+  saveJournalEntry,
+  deleteJournalEntry,
+  selectJournalEntry,
+  resetJournalForm,
+  addJournalAttachment,
   removeJournalAttachment,
   startJournalEntry,
   updateScreenerFilter,
@@ -505,15 +466,99 @@ const {
   saveScreenerPreset,
   loadScreenerPreset,
   deleteScreenerPreset,
-  } = useDashboard();
+} = useDashboard();
+
+const reviewTab = ref("journal");
 
 function readStateValue(source) {
   return isRef(source) ? source.value : source;
 }
 
+const drawerTab = ref("alerts");
+
+function normalizeWorkspacePage(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (["overview", "terminal", "institutional", "review"].includes(normalized)) {
+    return normalized;
+  }
+  if (["macro", "events", "screener", "db"].includes(normalized)) return "overview";
+  if (["journal", "backtest"].includes(normalized)) return "review";
+  if (["dashboard", "alerts", "chart"].includes(normalized)) return "terminal";
+  return "overview";
+}
+
+function normalizeReviewTab(value) {
+  return String(value || "").toLowerCase() === "backtest" ? "backtest" : "journal";
+}
+
+function normalizeDrawerTab(value) {
+  return String(value || "").toLowerCase() === "journal" ? "journal" : "alerts";
+}
+
+async function closeTerminalFullscreenIfNeeded() {
+  if (document.fullscreenElement === workspaceStageRef.value) {
+    await document.exitFullscreen();
+  }
+  if (pseudoFullscreen.value) {
+    pseudoFullscreen.value = false;
+  }
+  syncChartFullscreenState();
+}
+
+async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
+  if (page === "terminal") {
+    await setWorkspaceTab("chart");
+    const nextDrawerTab = normalizeDrawerTab(secondaryTab);
+    drawerTab.value = nextDrawerTab;
+    if (!terminalRightCollapsed.value) {
+      await setRightTab(nextDrawerTab);
+    }
+    return;
+  }
+
+  if (page === "overview") {
+    if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
+      await closeTerminalFullscreenIfNeeded();
+    }
+    await setWorkspaceTab("screener");
+    await Promise.all([
+      loadMacroDashboard(true),
+      loadEventCalendar(true),
+      loadTickerIntelligence(readStateValue(currentTicker), true),
+      readStateValue(screenerResults)?.items?.length ? Promise.resolve() : runScreener(),
+    ]);
+    return;
+  }
+
+  if (page === "institutional") {
+    if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
+      await closeTerminalFullscreenIfNeeded();
+    }
+    await setWorkspaceTab("institutional");
+    return;
+  }
+
+  if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
+    await closeTerminalFullscreenIfNeeded();
+  }
+  await setWorkspaceTab("chart");
+  reviewTab.value = normalizeReviewTab(secondaryTab);
+  await setRightTab(reviewTab.value);
+}
+
+async function applyWorkspacePage(nextPage, secondaryTab = "indicators") {
+  const previousPage = activeWorkspacePage.value;
+  activeWorkspacePage.value = normalizeWorkspacePage(nextPage);
+  if (activeWorkspacePage.value === "terminal" && previousPage !== "terminal") {
+    terminalLeftCollapsed.value = true;
+    terminalRightCollapsed.value = true;
+  }
+  await ensureWorkspaceResources(activeWorkspacePage.value, secondaryTab);
+}
+
 async function applyIncomingRouteState() {
   const nextTicker = String(props.routeTicker || "").trim().toUpperCase();
-  const nextWorkspaceTab = String(props.routeWorkspaceTab || "chart");
+  const nextPage = normalizeWorkspacePage(props.routeWorkspaceTab);
   const nextRightTab = String(props.routeRightTab || "indicators");
 
   applyingRouteState.value = true;
@@ -521,12 +566,7 @@ async function applyIncomingRouteState() {
     if (nextTicker && nextTicker !== readStateValue(currentTicker)) {
       await selectTicker(nextTicker, nextTicker);
     }
-    if (nextWorkspaceTab !== readStateValue(workspaceTab)) {
-      await setWorkspaceTab(nextWorkspaceTab);
-    }
-    if (nextWorkspaceTab === "chart" && nextRightTab !== readStateValue(rightTab)) {
-      await setRightTab(nextRightTab);
-    }
+    await applyWorkspacePage(nextPage, nextRightTab);
   } finally {
     applyingRouteState.value = false;
     routeStateReady.value = true;
@@ -543,15 +583,16 @@ watch(
 
 watch(
   () => [
-    readStateValue(workspaceTab),
-    readStateValue(rightTab),
+    activeWorkspacePage.value,
+    reviewTab.value,
+    drawerTab.value,
     readStateValue(currentTicker),
   ],
-  ([nextWorkspaceTab, nextRightTab, nextTicker]) => {
+  ([workspacePage, nextReviewTab, nextDrawerTab, nextTicker]) => {
     if (!routeStateReady.value || applyingRouteState.value) return;
     emit("route-change", {
-      workspaceTab: nextWorkspaceTab,
-      rightTab: nextRightTab,
+      workspaceTab: workspacePage,
+      rightTab: workspacePage === "review" ? nextReviewTab : nextDrawerTab,
       currentTicker: nextTicker,
     });
   },
@@ -599,15 +640,67 @@ function handleWindowKeydown(event) {
   }
 }
 
-function handleSelectTicker(item) {
-  if (!item) return;
-  setWorkspaceTab("chart");
-  selectTicker(item.ticker, item.name || item.ticker);
+function toggleTerminalLeft() {
+  terminalLeftCollapsed.value = !terminalLeftCollapsed.value;
 }
 
-function handleOpenDbTab() {
-  setWorkspaceTab("chart");
-  setRightTab("db");
+async function toggleTerminalRight() {
+  const nextCollapsed = !terminalRightCollapsed.value;
+  terminalRightCollapsed.value = nextCollapsed;
+  if (!nextCollapsed) {
+    await setRightTab(drawerTab.value);
+  }
+}
+
+async function handleNavigate(page) {
+  const nextPage = normalizeWorkspacePage(page);
+  await applyWorkspacePage(nextPage, nextPage === "review" ? reviewTab.value : drawerTab.value);
+}
+
+async function handleReviewTabChange(tab) {
+  reviewTab.value = normalizeReviewTab(tab);
+  await applyWorkspacePage("review", reviewTab.value);
+}
+
+async function handleReviewWorkspaceTabChange(tab) {
+  reviewTab.value = normalizeReviewTab(tab);
+  await setRightTab(reviewTab.value);
+}
+
+async function handleDrawerTabChange(tab) {
+  drawerTab.value = normalizeDrawerTab(tab);
+  await setRightTab(drawerTab.value);
+}
+
+async function handleOpenTerminal(ticker) {
+  await applyWorkspacePage("terminal", drawerTab.value);
+  if (ticker) {
+    const normalized = String(ticker).trim().toUpperCase();
+    if (normalized && normalized !== readStateValue(currentTicker)) {
+      await selectTicker(normalized, normalized);
+    }
+  }
+}
+
+async function openReviewWithJournal(payload) {
+  reviewTab.value = "journal";
+  await applyWorkspacePage("review", "journal");
+  if (payload?.ticker) {
+    await selectTicker(payload.ticker, payload.name || payload.ticker);
+  }
+  startJournalEntry(payload);
+}
+
+async function openTerminalWithTicker(ticker, name) {
+  await applyWorkspacePage("terminal", "alerts");
+  if (ticker) {
+    await selectTicker(ticker, name || ticker);
+  }
+}
+
+function handleSelectTicker(item) {
+  if (!item?.ticker) return;
+  selectTicker(item.ticker, item.name || item.ticker);
 }
 
 function handleNotificationReadToggle(payload) {
@@ -615,27 +708,37 @@ function handleNotificationReadToggle(payload) {
   setNotificationRead(payload.id, payload.read);
 }
 
-function handleOpenNotificationTicker(ticker) {
+async function handleOpenNotificationTicker(ticker) {
   if (!ticker) return;
-  setWorkspaceTab("chart");
-  selectTicker(ticker, ticker);
+  await openTerminalWithTicker(ticker, ticker);
 }
 
-function handleOpenNotificationWorkspace(workspace) {
-  if (!workspace) return;
-  setWorkspaceTab(workspace);
+function resolveWorkspaceTarget(target) {
+  const normalized = String(target || "").toLowerCase();
+  if (["macro", "events", "screener", "overview", "db"].includes(normalized)) return "overview";
+  if (normalized === "institutional") return "institutional";
+  if (["journal", "backtest", "review"].includes(normalized)) return "review";
+  return "terminal";
 }
 
-function handleNotificationJournalEntry(payload) {
+async function handleOpenNotificationWorkspace(workspace) {
+  const targetPage = resolveWorkspaceTarget(workspace);
+  if (targetPage === "review") {
+    await applyWorkspacePage("review", String(workspace || "").toLowerCase() === "backtest" ? "backtest" : "journal");
+    return;
+  }
+  await applyWorkspacePage(targetPage, drawerTab.value);
+}
+
+async function handleNotificationJournalEntry(payload) {
   if (!payload?.ticker) return;
-  setWorkspaceTab("chart");
-  void selectTicker(payload.ticker, payload.name || payload.ticker);
-  startJournalEntry(payload);
+  await openReviewWithJournal(payload);
 }
 
-function handleNotificationWatchGroup(payload) {
+async function handleNotificationWatchGroup(payload) {
   const groupName = String(payload?.groupName || "").trim();
   if (!groupName) return;
+  await applyWorkspacePage("overview", "indicators");
   setLeftTab("watch");
   const targetGroup = (userWatchGroups.value || []).find(
     (group) => String(group?.name || "").trim() === groupName,
@@ -654,21 +757,16 @@ function handleMacroAlertShortcut(payload) {
   });
 }
 
-function handleScreenerJournalEntry(payload) {
+async function handleOverviewJournalEntry(payload) {
   if (!payload?.ticker) return;
-  setWorkspaceTab("chart");
-  void selectTicker(payload.ticker, payload.name || payload.ticker);
-  startJournalEntry(payload);
+  await openReviewWithJournal(payload);
 }
 
-function handleWatchlistJournalEntry(payload) {
-  if (!payload?.ticker) return;
-  setWorkspaceTab("chart");
-  void selectTicker(payload.ticker, payload.name || payload.ticker);
-  startJournalEntry(payload);
-}
-
-function handleWatchlistAlertShortcut(payload) {
+function handleOverviewAlertShortcut(payload) {
+  if (payload?.type === "market_risk") {
+    handleMacroAlertShortcut(payload);
+    return;
+  }
   if (!payload) {
     openAlertModal();
     return;
@@ -676,16 +774,38 @@ function handleWatchlistAlertShortcut(payload) {
   openAlertModal(payload);
 }
 
-function handleWatchlistAlertBatch(payloads) {
-  if (!Array.isArray(payloads) || !payloads.length) return;
-  setRightTab("alerts");
-  void createAlertsBatch(payloads);
+function handleTerminalAlertShortcut(payload) {
+  if (!payload) {
+    openAlertModal();
+    return;
+  }
+  if (payload?.ticker) {
+    void selectTicker(payload.ticker, payload.name || payload.ticker);
+  }
+  openAlertModal(payload);
 }
 
-function handleJournalResultWatchlist(items) {
+async function handleTerminalJournalEntry(payload) {
+  drawerTab.value = "journal";
+  if (terminalRightCollapsed.value) {
+    terminalRightCollapsed.value = false;
+  }
+  await setRightTab("journal");
+  startJournalEntry(payload);
+}
+
+async function handleWatchlistAlertBatch(payloads) {
+  if (!Array.isArray(payloads) || !payloads.length) return;
+  drawerTab.value = "alerts";
+  await setRightTab("alerts");
+  await createAlertsBatch(payloads);
+}
+
+async function handleJournalResultWatchlist(items) {
   if (!Array.isArray(items) || !items.length) return;
+  await applyWorkspacePage("overview", "indicators");
   setLeftTab("watch");
-  void addTickersToWatchlistBatch(items);
+  await addTickersToWatchlistBatch(items);
 }
 
 function getUniqueWatchGroupName(baseName) {
@@ -708,6 +828,7 @@ function getUniqueWatchGroupName(baseName) {
 async function handleJournalResultWatchGroup(payload) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   if (!items.length) return;
+  await applyWorkspacePage("overview", "indicators");
   setLeftTab("watch");
   const groupName = getUniqueWatchGroupName(payload?.name);
   await createWatchGroup(groupName);
@@ -716,18 +837,6 @@ async function handleJournalResultWatchGroup(payload) {
   );
   if (!group?.id) return;
   await addTickersToWatchlistBatch(items, group.id);
-}
-
-function handleRightSidebarAlertShortcut(payload) {
-  if (!payload) {
-    openAlertModal();
-    return;
-  }
-  if (payload?.ticker) {
-    setWorkspaceTab("chart");
-    void selectTicker(payload.ticker, payload.name || payload.ticker);
-  }
-  openAlertModal(payload);
 }
 
 function handleAlertField(payload) {
@@ -760,8 +869,23 @@ function handleScreenerFilter(payload) {
   updateScreenerFilter(payload.key, payload.value);
 }
 
+async function handleToastSelect(item) {
+  if (!item) return;
+  if (item.ticker) {
+    await openTerminalWithTicker(item.ticker, item.name || item.ticker);
+    await dismissNotification(item.id);
+    return;
+  }
+  if (item.workspaceTarget) {
+    await handleOpenNotificationWorkspace(item.workspaceTarget);
+    await dismissNotification(item.id);
+    return;
+  }
+  await dismissNotification(item.id);
+}
+
 function focusSearchInput() {
-  dashboardTopbarRef.value?.focusSearchInput?.();
+  appNavbarRef.value?.focusSearchInput?.();
 }
 
 function shiftTimeframe(step) {
@@ -834,6 +958,29 @@ useHotkeys(() => [
       void handleSaveWorkspaceShortcut();
     },
   },
+  {
+    key: "z",
+    altKey: true,
+    preventDefault: true,
+    handler: () => {
+      if (activeWorkspacePage.value !== "terminal") return;
+      void toggleChartFullscreen();
+    },
+  },
+  {
+    key: "a",
+    altKey: true,
+    preventDefault: true,
+    handler: () => {
+      if (activeWorkspacePage.value !== "terminal") return;
+      drawerTab.value = "alerts";
+      if (terminalRightCollapsed.value) {
+        terminalRightCollapsed.value = false;
+      }
+      void setRightTab("alerts");
+      openAlertModal();
+    },
+  },
 ]);
 
 onMounted(() => {
@@ -856,5 +1003,34 @@ onBeforeUnmount(() => {
 .app-shell {
   display: flex;
   flex-direction: column;
+}
+
+.workspace-stage {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.terminal-stage-shell {
+  display: flex;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.terminal-stage-shell:fullscreen,
+.terminal-stage-shell.is-pseudo-fullscreen {
+  display: flex;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.terminal-stage-shell.is-pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+}
+
+.page-stage-shell {
+  overflow: hidden;
 }
 </style>

@@ -1,63 +1,75 @@
-const WORKSPACE_ROUTE_NAMES = new Set(["institutional", "events", "macro", "screener"]);
-const RIGHT_TAB_ROUTE_NAMES = new Set(["alerts", "backtest", "journal", "db"]);
+const OVERVIEW_ROUTE_NAMES = new Set(["overview", "macro", "events", "screener", "db"]);
+const TERMINAL_ROUTE_NAMES = new Set(["terminal", "dashboard", "alerts"]);
+const REVIEW_ROUTE_NAMES = new Set(["journal", "backtest"]);
 
 function normalizeTickerParam(ticker) {
   return String(ticker || "").trim().toUpperCase();
 }
 
 export function mapRouteToAppState(route = {}) {
-  const name = String(route?.name || "dashboard");
+  const name = String(route?.name || "overview");
   const routeTicker = normalizeTickerParam(route?.params?.ticker);
 
-  if (WORKSPACE_ROUTE_NAMES.has(name)) {
+  if (OVERVIEW_ROUTE_NAMES.has(name)) {
     return {
-      routeWorkspaceTab: name,
+      routeWorkspaceTab: "overview",
       routeRightTab: "indicators",
       routeTicker,
     };
   }
 
-  if (RIGHT_TAB_ROUTE_NAMES.has(name)) {
+  if (name === "institutional") {
     return {
-      routeWorkspaceTab: "chart",
-      routeRightTab: name,
+      routeWorkspaceTab: "institutional",
+      routeRightTab: "indicators",
+      routeTicker,
+    };
+  }
+
+  if (REVIEW_ROUTE_NAMES.has(name)) {
+    return {
+      routeWorkspaceTab: "review",
+      routeRightTab: name === "backtest" ? "backtest" : "journal",
       routeTicker,
     };
   }
 
   return {
-    routeWorkspaceTab: "chart",
-    routeRightTab: "indicators",
+    routeWorkspaceTab: "terminal",
+    routeRightTab: "alerts",
     routeTicker,
   };
 }
 
 export function buildAppRouteLocation({ workspaceTab, rightTab, currentTicker } = {}) {
-  const normalizedWorkspace = WORKSPACE_ROUTE_NAMES.has(String(workspaceTab || ""))
-    ? String(workspaceTab)
-    : "chart";
-  const normalizedRightTab = RIGHT_TAB_ROUTE_NAMES.has(String(rightTab || ""))
-    ? String(rightTab)
-    : "indicators";
+  const normalizedWorkspace = String(workspaceTab || "").toLowerCase();
+  const normalizedRightTab = String(rightTab || "").toLowerCase();
   const normalizedTicker = normalizeTickerParam(currentTicker);
   const params = normalizedTicker ? { ticker: normalizedTicker } : {};
 
-  if (normalizedWorkspace !== "chart") {
+  if (normalizedWorkspace === "overview") {
     return {
-      name: normalizedWorkspace,
+      name: "overview",
       params,
     };
   }
 
-  if (normalizedRightTab !== "indicators") {
+  if (normalizedWorkspace === "institutional") {
     return {
-      name: normalizedRightTab,
+      name: "institutional",
+      params,
+    };
+  }
+
+  if (normalizedWorkspace === "review") {
+    return {
+      name: normalizedRightTab === "backtest" ? "backtest" : "journal",
       params,
     };
   }
 
   return {
-    name: "dashboard",
+    name: "terminal",
     params,
   };
 }

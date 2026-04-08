@@ -14,7 +14,7 @@ import { useRoute, useRouter } from "vue-router";
 import { buildAppRouteLocation } from "../router/appRouteState";
 
 const props = defineProps({
-  workspaceTab: { type: String, default: "chart" },
+  workspaceTab: { type: String, default: "overview" },
   rightTab: { type: String, default: "indicators" },
 });
 

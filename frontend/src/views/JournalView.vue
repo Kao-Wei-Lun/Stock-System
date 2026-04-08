@@ -1,5 +1,5 @@
 <template>
-  <AppShellRouteView workspace-tab="chart" right-tab="journal" />
+  <AppShellRouteView workspace-tab="review" right-tab="journal" />
 </template>
 
 <script setup>

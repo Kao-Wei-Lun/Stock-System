@@ -5,6 +5,9 @@
       :key="item.id"
       class="toast-card"
       :class="item.level || item.type || 'info'"
+      :tabindex="item.ticker || item.workspaceTarget ? 0 : -1"
+      @click="handleSelect(item)"
+      @keydown.enter.prevent="handleSelect(item)"
     >
       <div class="toast-icon">{{ item.icon || "•" }}</div>
       <div class="toast-copy">
@@ -15,7 +18,7 @@
         class="toast-dismiss"
         type="button"
         aria-label="關閉提示"
-        @click="$emit('dismiss', item.id)"
+        @click.stop="$emit('dismiss', item.id)"
       >
         ×
       </button>
@@ -31,21 +34,26 @@ const props = defineProps({
   limit: { type: Number, default: 3 },
 });
 
-defineEmits(["dismiss"]);
+const emit = defineEmits(["dismiss", "select"]);
 
 const visibleToasts = computed(() =>
   (props.notifications || [])
-    .filter((item) => item?.category === "session" && item?.read !== true)
+    .filter((item) => ["session", "alert"].includes(item?.category) && item?.read !== true)
     .slice(-props.limit)
     .reverse(),
 );
+
+function handleSelect(item) {
+  if (!item) return;
+  emit("select", item);
+}
 </script>
 
 <style scoped>
 .toast-stack-shell {
   position: fixed;
-  top: 86px;
   right: 18px;
+  bottom: 92px;
   z-index: 42;
   display: flex;
   flex-direction: column;
@@ -67,6 +75,7 @@ const visibleToasts = computed(() =>
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(16px);
   pointer-events: auto;
+  cursor: pointer;
 }
 
 .toast-card.info {
@@ -137,7 +146,6 @@ const visibleToasts = computed(() =>
 
 @media (max-width: 640px) {
   .toast-stack-shell {
-    top: auto;
     right: 12px;
     left: 12px;
     bottom: 92px;

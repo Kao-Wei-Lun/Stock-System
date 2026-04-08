@@ -1,44 +1,30 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-const DashboardView = () => import("../views/DashboardView.vue");
-const AlertsView = () => import("../views/AlertsView.vue");
-const BacktestView = () => import("../views/BacktestView.vue");
-const JournalView = () => import("../views/JournalView.vue");
-const DatabaseView = () => import("../views/DatabaseView.vue");
+const OverviewView = () => import("../views/OverviewView.vue");
+const TerminalView = () => import("../views/TerminalView.vue");
 const InstitutionalView = () => import("../views/InstitutionalView.vue");
-const EventsView = () => import("../views/EventsView.vue");
-const MacroView = () => import("../views/MacroView.vue");
-const ScreenerView = () => import("../views/ScreenerView.vue");
+const JournalView = () => import("../views/JournalView.vue");
+const BacktestView = () => import("../views/BacktestView.vue");
+
+const redirectWithTicker = (name) => (to) => ({
+  name,
+  params: to.params?.ticker ? { ticker: String(to.params.ticker) } : {},
+});
 
 const routes = [
   {
     path: "/",
-    redirect: { name: "dashboard" },
+    redirect: { name: "overview" },
   },
   {
-    path: "/dashboard/:ticker?",
-    name: "dashboard",
-    component: DashboardView,
+    path: "/overview/:ticker?",
+    name: "overview",
+    component: OverviewView,
   },
   {
-    path: "/alerts/:ticker?",
-    name: "alerts",
-    component: AlertsView,
-  },
-  {
-    path: "/backtest/:ticker?",
-    name: "backtest",
-    component: BacktestView,
-  },
-  {
-    path: "/journal/:ticker?",
-    name: "journal",
-    component: JournalView,
-  },
-  {
-    path: "/db/:ticker?",
-    name: "db",
-    component: DatabaseView,
+    path: "/terminal/:ticker?",
+    name: "terminal",
+    component: TerminalView,
   },
   {
     path: "/institutional/:ticker?",
@@ -46,19 +32,38 @@ const routes = [
     component: InstitutionalView,
   },
   {
+    path: "/review/journal/:ticker?",
+    name: "journal",
+    component: JournalView,
+  },
+  {
+    path: "/review/backtest/:ticker?",
+    name: "backtest",
+    component: BacktestView,
+  },
+  {
+    path: "/dashboard/:ticker?",
+    redirect: redirectWithTicker("terminal"),
+  },
+  {
+    path: "/alerts/:ticker?",
+    redirect: redirectWithTicker("terminal"),
+  },
+  {
     path: "/events/:ticker?",
-    name: "events",
-    component: EventsView,
+    redirect: redirectWithTicker("overview"),
   },
   {
     path: "/macro/:ticker?",
-    name: "macro",
-    component: MacroView,
+    redirect: redirectWithTicker("overview"),
   },
   {
     path: "/screener/:ticker?",
-    name: "screener",
-    component: ScreenerView,
+    redirect: redirectWithTicker("overview"),
+  },
+  {
+    path: "/db/:ticker?",
+    redirect: redirectWithTicker("overview"),
   },
 ];
 
