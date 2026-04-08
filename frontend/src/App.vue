@@ -1098,6 +1098,12 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.workspace-stage > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .terminal-stage-shell {
   display: flex;
   overflow: hidden;

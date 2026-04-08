@@ -760,3 +760,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleKeydown);
 });
 </script>
+
+<style scoped>
+.center {
+  height: 100%;
+}
+</style>

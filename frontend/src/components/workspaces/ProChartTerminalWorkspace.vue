@@ -368,9 +368,17 @@ function openDrawer(tab) {
 
 .terminal-chart-shell {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.terminal-chart-shell > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .terminal-collapsed-toggle {
