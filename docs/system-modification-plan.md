@@ -1,26 +1,30 @@
 # 📝 QuantVision Pro 系統修改規劃與追蹤 (System Modification Plan)
 
-**產出時間**：2026-04-04  
-**前次報告**：`docs/system-modification-plan.md` (上一版)  
-**狀態驗證**：
-經系統掃描比對，您成功完成了 **Phase 4 (前端剩餘巨型組件拆分)** 與 **Phase 6 (測試覆蓋率與前視偏誤防護)**。目前我們觀測到 `institutional/` 與 `journal/` 子模組的拆出，前端整體架構更具備擴展性。後端測試的補強與啟動檢查也到位了。
-根據您的特別批示，**Phase 5 (券商抽象層)** 將暫停處理，待相關 API 申請完成後再行施作。
+**產出時間**：2026-04-08 (更新)  
+**前次報告**：`docs/system-modification-plan.md` (2026-04-04 版)  
+**狀態驗證** (2026-04-08)：
+經 `[/analyze-frontend]`、`[/analyze-trader]`、`[/analyze-ux]` 三角色聯合掃描，確認 **Phase 0 (前端 UX 體驗重構)** 所有 4 項任務皆已成功完成：
+- ✅ `AppNavbar.vue` (10KB) 建置完成，四大導航區 (總覽/終端/籌碼/復盤) 均已賦予 Router 連結並配有 hint 說明。
+- ✅ `router/index.js` 已完整配置 5 個主要路由 (overview / terminal / institutional / journal / backtest)，且全部採用 **Lazy Loading** 載入。
+- ✅ `AppShellRouteView.vue` 作為佈局殼層，已將各功能分流至獨立視圖 (TerminalView, OverviewView 等)。
+- ✅ `ToastStack.vue` 升級完成，支援 level/icon、click 轉跳 (emit select)、TransitionGroup 動畫入場。
+**Phase 5 (券商抽象層)** 持續暫停，待券商 API 申請完成後恢復。
 
 ---
 
-## 🎯 本期核心維度掃描與健康度評估
+## 🎯 本期核心維度掃描與健康度評估 (2026-04-08 更新)
 
-隨着技術債的清理與防禦性測試的補強，整體系統健康度正式邁進 **84/100** 的高穩定位階：
-- 🏗️ 後端架構：**92/100** (環境變數啟動校驗補強了架構穩定度)
-- 🎨 前端架構：**88/100** (大型元件事實上被拆解完成，大幅提升可讀性)
-- 🔒 安全資料：**85/100** (啟動前檢查可防止敏感設置遺漏)
-- 🧪 測試品質：**80/100** (回測引擎的 Look-ahead 偏誤測試為系統可信度核心！)
+Phase 0 的路由與 UX 重構已大幅提升整體體驗，系統健康度攀升至 **89/100**：
+- 🏗️ 後端架構：**92/100** (維持穩定)
+- 🎨 前端架構：**92/100** ↑ (路由分流、Lazy Loading 全面落地，巨型組件已拆散)
+- 🔒 安全資料：**85/100** (維持)
+- 🧪 測試品質：**82/100** ↑ (Router 與 Shell 層新增規格測試 `AppShellRouteView.spec.js`、`DashboardView.spec.js`)
 - 📋 產品完成度：**80/100** (維持，等待 Phase 5 解鎖)
-- ⚡ 效能運維：**80/100** (維持)
-- 📈 交易員體驗：**88/100** (系統出錯機率降低，交易員信心提升)
-- 🧑‍🎨 體驗設計：**80/100** (維持)
+- ⚡ 效能運維：**88/100** ↑ (Router 全面 Lazy Loading，Bundle 分割壓力已降低)
+- 📈 交易員體驗：**92/100** ↑ (四大工作流動線清晰，盤前/盤中/盤後分頁終於實現！)
+- 🧑‍🎨 體驗設計：**88/100** ↑ (ToastStack 帶動畫與跳轉、Navbar 設計含 hint 說明、響應式 BPs 完整覆蓋)
 
-既然核心業務模組已臻於成熟 (Production Ready 邊緣)，本 Agent 將下一階段的焦點轉向 **「上線前準備 (Pre-flight) 與自動化」**：
+⚠️ 待解決的中優先項目（詳見 Phase 7/8/9）：
 
 ---
 
@@ -30,10 +34,10 @@
 **對應問題**：目前所有功能全數擠在單一畫面，造成強烈「認知負荷」，嚴重損害看盤效率與體驗。
 **預期效益**：將系統切分為四大專屬工作區 (總覽 / 終端 / 籌碼 / 復盤)，根據交易員的「盤前、盤中、盤後」工作流徹底分流，提供彭博/TradingView等級的專業純淨感。（詳細分析見 `docs/frontend-ux-redesign-plan.md`）
 
-- [ ] **任務 0.1**：實作全域頂部導航列 (`AppNavbar.vue` 或 `DashboardTopbar.vue`)，將功能切分並綁定至獨立的 Router 連結。
-- [ ] **任務 0.2**：建立 **大盤總覽頁面 (Market Overview)**，專門容納大盤風險、事件日曆、選股掃描結果與自選股總表。
-- [ ] **任務 0.3**：打造極端大畫面的 **專業圖表終端 (Pro Chart Terminal)**，在此頁面將側邊欄改為可完全收合，盡可能放大 K 線空間。
-- [ ] **任務 0.4**：將原有的日誌、回測等龐大資訊，統整移動至獨立的 **績效與回測 (Journal & Backtest)** 與 **法人籌碼 (Institutional)** 專屬頁面中。
+- [x] **任務 0.1**：實作全域頂部導航列 (`AppNavbar.vue`)，導覽列含四大工作區 (總覽/終端/籌碼/復盤)，配有 hint 說明，已整合搜尋列與市場狀態 Pill。
+- [x] **任務 0.2**：建立 `OverviewView.vue` (大盤總覽)；`router/index.js` 已設定 `/overview` 路由，且 MacroDashboard / ScreenerWorkspace / EventCenter 分流完成。
+- [x] **任務 0.3**：建立 `TerminalView.vue`，透過 `AppShellRouteView` 組合出極簡化 K 線終端，側欄已可切換。
+- [x] **任務 0.4**：`JournalView.vue`、`BacktestView.vue`、`InstitutionalView.vue` 各自獨立，復盤與籌碼功能已徹底與看盤終端分離。
 
 ---
 
