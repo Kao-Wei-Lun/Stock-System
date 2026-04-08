@@ -48,11 +48,10 @@ def configure(
     LATEST_DATA_SYNC_INTERVAL = latest_data_sync_interval
 
 
-@router.get("/kline/{ticker}")
-async def get_kline(
+async def _get_ohlc_payload(
     ticker: str,
-    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
-    interval: str = Query("1d", description="1h 1d 1wk 1mo"),
+    period: str,
+    interval: str,
 ):
     ticker = normalize_ticker(ticker)
     period = (period or "1y").lower()
@@ -65,6 +64,24 @@ async def get_kline(
         rows = await db.get_ohlcv(ticker, period=period, interval=interval)
 
     return {"ticker": ticker, "interval": interval, "data": rows}
+
+
+@router.get("/kline/{ticker}")
+async def get_kline(
+    ticker: str,
+    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+):
+    return await _get_ohlc_payload(ticker, period, interval)
+
+
+@router.get("/ohlc/{ticker}")
+async def get_ohlc(
+    ticker: str,
+    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+):
+    return await _get_ohlc_payload(ticker, period, interval)
 
 
 @router.get("/quote/{ticker}", response_model=QuoteResponse)

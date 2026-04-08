@@ -9,6 +9,8 @@ import {
 } from "lightweight-charts";
 
 import { fmtPrice, fmtVol } from "../utils/formatters";
+import { buildLWCIndicatorModel } from "./useLWCIndicators";
+import { useLWCDrawings } from "./useLWCDrawings";
 
 const DEFAULT_VISIBLE_BARS = 120;
 const MIN_VISIBLE_BARS = 20;
@@ -16,7 +18,6 @@ const PAN_STEP_RATIO = 0.18;
 
 const SERIES_DEFINITIONS = {
   candles: {
-    key: "Candlestick",
     definition: CandlestickSeries,
     options: {
       upColor: "#00d9a3",
@@ -29,7 +30,6 @@ const SERIES_DEFINITIONS = {
     },
   },
   line: {
-    key: "Line",
     definition: LineSeries,
     options: {
       color: "#7be7ff",
@@ -40,7 +40,6 @@ const SERIES_DEFINITIONS = {
     },
   },
   area: {
-    key: "Area",
     definition: AreaSeries,
     options: {
       lineColor: "#7be7ff",
@@ -66,6 +65,11 @@ function normalizePriceScaleMode(mode) {
   return mode === "log" ? "log" : "linear";
 }
 
+function isIntradayInterval(interval) {
+  const normalized = String(interval || "").toLowerCase();
+  return ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"].includes(normalized);
+}
+
 function toChartTime(dateString) {
   if (!dateString) return null;
   const normalized = String(dateString).trim();
@@ -85,8 +89,14 @@ function toChartTime(dateString) {
 function formatRangeDate(dateString) {
   if (!dateString) return "—";
   const parsed = new Date(String(dateString).includes(" ") ? String(dateString).replace(" ", "T") : dateString);
-  if (Number.isNaN(parsed.getTime())) return String(dateString).slice(0, 10);
-  return parsed.toLocaleDateString("zh-TW");
+  if (Number.isNaN(parsed.getTime())) return String(dateString).slice(0, 16);
+  return parsed.toLocaleString("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: dateString.includes(":") ? "2-digit" : undefined,
+    minute: dateString.includes(":") ? "2-digit" : undefined,
+    hour12: false,
+  });
 }
 
 function buildCrosshairPayload(row, absoluteIndex, point) {
@@ -112,6 +122,11 @@ function buildCrosshairPayload(row, absoluteIndex, point) {
   };
 }
 
+function resolveSeriesDefinition(type) {
+  if (type === "histogram") return HistogramSeries;
+  return LineSeries;
+}
+
 export function useLWCChart({
   chartContainer,
   props,
@@ -121,13 +136,11 @@ export function useLWCChart({
   const mainSeries = shallowRef(null);
   const volumeSeries = shallowRef(null);
   const resizeObserver = shallowRef(null);
+  const dynamicSeries = ref([]);
+  const dynamicPriceLines = ref([]);
   const chartMode = ref("candles");
   const priceScaleMode = ref("linear");
   const visibleLogicalRange = ref(null);
-  const viewportStartIndex = computed(() => {
-    if (!chartRows.value.length || !visibleLogicalRange.value) return 0;
-    return clamp(Math.floor(visibleLogicalRange.value.from), 0, Math.max(chartRows.value.length - 1, 0));
-  });
 
   const chartRows = computed(() => (
     Array.isArray(props.ohlcData)
@@ -144,6 +157,14 @@ export function useLWCChart({
             index,
             raw: row,
             time,
+            ohlcv: {
+              time,
+              open,
+              high,
+              low,
+              close,
+              volume: Math.max(0, Number(row.volume ?? 0)),
+            },
             candle: { time, open, high, low, close },
             line: { time, value: close },
             area: { time, value: close },
@@ -158,6 +179,14 @@ export function useLWCChart({
       : []
   ));
 
+  const indicatorRows = computed(() => chartRows.value.map((entry) => entry.ohlcv));
+  const indicatorModel = computed(() => buildLWCIndicatorModel({
+    rows: indicatorRows.value,
+    activeInd: props.activeInd,
+    activePanels: props.activePanels,
+    settings: props.indicatorSettings,
+  }));
+
   const visibleData = computed(() => {
     const rows = chartRows.value;
     if (!rows.length) return [];
@@ -167,14 +196,17 @@ export function useLWCChart({
     return rows.slice(start, end).map((entry) => entry.raw);
   });
 
+  const viewportStartIndex = computed(() => {
+    if (!chartRows.value.length || !visibleLogicalRange.value) return 0;
+    return clamp(Math.floor(visibleLogicalRange.value.from), 0, Math.max(chartRows.value.length - 1, 0));
+  });
+
   const visibleRangeLabel = computed(() => {
     const rows = visibleData.value;
     if (!rows.length) return "可視範圍：—";
     return `可視範圍：${formatRangeDate(rows[0].date)} → ${formatRangeDate(rows[rows.length - 1].date)}`;
   });
-
   const visibleBarsLabel = computed(() => `可視 K 數：${visibleData.value.length} 根`);
-
   const visibleChangeLabel = computed(() => {
     const rows = visibleData.value;
     if (rows.length < 2) return "區間漲跌：—";
@@ -184,32 +216,23 @@ export function useLWCChart({
     const changePct = ((lastClose - firstClose) / firstClose) * 100;
     return `區間漲跌：${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`;
   });
-
   const visibleChangeClass = computed(() => {
-    const label = visibleChangeLabel.value;
-    if (label.includes("+")) return "up";
-    if (label.includes("-")) return "dn";
+    if (visibleChangeLabel.value.includes("+")) return "up";
+    if (visibleChangeLabel.value.includes("-")) return "dn";
     return "";
   });
-
   const zoomLabel = computed(() => `縮放：${visibleData.value.length || 0} 根`);
-  const yScaleLabel = computed(() => "Y 軸：LWC");
+  const yScaleLabel = computed(() => "Y 軸：LWC Multi-pane");
   const priceScaleModeLabel = computed(() => (priceScaleMode.value === "log" ? "對數" : "線性"));
   const interactionHint = computed(() => (
-    "LWC Phase A：主圖、成交量與十字線已接入；繪圖工具與子指標面板後續遷移。"
+    "LWC 已接上主圖、Multi-pane 指標、法人成本帶與繪圖 bridge；Legacy 僅保留為 fallback。"
   ));
   const canvasClass = computed(() => "chart-canvas-lwc");
   const canUseLogScale = computed(() => chartRows.value.every((entry) => entry.candle.low > 0));
   const canGoBackHistory = computed(() => false);
   const canGoForwardHistory = computed(() => false);
-  const canPanLeft = computed(() => {
-    if (!visibleLogicalRange.value) return false;
-    return visibleLogicalRange.value.from > 0;
-  });
-  const canPanRight = computed(() => {
-    if (!visibleLogicalRange.value) return false;
-    return visibleLogicalRange.value.to < chartRows.value.length;
-  });
+  const canPanLeft = computed(() => Boolean(visibleLogicalRange.value && visibleLogicalRange.value.from > 0));
+  const canPanRight = computed(() => Boolean(visibleLogicalRange.value && visibleLogicalRange.value.to < chartRows.value.length));
   const canZoomIn = computed(() => {
     if (!visibleLogicalRange.value) return chartRows.value.length > MIN_VISIBLE_BARS;
     return visibleLogicalRange.value.to - visibleLogicalRange.value.from > MIN_VISIBLE_BARS;
@@ -219,15 +242,15 @@ export function useLWCChart({
     return visibleLogicalRange.value.to - visibleLogicalRange.value.from < chartRows.value.length + 8;
   });
   const canResetYScale = computed(() => Boolean(mainSeries.value));
+  const isIntradayView = computed(() => isIntradayInterval(props.currentInterval));
 
-  function destroyChart() {
-    resizeObserver.value?.disconnect();
-    resizeObserver.value = null;
-    chartApi.value?.remove();
-    chartApi.value = null;
-    mainSeries.value = null;
-    volumeSeries.value = null;
-    visibleLogicalRange.value = null;
+  function getCurrentLogicalRange() {
+    return chartApi.value?.timeScale()?.getVisibleLogicalRange?.() || null;
+  }
+
+  function setLogicalRange(range) {
+    if (!chartApi.value || !range) return;
+    chartApi.value.timeScale().setVisibleLogicalRange(range);
   }
 
   function applyPriceScaleOptions() {
@@ -238,6 +261,18 @@ export function useLWCChart({
     mainSeries.value.priceScale().applyOptions({
       autoScale: true,
       mode,
+    });
+  }
+
+  function applyTimeScaleOptions() {
+    if (!chartApi.value) return;
+    const interval = String(props.currentInterval || "").toLowerCase();
+    chartApi.value.timeScale().applyOptions({
+      fixLeftEdge: false,
+      fixRightEdge: false,
+      rightOffset: 4,
+      timeVisible: isIntradayView.value,
+      secondsVisible: interval === "1m",
     });
   }
 
@@ -261,9 +296,32 @@ export function useLWCChart({
     emit("update-crosshair", payload);
   }
 
+  function clearTrackedPriceLines() {
+    dynamicPriceLines.value.forEach(({ series, line }) => {
+      try {
+        series?.removePriceLine?.(line);
+      } catch (error) {
+        console.error(error);
+      }
+    });
+    dynamicPriceLines.value = [];
+  }
+
+  function clearDynamicSeries() {
+    clearTrackedPriceLines();
+    [...dynamicSeries.value].reverse().forEach((series) => {
+      try {
+        chartApi.value?.removeSeries?.(series);
+      } catch (error) {
+        console.error(error);
+      }
+    });
+    dynamicSeries.value = [];
+  }
+
   function createMainSeries() {
     if (!chartApi.value) return;
-    const currentRange = chartApi.value.timeScale().getVisibleLogicalRange();
+    const currentRange = getCurrentLogicalRange();
     if (mainSeries.value) {
       chartApi.value.removeSeries(mainSeries.value);
       mainSeries.value = null;
@@ -271,12 +329,11 @@ export function useLWCChart({
 
     const definition = SERIES_DEFINITIONS[chartMode.value] || SERIES_DEFINITIONS.candles;
     mainSeries.value = chartApi.value.addSeries(definition.definition, definition.options, 0);
-    const data = chartRows.value.map((entry) => entry[chartMode.value]);
-    mainSeries.value.setData(data);
+    mainSeries.value.setData(chartRows.value.map((entry) => entry[chartMode.value]));
     applyPriceScaleOptions();
 
     if (currentRange) {
-      chartApi.value.timeScale().setVisibleLogicalRange(currentRange);
+      setLogicalRange(currentRange);
     }
   }
 
@@ -295,14 +352,69 @@ export function useLWCChart({
         priceFormat: { type: "volume" },
         priceLineVisible: false,
         lastValueVisible: false,
+        base: 0,
       }, 1);
     }
 
     volumeSeries.value.setData(chartRows.value.map((entry) => entry.volume));
+  }
 
-    const panes = chartApi.value.panes();
-    if (panes[0]) panes[0].setStretchFactor(3);
-    if (panes[1]) panes[1].setStretchFactor(1);
+  function applyPaneStretchFactors(panelCount) {
+    const panes = chartApi.value?.panes?.() || [];
+    if (!panes.length) return;
+    panes[0]?.setStretchFactor(panelCount >= 3 ? 0.6 : 0.72);
+    if (volumeSeries.value) {
+      panes[1]?.setStretchFactor(panelCount >= 3 ? 0.14 : 0.18);
+    }
+    const startIndex = volumeSeries.value ? 2 : 1;
+    for (let index = startIndex; index < panes.length; index += 1) {
+      panes[index]?.setStretchFactor(panelCount >= 5 ? 0.11 : 0.16);
+    }
+  }
+
+  function syncIndicatorPanes() {
+    if (!chartApi.value || !mainSeries.value) return;
+    const currentRange = getCurrentLogicalRange();
+    clearDynamicSeries();
+
+    indicatorModel.value.overlays.forEach((descriptor) => {
+      const series = chartApi.value.addSeries(resolveSeriesDefinition(descriptor.type), descriptor.options, 0);
+      series.setData(descriptor.data);
+      dynamicSeries.value.push(series);
+    });
+
+    let paneIndex = volumeSeries.value ? 2 : 1;
+    indicatorModel.value.panels.forEach((panel) => {
+      const createdSeries = [];
+      panel.series.forEach((descriptor) => {
+        const series = chartApi.value.addSeries(resolveSeriesDefinition(descriptor.type), descriptor.options, paneIndex);
+        series.setData(descriptor.data);
+        createdSeries.push(series);
+        dynamicSeries.value.push(series);
+      });
+
+      const lineHost = createdSeries.find((series, index) => panel.series[index]?.type === "line") || createdSeries[0];
+      if (lineHost && panel.priceLines?.length) {
+        panel.priceLines.forEach((priceLine) => {
+          const line = lineHost.createPriceLine({
+            price: Number(priceLine.price),
+            color: priceLine.color,
+            lineWidth: 1,
+            lineStyle: priceLine.lineStyle ?? 2,
+            axisLabelVisible: false,
+            title: "",
+          });
+          dynamicPriceLines.value.push({ series: lineHost, line });
+        });
+      }
+
+      paneIndex += 1;
+    });
+
+    applyPaneStretchFactors(indicatorModel.value.panels.length);
+    if (currentRange) {
+      setLogicalRange(currentRange);
+    }
   }
 
   function applyDefaultVisibleRange() {
@@ -310,7 +422,7 @@ export function useLWCChart({
     const rowCount = chartRows.value.length;
     const from = Math.max(0, rowCount - DEFAULT_VISIBLE_BARS);
     const to = rowCount + 4;
-    chartApi.value.timeScale().setVisibleLogicalRange({ from, to });
+    setLogicalRange({ from, to });
   }
 
   function resizeChart() {
@@ -337,13 +449,6 @@ export function useLWCChart({
       },
       rightPriceScale: {
         borderColor: "rgba(57, 79, 99, 0.58)",
-      },
-      timeScale: {
-        borderColor: "rgba(57, 79, 99, 0.58)",
-        fixLeftEdge: false,
-        fixRightEdge: false,
-        rightOffset: 4,
-        timeVisible: false,
       },
       crosshair: {
         vertLine: {
@@ -375,7 +480,9 @@ export function useLWCChart({
     chartApi.value.subscribeCrosshairMove(handleCrosshairMove);
 
     createMainSeries();
+    applyTimeScaleOptions();
     syncVolumeSeries();
+    syncIndicatorPanes();
     applyDefaultVisibleRange();
 
     if (typeof ResizeObserver === "function") {
@@ -386,13 +493,18 @@ export function useLWCChart({
     }
   }
 
-  function getCurrentLogicalRange() {
-    return chartApi.value?.timeScale().getVisibleLogicalRange() || null;
-  }
-
-  function setLogicalRange(range) {
-    if (!chartApi.value || !range) return;
-    chartApi.value.timeScale().setVisibleLogicalRange(range);
+  function destroyChart() {
+    resizeObserver.value?.disconnect();
+    resizeObserver.value = null;
+    if (!resizeObserver.value) {
+      window.removeEventListener("resize", resizeChart);
+    }
+    clearDynamicSeries();
+    chartApi.value?.remove();
+    chartApi.value = null;
+    mainSeries.value = null;
+    volumeSeries.value = null;
+    visibleLogicalRange.value = null;
   }
 
   function zoomBy(factor) {
@@ -450,63 +562,39 @@ export function useLWCChart({
     priceScaleMode.value = nextMode;
   }
 
-  function zoomIn() {
-    zoomBy(0.82);
-  }
-
-  function zoomOut() {
-    zoomBy(1.18);
-  }
-
-  function zoomYIn() {
-    zoomPriceRange(0.82);
-  }
-
-  function zoomYOut() {
-    zoomPriceRange(1.18);
-  }
-
-  function panLeft() {
-    panBy(-PAN_STEP_RATIO);
-  }
-
-  function panRight() {
-    panBy(PAN_STEP_RATIO);
-  }
-
+  function zoomIn() { zoomBy(0.82); }
+  function zoomOut() { zoomBy(1.18); }
+  function zoomYIn() { zoomPriceRange(0.82); }
+  function zoomYOut() { zoomPriceRange(1.18); }
+  function panLeft() { panBy(-PAN_STEP_RATIO); }
+  function panRight() { panBy(PAN_STEP_RATIO); }
   function goHistoryBack() {}
-
   function goHistoryForward() {}
-
-  function jumpToLatest() {
-    chartApi.value?.timeScale().scrollToRealTime();
-  }
-
-  function resetView() {
-    applyDefaultVisibleRange();
-  }
-
+  function jumpToLatest() { chartApi.value?.timeScale().scrollToRealTime(); }
+  function resetView() { applyDefaultVisibleRange(); }
   function resetYScale() {
     if (!mainSeries.value) return;
     mainSeries.value.priceScale().setAutoScale(true);
     applyPriceScaleOptions();
   }
-
   function onMouseDown() {}
-
   function onMouseMove() {}
-
   function onMouseLeave() {}
-
   function onMouseUp() {}
-
   function onWheel() {}
-
   function onChartClick() {}
+  function onDoubleClick() { resetView(); }
 
-  function onDoubleClick() {
-    resetView();
-  }
+  const drawingsBridge = useLWCDrawings({
+    chartApi,
+    mainSeries,
+    props,
+    emit,
+    scheduleHostSync: () => resizeChart(),
+    resetView,
+  });
+
+  const previousTicker = ref(props.currentTicker);
 
   watch(
     () => chartContainer.value,
@@ -517,21 +605,27 @@ export function useLWCChart({
     { immediate: true },
   );
 
+  watch(chartMode, () => {
+    if (!chartApi.value) return;
+    createMainSeries();
+    syncIndicatorPanes();
+  });
+
   watch(
-    chartMode,
-    () => {
-      if (!chartApi.value) return;
-      createMainSeries();
-    },
+    [priceScaleMode, canUseLogScale],
+    () => applyPriceScaleOptions(),
   );
 
   watch(
-    () => props.cleanChartMode,
+    () => [props.cleanChartMode, props.activeInd, props.activePanels, props.indicatorSettings],
     () => {
       if (!chartApi.value) return;
       syncVolumeSeries();
+      syncIndicatorPanes();
       resizeChart();
+      drawingsBridge.scheduleRender();
     },
+    { deep: true },
   );
 
   watch(
@@ -539,32 +633,37 @@ export function useLWCChart({
     (rows, previousRows) => {
       if (!chartApi.value) return;
       createMainSeries();
+      applyTimeScaleOptions();
       syncVolumeSeries();
+      syncIndicatorPanes();
       if (!previousRows?.length || props.currentTicker !== previousTicker.value) {
         applyDefaultVisibleRange();
       }
       if (!rows.length) {
         emit("hide-crosshair");
       }
+      drawingsBridge.scheduleRender();
     },
     { deep: true },
   );
 
-  const previousTicker = ref(props.currentTicker);
+  watch(
+    () => props.currentInterval,
+    () => {
+      applyTimeScaleOptions();
+      drawingsBridge.scheduleRender();
+    },
+  );
+
   watch(
     () => props.currentTicker,
-    (ticker) => {
-      previousTicker.value = ticker;
+    () => {
+      previousTicker.value = props.currentTicker;
       if (chartApi.value) {
         applyDefaultVisibleRange();
       }
       emit("hide-crosshair");
     },
-  );
-
-  watch(
-    priceScaleMode,
-    () => applyPriceScaleOptions(),
   );
 
   onBeforeUnmount(() => {
@@ -575,6 +674,7 @@ export function useLWCChart({
       chartApi.value.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
       chartApi.value.unsubscribeCrosshairMove(handleCrosshairMove);
     }
+    drawingsBridge.cleanupOverlay();
     destroyChart();
   });
 

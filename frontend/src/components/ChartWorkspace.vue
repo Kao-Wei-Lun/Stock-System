@@ -26,6 +26,9 @@
       :can-reset-y-scale="canResetYScale"
       :price-scale-mode="priceScaleMode"
       :can-use-log-scale="canUseLogScale"
+      :timeframe-options="timeframeOptions"
+      :current-period="currentPeriod"
+      :current-interval="currentInterval"
       :chart-mode="chartMode"
       :engine-mode="engineMode"
       :kline-display-mode="klineDisplayMode"
@@ -46,6 +49,7 @@
       @zoom-out="zoomOut"
       @jump-to-latest="jumpToLatest"
       @reset-view="resetView"
+      @set-timeframe="emit('set-timeframe', $event)"
       @zoom-y-in="zoomYIn"
       @zoom-y-out="zoomYOut"
       @reset-y-scale="resetYScale"
@@ -193,6 +197,9 @@ import ChartToolbar from "./chart/ChartToolbar.vue";
 const props = defineProps({
   currentTicker: { type: String, required: true },
   currentName: { type: String, required: true },
+  timeframeOptions: { type: Array, default: () => [] },
+  currentPeriod: { type: String, default: "1y" },
+  currentInterval: { type: String, default: "1d" },
   quote: { type: Object, required: true },
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
@@ -235,6 +242,7 @@ const emit = defineEmits([
   "save-workspace",
   "load-workspace",
   "delete-workspace",
+  "set-timeframe",
   "update-crosshair",
   "hide-crosshair",
   "add-compare",

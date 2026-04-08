@@ -21,6 +21,10 @@ import { createDashboardScreener } from "./dashboard/dashboardScreener";
 import { createDashboardTradeWorkbench } from "./dashboard/dashboardTradeWorkbench";
 
 const TIMEFRAME_OPTIONS = [
+  { tf: "1d", iv: "1m", label: "1m" },
+  { tf: "5d", iv: "5m", label: "5m" },
+  { tf: "1mo", iv: "15m", label: "15m" },
+  { tf: "3mo", iv: "60m", label: "60m" },
   { tf: "5d", iv: "1h", label: "5D" },
   { tf: "1mo", iv: "1d", label: "1M" },
   { tf: "3mo", iv: "1d", label: "3M" },
@@ -39,8 +43,18 @@ const KLINE_DISPLAY_OPTIONS = [
 
 const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
+const RECENT_TICKERS_KEY = "quantvision.recent.tickers.v1";
+const RECENT_TICKERS_LIMIT = 10;
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
+export const WATCHLIST_COLOR_OPTIONS = [
+  "#7be7ff",
+  "#00d9a3",
+  "#ffd166",
+  "#ff8c42",
+  "#9b6dff",
+  "#ff4d6a",
+];
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional", "events", "macro", "screener"];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
@@ -98,6 +112,21 @@ function readDashboardPrefs() {
 function writeDashboardPrefs(value) {
   if (!isBrowser()) return;
   window.localStorage.setItem(DASHBOARD_PREFS_KEY, JSON.stringify(value));
+}
+
+function readRecentTickers() {
+  if (!isBrowser()) return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(RECENT_TICKERS_KEY) || "[]");
+    return Array.isArray(value) ? value.filter(Boolean) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeRecentTickers(items) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(RECENT_TICKERS_KEY, JSON.stringify(items));
 }
 
 function getDrawingDefaults(type) {
@@ -167,7 +196,15 @@ function normalizeChartEngineMode(mode) {
   return mode === "lwc" ? "lwc" : "legacy";
 }
 
+function isIntradayInterval(interval) {
+  return ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"].includes(String(interval || "").toLowerCase());
+}
+
 function resolveTimeframeInterval(period, interval) {
+  const normalizedInterval = String(interval || "").toLowerCase();
+  if (isIntradayInterval(normalizedInterval)) {
+    return normalizedInterval === "1h" ? "1h" : normalizedInterval;
+  }
   return String(period || "").toLowerCase() === "5d" ? "1h" : "1d";
 }
 
@@ -283,6 +320,10 @@ function getExpandedFetchPeriod(period, mode) {
   };
 
   return mapByMode[mode]?.[period] || "max";
+}
+
+function getEffectiveKlineDisplayMode(mode, interval) {
+  return isIntradayInterval(interval) ? "day" : normalizeKlineDisplayMode(mode);
 }
 
 function filterRowsForDisplayPeriod(rows, period, mode) {
@@ -408,7 +449,7 @@ export function useDashboard() {
   const dashboardApi = createDashboardApi({ baseUrl: apiBase });
   const storedPrefs = readDashboardPrefs();
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
-    (option) => option.tf === storedPrefs.currentPeriod,
+    (option) => option.tf === storedPrefs.currentPeriod && option.iv === storedPrefs.currentInterval,
   );
   const initialTool = TOOL_OPTIONS.includes(storedPrefs.activeTool) ? storedPrefs.activeTool : "cursor";
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
@@ -416,12 +457,15 @@ export function useDashboard() {
   const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
   const initialChartEngineMode = normalizeChartEngineMode(storedPrefs.chartEngineMode);
   const initialWorkspaceTab = WORKSPACE_TAB_OPTIONS.includes(storedPrefs.workspaceTab) ? storedPrefs.workspaceTab : "chart";
+  const initialPeriod = storedPrefs.currentPeriod || storedTimeframe?.tf || "1y";
+  const initialInterval = resolveTimeframeInterval(initialPeriod, storedPrefs.currentInterval || storedTimeframe?.iv || "1d");
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
   const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
   const searchQuery = ref("");
   const searchResults = ref([]);
   const searchOpen = ref(false);
+  const recentTickers = ref(readRecentTickers());
   const watchlistGroups = ref([]);
   const userWatchGroups = computed(() =>
     watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME),
@@ -444,6 +488,7 @@ export function useDashboard() {
         ...item,
         group_id: item.group_id ?? group.id,
         group_name: item.group_name ?? group.name,
+        group_color: item.group_color ?? group.color ?? null,
       })),
     ),
   );
@@ -452,10 +497,11 @@ export function useDashboard() {
   const compareSeries = computed(() =>
     rawCompareSeries.value
       .map((series) => {
+        const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
         const data = filterRowsForDisplayPeriod(
-          aggregateOhlcRows(series.data || [], klineDisplayMode.value),
+          aggregateOhlcRows(series.data || [], displayMode),
           currentPeriod.value,
-          klineDisplayMode.value,
+          displayMode,
         );
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
         const lastClose = data.length ? data[data.length - 1].close : null;
@@ -473,9 +519,9 @@ export function useDashboard() {
   const workspaceTab = ref(initialWorkspaceTab);
   const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
-  const currentPeriod = ref(storedTimeframe?.tf || "1y");
-  const currentInterval = ref(resolveTimeframeInterval(storedTimeframe?.tf || "1y", storedTimeframe?.iv || "1d"));
-  const klineDisplayMode = ref(initialKlineDisplayMode);
+  const currentPeriod = ref(initialPeriod);
+  const currentInterval = ref(initialInterval);
+  const klineDisplayMode = ref(getEffectiveKlineDisplayMode(initialKlineDisplayMode, initialInterval));
   const chartEngineMode = ref(initialChartEngineMode);
   const cleanChartMode = ref(Boolean(storedPrefs.cleanChartMode));
   const chartLayout = ref(initialChartLayout);
@@ -611,11 +657,14 @@ export function useDashboard() {
     volume: "—",
   });
 
-  const ohlcData = computed(() => filterRowsForDisplayPeriod(
-    aggregateOhlcRows(rawOhlcData.value, klineDisplayMode.value),
-    currentPeriod.value,
-    klineDisplayMode.value,
-  ));
+  const ohlcData = computed(() => {
+    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
+    return filterRowsForDisplayPeriod(
+      aggregateOhlcRows(rawOhlcData.value, displayMode),
+      currentPeriod.value,
+      displayMode,
+    );
+  });
   const {
     alerts,
     alertTriggerLogs,
@@ -1230,7 +1279,7 @@ export function useDashboard() {
     watchlistLoading.value = true;
     watchlistError.value = false;
     try {
-      const payload = await apiFetch("/api/watchlist", { retries: 12, retryDelayMs: 1500 });
+      const payload = await dashboardApi.listWatchlist();
       watchlistGroups.value = payload.groups || [];
       const currentUserGroups = watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME);
       if (
@@ -1257,15 +1306,23 @@ export function useDashboard() {
     );
   }
 
+  function rememberRecentTicker(ticker, name = ticker) {
+    const normalized = normalizeTicker(ticker);
+    if (!normalized) return;
+    recentTickers.value = [
+      { ticker: normalized, name: name || normalized, viewedAt: new Date().toISOString() },
+      ...recentTickers.value.filter((item) => normalizeTicker(item?.ticker) !== normalized),
+    ].slice(0, RECENT_TICKERS_LIMIT);
+    writeRecentTickers(recentTickers.value);
+  }
+
   async function createWatchGroup(name) {
-    const trimmed = (name || "").trim();
+    const payload = name && typeof name === "object" ? name : { name };
+    const trimmed = String(payload?.name || "").trim();
+    const color = WATCHLIST_COLOR_OPTIONS.includes(payload?.color) ? payload.color : null;
     if (!trimmed) return;
     try {
-      const group = await apiFetch("/api/watchlist/groups", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
+      const group = await dashboardApi.createWatchlistGroup({ name: trimmed, color });
       await loadWatchlist();
       activeWatchGroupId.value = group.id;
       pushNotification({
@@ -1285,14 +1342,12 @@ export function useDashboard() {
   }
 
   async function renameWatchGroup(groupId, name) {
-    const trimmed = (name || "").trim();
+    const payload = name && typeof name === "object" ? name : { name };
+    const trimmed = String(payload?.name || "").trim();
+    const color = WATCHLIST_COLOR_OPTIONS.includes(payload?.color) ? payload.color : null;
     if (!groupId || !trimmed) return;
     try {
-      await apiFetch(`/api/watchlist/groups/${groupId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
+      await dashboardApi.updateWatchlistGroup(groupId, { name: trimmed, color });
       await loadWatchlist();
       pushNotification({
         icon: "✎",
@@ -1313,7 +1368,7 @@ export function useDashboard() {
   async function deleteWatchGroup(groupId) {
     if (!groupId) return;
     try {
-      await apiFetch(`/api/watchlist/groups/${groupId}`, { method: "DELETE" });
+      await dashboardApi.deleteWatchlistGroup(groupId);
       if (activeWatchGroupId.value === groupId) {
         activeWatchGroupId.value = userWatchGroups.value.find((group) => group.id !== groupId)?.id ?? null;
       }
@@ -1345,10 +1400,10 @@ export function useDashboard() {
       : [];
     if (!normalized || !targetGroupId) return;
     try {
-      const added = await apiFetch("/api/watchlist/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: targetGroupId, ticker: normalized, tags }),
+      const added = await dashboardApi.createWatchlistItem({
+        group_id: targetGroupId,
+        ticker: normalized,
+        tags,
       });
       await loadWatchlist();
       pushNotification({
@@ -1406,10 +1461,10 @@ export function useDashboard() {
 
     for (const request of normalizedRequests) {
       try {
-        const added = await apiFetch("/api/watchlist/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ group_id: targetGroupId, ticker: request.ticker, tags: request.tags }),
+        const added = await dashboardApi.createWatchlistItem({
+          group_id: targetGroupId,
+          ticker: request.ticker,
+          tags: request.tags,
         });
         addedCount += 1;
         groupName = added.group_name || groupName;
@@ -1442,7 +1497,7 @@ export function useDashboard() {
   async function removeTickerFromWatchlist(itemId) {
     if (!itemId) return;
     try {
-      await apiFetch(`/api/watchlist/items/${itemId}`, { method: "DELETE" });
+      await dashboardApi.deleteWatchlistItem(itemId);
       await loadWatchlist();
       pushNotification({
         icon: "🗑",
@@ -1463,11 +1518,7 @@ export function useDashboard() {
   async function reorderWatchlistItems(groupId, itemIds) {
     if (!groupId || !Array.isArray(itemIds) || !itemIds.length) return;
     try {
-      await apiFetch(`/api/watchlist/groups/${groupId}/items/order`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item_ids: itemIds }),
-      });
+      await dashboardApi.reorderWatchlistItems(groupId, itemIds);
       await loadWatchlist();
     } catch (error) {
       pushNotification({
@@ -1493,13 +1544,15 @@ export function useDashboard() {
       return;
     }
     const resolvedInterval = resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
-    const fetchPeriod = getExpandedFetchPeriod(currentPeriod.value, klineDisplayMode.value);
+    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
+    const fetchPeriod = getExpandedFetchPeriod(currentPeriod.value, displayMode);
 
     const results = await Promise.allSettled(
       normalizedTickers.map(async (ticker, index) => {
-        const payload = await apiFetch(
-          `/api/kline/${ticker}?period=${fetchPeriod}&interval=${resolvedInterval}`,
-        );
+        const payload = await dashboardApi.getOhlc(ticker, {
+          period: fetchPeriod,
+          interval: resolvedInterval,
+        });
         const data = payload.data || [];
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
         const lastClose = data.length ? data[data.length - 1].close : null;
@@ -1570,15 +1623,19 @@ export function useDashboard() {
     const normalized = normalizeTicker(ticker);
     const resolvedPeriod = (period || "1y").toLowerCase();
     const resolvedInterval = resolveTimeframeInterval(resolvedPeriod, interval);
-    const fetchPeriod = getExpandedFetchPeriod(resolvedPeriod, klineDisplayMode.value);
+    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
+    const fetchPeriod = getExpandedFetchPeriod(resolvedPeriod, displayMode);
     currentPeriod.value = resolvedPeriod;
     currentInterval.value = resolvedInterval;
+    if (isIntradayInterval(resolvedInterval)) {
+      klineDisplayMode.value = "day";
+    }
     chartLoading.value = true;
     loadingMessage.value = `載入 ${normalized} K 線...`;
     try {
-      const data = await apiFetch(`/api/kline/${normalized}?period=${fetchPeriod}&interval=${resolvedInterval}`, {
-        retries: 12,
-        retryDelayMs: 1500,
+      const data = await dashboardApi.getOhlc(normalized, {
+        period: fetchPeriod,
+        interval: resolvedInterval,
       });
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
@@ -1623,6 +1680,7 @@ export function useDashboard() {
     rawOhlcData.value = [];
     crosshair.visible = false;
     dashboardRealtime.subscribeTicker(normalized);
+    rememberRecentTicker(normalized, name || normalized);
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
     void loadBacktestHistory({ ticker: normalized });
     void loadJournalData();
@@ -1631,9 +1689,14 @@ export function useDashboard() {
   }
 
   function setTimeframe(timeframe) {
-    currentPeriod.value = timeframe.tf;
-    currentInterval.value = resolveTimeframeInterval(timeframe.tf, timeframe.iv);
-    loadKline(currentTicker.value, timeframe.tf, currentInterval.value);
+    const nextPeriod = timeframe?.tf || currentPeriod.value;
+    const nextInterval = resolveTimeframeInterval(nextPeriod, timeframe?.iv || currentInterval.value);
+    if (isIntradayInterval(nextInterval)) {
+      klineDisplayMode.value = "day";
+    }
+    currentPeriod.value = nextPeriod;
+    currentInterval.value = nextInterval;
+    loadKline(currentTicker.value, nextPeriod, nextInterval);
   }
 
   async function loadInstitutionalData(dateValue = institutionalDate.value, forceRefresh = false) {
@@ -1681,6 +1744,10 @@ export function useDashboard() {
   }
 
   async function setKlineDisplayMode(mode) {
+    if (isIntradayInterval(currentInterval.value)) {
+      klineDisplayMode.value = "day";
+      return;
+    }
     const nextMode = normalizeKlineDisplayMode(mode);
     if (nextMode === klineDisplayMode.value) return;
     klineDisplayMode.value = nextMode;
@@ -2232,7 +2299,7 @@ export function useDashboard() {
     currentName.value = preset.currentName || normalizedTicker;
     currentPeriod.value = preset.currentPeriod || currentPeriod.value;
     currentInterval.value = resolveTimeframeInterval(currentPeriod.value, preset.currentInterval || currentInterval.value);
-    klineDisplayMode.value = normalizeKlineDisplayMode(preset.klineDisplayMode);
+    klineDisplayMode.value = getEffectiveKlineDisplayMode(preset.klineDisplayMode, currentInterval.value);
     chartEngineMode.value = normalizeChartEngineMode(preset.chartEngineMode);
     cleanChartMode.value = Boolean(preset.cleanChartMode);
     chartLayout.value = CHART_LAYOUT_OPTIONS.includes(preset.chartLayout) ? preset.chartLayout : "single";
@@ -2260,6 +2327,7 @@ export function useDashboard() {
     activeWorkspacePresetId.value = preset.id;
     rawOhlcData.value = [];
     crosshair.visible = false;
+    rememberRecentTicker(normalizedTicker, preset.currentName || normalizedTicker);
     if (rightTab.value === "db") {
       await loadDbStats();
     }
@@ -2366,7 +2434,7 @@ export function useDashboard() {
       return;
     }
     try {
-      const results = await apiFetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
+      const results = await dashboardApi.searchSymbols(trimmed);
       searchResults.value = results;
       searchOpen.value = results.length > 0;
     } catch (error) {
@@ -2523,6 +2591,7 @@ export function useDashboard() {
     searchQuery,
     searchResults,
     searchOpen,
+    recentTickers,
     watchlistGroups,
     userWatchGroups,
     marketWatchItems,

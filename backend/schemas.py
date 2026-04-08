@@ -11,10 +11,12 @@ from pydantic import BaseModel, Field
 
 class WatchlistGroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
+    color: str | None = Field(None, max_length=32)
 
 
 class WatchlistGroupUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
+    color: str | None = Field(None, max_length=32)
 
 
 class WatchlistItemCreate(BaseModel):

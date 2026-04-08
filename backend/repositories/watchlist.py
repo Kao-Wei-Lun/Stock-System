@@ -3,6 +3,7 @@ from database.helpers import *
 from database.core import DEFAULT_OWNER_ID
 # Import common serialization helpers here if needed
 
+
 class WatchlistMixin:
     async def ensure_default_watchlist(self, tickers: List[str], group_name: str = "我的自選") -> None:
         async with self._lock:
@@ -47,7 +48,7 @@ class WatchlistMixin:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
                     await cur.execute(
                         """
-                        SELECT `id`, `name`, `sort_order`, `created_at`
+                        SELECT `id`, `name`, `color`, `sort_order`, `created_at`
                         FROM `watchlist_groups`
                         WHERE `name`=%s
                         LIMIT 1
@@ -127,7 +128,7 @@ class WatchlistMixin:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
                     """
-                    SELECT `id`, `name`, `sort_order`, `created_at`
+                    SELECT `id`, `name`, `color`, `sort_order`, `created_at`
                     FROM `watchlist_groups`
                     WHERE `id`=%s
                     """,
@@ -140,7 +141,7 @@ class WatchlistMixin:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
                     """
-                    SELECT `id`, `name`, `sort_order`, `created_at`
+                    SELECT `id`, `name`, `color`, `sort_order`, `created_at`
                     FROM `watchlist_groups`
                     ORDER BY `sort_order` ASC, `id` ASC
                     """
@@ -168,7 +169,7 @@ class WatchlistMixin:
             for group in groups
         ]
 
-    async def create_watchlist_group(self, name: str) -> Dict:
+    async def create_watchlist_group(self, name: str, color: str | None = None) -> Dict:
         clean_name = (name or "").strip()
         if not clean_name:
             raise ValueError("Group name is required")
@@ -195,17 +196,17 @@ class WatchlistMixin:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        INSERT INTO `watchlist_groups` (`name`, `sort_order`)
-                        VALUES (%s, %s)
+                        INSERT INTO `watchlist_groups` (`name`, `color`, `sort_order`)
+                        VALUES (%s, %s, %s)
                         """,
-                        (clean_name, next_sort),
+                        (clean_name, color, next_sort),
                     )
                     group_id = cur.lastrowid
 
         group = await self.get_watchlist_group(group_id)
-        return group or {"id": group_id, "name": clean_name, "sort_order": next_sort, "items": []}
+        return group or {"id": group_id, "name": clean_name, "color": color, "sort_order": next_sort, "items": []}
 
-    async def rename_watchlist_group(self, group_id: int, name: str) -> Optional[Dict]:
+    async def rename_watchlist_group(self, group_id: int, name: str, color: str | None = None) -> Optional[Dict]:
         clean_name = (name or "").strip()
         if not clean_name:
             raise ValueError("Group name is required")
@@ -230,10 +231,10 @@ class WatchlistMixin:
                     await cur.execute(
                         """
                         UPDATE `watchlist_groups`
-                        SET `name`=%s
+                        SET `name`=%s, `color`=%s
                         WHERE `id`=%s
                         """,
-                        (clean_name, group_id),
+                        (clean_name, color, group_id),
                     )
                     if cur.rowcount == 0:
                         return None

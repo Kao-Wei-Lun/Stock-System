@@ -219,6 +219,7 @@ CREATE_TABLE_STATEMENTS = {
             `id` BIGINT NOT NULL AUTO_INCREMENT,
             `owner_id` BIGINT NOT NULL DEFAULT 1,
             `name` VARCHAR(128) NOT NULL,
+            `color` VARCHAR(32) NULL,
             `sort_order` INT NOT NULL DEFAULT 0,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
@@ -510,6 +511,10 @@ REQUIRED_COLUMN_MIGRATIONS = {
         "owner_id": """
             ALTER TABLE `watchlist_groups`
             ADD COLUMN `owner_id` BIGINT NOT NULL DEFAULT 1 AFTER `id`
+        """,
+        "color": """
+            ALTER TABLE `watchlist_groups`
+            ADD COLUMN `color` VARCHAR(32) NULL AFTER `name`
         """,
     },
     "watchlist_items": {

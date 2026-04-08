@@ -83,6 +83,7 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
         "category": categorize(ticker),
         "group_id": group["id"],
         "group_name": group["name"],
+        "group_color": group.get("color"),
     }
 
 
@@ -107,7 +108,7 @@ async def get_watchlist():
 @router.post("/watchlist/groups")
 async def create_watchlist_group(payload: WatchlistGroupCreate):
     try:
-        group = await db.create_watchlist_group(payload.name)
+        group = await db.create_watchlist_group(payload.name, color=payload.color)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {**group, "items": []}
@@ -116,7 +117,7 @@ async def create_watchlist_group(payload: WatchlistGroupCreate):
 @router.patch("/watchlist/groups/{group_id}")
 async def rename_watchlist_group(group_id: int, payload: WatchlistGroupUpdate):
     try:
-        group = await db.rename_watchlist_group(group_id, payload.name)
+        group = await db.rename_watchlist_group(group_id, payload.name, color=payload.color)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not group:

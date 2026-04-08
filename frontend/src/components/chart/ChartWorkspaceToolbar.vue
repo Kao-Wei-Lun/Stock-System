@@ -34,6 +34,21 @@
 
     <div class="tool-sep"></div>
 
+    <template v-if="timeframeOptions.length">
+      <span class="tool-label">週期：</span>
+      <button
+        v-for="timeframe in timeframeOptions"
+        :key="`${timeframe.tf}-${timeframe.iv}`"
+        class="tool-btn"
+        :class="{ active: currentPeriod === timeframe.tf && currentInterval === timeframe.iv }"
+        @click="$emit('set-timeframe', timeframe)"
+      >
+        {{ timeframe.label }}
+      </button>
+
+      <div class="tool-sep"></div>
+    </template>
+
     <span class="tool-label">Y 軸：</span>
     <button class="tool-btn" @click="$emit('zoom-y-in')">Y＋</button>
     <button class="tool-btn" @click="$emit('zoom-y-out')">Y－</button>
@@ -95,6 +110,9 @@ defineProps({
   canResetYScale: { type: Boolean, default: false },
   priceScaleMode: { type: String, required: true },
   canUseLogScale: { type: Boolean, default: false },
+  timeframeOptions: { type: Array, default: () => [] },
+  currentPeriod: { type: String, default: "1y" },
+  currentInterval: { type: String, default: "1d" },
   chartMode: { type: String, required: true },
   engineMode: { type: String, default: "legacy" },
   klineDisplayMode: { type: String, required: true },
@@ -118,6 +136,7 @@ defineEmits([
   "zoom-out",
   "jump-to-latest",
   "reset-view",
+  "set-timeframe",
   "zoom-y-in",
   "zoom-y-out",
   "reset-y-scale",

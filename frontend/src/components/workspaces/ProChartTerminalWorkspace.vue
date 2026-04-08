@@ -60,6 +60,9 @@
         <ChartWorkspace
           :current-ticker="currentTicker"
           :current-name="currentName"
+          :timeframe-options="timeframeOptions"
+          :current-period="currentPeriod"
+          :current-interval="currentInterval"
           :quote="quote"
           :active-tool="activeTool"
           :active-panels="activePanels"
@@ -105,6 +108,7 @@
           @remove-compare="$emit('remove-compare', $event)"
           @clear-compare="$emit('clear-compare')"
           @set-compare-mode="$emit('set-compare-mode', $event)"
+          @set-timeframe="$emit('set-timeframe', $event)"
           @set-kline-display-mode="$emit('set-kline-display-mode', $event)"
           @set-engine-mode="$emit('set-chart-engine-mode', $event)"
           @set-chart-layout="$emit('set-chart-layout', $event)"
@@ -162,8 +166,11 @@ const props = defineProps({
   groups: { type: Array, default: () => [] },
   activeGroupId: { type: Number, default: null },
   watchlist: { type: Array, default: () => [] },
+  timeframeOptions: { type: Array, default: () => [] },
   currentTicker: { type: String, required: true },
   currentName: { type: String, required: true },
+  currentPeriod: { type: String, default: "1y" },
+  currentInterval: { type: String, default: "1d" },
   quote: { type: Object, required: true },
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
@@ -238,6 +245,7 @@ const emit = defineEmits([
   "remove-compare",
   "clear-compare",
   "set-compare-mode",
+  "set-timeframe",
   "set-kline-display-mode",
   "set-chart-engine-mode",
   "set-chart-layout",

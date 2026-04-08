@@ -28,6 +28,39 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
   }
 
   return {
+    searchSymbols(query) {
+      return request(`/api/search?q=${encodeURIComponent(query)}`);
+    },
+    getOhlc(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.period) params.set("period", String(options.period));
+      if (options.interval) params.set("interval", String(options.interval));
+      const query = params.toString();
+      return request(`/api/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    listWatchlist() {
+      return request("/api/watchlist");
+    },
+    createWatchlistGroup(payload) {
+      return request("/api/watchlist/groups", buildJsonRequest("POST", payload));
+    },
+    updateWatchlistGroup(groupId, payload) {
+      return request(`/api/watchlist/groups/${groupId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteWatchlistGroup(groupId) {
+      return request(`/api/watchlist/groups/${groupId}`, { method: "DELETE" });
+    },
+    createWatchlistItem(payload) {
+      return request("/api/watchlist/items", buildJsonRequest("POST", payload));
+    },
+    deleteWatchlistItem(itemId) {
+      return request(`/api/watchlist/items/${itemId}`, { method: "DELETE" });
+    },
+    reorderWatchlistItems(groupId, itemIds) {
+      return request(`/api/watchlist/groups/${groupId}/items/order`, buildJsonRequest("PUT", {
+        item_ids: itemIds,
+      }));
+    },
     listWorkspaces() {
       return request("/api/workspaces");
     },
