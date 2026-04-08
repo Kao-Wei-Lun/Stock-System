@@ -54,6 +54,56 @@ vi.mock("../composables/useChartEngine", () => ({
   }),
 }));
 
+vi.mock("../composables/useLWCChart", () => ({
+  useLWCChart: () => ({
+    chartMode: ref("candles"),
+    priceScaleMode: ref("linear"),
+    visibleData: ref([
+      { date: "2026-04-01", close: 200, high: 205, low: 198, open: 199, volume: 1000 },
+      { date: "2026-04-02", close: 204, high: 206, low: 201, open: 202, volume: 1200 },
+      { date: "2026-04-03", close: 210, high: 212, low: 203, open: 204, volume: 1300 },
+    ]),
+    viewportStartIndex: ref(0),
+    canvasClass: computed(() => ""),
+    visibleRangeLabel: computed(() => "å¯è¦–ç¯„åœ"),
+    visibleBarsLabel: computed(() => "0 æ ¹"),
+    visibleChangeLabel: computed(() => "+0.00%"),
+    visibleChangeClass: computed(() => "up"),
+    zoomLabel: computed(() => "Zoom 1x"),
+    yScaleLabel: computed(() => "Y LWC"),
+    priceScaleModeLabel: computed(() => "ç·šæ€§"),
+    interactionHint: computed(() => "lwc hint"),
+    canPanLeft: computed(() => false),
+    canPanRight: computed(() => false),
+    canZoomIn: computed(() => false),
+    canZoomOut: computed(() => false),
+    canUseLogScale: computed(() => false),
+    canGoBackHistory: computed(() => false),
+    canGoForwardHistory: computed(() => false),
+    canResetYScale: computed(() => false),
+    setChartMode: vi.fn(),
+    setPriceScaleMode: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    zoomYIn: vi.fn(),
+    zoomYOut: vi.fn(),
+    panLeft: vi.fn(),
+    panRight: vi.fn(),
+    goHistoryBack: vi.fn(),
+    goHistoryForward: vi.fn(),
+    jumpToLatest: vi.fn(),
+    resetView: vi.fn(),
+    resetYScale: vi.fn(),
+    onMouseDown: vi.fn(),
+    onMouseMove: vi.fn(),
+    onMouseLeave: vi.fn(),
+    onMouseUp: vi.fn(),
+    onWheel: vi.fn(),
+    onChartClick: vi.fn(),
+    onDoubleClick: vi.fn(),
+  }),
+}));
+
 function createProps() {
   return {
     currentTicker: "AAPL",
@@ -75,6 +125,7 @@ function createProps() {
     activeTool: "cursor",
     activePanels: { macd: true, stoch: true },
     klineDisplayMode: "day",
+    engineMode: "legacy",
     cleanChartMode: false,
     chartLayout: "single",
     loading: false,
@@ -173,6 +224,17 @@ describe("ChartWorkspace", () => {
     expect(wrapper.emitted("open-journal-entry")[0]).toEqual([
       { ticker: "AAPL", entry_price: 210.5 },
     ]);
+  });
+
+  it("emits engine mode changes from the chart toolbar", async () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+    const engineButtons = wrapper.findAll(".chart-toolbar .tool-btn").filter((button) =>
+      ["Legacy", "LWC Beta"].includes(button.text()),
+    );
+
+    await engineButtons[1].trigger("click");
+
+    expect(wrapper.emitted("set-engine-mode")[0]).toEqual(["lwc"]);
   });
 
   it("renders event markers and links event rows to vertical lines", async () => {
