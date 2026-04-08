@@ -12,9 +12,9 @@ vi.mock("./AppShellRouteView.vue", () => ({
 import DashboardView from "./DashboardView.vue";
 
 describe("DashboardView", () => {
-  it("wires the default dashboard route state into AppShellRouteView", () => {
+  it("keeps the legacy dashboard view pointed at the terminal workspace", () => {
     const wrapper = mount(DashboardView);
 
-    expect(wrapper.get('[data-testid="app-shell-route"]').text()).toBe("chart|indicators");
+    expect(wrapper.get('[data-testid="app-shell-route"]').text()).toBe("terminal|alerts");
   });
 });

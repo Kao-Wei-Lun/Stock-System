@@ -3,23 +3,23 @@ import { describe, expect, it } from "vitest";
 import { buildAppRouteLocation, mapRouteToAppState } from "./appRouteState";
 
 describe("appRouteState", () => {
-  it("maps dashboard routes into chart state", () => {
+  it("maps legacy dashboard routes into terminal state", () => {
     expect(mapRouteToAppState({
       name: "dashboard",
       params: { ticker: "msft" },
     })).toEqual({
-      routeWorkspaceTab: "chart",
-      routeRightTab: "indicators",
+      routeWorkspaceTab: "terminal",
+      routeRightTab: "alerts",
       routeTicker: "MSFT",
     });
   });
 
-  it("maps workspace and right-tab routes into app state", () => {
+  it("maps overview and review routes into app state", () => {
     expect(mapRouteToAppState({
       name: "events",
       params: { ticker: "nvda" },
     })).toEqual({
-      routeWorkspaceTab: "events",
+      routeWorkspaceTab: "overview",
       routeRightTab: "indicators",
       routeTicker: "NVDA",
     });
@@ -28,15 +28,15 @@ describe("appRouteState", () => {
       name: "journal",
       params: { ticker: "aapl" },
     })).toEqual({
-      routeWorkspaceTab: "chart",
+      routeWorkspaceTab: "review",
       routeRightTab: "journal",
       routeTicker: "AAPL",
     });
   });
 
-  it("builds route locations from current dashboard state", () => {
+  it("builds route locations from the four-workspace shell", () => {
     expect(buildAppRouteLocation({
-      workspaceTab: "chart",
+      workspaceTab: "review",
       rightTab: "backtest",
       currentTicker: "tsla",
     })).toEqual({
@@ -45,11 +45,11 @@ describe("appRouteState", () => {
     });
 
     expect(buildAppRouteLocation({
-      workspaceTab: "macro",
+      workspaceTab: "overview",
       rightTab: "indicators",
       currentTicker: "spy",
     })).toEqual({
-      name: "macro",
+      name: "overview",
       params: { ticker: "SPY" },
     });
   });

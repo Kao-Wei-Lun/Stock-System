@@ -14,11 +14,11 @@ vi.mock("vue", async () => {
           <div data-testid="route-props">{{ routeWorkspaceTab }}|{{ routeRightTab }}|{{ routeTicker }}</div>
           <button
             data-testid="emit-same-route"
-            @click="$emit('route-change', { workspaceTab: 'chart', rightTab: 'indicators', currentTicker: routeTicker })"
+            @click="$emit('route-change', { workspaceTab: 'terminal', rightTab: 'alerts', currentTicker: routeTicker })"
           />
           <button
-            data-testid="emit-alert-route"
-            @click="$emit('route-change', { workspaceTab: 'chart', rightTab: 'alerts', currentTicker: 'msft' })"
+            data-testid="emit-review-route"
+            @click="$emit('route-change', { workspaceTab: 'review', rightTab: 'backtest', currentTicker: 'msft' })"
           />
         </div>
       `,
@@ -42,7 +42,7 @@ import AppShellRouteView from "./AppShellRouteView.vue";
 
 describe("AppShellRouteView", () => {
   beforeEach(() => {
-    routeState.name = "dashboard";
+    routeState.name = "terminal";
     routeState.params = { ticker: "aapl" };
     replace.mockReset();
   });
@@ -50,21 +50,21 @@ describe("AppShellRouteView", () => {
   it("normalizes the route ticker before passing it into the app shell", async () => {
     const wrapper = mount(AppShellRouteView, {
       props: {
-        workspaceTab: "chart",
-        rightTab: "indicators",
+        workspaceTab: "terminal",
+        rightTab: "alerts",
       },
     });
 
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="route-props"]').text()).toBe("chart|indicators|AAPL");
+    expect(wrapper.get('[data-testid="route-props"]').text()).toBe("terminal|alerts|AAPL");
   });
 
   it("does not replace the route when the target route is already active", async () => {
     const wrapper = mount(AppShellRouteView, {
       props: {
-        workspaceTab: "chart",
-        rightTab: "indicators",
+        workspaceTab: "terminal",
+        rightTab: "alerts",
       },
     });
 
@@ -77,16 +77,16 @@ describe("AppShellRouteView", () => {
   it("replaces the route when the app shell requests a different view", async () => {
     const wrapper = mount(AppShellRouteView, {
       props: {
-        workspaceTab: "chart",
-        rightTab: "indicators",
+        workspaceTab: "terminal",
+        rightTab: "alerts",
       },
     });
 
     await flushPromises();
-    await wrapper.get('[data-testid="emit-alert-route"]').trigger("click");
+    await wrapper.get('[data-testid="emit-review-route"]').trigger("click");
 
     expect(replace).toHaveBeenCalledWith({
-      name: "alerts",
+      name: "backtest",
       params: { ticker: "MSFT" },
     });
   });

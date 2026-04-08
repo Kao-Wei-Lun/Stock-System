@@ -286,16 +286,17 @@ describe("App", () => {
     dashboardMock.addTickersToWatchlistBatch = vi.fn().mockResolvedValue({ added: 2, failed: 0 });
 
     const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "review",
+        routeRightTab: "journal",
+      },
       global: {
         stubs: {
-          DashboardTopbar: true,
-          WatchlistPanel: true,
-          ChartWorkspace: true,
-          RightSidebar: {
-            name: "RightSidebar",
+          ReviewWorkspace: {
+            name: "ReviewWorkspace",
             template: `
               <button
-                data-testid="right-sidebar-trigger"
+                data-testid="review-watch-group-trigger"
                 @click="$emit('create-watch-group', {
                   name: '警報通知模板 命中池',
                   items: [{ ticker: 'AAPL' }, { ticker: 'MSFT' }],
@@ -303,10 +304,6 @@ describe("App", () => {
               />
             `,
           },
-          InstitutionalDashboard: true,
-          EventCenter: true,
-          MacroDashboard: true,
-          ScreenerWorkspace: true,
           StatusBar: true,
           ToastStack: true,
           NotificationPanel: true,
@@ -315,7 +312,8 @@ describe("App", () => {
       },
     });
 
-    await wrapper.get('[data-testid="right-sidebar-trigger"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="review-watch-group-trigger"]').trigger("click");
     await flushPromises();
 
     expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
@@ -333,12 +331,11 @@ describe("App", () => {
     const wrapper = shallowMount(App, {
       global: {
         stubs: {
-          DashboardTopbar: true,
-          WatchlistPanel: {
-            name: "WatchlistPanel",
+          MarketOverviewWorkspace: {
+            name: "MarketOverviewWorkspace",
             template: `
               <button
-                data-testid="watchlist-batch-alerts-trigger"
+                data-testid="overview-batch-alerts-trigger"
                 @click="$emit('create-alerts-batch', [
                   { ticker: 'AAPL', type: 'price', condition: '大於', value: 210.5 },
                   { ticker: 'MSFT', type: 'price', condition: '大於', value: 410.2 },
@@ -346,12 +343,6 @@ describe("App", () => {
               />
             `,
           },
-          ChartWorkspace: true,
-          RightSidebar: true,
-          InstitutionalDashboard: true,
-          EventCenter: true,
-          MacroDashboard: true,
-          ScreenerWorkspace: true,
           StatusBar: true,
           ToastStack: true,
           NotificationPanel: true,
@@ -360,7 +351,8 @@ describe("App", () => {
       },
     });
 
-    await wrapper.get('[data-testid="watchlist-batch-alerts-trigger"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="overview-batch-alerts-trigger"]').trigger("click");
     await flushPromises();
 
     expect(dashboardMock.setRightTab).toHaveBeenCalledWith("alerts");
@@ -380,14 +372,6 @@ describe("App", () => {
     const wrapper = shallowMount(App, {
       global: {
         stubs: {
-          DashboardTopbar: true,
-          WatchlistPanel: true,
-          ChartWorkspace: true,
-          RightSidebar: true,
-          InstitutionalDashboard: true,
-          EventCenter: true,
-          MacroDashboard: true,
-          ScreenerWorkspace: true,
           StatusBar: true,
           ToastStack: true,
           NotificationPanel: {
@@ -404,6 +388,7 @@ describe("App", () => {
       },
     });
 
+    await flushPromises();
     await wrapper.get('[data-testid="notification-watch-group-trigger"]').trigger("click");
     await flushPromises();
 
@@ -420,24 +405,21 @@ describe("App", () => {
     dashboardMock.setActiveWatchGroup = vi.fn();
 
     const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "terminal",
+        routeRightTab: "alerts",
+      },
       global: {
         stubs: {
-          DashboardTopbar: true,
-          WatchlistPanel: true,
-          ChartWorkspace: true,
-          RightSidebar: {
-            name: "RightSidebar",
+          ProChartTerminalWorkspace: {
+            name: "ProChartTerminalWorkspace",
             template: `
               <button
-                data-testid="right-sidebar-watch-group-trigger"
+                data-testid="terminal-watch-group-trigger"
                 @click="$emit('open-watch-group', { groupName: 'Journal Flow', ticker: 'AAPL' })"
               />
             `,
           },
-          InstitutionalDashboard: true,
-          EventCenter: true,
-          MacroDashboard: true,
-          ScreenerWorkspace: true,
           StatusBar: true,
           ToastStack: true,
           NotificationPanel: true,
@@ -446,7 +428,8 @@ describe("App", () => {
       },
     });
 
-    await wrapper.get('[data-testid="right-sidebar-watch-group-trigger"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="terminal-watch-group-trigger"]').trigger("click");
     await flushPromises();
 
     expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
