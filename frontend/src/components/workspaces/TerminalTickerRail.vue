@@ -16,9 +16,11 @@
         :key="`${item.group_id || 'watch'}-${item.ticker}`"
         class="terminal-rail-item"
         :class="{ active: item.ticker === activeTicker }"
+        :style="getGroupAccentStyle(item)"
         type="button"
         @click="$emit('select-ticker', item)"
       >
+        <span class="terminal-rail-accent" :style="getGroupColorStyle(item.group_color)"></span>
         <div class="terminal-rail-main">
           <div class="terminal-rail-symbol">{{ item.ticker }}</div>
           <div class="terminal-rail-name">{{ item.name || item.group_name || "" }}</div>
@@ -67,6 +69,21 @@ const visibleItems = computed(() => {
 
 function formatPrice(value) {
   return fmtPrice(value);
+}
+
+function getGroupColorStyle(color) {
+  return {
+    background: color || "rgba(255, 255, 255, 0.12)",
+  };
+}
+
+function getGroupAccentStyle(item) {
+  return item?.group_color
+    ? {
+      borderColor: `${item.group_color}33`,
+      boxShadow: `inset 0 0 0 1px ${item.group_color}16`,
+    }
+    : {};
 }
 </script>
 
@@ -123,6 +140,7 @@ function formatPrice(value) {
 }
 
 .terminal-rail-item {
+  position: relative;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -144,6 +162,15 @@ function formatPrice(value) {
 .terminal-rail-item.active {
   border-color: rgba(123, 231, 255, 0.28);
   background: rgba(123, 231, 255, 0.08);
+}
+
+.terminal-rail-accent {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 999px;
 }
 
 .terminal-rail-main,

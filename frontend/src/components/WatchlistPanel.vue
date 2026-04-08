@@ -12,8 +12,10 @@
           :key="group.id"
           class="group-pill"
           :class="{ active: group.id === activeGroupId }"
+          :style="getGroupAccentStyle(group)"
           @click="$emit('select-group', group.id)"
         >
+          <span class="group-pill-color" :style="getGroupColorStyle(group.color)"></span>
           <span>{{ group.name }}</span>
           <span class="group-count">{{ group.items?.length || 0 }}</span>
         </button>
@@ -37,6 +39,17 @@
           placeholder="新增觀察群組"
           @keydown.enter.prevent="submitGroup"
         />
+        <div class="group-swatch-row">
+          <button
+            v-for="color in colorOptions"
+            :key="`new-${color}`"
+            class="group-swatch"
+            :class="{ active: newGroupColor === color }"
+            type="button"
+            :style="{ '--group-color': color }"
+            @click="newGroupColor = color"
+          ></button>
+        </div>
         <button @click="submitGroup">建立</button>
       </div>
 
@@ -48,6 +61,17 @@
             placeholder="重新命名群組"
             @keydown.enter.prevent="submitRenameGroup"
           />
+          <div class="group-swatch-row">
+            <button
+              v-for="color in colorOptions"
+              :key="`edit-${color}`"
+              class="group-swatch"
+              :class="{ active: editGroupColor === color }"
+              type="button"
+              :style="{ '--group-color': color }"
+              @click="editGroupColor = color"
+            ></button>
+          </div>
           <button @click="submitRenameGroup">儲存</button>
           <button class="ghost" @click="cancelRenameGroup">取消</button>
         </template>
@@ -141,8 +165,10 @@
           class="wl-item"
           :class="{ active: item.ticker === activeTicker }"
           :data-ticker="item.ticker"
+          :style="getGroupAccentStyle(item)"
           @click="$emit('select-ticker', item)"
         >
+          <span class="wl-item-accent" :style="getGroupColorStyle(item.group_color)"></span>
           <div>
             <div class="wl-ticker">{{ item.ticker }}</div>
             <div class="wl-name">{{ item.name || "" }}<span v-if="item.category"> &#183; {{ item.category }}</span></div>
@@ -200,6 +226,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 
+import { WATCHLIST_COLOR_OPTIONS } from "../composables/useDashboard";
 import { fmtPrice } from "../utils/formatters";
 
 const props = defineProps({
@@ -230,13 +257,16 @@ const emit = defineEmits([
 
 const createGroupOpen = ref(false);
 const newGroupName = ref("");
+const newGroupColor = ref(WATCHLIST_COLOR_OPTIONS[0]);
 const newTicker = ref("");
 const editingGroupId = ref(null);
 const editGroupName = ref("");
+const editGroupColor = ref(WATCHLIST_COLOR_OPTIONS[0]);
 const watchVerdictFilter = ref("all");
 const watchSetupFilter = ref("all");
 const watchPostureFilter = ref("all");
 const watchSortMode = ref("manual");
+const colorOptions = WATCHLIST_COLOR_OPTIONS;
 
 const SOURCE_LABELS = {
   yahoo_finance: "Yahoo Finance",
@@ -576,15 +606,39 @@ function openAlertShortcut(item) {
   if (!payload) return;
   emit("open-alert-modal", payload);
 }
+
+function getGroupColorStyle(color) {
+  return {
+    background: color || "rgba(255, 255, 255, 0.12)",
+  };
+}
+
+function getGroupAccentStyle(item) {
+  const color = item?.group_color || item?.color;
+  return color
+    ? {
+      borderColor: `${color}33`,
+      boxShadow: `inset 0 0 0 1px ${color}16`,
+    }
+    : {};
+}
+
 function toggleCreateGroup() {
   createGroupOpen.value = !createGroupOpen.value;
-  if (!createGroupOpen.value) newGroupName.value = "";
+  if (!createGroupOpen.value) {
+    newGroupName.value = "";
+    newGroupColor.value = colorOptions[0];
+  }
 }
 
 function submitGroup() {
   if (!newGroupName.value) return;
-  emit("create-group", newGroupName.value);
+  emit("create-group", {
+    name: newGroupName.value,
+    color: newGroupColor.value,
+  });
   newGroupName.value = "";
+  newGroupColor.value = colorOptions[0];
   createGroupOpen.value = false;
 }
 
@@ -597,16 +651,21 @@ function submitTicker() {
 function beginRenameGroup(group) {
   editingGroupId.value = group.id;
   editGroupName.value = group.name || "";
+  editGroupColor.value = group.color || colorOptions[0];
 }
 
 function cancelRenameGroup() {
   editingGroupId.value = null;
   editGroupName.value = "";
+  editGroupColor.value = colorOptions[0];
 }
 
 function submitRenameGroup() {
   if (!editingGroupId.value || !editGroupName.value) return;
-  emit("rename-group", editingGroupId.value, editGroupName.value);
+  emit("rename-group", editingGroupId.value, {
+    name: editGroupName.value,
+    color: editGroupColor.value,
+  });
   cancelRenameGroup();
 }
 
@@ -643,6 +702,51 @@ function removeItem(item) {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
+}
+
+.group-pill-color,
+.wl-item-accent,
+.group-swatch {
+  flex-shrink: 0;
+}
+
+.group-pill-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.wl-item {
+  position: relative;
+}
+
+.wl-item-accent {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 999px;
+}
+
+.group-swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-swatch {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: var(--group-color);
+  cursor: pointer;
+}
+
+.group-swatch.active {
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(123, 231, 255, 0.2);
 }
 
 .watchlist-viewfield {

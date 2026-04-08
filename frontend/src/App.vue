@@ -6,7 +6,7 @@
       :review-tab="reviewTab"
       :search-query="searchQuery"
       :search-results="searchResults"
-      :search-open="searchOpen"
+      :search-open="searchOpen && !commandPaletteOpen"
       :timeframe-options="timeframeOptions"
       :current-period="currentPeriod"
       :current-interval="currentInterval"
@@ -19,6 +19,7 @@
       @select-search-result="selectSearchResult"
       @close-search="closeSearch"
       @set-timeframe="setTimeframe"
+      @open-heatmap="handleOpenHeatmap"
       @open-alert-modal="openAlertModal"
     />
 
@@ -32,8 +33,11 @@
         :groups="userWatchGroups"
         :active-group-id="activeWatchGroupId"
         :watchlist="watchlist"
+        :timeframe-options="timeframeOptions"
         :current-ticker="currentTicker"
         :current-name="currentName"
+        :current-period="currentPeriod"
+        :current-interval="currentInterval"
         :quote="quote"
         :active-tool="activeTool"
         :active-panels="activePanels"
@@ -105,6 +109,7 @@
         @remove-compare="removeCompareTicker"
         @clear-compare="clearCompareTickers"
         @set-compare-mode="setComparisonMode"
+        @set-timeframe="setTimeframe"
         @set-kline-display-mode="setKlineDisplayMode"
         @set-chart-engine-mode="setChartEngineMode"
         @set-chart-layout="setChartLayout"
@@ -116,6 +121,7 @@
     <div v-else class="workspace-stage page-stage-shell">
       <MarketOverviewWorkspace
         v-if="activeWorkspacePage === 'overview'"
+        ref="marketOverviewRef"
         :groups="userWatchGroups"
         :market-items="marketWatchItems"
         :active-group-id="activeWatchGroupId"
@@ -222,6 +228,18 @@
       />
     </div>
 
+    <GlobalSearchCommand
+      :open="commandPaletteOpen"
+      :query="searchQuery"
+      :search-results="searchResults"
+      :recent-tickers="recentTickers"
+      :current-ticker="currentTicker"
+      @close="closeCommandPalette"
+      @query-change="handleCommandQueryChange"
+      @select-symbol="handleCommandSelectSymbol"
+      @navigate="handleCommandNavigate"
+    />
+
     <StatusBar
       :connected="wsConnected"
       :backend-url="backendUrl"
@@ -274,6 +292,7 @@ import {
 
 import AppNavbar from "./components/AppNavbar.vue";
 import AlertModal from "./components/AlertModal.vue";
+import GlobalSearchCommand from "./components/GlobalSearchCommand.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import ToastStack from "./components/ToastStack.vue";
@@ -293,9 +312,11 @@ const props = defineProps({
 const emit = defineEmits(["route-change"]);
 
 const appNavbarRef = ref(null);
+const marketOverviewRef = ref(null);
 const workspaceStageRef = ref(null);
 const chartFullscreen = ref(false);
 const pseudoFullscreen = ref(false);
+const commandPaletteOpen = ref(false);
 const routeStateReady = ref(false);
 const applyingRouteState = ref(false);
 const activeWorkspacePage = ref("overview");
@@ -308,6 +329,7 @@ const {
   searchQuery,
   searchResults,
   searchOpen,
+  recentTickers,
   userWatchGroups,
   marketWatchItems,
   activeWatchGroupId,
@@ -476,6 +498,12 @@ const reviewTab = ref("journal");
 
 function readStateValue(source) {
   return isRef(source) ? source.value : source;
+}
+
+function writeStateValue(target, value) {
+  if (isRef(target)) {
+    target.value = value;
+  }
 }
 
 const drawerTab = ref("alerts");
@@ -892,6 +920,48 @@ function focusSearchInput() {
   appNavbarRef.value?.focusSearchInput?.();
 }
 
+function resetSearchState() {
+  writeStateValue(searchQuery, "");
+  writeStateValue(searchResults, []);
+  writeStateValue(searchOpen, false);
+}
+
+function openCommandPalette() {
+  commandPaletteOpen.value = true;
+}
+
+function closeCommandPalette() {
+  commandPaletteOpen.value = false;
+  writeStateValue(searchOpen, false);
+}
+
+function handleCommandQueryChange(value) {
+  const query = String(value || "");
+  if (!query.trim()) {
+    resetSearchState();
+    return;
+  }
+  void searchSymbols(query);
+  writeStateValue(searchOpen, false);
+}
+
+async function handleCommandSelectSymbol(payload) {
+  closeCommandPalette();
+  if (!payload?.ticker) return;
+  await openTerminalWithTicker(payload.ticker, payload.name || payload.ticker);
+}
+
+async function handleCommandNavigate(page) {
+  closeCommandPalette();
+  await handleNavigate(page);
+}
+
+async function handleOpenHeatmap() {
+  await applyWorkspacePage("overview", "indicators");
+  await nextTick();
+  marketOverviewRef.value?.focusHeatmap?.();
+}
+
 function shiftTimeframe(step) {
   const currentIndex = timeframeOptions.findIndex(
     (option) => option.tf === readStateValue(currentPeriod) && option.iv === readStateValue(currentInterval),
@@ -928,6 +998,19 @@ useHotkeys(() => [
     key: "/",
     preventDefault: true,
     handler: focusSearchInput,
+  },
+  {
+    key: "k",
+    ctrlOrMeta: true,
+    preventDefault: true,
+    handler: () => {
+      if (commandPaletteOpen.value) {
+        closeCommandPalette();
+        return;
+      }
+      resetSearchState();
+      openCommandPalette();
+    },
   },
   {
     key: "ArrowLeft",

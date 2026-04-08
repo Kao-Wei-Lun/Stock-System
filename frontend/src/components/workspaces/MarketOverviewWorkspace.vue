@@ -24,6 +24,43 @@
       />
     </div>
 
+    <div ref="heatmapSectionRef" class="overview-grid widgets-grid">
+      <div class="overview-card widget-card">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">TradingView</div>
+            <div class="overview-card-title">Market Heatmap</div>
+          </div>
+          <button class="hero-action ghost" type="button" @click="focusHeatmap">
+            聚焦區塊
+          </button>
+        </div>
+        <div class="widget-shell heatmap-shell">
+          <TradingViewWidgetEmbed
+            script-src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"
+            :config="heatmapConfig"
+            fallback-url="https://www.tradingview.com/heatmap/stock/"
+          />
+        </div>
+      </div>
+
+      <div class="overview-card widget-card">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">TradingView</div>
+            <div class="overview-card-title">Market Overview Widget</div>
+          </div>
+        </div>
+        <div class="widget-shell market-overview-shell">
+          <TradingViewWidgetEmbed
+            script-src="https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
+            :config="marketOverviewConfig"
+            fallback-url="https://www.tradingview.com/markets/"
+          />
+        </div>
+      </div>
+    </div>
+
     <div class="overview-grid">
       <div class="overview-card overview-watch">
         <div class="overview-card-head">
@@ -108,10 +145,91 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
+
 import EventCenter from "../EventCenter.vue";
 import MacroDashboard from "../MacroDashboard.vue";
 import ScreenerWorkspace from "../ScreenerWorkspace.vue";
+import TradingViewWidgetEmbed from "../TradingViewWidgetEmbed.vue";
 import WatchlistPanel from "../WatchlistPanel.vue";
+
+const heatmapSectionRef = ref(null);
+
+const heatmapConfig = {
+  dataSource: "SPX500",
+  blockSize: "market_cap_basic",
+  blockColor: "change",
+  grouping: "sector",
+  locale: "zh_TW",
+  symbolUrl: "",
+  colorTheme: "dark",
+  hasTopBar: false,
+  isDataSetEnabled: false,
+  isZoomEnabled: true,
+  hasSymbolTooltip: true,
+  isMonoSize: false,
+  width: "100%",
+  height: "100%",
+};
+
+const marketOverviewConfig = {
+  colorTheme: "dark",
+  dateRange: "12M",
+  showChart: true,
+  locale: "zh_TW",
+  largeChartUrl: "",
+  isTransparent: true,
+  showSymbolLogo: true,
+  showFloatingTooltip: false,
+  plotLineColorGrowing: "rgba(0, 217, 163, 1)",
+  plotLineColorFalling: "rgba(255, 77, 106, 1)",
+  gridLineColor: "rgba(255, 255, 255, 0.06)",
+  scaleFontColor: "rgba(152, 167, 183, 1)",
+  belowLineFillColorGrowing: "rgba(0, 217, 163, 0.16)",
+  belowLineFillColorFalling: "rgba(255, 77, 106, 0.16)",
+  belowLineFillColorGrowingBottom: "rgba(0, 217, 163, 0)",
+  belowLineFillColorFallingBottom: "rgba(255, 77, 106, 0)",
+  symbolActiveColor: "rgba(123, 231, 255, 0.16)",
+  tabs: [
+    {
+      title: "美股指數",
+      symbols: [
+        { s: "FOREXCOM:SPXUSD", d: "S&P 500" },
+        { s: "NASDAQ:NDX", d: "NASDAQ 100" },
+        { s: "INDEX:DJI", d: "Dow Jones" },
+      ],
+      originalTitle: "US",
+    },
+    {
+      title: "台灣/亞洲",
+      symbols: [
+        { s: "TVC:TWII", d: "TWSE" },
+        { s: "INDEX:HSI", d: "Hang Seng" },
+        { s: "INDEX:NKY", d: "Nikkei 225" },
+      ],
+      originalTitle: "Asia",
+    },
+    {
+      title: "商品/匯率",
+      symbols: [
+        { s: "COMEX:GC1!", d: "Gold" },
+        { s: "NYMEX:CL1!", d: "WTI Oil" },
+        { s: "FX:USDJPY", d: "USD/JPY" },
+      ],
+      originalTitle: "Macro",
+    },
+  ],
+  width: "100%",
+  height: "100%",
+};
+
+function focusHeatmap() {
+  heatmapSectionRef.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+defineExpose({
+  focusHeatmap,
+});
 
 defineProps({
   groups: { type: Array, required: true },
@@ -260,6 +378,30 @@ defineEmits([
   overflow: hidden;
 }
 
+.widgets-grid {
+  margin-top: 18px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.widget-card {
+  min-height: 440px;
+}
+
+.widget-shell {
+  min-height: 360px;
+  padding: 0 18px 18px;
+}
+
+.heatmap-shell :deep(.tv-widget-shell),
+.market-overview-shell :deep(.tv-widget-shell),
+.heatmap-shell :deep(.tradingview-widget-container),
+.market-overview-shell :deep(.tradingview-widget-container),
+.heatmap-shell :deep(.tradingview-widget-container__widget),
+.market-overview-shell :deep(.tradingview-widget-container__widget) {
+  min-height: 100%;
+  height: 100%;
+}
+
 .overview-card-head {
   display: flex;
   align-items: center;
@@ -308,6 +450,10 @@ defineEmits([
 
 @media (max-width: 1280px) {
   .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .widgets-grid {
     grid-template-columns: 1fr;
   }
 

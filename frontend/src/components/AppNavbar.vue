@@ -60,6 +60,10 @@
         </button>
       </div>
 
+      <button class="heatmap-link" type="button" @click="$emit('open-heatmap')">
+        Heatmap
+      </button>
+
       <div class="market-pills">
         <div class="mpill">
           <div class="dot" :class="marketStatus.nyseOpen ? 'live' : 'closed'"></div>
@@ -130,6 +134,7 @@ const emit = defineEmits([
   "select-search-result",
   "close-search",
   "set-timeframe",
+  "open-heatmap",
   "open-alert-modal",
 ]);
 
@@ -347,6 +352,7 @@ onBeforeUnmount(() => {
 }
 
 .tf-btns,
+.heatmap-link,
 .market-pills,
 .review-switch,
 .nav-actions {
@@ -392,6 +398,16 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text3);
+  font-size: 10px;
+}
+
+.heatmap-link {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 209, 102, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.08);
+  color: #ffe1a0;
+  cursor: pointer;
   font-size: 10px;
 }
 
