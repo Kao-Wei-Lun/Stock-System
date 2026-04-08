@@ -53,6 +53,12 @@ const SERIES_DEFINITIONS = {
   },
 };
 
+const SERIES_DATA_KEYS = {
+  candles: "candle",
+  line: "line",
+  area: "area",
+};
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -330,8 +336,12 @@ export function useLWCChart({
     }
 
     const definition = SERIES_DEFINITIONS[chartMode.value] || SERIES_DEFINITIONS.candles;
+    const seriesDataKey = SERIES_DATA_KEYS[chartMode.value] || SERIES_DATA_KEYS.candles;
+    const seriesData = chartRows.value
+      .map((entry) => entry?.[seriesDataKey])
+      .filter((item) => item?.time != null);
     mainSeries.value = chartApi.value.addSeries(definition.definition, definition.options, 0);
-    mainSeries.value.setData(chartRows.value.map((entry) => entry[chartMode.value]));
+    mainSeries.value.setData(seriesData);
     applyPriceScaleOptions();
 
     if (currentRange) {
