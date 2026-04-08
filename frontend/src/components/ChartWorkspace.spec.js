@@ -252,6 +252,22 @@ describe("ChartWorkspace", () => {
     expect(wrapper.emitted("set-timeframe")[0]).toEqual([{ tf: "1d", iv: "1m", label: "1m" }]);
   });
 
+  it("switches to a chart-first layout in fullscreen mode", () => {
+    const wrapper = mount(ChartWorkspace, {
+      props: {
+        ...createProps(),
+        isFullscreen: true,
+      },
+    });
+
+    expect(wrapper.find(".center").classes()).toContain("is-chart-fullscreen");
+    expect(wrapper.find(".chart-header").exists()).toBe(false);
+    expect(wrapper.find(".chart-meta").exists()).toBe(false);
+    expect(wrapper.find(".workspace-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".drawing-manager").exists()).toBe(false);
+    expect(wrapper.find(".chart-toolbar").exists()).toBe(true);
+  });
+
   it("renders event markers and links event rows to vertical lines", async () => {
     const wrapper = mount(ChartWorkspace, {
       props: {

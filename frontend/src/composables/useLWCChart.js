@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import {
   AreaSeries,
   CandlestickSeries,
@@ -141,6 +141,8 @@ export function useLWCChart({
   const chartMode = ref("candles");
   const priceScaleMode = ref("linear");
   const visibleLogicalRange = ref(null);
+  let resizeFrameId = null;
+  let resizeTimeoutId = null;
 
   const chartRows = computed(() => (
     Array.isArray(props.ohlcData)
@@ -434,6 +436,36 @@ export function useLWCChart({
     );
   }
 
+  function clearScheduledResize() {
+    if (resizeFrameId != null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(resizeFrameId);
+    }
+    if (resizeTimeoutId != null && typeof window !== "undefined") {
+      window.clearTimeout(resizeTimeoutId);
+    }
+    resizeFrameId = null;
+    resizeTimeoutId = null;
+  }
+
+  function scheduleResizeChart() {
+    clearScheduledResize();
+    nextTick(() => {
+      resizeChart();
+      drawingsBridge.scheduleRender();
+      if (typeof window === "undefined") return;
+      resizeFrameId = window.requestAnimationFrame(() => {
+        resizeChart();
+        drawingsBridge.scheduleRender();
+        resizeFrameId = null;
+      });
+      resizeTimeoutId = window.setTimeout(() => {
+        resizeChart();
+        drawingsBridge.scheduleRender();
+        resizeTimeoutId = null;
+      }, 120);
+    });
+  }
+
   function initializeChart() {
     if (chartApi.value || !chartContainer.value) return;
     chartApi.value = createChart(chartContainer.value, {
@@ -666,7 +698,16 @@ export function useLWCChart({
     },
   );
 
+  watch(
+    () => props.isFullscreen,
+    () => {
+      if (!chartApi.value) return;
+      scheduleResizeChart();
+    },
+  );
+
   onBeforeUnmount(() => {
+    clearScheduledResize();
     if (!resizeObserver.value) {
       window.removeEventListener("resize", resizeChart);
     }

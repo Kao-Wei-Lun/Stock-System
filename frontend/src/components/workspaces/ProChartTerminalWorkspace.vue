@@ -1,6 +1,6 @@
 <template>
-  <section class="terminal-page">
-    <div class="terminal-commandbar">
+  <section class="terminal-page" :class="{ 'is-chart-fullscreen': chartFullscreen }">
+    <div v-if="!chartFullscreen" class="terminal-commandbar">
       <div class="terminal-commandbar-main">
         <div class="terminal-kicker">Pro Chart Terminal</div>
         <div class="terminal-title-row">
@@ -38,7 +38,7 @@
 
     <div class="terminal-stage">
       <button
-        v-if="leftCollapsed"
+        v-if="!chartFullscreen && leftCollapsed"
         class="terminal-collapsed-toggle left"
         type="button"
         @click="$emit('toggle-left')"
@@ -47,7 +47,7 @@
       </button>
 
       <TerminalTickerRail
-        v-if="!leftCollapsed"
+        v-if="!chartFullscreen && !leftCollapsed"
         :items="watchlist"
         :groups="groups"
         :active-group-id="activeGroupId"
@@ -119,7 +119,7 @@
       </div>
 
       <button
-        v-if="rightCollapsed"
+        v-if="!chartFullscreen && rightCollapsed"
         class="terminal-collapsed-toggle right"
         type="button"
         @click="openDrawer('alerts')"
@@ -128,7 +128,7 @@
       </button>
 
       <TerminalUtilityDrawer
-        v-if="!rightCollapsed"
+        v-if="!chartFullscreen && !rightCollapsed"
         :right-tab="normalizedDrawerTab"
         :current-ticker="currentTicker"
         :alerts="alerts"
@@ -273,6 +273,10 @@ function openDrawer(tab) {
   background:
     radial-gradient(circle at top left, rgba(59, 139, 255, 0.08), transparent 24%),
     linear-gradient(180deg, rgba(7, 12, 19, 0.98), rgba(8, 13, 21, 0.98));
+}
+
+.terminal-page.is-chart-fullscreen {
+  overflow: hidden;
 }
 
 .terminal-commandbar {

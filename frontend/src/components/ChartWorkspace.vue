@@ -1,6 +1,7 @@
 <template>
-  <div class="center">
+  <div class="center" :class="{ 'is-chart-fullscreen': isFullscreen }">
     <ChartWorkspaceHeader
+      v-if="!isFullscreen"
       :current-ticker="currentTicker"
       :current-name="currentName"
       :quote="quote"
@@ -65,6 +66,7 @@
     />
 
     <ChartWorkspaceMetaBar
+      v-if="!isFullscreen"
       :visible-range-label="visibleRangeLabel"
       :visible-bars-label="visibleBarsLabel"
       :visible-change-label="visibleChangeLabel"
@@ -83,6 +85,7 @@
     />
 
     <ChartWorkspaceControls
+      v-if="!isFullscreen"
       v-model:workspace-preset-name="workspacePresetName"
       v-model:workspace-selection="workspaceSelection"
       v-model:compare-input="compareInput"
@@ -100,6 +103,7 @@
     />
 
     <DrawingManager
+      v-if="!isFullscreen"
       :drawings="drawings"
       :selected-drawing-id="selectedDrawingId"
       :selected-drawing="selectedDrawing"
@@ -149,24 +153,24 @@
     />
 
     <ChartSyncPaneGrid
-      v-if="!isLwcMode"
+      v-if="!isLwcMode && !isFullscreen"
       :layout-panes="layoutPanes"
       :current-ticker="currentTicker"
       :set-sync-pane-ref="setSyncPaneRef"
     />
 
     <ChartIndicatorPanel
-      v-if="!isLwcMode && showComparePanel"
+      v-if="!isLwcMode && showComparePanel && !isFullscreen"
       :visible="true"
       :label="`COMPARE (${comparisonMode === 'percent' ? '%' : 'PRICE'})`"
       :canvas-target="compareCanvasTarget"
       panel-class="visible compare-panel"
     />
 
-    <div v-if="!isLwcMode && showVolumePanel" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
+    <div v-if="!isLwcMode && showVolumePanel && !isFullscreen" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
 
     <ChartIndicatorPanel
-      v-if="!isLwcMode"
+      v-if="!isLwcMode && !isFullscreen"
       v-for="panel in indicatorPanels"
       :key="panel.key"
       :visible="panel.visible"
@@ -764,5 +768,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .center {
   height: 100%;
+}
+
+.center.is-chart-fullscreen {
+  overflow: hidden;
+}
+
+.center.is-chart-fullscreen :deep(.chart-area) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 </style>
