@@ -77,7 +77,7 @@ onBeforeUnmount(() => {
 .lwc-chart-host {
   width: 100%;
   height: 100%;
-  min-height: 420px;
+  min-height: 560px;
 }
 
 .chart-event-overlay {

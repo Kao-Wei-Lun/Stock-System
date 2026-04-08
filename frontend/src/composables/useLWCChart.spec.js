@@ -107,6 +107,11 @@ describe("useLWCChart", () => {
     await nextTick();
 
     expect(lwcMocks.createChart).toHaveBeenCalled();
+    expect(lwcMocks.createChart.mock.calls[0][1]).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+    });
+    expect(lwcMocks.createChart.mock.calls[0][1]).not.toHaveProperty("autoSize");
     expect(lwcMocks.seriesInstances[0].setData).toHaveBeenCalled();
 
     const firstPayload = lwcMocks.seriesInstances[0].setData.mock.calls[0][0];

@@ -2790,6 +2790,8 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     scheduleRender();
   };
 
+  const refreshLayout = () => nextTick(() => resizeAll());
+
   const getPointerData = (event) => {
     if (!mainCanvas.value || !visibleData.value.length) return null;
     const rect = mainCanvas.value.getBoundingClientRect();
@@ -3287,6 +3289,31 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   );
 
   watch(
+    () => [
+      chartAreaRef.value,
+      mainCanvas.value,
+      volumeCanvas.value,
+      compareCanvas.value,
+      rsiCanvas.value,
+      aroonCanvas.value,
+      trixCanvas.value,
+      williamsrCanvas.value,
+      mfiCanvas.value,
+      rocCanvas.value,
+      bbPercentCanvas.value,
+      bbWidthCanvas.value,
+      macdCanvas.value,
+      stochCanvas.value,
+      atrCanvas.value,
+      cciCanvas.value,
+      obvCanvas.value,
+      adxCanvas.value,
+      cmfCanvas.value,
+    ],
+    () => nextTick(() => resizeAll()),
+  );
+
+  watch(
     () => props.comparisonMode,
     () => scheduleRender(),
   );
@@ -3405,6 +3432,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     jumpToLatest,
     resetView,
     resetYScale,
+    refreshLayout,
     onMouseDown,
     onMouseMove,
     onMouseLeave,

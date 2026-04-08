@@ -133,6 +133,11 @@ function resolveSeriesDefinition(type) {
   return LineSeries;
 }
 
+function isIgnorableSeriesError(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("Value is undefined") || message.includes("Assertion failed");
+}
+
 export function useLWCChart({
   chartContainer,
   props,
@@ -309,29 +314,37 @@ export function useLWCChart({
       try {
         series?.removePriceLine?.(line);
       } catch (error) {
-        console.error(error);
+        if (!isIgnorableSeriesError(error)) {
+          console.error(error);
+        }
       }
     });
     dynamicPriceLines.value = [];
   }
 
-  function clearDynamicSeries() {
-    clearTrackedPriceLines();
-    [...dynamicSeries.value].reverse().forEach((series) => {
-      try {
-        chartApi.value?.removeSeries?.(series);
-      } catch (error) {
+  function removeSeriesSafely(series) {
+    if (!series || !chartApi.value) return;
+    try {
+      chartApi.value.removeSeries(series);
+    } catch (error) {
+      if (!isIgnorableSeriesError(error)) {
         console.error(error);
       }
-    });
+    }
+  }
+
+  function clearDynamicSeries() {
+    clearTrackedPriceLines();
+    const staleSeries = [...dynamicSeries.value].reverse();
     dynamicSeries.value = [];
+    staleSeries.forEach((series) => removeSeriesSafely(series));
   }
 
   function createMainSeries() {
     if (!chartApi.value) return;
     const currentRange = getCurrentLogicalRange();
     if (mainSeries.value) {
-      chartApi.value.removeSeries(mainSeries.value);
+      removeSeriesSafely(mainSeries.value);
       mainSeries.value = null;
     }
 
@@ -353,7 +366,7 @@ export function useLWCChart({
     if (!chartApi.value) return;
     if (props.cleanChartMode) {
       if (volumeSeries.value) {
-        chartApi.value.removeSeries(volumeSeries.value);
+        removeSeriesSafely(volumeSeries.value);
         volumeSeries.value = null;
       }
       return;
@@ -437,13 +450,21 @@ export function useLWCChart({
     setLogicalRange({ from, to });
   }
 
-  function resizeChart() {
+  function getContainerSize() {
     const container = chartContainer.value;
-    if (!chartApi.value || !container) return;
-    chartApi.value.resize(
-      Math.max(1, Math.round(container.clientWidth)),
-      Math.max(1, Math.round(container.clientHeight)),
-    );
+    if (!container) {
+      return { width: 1, height: 1 };
+    }
+    return {
+      width: Math.max(1, Math.round(container.clientWidth || 1)),
+      height: Math.max(1, Math.round(container.clientHeight || 1)),
+    };
+  }
+
+  function resizeChart() {
+    if (!chartApi.value) return;
+    const { width, height } = getContainerSize();
+    chartApi.value.resize(width, height);
   }
 
   function clearScheduledResize() {
@@ -478,8 +499,10 @@ export function useLWCChart({
 
   function initializeChart() {
     if (chartApi.value || !chartContainer.value) return;
+    const { width, height } = getContainerSize();
     chartApi.value = createChart(chartContainer.value, {
-      autoSize: true,
+      width,
+      height,
       layout: {
         background: { color: "#07121c" },
         textColor: "#98a7b7",
@@ -526,12 +549,13 @@ export function useLWCChart({
     syncVolumeSeries();
     syncIndicatorPanes();
     applyDefaultVisibleRange();
+    scheduleResizeChart();
 
     if (typeof ResizeObserver === "function") {
-      resizeObserver.value = new ResizeObserver(() => resizeChart());
+      resizeObserver.value = new ResizeObserver(() => scheduleResizeChart());
       resizeObserver.value.observe(chartContainer.value);
     } else {
-      window.addEventListener("resize", resizeChart);
+      window.addEventListener("resize", scheduleResizeChart);
     }
   }
 
@@ -539,7 +563,7 @@ export function useLWCChart({
     resizeObserver.value?.disconnect();
     resizeObserver.value = null;
     if (!resizeObserver.value) {
-      window.removeEventListener("resize", resizeChart);
+      window.removeEventListener("resize", scheduleResizeChart);
     }
     clearDynamicSeries();
     chartApi.value?.remove();
@@ -632,7 +656,7 @@ export function useLWCChart({
     mainSeries,
     props,
     emit,
-    scheduleHostSync: () => resizeChart(),
+    scheduleHostSync: () => scheduleResizeChart(),
     resetView,
   });
 
@@ -664,8 +688,7 @@ export function useLWCChart({
       if (!chartApi.value) return;
       syncVolumeSeries();
       syncIndicatorPanes();
-      resizeChart();
-      drawingsBridge.scheduleRender();
+      scheduleResizeChart();
     },
     { deep: true },
   );
@@ -719,7 +742,7 @@ export function useLWCChart({
   onBeforeUnmount(() => {
     clearScheduledResize();
     if (!resizeObserver.value) {
-      window.removeEventListener("resize", resizeChart);
+      window.removeEventListener("resize", scheduleResizeChart);
     }
     if (chartApi.value) {
       chartApi.value.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
@@ -764,6 +787,7 @@ export function useLWCChart({
     jumpToLatest,
     resetView,
     resetYScale,
+    refreshLayout: scheduleResizeChart,
     onMouseDown,
     onMouseMove,
     onMouseLeave,

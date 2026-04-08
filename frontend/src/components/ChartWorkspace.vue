@@ -193,7 +193,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useChartEngine } from "../composables/useChartEngine";
@@ -770,6 +770,11 @@ watch(
     nextController.setChartMode(previousController.chartMode.value);
     nextController.setPriceScaleMode(previousController.priceScaleMode.value);
     emit("hide-crosshair");
+    nextTick(() => {
+      nextController.refreshLayout?.();
+      previousController.refreshLayout?.();
+      window.dispatchEvent(new Event("resize"));
+    });
   },
 );
 
@@ -794,6 +799,6 @@ onBeforeUnmount(() => {
 
 .center.is-chart-fullscreen :deep(.chart-area) {
   flex: 1 1 auto;
-  min-height: clamp(360px, 62vh, 780px);
+  min-height: clamp(480px, 72vh, 920px);
 }
 </style>
