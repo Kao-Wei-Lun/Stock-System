@@ -238,4 +238,31 @@ describe("WatchlistPanel", () => {
     expect(payloads[1].prefill_hint).toContain("Journal Flow");
     expect(payloads[1].prefill_hint).toContain("2 檔");
   });
+
+  it("emits group color payloads when creating and renaming groups", async () => {
+    const wrapper = mount(WatchlistPanel, {
+      props: buildPanelProps(),
+    });
+
+    await wrapper.findAll(".group-pill")[1].trigger("click");
+    await wrapper.find('input[placeholder="新增觀察群組"]').setValue("Momentum");
+    await wrapper.findAll(".group-swatch")[2].trigger("click");
+    const createForm = wrapper.findAll(".watchlist-form")[0];
+    await createForm.findAll("button").at(-1).trigger("click");
+
+    expect(wrapper.emitted("create-group")[0]).toEqual([
+      { name: "Momentum", color: "#ffd166" },
+    ]);
+
+    await wrapper.find(".secondary").trigger("click");
+    await wrapper.find('input[placeholder="重新命名群組"]').setValue("Core Plus");
+    const renameForm = wrapper.findAll(".watchlist-form")[0];
+    await renameForm.findAll(".group-swatch")[4].trigger("click");
+    await renameForm.findAll("button").find((button) => button.text() === "儲存").trigger("click");
+
+    expect(wrapper.emitted("rename-group")[0]).toEqual([
+      1,
+      { name: "Core Plus", color: "#9b6dff" },
+    ]);
+  });
 });

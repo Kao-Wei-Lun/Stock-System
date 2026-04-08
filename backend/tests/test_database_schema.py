@@ -57,6 +57,7 @@ def test_build_schema_plan_adds_missing_tables_and_columns():
     assert any("ALTER TABLE `ohlcv`" in statement and "`source`" in statement for statement in plan)
     assert any("ALTER TABLE `ohlcv`" in statement and "idx_ohlcv_ticker_date_lookup" in statement for statement in plan)
     assert any("ALTER TABLE `watchlist_groups`" in statement and "`owner_id`" in statement for statement in plan)
+    assert any("ALTER TABLE `watchlist_groups`" in statement and "`color`" in statement for statement in plan)
     assert any("ALTER TABLE `watchlist_items`" in statement and "`tags_json`" in statement for statement in plan)
     assert any("ALTER TABLE `alerts`" in statement and "`condition_json`" in statement for statement in plan)
     assert any(

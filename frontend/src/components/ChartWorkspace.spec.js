@@ -108,6 +108,12 @@ function createProps() {
   return {
     currentTicker: "AAPL",
     currentName: "Apple",
+    timeframeOptions: [
+      { tf: "1d", iv: "1m", label: "1m" },
+      { tf: "1y", iv: "1d", label: "1Y" },
+    ],
+    currentPeriod: "1y",
+    currentInterval: "1d",
     quote: {
       price: 210.5,
       open: 208,
@@ -235,6 +241,15 @@ describe("ChartWorkspace", () => {
     await engineButtons[1].trigger("click");
 
     expect(wrapper.emitted("set-engine-mode")[0]).toEqual(["lwc"]);
+  });
+
+  it("emits timeframe changes from the chart toolbar", async () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+    const timeframeButton = wrapper.findAll(".chart-toolbar .tool-btn").find((button) => button.text() === "1m");
+
+    await timeframeButton.trigger("click");
+
+    expect(wrapper.emitted("set-timeframe")[0]).toEqual([{ tf: "1d", iv: "1m", label: "1m" }]);
   });
 
   it("renders event markers and links event rows to vertical lines", async () => {
