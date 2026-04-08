@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Product"
+  short_description: "Read-only product spec versus implementation review"
+  default_prompt: "Use $analyze-product to compare the shipped system against the product spec."
+policy:
+  allow_implicit_invocation: false

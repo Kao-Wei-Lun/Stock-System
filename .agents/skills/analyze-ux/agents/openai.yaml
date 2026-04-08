@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze UX"
+  short_description: "Read-only UX and interaction quality review"
+  default_prompt: "Use $analyze-ux to assess the UX, journeys, and interaction quality."
+policy:
+  allow_implicit_invocation: false

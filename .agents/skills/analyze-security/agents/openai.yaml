@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Security"
+  short_description: "Read-only security and data compliance review"
+  default_prompt: "Use $analyze-security to audit the repo for security and data compliance risks."
+policy:
+  allow_implicit_invocation: false

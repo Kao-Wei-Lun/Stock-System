@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Frontend"
+  short_description: "Read-only frontend architecture gap review"
+  default_prompt: "Use $analyze-frontend to review the frontend and report the main issues."
+policy:
+  allow_implicit_invocation: false

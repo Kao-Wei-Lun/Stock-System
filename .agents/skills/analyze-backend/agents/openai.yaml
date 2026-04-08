@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Backend"
+  short_description: "Read-only backend architecture gap review"
+  default_prompt: "Use $analyze-backend to review the backend architecture and report the main gaps."
+policy:
+  allow_implicit_invocation: false

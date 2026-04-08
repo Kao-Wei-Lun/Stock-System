@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Testing"
+  short_description: "Read-only test coverage and QA risk review"
+  default_prompt: "Use $analyze-testing to assess test coverage, QA gaps, and execution risks."
+policy:
+  allow_implicit_invocation: false

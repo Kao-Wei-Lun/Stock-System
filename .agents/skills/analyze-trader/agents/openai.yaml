@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Trader"
+  short_description: "Read-only trader workflow and feature gap review"
+  default_prompt: "Use $analyze-trader to review the product from a senior trader workflow perspective."
+policy:
+  allow_implicit_invocation: false

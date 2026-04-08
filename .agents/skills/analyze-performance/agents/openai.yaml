@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Performance"
+  short_description: "Read-only DevOps and performance bottleneck review"
+  default_prompt: "Use $analyze-performance to review startup flow, build config, and performance risks."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Full System Review"
+  short_description: "Read-only cross-functional system review workflow"
+  default_prompt: "Use $full-system-review to run a structured full-system review across all analysis tracks."
+policy:
+  allow_implicit_invocation: false
