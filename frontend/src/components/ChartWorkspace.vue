@@ -27,6 +27,7 @@
       :price-scale-mode="priceScaleMode"
       :can-use-log-scale="canUseLogScale"
       :chart-mode="chartMode"
+      :engine-mode="engineMode"
       :kline-display-mode="klineDisplayMode"
       :is-fullscreen="isFullscreen"
       :chart-layout="chartLayout"
@@ -50,6 +51,7 @@
       @reset-y-scale="resetYScale"
       @set-price-scale-mode="setPriceScaleMode"
       @set-chart-mode="setChartMode"
+      @set-engine-mode="emit('set-engine-mode', $event)"
       @set-kline-display-mode="emit('set-kline-display-mode', $event)"
       @clear-indicators="handleClearIndicators"
       @toggle-fullscreen="emit('toggle-fullscreen')"
@@ -112,6 +114,7 @@
     />
 
     <ChartCanvasArea
+      v-if="!isLwcMode"
       :loading="loading"
       :loading-message="loadingMessage"
       :crosshair="crosshair"
@@ -130,23 +133,36 @@
       :jump-to-event="jumpToEvent"
     />
 
+    <LWCChartCanvas
+      v-else
+      :loading="loading"
+      :loading-message="loadingMessage"
+      :crosshair="crosshair"
+      :visible-event-markers="visibleEventMarkers"
+      :focused-event-key="focusedEventKey"
+      :chart-container-target="chartContainerTarget"
+      :jump-to-event="jumpToEvent"
+    />
+
     <ChartSyncPaneGrid
+      v-if="!isLwcMode"
       :layout-panes="layoutPanes"
       :current-ticker="currentTicker"
       :set-sync-pane-ref="setSyncPaneRef"
     />
 
     <ChartIndicatorPanel
-      v-if="showComparePanel"
+      v-if="!isLwcMode && showComparePanel"
       :visible="true"
       :label="`COMPARE (${comparisonMode === 'percent' ? '%' : 'PRICE'})`"
       :canvas-target="compareCanvasTarget"
       panel-class="visible compare-panel"
     />
 
-    <div v-if="showVolumePanel" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
+    <div v-if="!isLwcMode && showVolumePanel" class="volume-area"><canvas ref="volumeCanvas"></canvas></div>
 
     <ChartIndicatorPanel
+      v-if="!isLwcMode"
       v-for="panel in indicatorPanels"
       :key="panel.key"
       :visible="panel.visible"
@@ -161,12 +177,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useChartEngine } from "../composables/useChartEngine";
+import { useLWCChart } from "../composables/useLWCChart";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
 import ChartCanvasArea from "./chart/ChartCanvasArea.vue";
 import DrawingManager from "./chart/DrawingManager.vue";
 import ChartIndicatorPanel from "./chart/ChartIndicatorPanel.vue";
 import ChartSyncPaneGrid from "./chart/ChartSyncPaneGrid.vue";
+import LWCChartCanvas from "./chart/LWCChartCanvas.vue";
 import ChartWorkspaceControls from "./chart/ChartWorkspaceControls.vue";
 import ChartWorkspaceHeader from "./chart/ChartWorkspaceHeader.vue";
 import ChartWorkspaceMetaBar from "./chart/ChartWorkspaceMetaBar.vue";
@@ -179,6 +197,7 @@ const props = defineProps({
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
   klineDisplayMode: { type: String, default: "day" },
+  engineMode: { type: String, default: "legacy" },
   cleanChartMode: { type: Boolean, default: false },
   chartLayout: { type: String, default: "single" },
   loading: { type: Boolean, required: true },
@@ -223,6 +242,7 @@ const emit = defineEmits([
   "clear-compare",
   "set-compare-mode",
   "set-kline-display-mode",
+  "set-engine-mode",
   "set-chart-layout",
   "clear-indicators",
   "toggle-fullscreen",
@@ -230,6 +250,7 @@ const emit = defineEmits([
 ]);
 
 const chartAreaRef = ref(null);
+const chartContainerRef = ref(null);
 const mainCanvas = ref(null);
 const volumeCanvas = ref(null);
 const compareCanvas = ref(null);
@@ -253,6 +274,7 @@ const workspacePresetName = ref("");
 const workspaceSelection = ref(props.activeWorkspacePresetId || "");
 const focusedEventKey = ref("");
 const chartAreaTarget = { target: chartAreaRef };
+const chartContainerTarget = { target: chartContainerRef };
 const mainCanvasTarget = { target: mainCanvas };
 const compareCanvasTarget = { target: compareCanvas };
 const rsiCanvasTarget = { target: rsiCanvas };
@@ -271,49 +293,7 @@ const obvCanvasTarget = { target: obvCanvas };
 const adxCanvasTarget = { target: adxCanvas };
 const cmfCanvasTarget = { target: cmfCanvas };
 
-const {
-  chartMode,
-  priceScaleMode,
-  visibleData,
-  viewportStartIndex,
-  canvasClass,
-  visibleRangeLabel,
-  visibleBarsLabel,
-  visibleChangeLabel,
-  visibleChangeClass,
-  zoomLabel,
-  yScaleLabel,
-  priceScaleModeLabel,
-  interactionHint,
-  canPanLeft,
-  canPanRight,
-  canZoomIn,
-  canZoomOut,
-  canUseLogScale,
-  canGoBackHistory,
-  canGoForwardHistory,
-  canResetYScale,
-  setChartMode,
-  setPriceScaleMode,
-  zoomIn,
-  zoomOut,
-  zoomYIn,
-  zoomYOut,
-  panLeft,
-  panRight,
-  goHistoryBack,
-  goHistoryForward,
-  jumpToLatest,
-  resetView,
-  resetYScale,
-  onMouseDown,
-  onMouseMove,
-  onMouseLeave,
-  onMouseUp,
-  onWheel,
-  onChartClick,
-  onDoubleClick,
-} = useChartEngine({
+const legacyChart = useChartEngine({
   mainCanvas,
   volumeCanvas,
   compareCanvas,
@@ -336,6 +316,117 @@ const {
   props,
   emit,
 });
+
+const lwcChart = useLWCChart({
+  chartContainer: chartContainerRef,
+  props,
+  emit,
+});
+
+const isLwcMode = computed(() => props.engineMode === "lwc");
+const activeChartController = computed(() => (isLwcMode.value ? lwcChart : legacyChart));
+
+const chartMode = computed(() => activeChartController.value.chartMode.value);
+const priceScaleMode = computed(() => activeChartController.value.priceScaleMode.value);
+const visibleData = computed(() => activeChartController.value.visibleData.value);
+const viewportStartIndex = computed(() => activeChartController.value.viewportStartIndex.value);
+const canvasClass = computed(() => activeChartController.value.canvasClass.value);
+const visibleRangeLabel = computed(() => activeChartController.value.visibleRangeLabel.value);
+const visibleBarsLabel = computed(() => activeChartController.value.visibleBarsLabel.value);
+const visibleChangeLabel = computed(() => activeChartController.value.visibleChangeLabel.value);
+const visibleChangeClass = computed(() => activeChartController.value.visibleChangeClass.value);
+const zoomLabel = computed(() => activeChartController.value.zoomLabel.value);
+const yScaleLabel = computed(() => activeChartController.value.yScaleLabel.value);
+const priceScaleModeLabel = computed(() => activeChartController.value.priceScaleModeLabel.value);
+const interactionHint = computed(() => activeChartController.value.interactionHint.value);
+const canPanLeft = computed(() => activeChartController.value.canPanLeft.value);
+const canPanRight = computed(() => activeChartController.value.canPanRight.value);
+const canZoomIn = computed(() => activeChartController.value.canZoomIn.value);
+const canZoomOut = computed(() => activeChartController.value.canZoomOut.value);
+const canUseLogScale = computed(() => activeChartController.value.canUseLogScale.value);
+const canGoBackHistory = computed(() => activeChartController.value.canGoBackHistory.value);
+const canGoForwardHistory = computed(() => activeChartController.value.canGoForwardHistory.value);
+const canResetYScale = computed(() => activeChartController.value.canResetYScale.value);
+
+function setChartMode(mode) {
+  activeChartController.value.setChartMode(mode);
+}
+
+function setPriceScaleMode(mode) {
+  activeChartController.value.setPriceScaleMode(mode);
+}
+
+function zoomIn() {
+  activeChartController.value.zoomIn();
+}
+
+function zoomOut() {
+  activeChartController.value.zoomOut();
+}
+
+function zoomYIn() {
+  activeChartController.value.zoomYIn();
+}
+
+function zoomYOut() {
+  activeChartController.value.zoomYOut();
+}
+
+function panLeft() {
+  activeChartController.value.panLeft();
+}
+
+function panRight() {
+  activeChartController.value.panRight();
+}
+
+function goHistoryBack() {
+  activeChartController.value.goHistoryBack();
+}
+
+function goHistoryForward() {
+  activeChartController.value.goHistoryForward();
+}
+
+function jumpToLatest() {
+  activeChartController.value.jumpToLatest();
+}
+
+function resetView() {
+  activeChartController.value.resetView();
+}
+
+function resetYScale() {
+  activeChartController.value.resetYScale();
+}
+
+function onMouseDown(event) {
+  activeChartController.value.onMouseDown(event);
+}
+
+function onMouseMove(event) {
+  activeChartController.value.onMouseMove(event);
+}
+
+function onMouseLeave(event) {
+  activeChartController.value.onMouseLeave(event);
+}
+
+function onMouseUp(event) {
+  activeChartController.value.onMouseUp(event);
+}
+
+function onWheel(event) {
+  activeChartController.value.onWheel(event);
+}
+
+function onChartClick(event) {
+  activeChartController.value.onChartClick(event);
+}
+
+function onDoubleClick(event) {
+  activeChartController.value.onDoubleClick(event);
+}
 
 const displayPrice = computed(() =>
   props.quote.price == null ? "—" : `$${fmtPrice(props.quote.price)}`,
@@ -462,7 +553,7 @@ const supportsFillOpacity = computed(() =>
   ["rect", "note"].includes(selectedDrawing.value?.type),
 );
 const supportsText = computed(() => selectedDrawing.value?.type === "note");
-const showComparePanel = computed(() => props.compareSeries.length > 0 && !props.cleanChartMode);
+const showComparePanel = computed(() => !isLwcMode.value && props.compareSeries.length > 0 && !props.cleanChartMode);
 const layoutPanes = computed(() => {
   if (props.chartLayout === "double") {
     return [{ key: "sync-line", title: "同步折線", mode: "line" }];
@@ -639,6 +730,17 @@ watch(
   () => props.activeWorkspacePresetId,
   (value) => {
     workspaceSelection.value = value || "";
+  },
+);
+
+watch(
+  () => props.engineMode,
+  (nextMode, previousMode) => {
+    const previousController = previousMode === "lwc" ? lwcChart : legacyChart;
+    const nextController = nextMode === "lwc" ? lwcChart : legacyChart;
+    nextController.setChartMode(previousController.chartMode.value);
+    nextController.setPriceScaleMode(previousController.priceScaleMode.value);
+    emit("hide-crosshair");
   },
 );
 

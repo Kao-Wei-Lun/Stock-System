@@ -64,6 +64,7 @@
           :active-tool="activeTool"
           :active-panels="activePanels"
           :kline-display-mode="klineDisplayMode"
+          :engine-mode="chartEngineMode"
           :clean-chart-mode="cleanChartMode"
           :chart-layout="chartLayout"
           :loading="chartLoading"
@@ -105,6 +106,7 @@
           @clear-compare="$emit('clear-compare')"
           @set-compare-mode="$emit('set-compare-mode', $event)"
           @set-kline-display-mode="$emit('set-kline-display-mode', $event)"
+          @set-engine-mode="$emit('set-chart-engine-mode', $event)"
           @set-chart-layout="$emit('set-chart-layout', $event)"
           @clear-indicators="$emit('clear-indicators')"
           @open-journal-entry="$emit('open-journal-entry', $event)"
@@ -166,6 +168,7 @@ const props = defineProps({
   activeTool: { type: String, required: true },
   activePanels: { type: Object, required: true },
   klineDisplayMode: { type: String, required: true },
+  chartEngineMode: { type: String, default: "legacy" },
   cleanChartMode: { type: Boolean, required: true },
   chartLayout: { type: String, required: true },
   chartLoading: { type: Boolean, required: true },
@@ -236,6 +239,7 @@ const emit = defineEmits([
   "clear-compare",
   "set-compare-mode",
   "set-kline-display-mode",
+  "set-chart-engine-mode",
   "set-chart-layout",
   "clear-indicators",
   "open-journal-entry",

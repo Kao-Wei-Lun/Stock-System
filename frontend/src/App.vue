@@ -38,6 +38,7 @@
         :active-tool="activeTool"
         :active-panels="activePanels"
         :kline-display-mode="klineDisplayMode"
+        :chart-engine-mode="chartEngineMode"
         :clean-chart-mode="cleanChartMode"
         :chart-layout="chartLayout"
         :chart-loading="chartLoading"
@@ -105,6 +106,7 @@
         @clear-compare="clearCompareTickers"
         @set-compare-mode="setComparisonMode"
         @set-kline-display-mode="setKlineDisplayMode"
+        @set-chart-engine-mode="setChartEngineMode"
         @set-chart-layout="setChartLayout"
         @clear-indicators="clearIndicators"
         @open-journal-entry="handleTerminalJournalEntry"
@@ -323,6 +325,7 @@ const {
   currentPeriod,
   currentInterval,
   klineDisplayMode,
+  chartEngineMode,
   cleanChartMode,
   chartLayout,
   chartLoading,
@@ -399,6 +402,7 @@ const {
   setComparisonMode,
   setTimeframe,
   setKlineDisplayMode,
+  setChartEngineMode,
   setLeftTab,
   setActiveWatchGroup,
   setRightTab,

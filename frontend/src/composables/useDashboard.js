@@ -163,6 +163,10 @@ function normalizeKlineDisplayMode(mode) {
   return ["day", "week", "month", "quarter"].includes(mode) ? mode : "day";
 }
 
+function normalizeChartEngineMode(mode) {
+  return mode === "lwc" ? "lwc" : "legacy";
+}
+
 function resolveTimeframeInterval(period, interval) {
   return String(period || "").toLowerCase() === "5d" ? "1h" : "1d";
 }
@@ -410,6 +414,7 @@ export function useDashboard() {
   const initialComparisonMode = storedPrefs.comparisonMode === "price" ? "price" : "percent";
   const initialChartLayout = CHART_LAYOUT_OPTIONS.includes(storedPrefs.chartLayout) ? storedPrefs.chartLayout : "single";
   const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
+  const initialChartEngineMode = normalizeChartEngineMode(storedPrefs.chartEngineMode);
   const initialWorkspaceTab = WORKSPACE_TAB_OPTIONS.includes(storedPrefs.workspaceTab) ? storedPrefs.workspaceTab : "chart";
 
   const timeframeOptions = TIMEFRAME_OPTIONS;
@@ -471,6 +476,7 @@ export function useDashboard() {
   const currentPeriod = ref(storedTimeframe?.tf || "1y");
   const currentInterval = ref(resolveTimeframeInterval(storedTimeframe?.tf || "1y", storedTimeframe?.iv || "1d"));
   const klineDisplayMode = ref(initialKlineDisplayMode);
+  const chartEngineMode = ref(initialChartEngineMode);
   const cleanChartMode = ref(Boolean(storedPrefs.cleanChartMode));
   const chartLayout = ref(initialChartLayout);
   const chartLoading = ref(true);
@@ -1732,6 +1738,10 @@ export function useDashboard() {
     chartLayout.value = CHART_LAYOUT_OPTIONS.includes(layout) ? layout : "single";
   }
 
+  function setChartEngineMode(mode) {
+    chartEngineMode.value = normalizeChartEngineMode(mode);
+  }
+
   function toggleIndicator(name) {
     cleanChartMode.value = false;
     activeInd[name] = !activeInd[name];
@@ -2161,6 +2171,7 @@ export function useDashboard() {
         currentPeriod: currentPeriod.value,
         currentInterval: currentInterval.value,
         klineDisplayMode: klineDisplayMode.value,
+        chartEngineMode: chartEngineMode.value,
         cleanChartMode: cleanChartMode.value,
         chartLayout: chartLayout.value,
         compareTickers: compareTickers.value,
@@ -2222,6 +2233,7 @@ export function useDashboard() {
     currentPeriod.value = preset.currentPeriod || currentPeriod.value;
     currentInterval.value = resolveTimeframeInterval(currentPeriod.value, preset.currentInterval || currentInterval.value);
     klineDisplayMode.value = normalizeKlineDisplayMode(preset.klineDisplayMode);
+    chartEngineMode.value = normalizeChartEngineMode(preset.chartEngineMode);
     cleanChartMode.value = Boolean(preset.cleanChartMode);
     chartLayout.value = CHART_LAYOUT_OPTIONS.includes(preset.chartLayout) ? preset.chartLayout : "single";
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
@@ -2433,6 +2445,7 @@ export function useDashboard() {
     currentPeriod: currentPeriod.value,
     currentInterval: currentInterval.value,
     klineDisplayMode: klineDisplayMode.value,
+    chartEngineMode: chartEngineMode.value,
     cleanChartMode: cleanChartMode.value,
     activeWatchGroupId: activeWatchGroupId.value,
     activeWorkspacePresetId: activeWorkspacePresetId.value,
@@ -2532,6 +2545,7 @@ export function useDashboard() {
     currentPeriod,
     currentInterval,
     klineDisplayMode,
+    chartEngineMode,
     cleanChartMode,
     chartLayout,
     chartLoading,
@@ -2617,6 +2631,7 @@ export function useDashboard() {
     setComparisonMode,
     setTimeframe,
     setKlineDisplayMode,
+    setChartEngineMode,
     setLeftTab,
     setActiveWatchGroup,
     setRightTab,

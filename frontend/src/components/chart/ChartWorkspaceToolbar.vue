@@ -50,6 +50,12 @@
 
     <div class="tool-sep"></div>
 
+    <span class="tool-label">引擎：</span>
+    <button class="tool-btn" :class="{ active: engineMode === 'legacy' }" @click="$emit('set-engine-mode', 'legacy')">Legacy</button>
+    <button class="tool-btn" :class="{ active: engineMode === 'lwc' }" @click="$emit('set-engine-mode', 'lwc')">LWC Beta</button>
+
+    <div class="tool-sep"></div>
+
     <span class="tool-label">K別：</span>
     <button class="tool-btn" :class="{ active: klineDisplayMode === 'day' }" @click="$emit('set-kline-display-mode', 'day')">日K</button>
     <button class="tool-btn" :class="{ active: klineDisplayMode === 'week' }" @click="$emit('set-kline-display-mode', 'week')">週K</button>
@@ -90,6 +96,7 @@ defineProps({
   priceScaleMode: { type: String, required: true },
   canUseLogScale: { type: Boolean, default: false },
   chartMode: { type: String, required: true },
+  engineMode: { type: String, default: "legacy" },
   klineDisplayMode: { type: String, required: true },
   isFullscreen: { type: Boolean, default: false },
   chartLayout: { type: String, required: true },
@@ -116,6 +123,7 @@ defineEmits([
   "reset-y-scale",
   "set-price-scale-mode",
   "set-chart-mode",
+  "set-engine-mode",
   "set-kline-display-mode",
   "clear-indicators",
   "toggle-fullscreen",
