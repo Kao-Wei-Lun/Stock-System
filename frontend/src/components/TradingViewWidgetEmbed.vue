@@ -28,6 +28,9 @@ const props = defineProps({
 const hostRef = ref(null);
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
+let lastRenderSignature = "";
+let renderQueued = false;
+let mounted = false;
 
 const scriptAllowed = computed(() => {
   try {
@@ -47,10 +50,20 @@ function cleanupHost() {
   hostRef.value.replaceChildren();
 }
 
+function getRenderSignature() {
+  return `${props.scriptSrc}::${JSON.stringify(props.config)}`;
+}
+
 function renderWidget() {
   if (!hostRef.value || typeof document === "undefined") return;
 
+  const signature = getRenderSignature();
+  if (signature === lastRenderSignature && hostRef.value.querySelector("script")) {
+    return;
+  }
+
   cleanupHost();
+  lastRenderSignature = signature;
   if (!scriptAllowed.value) return;
 
   const widgetNode = document.createElement("div");
@@ -66,20 +79,29 @@ function renderWidget() {
   hostRef.value.appendChild(scriptNode);
 }
 
+async function scheduleRenderWidget() {
+  if (!mounted || renderQueued) return;
+  renderQueued = true;
+  await nextTick();
+  renderQueued = false;
+  renderWidget();
+}
+
 watch(
   () => [props.scriptSrc, JSON.stringify(props.config)],
-  async () => {
-    await nextTick();
-    renderWidget();
+  () => {
+    void scheduleRenderWidget();
   },
-  { immediate: true },
 );
 
 onMounted(() => {
+  mounted = true;
   renderWidget();
 });
 
 onBeforeUnmount(() => {
+  mounted = false;
+  lastRenderSignature = "";
   cleanupHost();
 });
 </script>
