@@ -21,6 +21,20 @@ _has_suspicious_daily_rows = None
 FULL_HISTORY_PERIODS = {"10y", "max"}
 LATEST_DATA_SYNC_PERIOD = "1y"
 LATEST_DATA_SYNC_INTERVAL = "1d"
+ALLOWED_PERIODS = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"}
+ALLOWED_INTERVALS = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "1wk", "1mo"}
+INTRADAY_INTERVALS = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
+INTRADAY_DEFAULT_PERIODS = {
+    "1m": "1d",
+    "2m": "5d",
+    "5m": "5d",
+    "15m": "1mo",
+    "30m": "1mo",
+    "60m": "3mo",
+    "90m": "3mo",
+    "1h": "3mo",
+}
+INTRADAY_PERIODS = {"1d", "5d", "1mo", "3mo", "6mo"}
 
 router = APIRouter(prefix="/api", tags=["market_data"])
 
@@ -50,12 +64,11 @@ def configure(
 
 async def _get_ohlc_payload(
     ticker: str,
-    period: str,
+    period: str | None,
     interval: str,
 ):
     ticker = normalize_ticker(ticker)
-    period = (period or "1y").lower()
-    interval = (interval or "1d").lower()
+    period, interval = _normalize_ohlc_query(period, interval)
     rows = await db.get_ohlcv(ticker, period=period, interval=interval)
 
     if _needs_history_backfill(rows, period) or _has_suspicious_daily_rows(ticker, rows, interval):
@@ -63,13 +76,40 @@ async def _get_ohlc_payload(
         await fetcher.fetch_and_store(ticker, period=fetch_period, interval=interval, include_info=False)
         rows = await db.get_ohlcv(ticker, period=period, interval=interval)
 
-    return {"ticker": ticker, "interval": interval, "data": rows}
+    return {"ticker": ticker, "period": period, "interval": interval, "data": rows}
+
+
+def _normalize_ohlc_query(period: str | None, interval: str | None) -> tuple[str, str]:
+    normalized_interval = (interval or "1d").strip().lower()
+    if normalized_interval not in ALLOWED_INTERVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported interval '{normalized_interval}'. Use one of: {', '.join(sorted(ALLOWED_INTERVALS))}",
+        )
+
+    if normalized_interval in INTRADAY_INTERVALS:
+        normalized_period = (period or INTRADAY_DEFAULT_PERIODS[normalized_interval]).strip().lower()
+        if normalized_period not in INTRADAY_PERIODS:
+            allowed = ", ".join(sorted(INTRADAY_PERIODS))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Intraday interval '{normalized_interval}' supports period values: {allowed}",
+            )
+        return normalized_period, normalized_interval
+
+    normalized_period = (period or "1y").strip().lower()
+    if normalized_period not in ALLOWED_PERIODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported period '{normalized_period}'. Use one of: {', '.join(sorted(ALLOWED_PERIODS))}",
+        )
+    return normalized_period, normalized_interval
 
 
 @router.get("/kline/{ticker}")
 async def get_kline(
     ticker: str,
-    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
     interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
 ):
     return await _get_ohlc_payload(ticker, period, interval)
@@ -78,7 +118,16 @@ async def get_kline(
 @router.get("/ohlc/{ticker}")
 async def get_ohlc(
     ticker: str,
-    period: str = Query("1y", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
+    interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+):
+    return await _get_ohlc_payload(ticker, period, interval)
+
+
+@router.get("/ohlc")
+async def get_ohlc_query(
+    ticker: str = Query(..., min_length=1),
+    period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
     interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
 ):
     return await _get_ohlc_payload(ticker, period, interval)
@@ -108,11 +157,10 @@ async def get_info(ticker: str):
 async def sync_ticker(
     ticker: str,
     period: str = Query("max", description="5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
-    interval: str = Query("1d", description="1h 1d 1wk 1mo"),
+    interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
 ):
     ticker = normalize_ticker(ticker)
-    period = (period or "max").lower()
-    interval = (interval or "1d").lower()
+    period, interval = _normalize_ohlc_query(period, interval)
     count = await fetcher.fetch_and_store(ticker, period=period, interval=interval, include_info=False)
     return {"ticker": ticker, "synced": count, "period": period, "interval": interval}
 

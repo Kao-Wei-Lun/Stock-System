@@ -29,6 +29,10 @@ def phase1_store(monkeypatch):
             }
         ],
         "quotes": {},
+        "ohlcv_rows": [],
+        "ohlcv_fetched": False,
+        "ohlcv_calls": [],
+        "fetch_calls": [],
     }
 
     def clone(value):
@@ -204,6 +208,46 @@ def phase1_store(monkeypatch):
             "ts": 1760000000000,
         }
 
+    async def get_ohlcv(ticker, period="1y", interval="1d"):
+        store["ohlcv_calls"].append({"ticker": ticker, "period": period, "interval": interval})
+        if not store["ohlcv_fetched"]:
+            return []
+        return clone(store["ohlcv_rows"])
+
+    async def fetch_and_store(ticker, period="2y", interval="1d", include_info=False):
+        store["fetch_calls"].append(
+            {
+                "ticker": ticker,
+                "period": period,
+                "interval": interval,
+                "include_info": include_info,
+            }
+        )
+        store["ohlcv_fetched"] = True
+        store["ohlcv_rows"] = [
+            {
+                "date": "2026-03-29 01:00:00",
+                "open": 100,
+                "high": 101,
+                "low": 99,
+                "close": 100.5,
+                "volume": 1000,
+                "adj_close": 100.5,
+                "source": "yahoo_finance",
+            },
+            {
+                "date": "2026-03-29 01:01:00",
+                "open": 100.5,
+                "high": 102,
+                "low": 100,
+                "close": 101.5,
+                "volume": 1200,
+                "adj_close": 101.5,
+                "source": "yahoo_finance",
+            },
+        ]
+        return len(store["ohlcv_rows"])
+
     monkeypatch.setattr(main.db, "list_workspace_presets", list_workspace_presets)
     monkeypatch.setattr(main.db, "get_workspace_preset", get_workspace_preset)
     monkeypatch.setattr(main.db, "create_workspace_preset", create_workspace_preset)
@@ -218,7 +262,9 @@ def phase1_store(monkeypatch):
     monkeypatch.setattr(main.db, "mark_notification_read", mark_notification_read)
     monkeypatch.setattr(main.db, "upsert_market_quote", upsert_market_quote)
     monkeypatch.setattr(main.db, "get_market_quote", get_market_quote)
+    monkeypatch.setattr(main.db, "get_ohlcv", get_ohlcv)
     monkeypatch.setattr(main.fetcher, "fetch_realtime_quote", fetch_realtime_quote)
+    monkeypatch.setattr(main.fetcher, "fetch_and_store", fetch_and_store)
 
     return store
 
@@ -363,3 +409,32 @@ def test_quote_endpoint_falls_back_to_local_snapshot(client, phase1_store):
     assert payload["source"] == "local_cache"
     assert payload["quote_type"] == "cached_snapshot"
     assert payload["price"] == 88.8
+
+
+def test_ohlc_endpoint_supports_intraday_interval_defaults(client, phase1_store):
+    response = client.get("/api/ohlc/AAPL?interval=1m")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ticker"] == "AAPL"
+    assert payload["period"] == "1d"
+    assert payload["interval"] == "1m"
+    assert payload["data"][0]["date"] == "2026-03-29 01:00:00"
+    assert phase1_store["fetch_calls"][0]["period"] == "1d"
+    assert phase1_store["fetch_calls"][0]["interval"] == "1m"
+
+
+def test_ohlc_query_endpoint_accepts_ticker_and_intraday_interval(client, phase1_store):
+    response = client.get("/api/ohlc?ticker=AAPL&period=5d&interval=5m")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["period"] == "5d"
+    assert payload["interval"] == "5m"
+
+
+def test_ohlc_endpoint_rejects_unsupported_interval(client, phase1_store):
+    response = client.get("/api/ohlc/AAPL?interval=2h")
+
+    assert response.status_code == 400
+    assert "Unsupported interval" in response.json()["detail"]

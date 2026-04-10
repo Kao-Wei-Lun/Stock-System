@@ -5,7 +5,6 @@ Refactored: routes are in backend/routers/*, schemas in backend/schemas.py.
 This file retains app creation, middleware, lifespan, and scheduler wiring.
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, time as time_of_day, timedelta, timezone
@@ -18,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from data_fetcher import normalize_ticker
+from background_tasks import BackgroundTaskService
 from database import db, init_db
 from env_validation import (
     read_bool_env,
@@ -92,7 +91,6 @@ TAIFEX_SPOT_REFERENCE = [
 
 FULL_HISTORY_PERIODS = {"10y", "max"}
 APP_TZ = ZoneInfo(APP_TIMEZONE)
-TRACKED_SYNC_LOCK = asyncio.Lock()
 
 
 # ─── Utility helpers ─────────────────────────────────────────
@@ -164,95 +162,25 @@ def _has_suspicious_daily_rows(ticker: str, rows, interval: str) -> bool:
 
 # ─── Background tasks ────────────────────────────────────────
 
-async def get_tracked_sync_tickers() -> list[str]:
-    groups = await db.get_watchlist_groups()
-    tickers = [
-        normalize_ticker(item["ticker"])
-        for group in groups
-        for item in group.get("items", [])
-        if item.get("ticker")
-    ]
-    if not tickers:
-        return list(STARTUP_DOWNLOAD_TICKERS)
-    return list(dict.fromkeys(tickers))
+background_tasks = BackgroundTaskService(
+    db=db,
+    fetcher=fetcher,
+    quote_provider=quote_provider,
+    macro_snapshot_provider=macro_snapshot_provider,
+    market_event_provider=market_event_provider,
+    news_provider=news_provider,
+    startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
+    startup_download_delay_seconds=STARTUP_DOWNLOAD_DELAY_SECONDS,
+    latest_data_sync_period=LATEST_DATA_SYNC_PERIOD,
+    latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
+    logger=log,
+)
 
-
-async def sync_tracked_market_data(
-    period: str = LATEST_DATA_SYNC_PERIOD,
-    interval: str = LATEST_DATA_SYNC_INTERVAL,
-    reason: str = "manual",
-) -> dict:
-    normalized_period = (period or LATEST_DATA_SYNC_PERIOD).lower()
-    normalized_interval = (interval or LATEST_DATA_SYNC_INTERVAL).lower()
-    tickers = await get_tracked_sync_tickers()
-
-    async with TRACKED_SYNC_LOCK:
-        log.info(
-            "Tracked market sync started: reason=%s tickers=%s period=%s interval=%s",
-            reason, len(tickers), normalized_period, normalized_interval,
-        )
-        successes = []
-        failures = []
-        total_rows = 0
-        for index, ticker in enumerate(tickers):
-            try:
-                synced = await fetcher.fetch_and_store(
-                    ticker, period=normalized_period,
-                    interval=normalized_interval, include_info=False,
-                )
-                total_rows += synced
-                successes.append({"ticker": ticker, "synced": synced})
-                await db.log_sync(ticker, "success", synced, f"{reason}:{normalized_period}/{normalized_interval}")
-            except Exception as exc:
-                message = str(exc)
-                failures.append({"ticker": ticker, "message": message})
-                await db.log_sync(ticker, "error", 0, f"{reason}:{message[:500]}")
-                log.warning("Tracked sync failed for %s (%s): %s", ticker, reason, exc)
-            if index < len(tickers) - 1:
-                await asyncio.sleep(STARTUP_DOWNLOAD_DELAY_SECONDS)
-
-        log.info(
-            "Tracked market sync finished: reason=%s success=%s failure=%s rows=%s",
-            reason, len(successes), len(failures), total_rows,
-        )
-        return {
-            "reason": reason,
-            "period": normalized_period, "interval": normalized_interval,
-            "tickers": tickers,
-            "success_count": len(successes), "failure_count": len(failures),
-            "total_rows": total_rows,
-            "results": successes, "failures": failures,
-        }
-
-
-async def fetch_and_store_quote_snapshot(ticker: str) -> dict | None:
-    ticker = normalize_ticker(ticker)
-    quote = await quote_provider.fetch_quote(ticker)
-    if not quote:
-        return None
-    return await db.upsert_market_quote(quote)
-
-
-async def sync_market_intelligence_snapshot(reason: str = "manual") -> dict:
-    tickers = await get_tracked_sync_tickers()
-    macro_items = await macro_snapshot_provider.sync_macro_snapshots()
-    event_count = await market_event_provider.sync_events_for_tickers(tickers)
-    news_count = 0
-    for ticker in tickers[:20]:
-        try:
-            articles = await news_provider.sync_ticker_news(ticker, limit=6)
-            news_count += len(articles)
-        except Exception as exc:
-            log.debug("news sync failed for %s (%s): %s", ticker, reason, exc)
-    return {
-        "reason": reason, "macro_count": len(macro_items),
-        "event_count": event_count, "news_count": news_count,
-        "tracked_tickers": len(tickers),
-    }
-
-
-async def fetch_startup_history_for_ticker(ticker: str) -> int:
-    return await fetcher.fetch_and_store(ticker, period="2y", include_info=False)
+get_tracked_sync_tickers = background_tasks.get_tracked_sync_tickers
+sync_tracked_market_data = background_tasks.sync_tracked_market_data
+fetch_and_store_quote_snapshot = background_tasks.fetch_and_store_quote_snapshot
+sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
+fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
 
 
 background_scheduler = BackgroundScheduler(
@@ -330,7 +258,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_origin_regex=local_dev_origin_regex,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -358,6 +286,7 @@ intelligence.configure(
 system.configure(
     frontend_dev_url=FRONTEND_DEV_URL,
     frontend_dist_dir=FRONTEND_DIST_DIR,
+    scheduler=background_scheduler,
 )
 
 app.include_router(watchlist.router)

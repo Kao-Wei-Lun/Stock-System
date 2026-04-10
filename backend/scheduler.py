@@ -184,6 +184,22 @@ class BackgroundScheduler:
     def task_count(self) -> int:
         return len(self._tasks)
 
+    def health_summary(self) -> dict:
+        tasks = [
+            {
+                "name": task.get_name().replace("quantvision:", "", 1),
+                "done": task.done(),
+                "cancelled": task.cancelled(),
+            }
+            for task in self._tasks
+        ]
+        return {
+            "running": bool(self._tasks),
+            "task_count": len(self._tasks),
+            "active_count": sum(1 for task in self._tasks if not task.done()),
+            "tasks": tasks,
+        }
+
     def start(self) -> None:
         if self._tasks:
             return

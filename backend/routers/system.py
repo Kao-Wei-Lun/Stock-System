@@ -15,14 +15,16 @@ log = logging.getLogger(__name__)
 
 _FRONTEND_DEV_URL = "http://localhost:5173"
 _FRONTEND_DIST_DIR: Path | None = None
+_SCHEDULER = None
 
 router = APIRouter(tags=["system"])
 
 
-def configure(*, frontend_dev_url: str, frontend_dist_dir: Path):
-    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR
+def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None):
+    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
+    _SCHEDULER = scheduler
 
 
 def _frontend_ready() -> bool:
@@ -32,6 +34,17 @@ def _frontend_ready() -> bool:
 @router.get("/api/health")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/api/scheduler/health")
+async def scheduler_health():
+    if _SCHEDULER is None:
+        return {"status": "unconfigured", "running": False, "task_count": 0, "active_count": 0, "tasks": []}
+    summary = _SCHEDULER.health_summary()
+    status = "running" if summary["running"] else "stopped"
+    if summary["running"] and summary["active_count"] == 0:
+        status = "idle"
+    return {"status": status, **summary, "time": datetime.now(timezone.utc).isoformat()}
 
 
 @router.websocket("/ws")
