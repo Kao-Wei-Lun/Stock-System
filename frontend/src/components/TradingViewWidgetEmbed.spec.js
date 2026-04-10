@@ -1,11 +1,10 @@
 import { mount } from "@vue/test-utils";
-import { nextTick } from "vue";
 import { describe, expect, it } from "vitest";
 
 import TradingViewWidgetEmbed from "./TradingViewWidgetEmbed.vue";
 
 describe("TradingViewWidgetEmbed", () => {
-  it("renders allowed TradingView embed scripts once on mount", async () => {
+  it("renders allowed TradingView embeds inside a sandboxed iframe", () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js",
@@ -13,12 +12,17 @@ describe("TradingViewWidgetEmbed", () => {
       },
     });
 
-    await nextTick();
+    const frame = wrapper.find("iframe.tv-widget-frame");
+    const srcdoc = frame.attributes("srcdoc");
 
-    expect(wrapper.find("script").attributes("src")).toBe(
-      "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js",
+    expect(frame.exists()).toBe(true);
+    expect(frame.attributes("sandbox")).toContain("allow-scripts");
+    expect(srcdoc).toContain(
+      'src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"',
     );
-    expect(wrapper.findAll("script")).toHaveLength(1);
+    expect(srcdoc).toContain('"colorTheme":"dark"');
+    expect(srcdoc).toContain("tradingview-widget-container__widget");
+    expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find(".tv-widget-warning").exists()).toBe(false);
   });
 
@@ -31,10 +35,11 @@ describe("TradingViewWidgetEmbed", () => {
     });
 
     expect(wrapper.find("script").exists()).toBe(false);
+    expect(wrapper.find("iframe").exists()).toBe(false);
     expect(wrapper.text()).toContain("未在允許清單");
   });
 
-  it("re-renders only when the widget config changes", async () => {
+  it("rebuilds the iframe document when the widget config changes", async () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js",
@@ -42,13 +47,15 @@ describe("TradingViewWidgetEmbed", () => {
       },
     });
 
-    await nextTick();
-    expect(wrapper.findAll("script")).toHaveLength(1);
+    const originalSrcdoc = wrapper.find("iframe").attributes("srcdoc");
+    expect(wrapper.findAll("iframe")).toHaveLength(1);
 
     await wrapper.setProps({ config: { colorTheme: "light" } });
-    await nextTick();
 
-    expect(wrapper.findAll("script")).toHaveLength(1);
-    expect(wrapper.find("script").element.text).toContain('"colorTheme":"light"');
+    const updatedSrcdoc = wrapper.find("iframe").attributes("srcdoc");
+    expect(wrapper.findAll("iframe")).toHaveLength(1);
+    expect(updatedSrcdoc).not.toBe(originalSrcdoc);
+    expect(updatedSrcdoc).toContain('"colorTheme":"light"');
+    expect(wrapper.find("script").exists()).toBe(false);
   });
 });

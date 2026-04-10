@@ -1,6 +1,15 @@
 <template>
   <div class="tv-widget-shell">
-    <div ref="hostRef" class="tradingview-widget-container"></div>
+    <iframe
+      v-if="scriptAllowed"
+      :key="iframeKey"
+      class="tv-widget-frame"
+      :srcdoc="iframeSrcdoc"
+      title="TradingView widget"
+      loading="lazy"
+      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+      referrerpolicy="no-referrer-when-downgrade"
+    ></iframe>
     <div v-if="!scriptAllowed" class="tv-widget-warning">
       此 TradingView 來源未在允許清單內。
     </div>
@@ -17,7 +26,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed } from "vue";
 
 const props = defineProps({
   scriptSrc: { type: String, required: true },
@@ -25,12 +34,8 @@ const props = defineProps({
   fallbackUrl: { type: String, default: "https://www.tradingview.com/" },
 });
 
-const hostRef = ref(null);
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
-let lastRenderSignature = "";
-let renderQueued = false;
-let mounted = false;
 
 const scriptAllowed = computed(() => {
   try {
@@ -45,65 +50,63 @@ const scriptAllowed = computed(() => {
   }
 });
 
-function cleanupHost() {
-  if (!hostRef.value) return;
-  hostRef.value.replaceChildren();
-}
+const serializedConfig = computed(() => JSON.stringify(props.config ?? {}));
 
-function getRenderSignature() {
-  return `${props.scriptSrc}::${JSON.stringify(props.config)}`;
-}
+const iframeKey = computed(() => `${props.scriptSrc}::${serializedConfig.value}`);
 
-function renderWidget() {
-  if (!hostRef.value || typeof document === "undefined") return;
+const iframeSrcdoc = computed(() => {
+  if (!scriptAllowed.value) return "";
 
-  const signature = getRenderSignature();
-  if (signature === lastRenderSignature && hostRef.value.querySelector("script")) {
-    return;
-  }
+  const scriptSrc = escapeHtmlAttribute(props.scriptSrc);
+  const configJson = escapeScriptJson(serializedConfig.value);
 
-  cleanupHost();
-  lastRenderSignature = signature;
-  if (!scriptAllowed.value) return;
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      html,
+      body,
+      .tradingview-widget-container,
+      .tradingview-widget-container__widget {
+        width: 100%;
+        height: 100%;
+        min-height: 100%;
+        margin: 0;
+      }
 
-  const widgetNode = document.createElement("div");
-  widgetNode.className = "tradingview-widget-container__widget";
-
-  const scriptNode = document.createElement("script");
-  scriptNode.type = "text/javascript";
-  scriptNode.async = true;
-  scriptNode.src = props.scriptSrc;
-  scriptNode.text = JSON.stringify(props.config);
-
-  hostRef.value.appendChild(widgetNode);
-  hostRef.value.appendChild(scriptNode);
-}
-
-async function scheduleRenderWidget() {
-  if (!mounted || renderQueued) return;
-  renderQueued = true;
-  await nextTick();
-  renderQueued = false;
-  renderWidget();
-}
-
-watch(
-  () => [props.scriptSrc, JSON.stringify(props.config)],
-  () => {
-    void scheduleRenderWidget();
-  },
-);
-
-onMounted(() => {
-  mounted = true;
-  renderWidget();
+      body {
+        overflow: hidden;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <script type="text/javascript" src="${scriptSrc}" async>
+${configJson}
+      <\/script>
+    </div>
+  </body>
+</html>`;
 });
 
-onBeforeUnmount(() => {
-  mounted = false;
-  lastRenderSignature = "";
-  cleanupHost();
-});
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeScriptJson(value) {
+  return String(value)
+    .replace(/<\//g, "<\\/")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
 </script>
 
 <style scoped>
@@ -111,11 +114,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 0;
+  min-height: inherit;
+  height: 100%;
 }
 
-.tradingview-widget-container {
-  min-height: inherit;
+.tv-widget-frame {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 260px;
+  border: 0;
+  background: transparent;
 }
 
 .tv-widget-link {

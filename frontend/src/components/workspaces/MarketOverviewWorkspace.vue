@@ -394,10 +394,8 @@ defineEmits([
 
 .heatmap-shell :deep(.tv-widget-shell),
 .market-overview-shell :deep(.tv-widget-shell),
-.heatmap-shell :deep(.tradingview-widget-container),
-.market-overview-shell :deep(.tradingview-widget-container),
-.heatmap-shell :deep(.tradingview-widget-container__widget),
-.market-overview-shell :deep(.tradingview-widget-container__widget) {
+.heatmap-shell :deep(.tv-widget-frame),
+.market-overview-shell :deep(.tv-widget-frame) {
   min-height: 100%;
   height: 100%;
 }
