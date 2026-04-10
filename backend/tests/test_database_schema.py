@@ -43,6 +43,7 @@ def test_build_schema_plan_adds_missing_tables_and_columns():
     assert any("CREATE TABLE `workspace_presets`" in statement for statement in plan)
     assert any("CREATE TABLE `market_quotes_latest`" in statement for statement in plan)
     assert any("CREATE TABLE `notifications`" in statement for statement in plan)
+    assert any("CREATE TABLE `fubon_api_accounts`" in statement for statement in plan)
     assert any("CREATE TABLE `backtest_runs`" in statement for statement in plan)
     assert any("CREATE TABLE `backtest_trades`" in statement for statement in plan)
     assert any("CREATE TABLE `backtest_equity_points`" in statement for statement in plan)

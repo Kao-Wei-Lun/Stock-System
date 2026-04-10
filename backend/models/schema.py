@@ -127,6 +127,28 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_market_quotes_latest_quote_recency` (`quote_timestamp`, `synced_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "fubon_api_accounts": """
+        CREATE TABLE `fubon_api_accounts` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `label` VARCHAR(100) NOT NULL,
+            `user_id` VARCHAR(50) NOT NULL,
+            `password_enc` TEXT NOT NULL,
+            `cert_path` VARCHAR(500) NULL,
+            `cert_password_enc` TEXT NULL,
+            `api_key_enc` TEXT NOT NULL,
+            `ws_mode` VARCHAR(10) NOT NULL DEFAULT 'Speed',
+            `is_active` TINYINT NOT NULL DEFAULT 0,
+            `is_enabled` TINYINT NOT NULL DEFAULT 1,
+            `connection_status` VARCHAR(20) NOT NULL DEFAULT 'disconnected',
+            `connection_error` TEXT NULL,
+            `last_connected_at` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_fubon_api_accounts_active` (`is_active`, `is_enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        COMMENT='Fubon Neo API account settings'
+    """,
     "alerts": """
         CREATE TABLE `alerts` (
             `id` BIGINT NOT NULL AUTO_INCREMENT,
