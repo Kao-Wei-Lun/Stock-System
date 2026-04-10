@@ -21,3 +21,12 @@ __pycache__/
 .idea/
 *.swp
 *.swo
+
+# 憑證與機密金鑰（富邦 SDK）
+certs/
+*.pfx
+*.p12
+*.pem
+*.key
+docs/llms-full.txt
+docs/fubon_neo-*.whl
