@@ -193,7 +193,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
 import { useLWCChart } from "../composables/useLWCChart";
@@ -276,6 +276,8 @@ const emit = defineEmits([
   "open-journal-entry",
 ]);
 
+const lifecycleTarget = getCurrentInstance();
+let workspaceMounted = false;
 const chartAreaRef = ref(null);
 const chartContainerRef = ref(null);
 const mainCanvas = ref(null);
@@ -404,6 +406,8 @@ function createLegacyChartOptions() {
     chartAreaRef,
     props,
     emit,
+    lifecycleTarget,
+    mountImmediately: workspaceMounted,
   };
 }
 
@@ -417,7 +421,10 @@ async function loadLegacyChart() {
     const pendingChartMode = legacyChart.value.chartMode.value;
     const pendingPriceScaleMode = legacyChart.value.priceScaleMode.value;
     legacyChartLoadPromise = import("../composables/useChartEngine").then(({ useChartEngine }) => {
-      const controller = useChartEngine(createLegacyChartOptions());
+      const createController = () => useChartEngine(createLegacyChartOptions());
+      const controller = lifecycleTarget?.scope?.active
+        ? lifecycleTarget.scope.run(createController)
+        : createController();
       controller.setChartMode?.(pendingChartMode);
       controller.setPriceScaleMode?.(pendingPriceScaleMode);
       legacyChart.value = controller;
@@ -855,6 +862,7 @@ watch(
 );
 
 onMounted(() => {
+  workspaceMounted = true;
   window.addEventListener("keydown", handleKeydown);
   if (!isLwcMode.value) {
     void loadLegacyChart().then((controller) => {
@@ -867,6 +875,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  workspaceMounted = false;
   window.removeEventListener("keydown", handleKeydown);
 });
 </script>

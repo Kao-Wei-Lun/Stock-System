@@ -183,6 +183,8 @@ export function useChartEngine({
   chartAreaRef,
   props,
   emit,
+  lifecycleTarget = null,
+  mountImmediately = false,
 }) {
   const storedChartPrefs = readChartPrefs();
   const chartMode = ref(["candles", "line", "area"].includes(storedChartPrefs.chartMode) ? storedChartPrefs.chartMode : "candles");
@@ -3206,7 +3208,10 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
   };
   const handleWindowMouseUp = () => onMouseUp();
 
-  onMounted(() => {
+  let engineMounted = false;
+  const mountEngine = () => {
+    if (engineMounted) return;
+    engineMounted = true;
     syncViewport({ anchorLatest: true });
     nextTick(() => {
       resizeAll();
@@ -3215,15 +3220,25 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     window.addEventListener("resize", handleResize);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
-  });
+  };
 
-  onBeforeUnmount(() => {
+  const unmountEngine = () => {
+    if (!engineMounted) return;
+    engineMounted = false;
     if (renderFrame) cancelAnimationFrame(renderFrame);
     if (historyCommitTimer) window.clearTimeout(historyCommitTimer);
     window.removeEventListener("resize", handleResize);
     window.removeEventListener("mousemove", handleWindowMouseMove);
     window.removeEventListener("mouseup", handleWindowMouseUp);
-  });
+  };
+
+  if (mountImmediately) {
+    mountEngine();
+  } else {
+    onMounted(mountEngine, lifecycleTarget);
+  }
+
+  onBeforeUnmount(unmountEngine, lifecycleTarget);
 
   watch(
     () => props.ohlcData.length,
@@ -3440,5 +3455,6 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     onWheel,
     onChartClick,
     onDoubleClick,
+    dispose: unmountEngine,
   };
 }
