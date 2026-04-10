@@ -1,0 +1,17 @@
+.git/
+.agents/
+.codex/
+.pytest_cache/
+.vscode/
+venv/
+frontend/node_modules/
+frontend/dist/
+backend/__pycache__/
+__pycache__/
+*.py[cod]
+.env
+.env.local
+.env.*.local
+*.db
+*.db-shm
+*.db-wal

@@ -14,6 +14,8 @@ Stock-System/
 ├── scripts/
 │   ├── start.bat
 │   └── start.sh
+├── docker-compose.yml
+├── start.bat              # Windows wrapper; use "start.bat docker" for Docker
 ├── .env
 └── README.md
 ```
@@ -23,6 +25,7 @@ Stock-System/
 - Python 3.10+
 - Node.js 18+
 - MySQL 8+
+- Docker Desktop（選用，用於容器化啟動）
 
 ## 環境設定
 
@@ -48,6 +51,12 @@ FRONTEND_DEV_URL=http://localhost:5173
 scripts\start.bat
 ```
 
+或從根目錄：
+
+```bat
+start.bat
+```
+
 ### Mac / Linux
 
 ```bash
@@ -60,6 +69,26 @@ chmod +x scripts/start.sh
 - 前端服務: `http://localhost:5173`
 - 後端 API: `http://localhost:8001`
 - Swagger 文件: `http://localhost:8001/docs`
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+Windows 也可以使用：
+
+```bat
+start.bat docker
+```
+
+Docker Compose 會啟動：
+
+- MySQL: `localhost:3306`
+- 後端 API: `http://localhost:8001`
+- 前端服務: `http://localhost:5173`
+
+若本機已經有 MySQL 佔用 `3306`，可在 `.env` 調整 `MYSQL_PORT` 後再啟動。
 
 ## 前端說明
 

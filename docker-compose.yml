@@ -1,0 +1,70 @@
+services:
+  db:
+    image: mysql:8.4
+    container_name: quantvision-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-quantvision_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-quantvision}
+      MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - quantvision_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+    container_name: quantvision-backend
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-quantvision_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-quantvision}
+      MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
+      APP_PORT: 8001
+      FRONTEND_DEV_URL: http://localhost:5173
+      STARTUP_DOWNLOAD_ENABLED: ${STARTUP_DOWNLOAD_ENABLED:-false}
+      INSTITUTIONAL_AUTO_SYNC_ENABLED: ${INSTITUTIONAL_AUTO_SYNC_ENABLED:-true}
+      LATEST_DATA_SYNC_ON_STARTUP: ${LATEST_DATA_SYNC_ON_STARTUP:-true}
+      LATEST_DATA_SYNC_PERIOD: ${LATEST_DATA_SYNC_PERIOD:-1y}
+      LATEST_DATA_SYNC_INTERVAL: ${LATEST_DATA_SYNC_INTERVAL:-1d}
+      ALERT_EVALUATOR_ENABLED: ${ALERT_EVALUATOR_ENABLED:-true}
+      ALERT_POLL_INTERVAL_SECONDS: ${ALERT_POLL_INTERVAL_SECONDS:-30}
+      MARKET_INTELLIGENCE_SYNC_ENABLED: ${MARKET_INTELLIGENCE_SYNC_ENABLED:-true}
+      MARKET_INTELLIGENCE_STARTUP_SYNC: ${MARKET_INTELLIGENCE_STARTUP_SYNC:-true}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Taipei}
+      DAILY_LATEST_SYNC_TIME: ${DAILY_LATEST_SYNC_TIME:-18:10}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: quantvision-frontend
+    restart: unless-stopped
+    environment:
+      VITE_BACKEND_TARGET: http://backend:8001
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+
+volumes:
+  quantvision_mysql:
