@@ -4,24 +4,28 @@ import { describe, expect, it } from "vitest";
 import TradingViewWidgetEmbed from "./TradingViewWidgetEmbed.vue";
 
 describe("TradingViewWidgetEmbed", () => {
-  it("renders allowed TradingView embeds inside a sandboxed iframe", () => {
+  it("renders allowed TradingView embeds as direct sandboxed iframes", () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js",
-        config: { colorTheme: "dark" },
+        config: { colorTheme: "dark", locale: "zh_TW" },
       },
     });
 
     const frame = wrapper.find("iframe.tv-widget-frame");
-    const srcdoc = frame.attributes("srcdoc");
+    const frameUrl = new URL(frame.attributes("src"));
+    const frameConfig = JSON.parse(decodeURIComponent(frameUrl.hash.slice(1)));
 
     expect(frame.exists()).toBe(true);
     expect(frame.attributes("sandbox")).toContain("allow-scripts");
-    expect(srcdoc).toContain(
-      'src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"',
-    );
-    expect(srcdoc).toContain('"colorTheme":"dark"');
-    expect(srcdoc).toContain("tradingview-widget-container__widget");
+    expect(frame.attributes("sandbox")).toContain("allow-same-origin");
+    expect(frameUrl.origin).toBe("https://www.tradingview-widget.com");
+    expect(frameUrl.pathname).toBe("/embed-widget/stock-heatmap/");
+    expect(frameUrl.searchParams.get("locale")).toBe("zh_TW");
+    expect(frameConfig.colorTheme).toBe("dark");
+    expect(frameConfig.locale).toBeUndefined();
+    expect(frameConfig.utm_campaign).toBe("stock-heatmap");
+    expect(frame.attributes("srcdoc")).toBeUndefined();
     expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find(".tv-widget-warning").exists()).toBe(false);
   });
@@ -39,7 +43,7 @@ describe("TradingViewWidgetEmbed", () => {
     expect(wrapper.text()).toContain("未在允許清單");
   });
 
-  it("rebuilds the iframe document when the widget config changes", async () => {
+  it("rebuilds the iframe url when the widget config changes", async () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js",
@@ -47,15 +51,17 @@ describe("TradingViewWidgetEmbed", () => {
       },
     });
 
-    const originalSrcdoc = wrapper.find("iframe").attributes("srcdoc");
+    const originalSrc = wrapper.find("iframe").attributes("src");
     expect(wrapper.findAll("iframe")).toHaveLength(1);
 
     await wrapper.setProps({ config: { colorTheme: "light" } });
 
-    const updatedSrcdoc = wrapper.find("iframe").attributes("srcdoc");
+    const updatedSrc = wrapper.find("iframe").attributes("src");
+    const frameConfig = JSON.parse(decodeURIComponent(new URL(updatedSrc).hash.slice(1)));
+
     expect(wrapper.findAll("iframe")).toHaveLength(1);
-    expect(updatedSrcdoc).not.toBe(originalSrcdoc);
-    expect(updatedSrcdoc).toContain('"colorTheme":"light"');
+    expect(updatedSrc).not.toBe(originalSrc);
+    expect(frameConfig.colorTheme).toBe("light");
     expect(wrapper.find("script").exists()).toBe(false);
   });
 });

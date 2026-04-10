@@ -4,10 +4,10 @@
       v-if="scriptAllowed"
       :key="iframeKey"
       class="tv-widget-frame"
-      :srcdoc="iframeSrcdoc"
+      :src="iframeSrc"
       title="TradingView widget"
       loading="lazy"
-      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+      sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       referrerpolicy="no-referrer-when-downgrade"
     ></iframe>
     <div v-if="!scriptAllowed" class="tv-widget-warning">
@@ -36,77 +36,53 @@ const props = defineProps({
 
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
+const WIDGET_HOST = "https://www.tradingview-widget.com";
+const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
 
-const scriptAllowed = computed(() => {
+const widgetName = computed(() => {
   try {
     const url = new URL(props.scriptSrc);
-    return (
+    if (
       url.protocol === "https:"
       && ALLOWED_SCRIPT_HOSTS.has(url.hostname)
       && url.pathname.startsWith(ALLOWED_SCRIPT_PATH_PREFIX)
-    );
+    ) {
+      const fileName = url.pathname.slice(ALLOWED_SCRIPT_PATH_PREFIX.length);
+      return fileName.match(WIDGET_SCRIPT_PATTERN)?.[1] ?? "";
+    }
   } catch (error) {
-    return false;
+    return "";
   }
+
+  return "";
 });
 
-const serializedConfig = computed(() => JSON.stringify(props.config ?? {}));
+const scriptAllowed = computed(() => Boolean(widgetName.value));
 
-const iframeKey = computed(() => `${props.scriptSrc}::${serializedConfig.value}`);
+const widgetConfig = computed(() => {
+  const { locale, ...config } = props.config ?? {};
 
-const iframeSrcdoc = computed(() => {
+  return {
+    ...config,
+    utm_source: "",
+    utm_medium: "widget",
+    utm_campaign: widgetName.value,
+  };
+});
+
+const locale = computed(() => props.config?.locale || "en");
+
+const serializedConfig = computed(() => JSON.stringify(widgetConfig.value));
+
+const iframeSrc = computed(() => {
   if (!scriptAllowed.value) return "";
 
-  const scriptSrc = escapeHtmlAttribute(props.scriptSrc);
-  const configJson = escapeScriptJson(serializedConfig.value);
-
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      html,
-      body,
-      .tradingview-widget-container,
-      .tradingview-widget-container__widget {
-        width: 100%;
-        height: 100%;
-        min-height: 100%;
-        margin: 0;
-      }
-
-      body {
-        overflow: hidden;
-        background: transparent;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="tradingview-widget-container">
-      <div class="tradingview-widget-container__widget"></div>
-      <script type="text/javascript" src="${scriptSrc}" async>
-${configJson}
-      <\/script>
-    </div>
-  </body>
-</html>`;
+  const query = new URLSearchParams({ locale: locale.value });
+  const configHash = encodeURIComponent(serializedConfig.value);
+  return `${WIDGET_HOST}/embed-widget/${widgetName.value}/?${query.toString()}#${configHash}`;
 });
 
-function escapeHtmlAttribute(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeScriptJson(value) {
-  return String(value)
-    .replace(/<\//g, "<\\/")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
-}
+const iframeKey = computed(() => `${iframeSrc.value}`);
 </script>
 
 <style scoped>
