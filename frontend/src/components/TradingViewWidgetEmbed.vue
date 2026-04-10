@@ -1,6 +1,9 @@
 <template>
   <div class="tv-widget-shell">
     <div ref="hostRef" class="tradingview-widget-container"></div>
+    <div v-if="!scriptAllowed" class="tv-widget-warning">
+      此 TradingView 來源未在允許清單內。
+    </div>
     <a
       v-if="fallbackUrl"
       class="tv-widget-link"
@@ -14,7 +17,7 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
   scriptSrc: { type: String, required: true },
@@ -23,6 +26,21 @@ const props = defineProps({
 });
 
 const hostRef = ref(null);
+const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
+const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
+
+const scriptAllowed = computed(() => {
+  try {
+    const url = new URL(props.scriptSrc);
+    return (
+      url.protocol === "https:"
+      && ALLOWED_SCRIPT_HOSTS.has(url.hostname)
+      && url.pathname.startsWith(ALLOWED_SCRIPT_PATH_PREFIX)
+    );
+  } catch (error) {
+    return false;
+  }
+});
 
 function cleanupHost() {
   if (!hostRef.value) return;
@@ -33,6 +51,7 @@ function renderWidget() {
   if (!hostRef.value || typeof document === "undefined") return;
 
   cleanupHost();
+  if (!scriptAllowed.value) return;
 
   const widgetNode = document.createElement("div");
   widgetNode.className = "tradingview-widget-container__widget";
@@ -82,5 +101,14 @@ onBeforeUnmount(() => {
   color: var(--text3);
   font-size: 10px;
   text-decoration: none;
+}
+
+.tv-widget-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 77, 106, 0.2);
+  border-radius: 8px;
+  color: #ff8a9d;
+  background: rgba(255, 77, 106, 0.08);
+  font-size: 11px;
 }
 </style>

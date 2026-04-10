@@ -21,6 +21,7 @@ describe("StatusBar", () => {
     });
 
     expect(wrapper.text()).toContain("資料較舊");
+    expect(wrapper.text()).toContain("·");
   });
 
   it("shows missing timestamp warnings when no quote time is available", () => {
@@ -40,5 +41,25 @@ describe("StatusBar", () => {
     });
 
     expect(wrapper.text()).toContain("無時間戳");
+  });
+
+  it("adds quote age to fresh snapshot labels", () => {
+    const timestamp = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+    const wrapper = mount(StatusBar, {
+      props: {
+        connected: true,
+        backendUrl: "http://127.0.0.1:8001",
+        latency: "15ms",
+        quoteSource: "yahoo_finance",
+        quoteMode: "最新快照",
+        quoteTimestamp: timestamp,
+        quoteSyncedAt: timestamp,
+        quoteDelayed: false,
+        lastUpdate: "2026/04/02 10:00:00",
+        clockTime: "2026/04/02 10:00:00",
+      },
+    });
+
+    expect(wrapper.text()).toContain("最新快照 · 4分鐘前");
   });
 });

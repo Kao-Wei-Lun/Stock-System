@@ -21,6 +21,7 @@
       @set-timeframe="setTimeframe"
       @open-heatmap="handleOpenHeatmap"
       @open-alert-modal="openAlertModal"
+      @open-command-palette="openCommandPalette"
     />
 
     <div

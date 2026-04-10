@@ -22,16 +22,16 @@
 
       <div class="terminal-commandbar-actions">
         <button class="terminal-action" type="button" @click="$emit('toggle-left')">
-          {{ leftCollapsed ? "展開觀察池" : "收合觀察池" }}
+          {{ leftCollapsed ? "☰ 觀察池" : "✕ 觀察池" }}
         </button>
         <button class="terminal-action" type="button" @click="openDrawer('alerts')">
-          警報抽屜
+          🔔 警報
         </button>
         <button class="terminal-action" type="button" @click="openDrawer('journal')">
-          快速日誌
+          ✎ 日誌
         </button>
         <button class="terminal-action emphasis" type="button" @click="$emit('toggle-fullscreen')">
-          {{ chartFullscreen ? "離開 Zen" : "Zen Mode" }}
+          {{ chartFullscreen ? "✕⛶" : "⛶ Zen" }}
         </button>
       </div>
     </div>

@@ -56,6 +56,33 @@ function createProps() {
 }
 
 describe("ProChartTerminalWorkspace", () => {
+  it("uses compact commandbar action labels", () => {
+    const wrapper = mount(ProChartTerminalWorkspace, {
+      props: createProps(),
+      global: {
+        stubs: {
+          ChartWorkspace: {
+            name: "ChartWorkspace",
+            template: "<div class='chart-workspace-stub'>chart</div>",
+          },
+          TerminalTickerRail: {
+            name: "TerminalTickerRail",
+            template: "<aside class='ticker-rail-stub'>rail</aside>",
+          },
+          TerminalUtilityDrawer: {
+            name: "TerminalUtilityDrawer",
+            template: "<aside class='utility-drawer-stub'>drawer</aside>",
+          },
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("☰ 觀察池");
+    expect(wrapper.text()).toContain("🔔 警報");
+    expect(wrapper.text()).toContain("✎ 日誌");
+    expect(wrapper.text()).toContain("⛶ Zen");
+  });
+
   it("keeps chart-focused zen mode free of command chrome", () => {
     const wrapper = mount(ProChartTerminalWorkspace, {
       props: {

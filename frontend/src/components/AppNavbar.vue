@@ -14,6 +14,7 @@
         class="workspace-nav-btn"
         :class="{ active: workspacePage === item.key }"
         type="button"
+        :title="`${item.label} · ${item.shortcut}`"
         @click="$emit('navigate', item.key)"
       >
         <span class="workspace-nav-label">{{ item.label }}</span>
@@ -33,6 +34,14 @@
           @input="$emit('search-change', $event.target.value)"
           @keydown.enter.prevent="$emit('submit-search')"
         />
+        <button
+          class="search-command-badge"
+          type="button"
+          title="Ctrl/Cmd + K"
+          @click="$emit('open-command-palette')"
+        >
+          ⌘K
+        </button>
         <div class="search-dropdown" :class="{ open: searchOpen }">
           <button
             v-for="result in searchResults"
@@ -136,13 +145,14 @@ const emit = defineEmits([
   "set-timeframe",
   "open-heatmap",
   "open-alert-modal",
+  "open-command-palette",
 ]);
 
 const navItems = [
-  { key: "overview", label: "總覽", hint: "盤前觀察" },
-  { key: "terminal", label: "終端", hint: "盤中決策" },
-  { key: "institutional", label: "籌碼", hint: "盤後深究" },
-  { key: "review", label: "復盤", hint: "日誌回測" },
+  { key: "overview", label: "總覽", hint: "盤前觀察", shortcut: "Alt+1" },
+  { key: "terminal", label: "終端", hint: "盤中決策", shortcut: "Alt+2" },
+  { key: "institutional", label: "籌碼", hint: "盤後深究", shortcut: "Alt+3" },
+  { key: "review", label: "復盤", hint: "日誌回測", shortcut: "Alt+4" },
 ];
 
 const rootRef = ref(null);
@@ -294,6 +304,22 @@ onBeforeUnmount(() => {
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   text-transform: uppercase;
+}
+
+.search-command-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid rgba(123, 231, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(123, 231, 255, 0.1);
+  color: #d7fbff;
+  cursor: pointer;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+}
+
+.search-command-badge:hover {
+  border-color: rgba(123, 231, 255, 0.34);
 }
 
 .search-wrap input::placeholder {

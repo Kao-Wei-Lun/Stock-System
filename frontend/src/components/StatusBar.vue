@@ -10,7 +10,7 @@
     <div class="status-block">模式：<span>{{ quoteMode }}</span></div>
     <div class="status-block">
       狀態：
-      <span class="status-badge" :class="freshnessClass">{{ freshnessLabel }}</span>
+      <span class="status-badge" :class="freshnessClass">{{ freshnessDisplayLabel }}</span>
     </div>
     <div class="status-block status-push">
       更新：
@@ -51,6 +51,34 @@ const freshnessLabel = computed(() => {
   if (freshnessState.value === "stale") return "資料較舊";
   return freshnessState.value === "live" ? "最新快照" : "延遲快照";
 });
+
+function formatAgeLabel(ageMs) {
+  if (!Number.isFinite(ageMs)) return "";
+  if (ageMs < 0) return "剛剛";
+  const totalSeconds = Math.floor(ageMs / 1000);
+  if (totalSeconds < 60) return "剛剛";
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}分鐘前`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) return `${totalHours}小時前`;
+  const totalDays = Math.floor(totalHours / 24);
+  if (totalDays < 30) return `${totalDays}天前`;
+  const totalMonths = Math.floor(totalDays / 30);
+  if (totalMonths < 12) return `${totalMonths}個月前`;
+  return `${Math.floor(totalDays / 365)}年前`;
+}
+
+const freshnessAgeLabel = computed(() => {
+  const rawValue = props.quoteTimestamp || props.quoteSyncedAt;
+  if (!rawValue) return "";
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return formatAgeLabel(Date.now() - parsed.getTime());
+});
+
+const freshnessDisplayLabel = computed(() => (
+  freshnessAgeLabel.value ? `${freshnessLabel.value} · ${freshnessAgeLabel.value}` : freshnessLabel.value
+));
 
 const freshnessClass = computed(() => freshnessState.value);
 </script>
