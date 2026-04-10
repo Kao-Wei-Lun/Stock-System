@@ -202,10 +202,10 @@
 
 <script setup>
 import { computed, ref } from "vue";
-import AlertConfigPanel from "./AlertConfigPanel.vue";
-import BacktestPanel from "./BacktestPanel.vue";
-import JournalPanel from "./JournalPanel.vue";
-import MarketIntelPanel from "./MarketIntelPanel.vue";
+import AlertConfigPanel from "../AlertConfigPanel.vue";
+import BacktestPanel from "../BacktestPanel.vue";
+import JournalPanel from "../JournalPanel.vue";
+import MarketIntelPanel from "../MarketIntelPanel.vue";
 
 
 const props = defineProps({
