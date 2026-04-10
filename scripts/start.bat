@@ -109,6 +109,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if exist "%PROJECT_ROOT%\docs\fubon_neo-2.2.8-cp37-abi3-win_amd64.whl" (
+    echo [INFO] Installing local Fubon Neo SDK wheel...
+    "%VENV_PYTHON%" -m pip install "%PROJECT_ROOT%\docs\fubon_neo-2.2.8-cp37-abi3-win_amd64.whl" -q
+    if errorlevel 1 (
+        echo [ERROR] Failed to install Fubon Neo SDK wheel.
+        exit /b 1
+    )
+)
+
 echo [INFO] Starting backend API on port %BACKEND_PORT%...
 cd /d "%PROJECT_ROOT%\backend"
 "%VENV_PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload

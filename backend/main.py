@@ -220,7 +220,7 @@ async def lifespan(app: FastAPI):
 
     validate_runtime_environment()
     await init_db()
-    if await fubon_manager.init_from_db(db):
+    if getattr(db, "_pool", None) is not None and await fubon_manager.init_from_db(db):
         fubon_manager.start_ws_stock()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
