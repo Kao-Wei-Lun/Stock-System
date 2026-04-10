@@ -7,6 +7,7 @@ from statistics import mean
 from typing import Any, Dict, List, Optional
 
 from database import DEFAULT_OWNER_ID
+from external_notifications import NullExternalNotificationDispatcher
 from macro_regime import build_macro_summary
 
 log = logging.getLogger(__name__)
@@ -639,10 +640,11 @@ def _build_indicator_market_data(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 class AlertEngine:
-    def __init__(self, db, quote_provider, owner_id: int = DEFAULT_OWNER_ID):
+    def __init__(self, db, quote_provider, owner_id: int = DEFAULT_OWNER_ID, external_notifier=None):
         self._db = db
         self._quote_provider = quote_provider
         self._owner_id = owner_id
+        self._external_notifier = external_notifier or NullExternalNotificationDispatcher()
 
     async def evaluate_active_alerts(self) -> int:
         triggered_count = 0
@@ -794,7 +796,7 @@ class AlertEngine:
                 },
             },
         )
-        await self._db.create_notification(
+        notification = await self._db.create_notification(
             {
                 "category": "alert",
                 "level": "warning",
@@ -824,6 +826,10 @@ class AlertEngine:
             },
             owner_id=self._owner_id,
         )
+        try:
+            await self._external_notifier.send_alert(notification)
+        except Exception as exc:
+            log.warning("external alert notification failed for alert %s: %s", alert.get("id"), exc)
         return True
 
     @staticmethod

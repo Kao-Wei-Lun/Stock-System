@@ -90,6 +90,18 @@ Docker Compose 會啟動：
 
 若本機已經有 MySQL 佔用 `3306`，可在 `.env` 調整 `MYSQL_PORT` 後再啟動。
 
+## 外部通知
+
+警報觸發時會先寫入站內通知；若 `.env` 設定以下任一組外部通道，後端會同步推送：
+
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+DISCORD_WEBHOOK_URL=
+```
+
+Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook URL。
+
 ## 前端說明
 
 - 前端已改為 Vue 3 + Vite 專案，不再使用直接雙擊 `frontend/index.html` 的啟動方式

@@ -162,6 +162,15 @@ class StubQuoteProvider:
         return dict(self.quote) if self.quote else None
 
 
+class StubExternalNotifier:
+    def __init__(self):
+        self.notifications = []
+
+    async def send_alert(self, notification):
+        self.notifications.append(dict(notification))
+        return ["stub"]
+
+
 def _build_rows():
     closes = list(range(160, 120, -1))
     rows = []
@@ -313,6 +322,39 @@ async def test_alert_engine_triggers_and_persists_notifications():
     assert db.notifications[0]["payload"]["context_tags"] == ["優先候選", "Q4"]
     assert db.notifications[0]["payload"]["snapshot_price"] == 210.5
     assert db.notifications[0]["payload"]["macro_summary"]["trade_posture"] == "balanced"
+
+
+@pytest.mark.anyio
+async def test_alert_engine_dispatches_external_notifications_after_local_persist():
+    db = StubDb()
+    notifier = StubExternalNotifier()
+    provider = StubQuoteProvider(
+        {
+            "ticker": "AAPL",
+            "price": 212,
+            "change_pct": 1.5,
+            "source": "yahoo_finance",
+            "quote_timestamp": "2026-03-29T04:00:00+00:00",
+        }
+    )
+    engine = AlertEngine(db, provider, external_notifier=notifier)
+
+    triggered = await engine.evaluate_alert(
+        {
+            "id": 8,
+            "ticker": "AAPL",
+            "name": "AAPL breakout",
+            "notification_title": "AAPL breakout",
+            "type": "price",
+            "condition": "大於",
+            "value": 210,
+            "condition_payload": {},
+        }
+    )
+
+    assert triggered is True
+    assert notifier.notifications[0]["title"] == "AAPL breakout"
+    assert notifier.notifications[0]["payload"]["trigger_value"] == 212
 
 
 @pytest.mark.anyio
