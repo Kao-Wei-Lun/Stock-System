@@ -80,12 +80,11 @@ from fubon_neo.sdk import FubonSDK
 
 sdk = FubonSDK()
 # API Key 登入（v2.2.7+）
-accounts = sdk.login(
-    id="您的身分證字號",
-    password="您的電子平台密碼",
-    cert_path="憑證路徑（若憑證已匯出）",
-    cert_password="憑證密碼",
-    api_key="YOUR_FUBON_API_KEY"
+accounts = sdk.apikey_login(
+    "您的身分證字號",
+    "YOUR_FUBON_API_KEY",
+    "憑證路徑（若憑證已匯出）",
+    "憑證密碼",
 )
 sdk.init_realtime()  # 建立行情連線（WebSocket + REST）
 ```
@@ -436,12 +435,11 @@ class FubonSDKManager:
         try:
             from fubon_neo.sdk import FubonSDK, Mode
             self._sdk = FubonSDK()
-            self._accounts = self._sdk.login(
-                id=os.environ["FUBON_USER_ID"],
-                password=os.environ["FUBON_PASSWORD"],
-                cert_path=os.environ.get("FUBON_CERT_PATH", ""),
-                cert_password=os.environ.get("FUBON_CERT_PASSWORD", ""),
-                # api_key 參數（v2.2.7+）
+            self._accounts = self._sdk.apikey_login(
+                os.environ["FUBON_USER_ID"],
+                os.environ["FUBON_API_KEY"],
+                os.environ.get("FUBON_CERT_PATH", ""),
+                os.environ.get("FUBON_CERT_PASSWORD", ""),
             )
             mode_str = os.getenv("FUBON_WS_MODE", "Speed")
             mode = Mode.Normal if mode_str == "Normal" else Mode.Speed

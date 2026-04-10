@@ -674,11 +674,11 @@ class FubonSDKManager:
 
             from fubon_neo.sdk import FubonSDK, Mode
             sdk = FubonSDK()
-            sdk.login(
-                id=account["user_id"],
-                password=account["password"],
-                cert_path=account.get("cert_path", ""),
-                cert_password=account.get("cert_password", ""),
+            sdk.apikey_login(
+                account["user_id"],
+                account["api_key"],
+                account.get("cert_path", ""),
+                account.get("cert_password", ""),
             )
             mode = Mode.Normal if account.get("ws_mode") == "Normal" else Mode.Speed
             sdk.init_realtime(mode)
@@ -738,11 +738,11 @@ async def test_fubon_login(account: dict) -> dict:
 
         def _try_login():
             sdk = FubonSDK()
-            sdk.login(
-                id=account["user_id"],
-                password=account["password"],
-                cert_path=account.get("cert_path", ""),
-                cert_password=account.get("cert_password", ""),
+            sdk.apikey_login(
+                account["user_id"],
+                account["api_key"],
+                account.get("cert_path", ""),
+                account.get("cert_password", ""),
             )
             return True
 

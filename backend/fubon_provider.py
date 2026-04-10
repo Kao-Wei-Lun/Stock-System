@@ -78,17 +78,9 @@ class FubonSDKManager:
             ) from exc
 
         sdk = FubonSDK()
-        login_kwargs = {
-            "id": account["user_id"],
-            "password": account["password"],
-        }
-        if account.get("cert_path"):
-            login_kwargs["cert_path"] = account.get("cert_path") or ""
-        if account.get("cert_password"):
-            login_kwargs["cert_password"] = account.get("cert_password") or ""
-        if account.get("api_key"):
-            login_kwargs["api_key"] = account.get("api_key") or ""
-        sdk.login(**login_kwargs)
+        login_result = self._login_account(sdk, account)
+        if not self._is_login_success(login_result):
+            raise RuntimeError(self._login_message(login_result) or "Fubon login failed")
 
         mode = Mode.Normal if account.get("ws_mode") == "Normal" else Mode.Speed
         try:
@@ -100,6 +92,43 @@ class FubonSDKManager:
         ws_stock = getattr(websocket_client, "stock", None)
         ws_futopt = getattr(websocket_client, "futopt", None)
         return sdk, ws_stock, ws_futopt
+
+    @staticmethod
+    def _login_account(sdk, account: dict):
+        cert_path = account.get("cert_path") or ""
+        cert_password = account.get("cert_password") or ""
+        login_args = [account["user_id"]]
+
+        if account.get("api_key"):
+            login_args.append(account["api_key"])
+            login_args.append(cert_path)
+            if cert_password:
+                login_args.append(cert_password)
+            return sdk.apikey_login(*login_args)
+
+        login_args.append(account["password"])
+        login_args.append(cert_path)
+        if cert_password:
+            login_args.append(cert_password)
+        return sdk.login(*login_args)
+
+    @staticmethod
+    def _is_login_success(login_result) -> bool:
+        if login_result is None:
+            return True
+        if isinstance(login_result, dict) and "is_success" in login_result:
+            return bool(login_result.get("is_success"))
+        if hasattr(login_result, "is_success"):
+            return bool(getattr(login_result, "is_success"))
+        return True
+
+    @staticmethod
+    def _login_message(login_result) -> str:
+        if isinstance(login_result, dict):
+            return str(login_result.get("message") or "")
+        if hasattr(login_result, "message"):
+            return str(getattr(login_result, "message") or "")
+        return ""
 
     async def hot_switch(self, account: dict) -> bool:
         old_subscriptions = dict(self._subscriptions)
