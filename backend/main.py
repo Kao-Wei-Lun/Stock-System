@@ -32,6 +32,7 @@ from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
     fetcher,
+    fubon_manager,
     fundamentals_provider,
     macro_snapshot_provider,
     market_event_provider,
@@ -41,7 +42,7 @@ from providers import (
     taiwan_chip_provider,
     ws_manager,
 )
-from routers import alerts, backtest, intelligence, journal, market_data, system, watchlist, workspace
+from routers import alerts, backtest, intelligence, journal, market_data, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
@@ -219,6 +220,8 @@ async def lifespan(app: FastAPI):
 
     validate_runtime_environment()
     await init_db()
+    if await fubon_manager.init_from_db(db):
+        fubon_manager.start_ws_stock()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,
@@ -226,6 +229,7 @@ async def lifespan(app: FastAPI):
     background_scheduler.start()
     yield
     await background_scheduler.shutdown()
+    fubon_manager.shutdown()
     await db.close()
     log.info("QuantVision Pro backend stopped")
 
@@ -296,6 +300,7 @@ app.include_router(journal.router)
 app.include_router(backtest.router)
 app.include_router(market_data.router)
 app.include_router(intelligence.router)
+app.include_router(settings.router)
 app.include_router(system.router)
 
 
