@@ -34,7 +34,18 @@ describe("appRouteState", () => {
     });
   });
 
-  it("builds route locations from the four-workspace shell", () => {
+  it("maps settings routes into app state", () => {
+    expect(mapRouteToAppState({
+      name: "settings",
+      params: { ticker: "2330.tw" },
+    })).toEqual({
+      routeWorkspaceTab: "settings",
+      routeRightTab: "settings",
+      routeTicker: "2330.TW",
+    });
+  });
+
+  it("builds route locations from the workspace shell", () => {
     expect(buildAppRouteLocation({
       workspaceTab: "review",
       rightTab: "backtest",
@@ -51,6 +62,15 @@ describe("appRouteState", () => {
     })).toEqual({
       name: "overview",
       params: { ticker: "SPY" },
+    });
+
+    expect(buildAppRouteLocation({
+      workspaceTab: "settings",
+      rightTab: "settings",
+      currentTicker: "2330.tw",
+    })).toEqual({
+      name: "settings",
+      params: { ticker: "2330.TW" },
     });
   });
 });

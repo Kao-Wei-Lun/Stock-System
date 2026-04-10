@@ -42,5 +42,6 @@ describe("AppNavbar", () => {
     const titles = wrapper.findAll(".workspace-nav-btn").map((button) => button.attributes("title"));
     expect(titles).toContain("總覽 · Alt+1");
     expect(titles).toContain("終端 · Alt+2");
+    expect(titles).toContain("設定 · Alt+5");
   });
 });

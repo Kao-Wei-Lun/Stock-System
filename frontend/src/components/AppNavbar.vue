@@ -153,6 +153,7 @@ const navItems = [
   { key: "terminal", label: "終端", hint: "盤中決策", shortcut: "Alt+2" },
   { key: "institutional", label: "籌碼", hint: "盤後深究", shortcut: "Alt+3" },
   { key: "review", label: "復盤", hint: "日誌回測", shortcut: "Alt+4" },
+  { key: "settings", label: "設定", hint: "帳號連線", shortcut: "Alt+5" },
 ];
 
 const rootRef = ref(null);
@@ -228,7 +229,7 @@ onBeforeUnmount(() => {
 
 .workspace-nav {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 

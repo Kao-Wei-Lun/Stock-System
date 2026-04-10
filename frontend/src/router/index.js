@@ -5,6 +5,7 @@ const TerminalView = () => import("../views/TerminalView.vue");
 const InstitutionalView = () => import("../views/InstitutionalView.vue");
 const JournalView = () => import("../views/JournalView.vue");
 const BacktestView = () => import("../views/BacktestView.vue");
+const SettingsView = () => import("../views/SettingsView.vue");
 
 const redirectWithTicker = (name) => (to) => ({
   name,
@@ -40,6 +41,11 @@ const routes = [
     path: "/review/backtest/:ticker?",
     name: "backtest",
     component: BacktestView,
+  },
+  {
+    path: "/settings/:ticker?",
+    name: "settings",
+    component: SettingsView,
   },
   {
     path: "/dashboard/:ticker?",

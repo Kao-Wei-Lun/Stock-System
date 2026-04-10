@@ -26,6 +26,14 @@ export function mapRouteToAppState(route = {}) {
     };
   }
 
+  if (name === "settings") {
+    return {
+      routeWorkspaceTab: "settings",
+      routeRightTab: "settings",
+      routeTicker,
+    };
+  }
+
   if (REVIEW_ROUTE_NAMES.has(name)) {
     return {
       routeWorkspaceTab: "review",
@@ -64,6 +72,13 @@ export function buildAppRouteLocation({ workspaceTab, rightTab, currentTicker } 
   if (normalizedWorkspace === "review") {
     return {
       name: normalizedRightTab === "backtest" ? "backtest" : "journal",
+      params,
+    };
+  }
+
+  if (normalizedWorkspace === "settings") {
+    return {
+      name: "settings",
       params,
     };
   }

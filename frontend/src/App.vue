@@ -190,6 +190,8 @@
         @create-alert="openAlertModal($event)"
       />
 
+      <SettingsWorkspace v-else-if="activeWorkspacePage === 'settings'" />
+
       <ReviewWorkspace
         v-else
         :right-tab="reviewTab"
@@ -300,6 +302,7 @@ import GlobalSearchCommand from "./components/GlobalSearchCommand.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import ToastStack from "./components/ToastStack.vue";
+import SettingsWorkspace from "./components/settings/SettingsWorkspace.vue";
 import InstitutionalAnalysisWorkspace from "./components/workspaces/InstitutionalAnalysisWorkspace.vue";
 import MarketOverviewWorkspace from "./components/workspaces/MarketOverviewWorkspace.vue";
 import ProChartTerminalWorkspace from "./components/workspaces/ProChartTerminalWorkspace.vue";
@@ -517,7 +520,7 @@ const drawerTab = ref("alerts");
 
 function normalizeWorkspacePage(value) {
   const normalized = String(value || "").toLowerCase();
-  if (["overview", "terminal", "institutional", "review"].includes(normalized)) {
+  if (["overview", "terminal", "institutional", "review", "settings"].includes(normalized)) {
     return normalized;
   }
   if (["macro", "events", "screener", "db"].includes(normalized)) return "overview";
@@ -574,6 +577,13 @@ async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
       await closeTerminalFullscreenIfNeeded();
     }
     await setWorkspaceTab("institutional");
+    return;
+  }
+
+  if (page === "settings") {
+    if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
+      await closeTerminalFullscreenIfNeeded();
+    }
     return;
   }
 
