@@ -193,10 +193,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
-import { useChartEngine } from "../composables/useChartEngine";
 import { useLWCChart } from "../composables/useLWCChart";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
@@ -322,38 +321,115 @@ const obvCanvasTarget = { target: obvCanvas };
 const adxCanvasTarget = { target: adxCanvas };
 const cmfCanvasTarget = { target: cmfCanvas };
 
-const legacyChart = useChartEngine({
-  mainCanvas,
-  volumeCanvas,
-  compareCanvas,
-  rsiCanvas,
-  aroonCanvas,
-  trixCanvas,
-  williamsrCanvas,
-  mfiCanvas,
-  rocCanvas,
-  bbPercentCanvas,
-  bbWidthCanvas,
-  macdCanvas,
-  stochCanvas,
-  atrCanvas,
-  cciCanvas,
-  obvCanvas,
-  adxCanvas,
-  cmfCanvas,
-  chartAreaRef,
-  props,
-  emit,
-});
-
 const lwcChart = useLWCChart({
   chartContainer: chartContainerRef,
   props,
   emit,
 });
 
+function createIdleChartController() {
+  const chartMode = ref("candles");
+  const priceScaleMode = ref("linear");
+  const noop = () => {};
+  return {
+    chartMode,
+    priceScaleMode,
+    visibleData: computed(() => (Array.isArray(props.ohlcData) ? props.ohlcData : [])),
+    viewportStartIndex: ref(0),
+    canvasClass: computed(() => ""),
+    visibleRangeLabel: computed(() => "可視範圍 —"),
+    visibleBarsLabel: computed(() => "0 根"),
+    visibleChangeLabel: computed(() => "—"),
+    visibleChangeClass: computed(() => ""),
+    zoomLabel: computed(() => "縮放 —"),
+    yScaleLabel: computed(() => "Y 自動"),
+    priceScaleModeLabel: computed(() => "線性"),
+    interactionHint: computed(() => "Legacy 引擎載入中..."),
+    canPanLeft: computed(() => false),
+    canPanRight: computed(() => false),
+    canZoomIn: computed(() => false),
+    canZoomOut: computed(() => false),
+    canUseLogScale: computed(() => false),
+    canGoBackHistory: computed(() => false),
+    canGoForwardHistory: computed(() => false),
+    canResetYScale: computed(() => false),
+    setChartMode: (mode) => {
+      chartMode.value = mode;
+    },
+    setPriceScaleMode: (mode) => {
+      priceScaleMode.value = mode;
+    },
+    zoomIn: noop,
+    zoomOut: noop,
+    zoomYIn: noop,
+    zoomYOut: noop,
+    panLeft: noop,
+    panRight: noop,
+    goHistoryBack: noop,
+    goHistoryForward: noop,
+    jumpToLatest: noop,
+    resetView: noop,
+    resetYScale: noop,
+    refreshLayout: noop,
+    onMouseDown: noop,
+    onMouseMove: noop,
+    onMouseLeave: noop,
+    onMouseUp: noop,
+    onWheel: noop,
+    onChartClick: noop,
+    onDoubleClick: noop,
+  };
+}
+
+function createLegacyChartOptions() {
+  return {
+    mainCanvas,
+    volumeCanvas,
+    compareCanvas,
+    rsiCanvas,
+    aroonCanvas,
+    trixCanvas,
+    williamsrCanvas,
+    mfiCanvas,
+    rocCanvas,
+    bbPercentCanvas,
+    bbWidthCanvas,
+    macdCanvas,
+    stochCanvas,
+    atrCanvas,
+    cciCanvas,
+    obvCanvas,
+    adxCanvas,
+    cmfCanvas,
+    chartAreaRef,
+    props,
+    emit,
+  };
+}
+
+const legacyChart = shallowRef(createIdleChartController());
+const legacyChartLoaded = ref(false);
+let legacyChartLoadPromise = null;
+
+async function loadLegacyChart() {
+  if (legacyChartLoaded.value) return legacyChart.value;
+  if (!legacyChartLoadPromise) {
+    const pendingChartMode = legacyChart.value.chartMode.value;
+    const pendingPriceScaleMode = legacyChart.value.priceScaleMode.value;
+    legacyChartLoadPromise = import("../composables/useChartEngine").then(({ useChartEngine }) => {
+      const controller = useChartEngine(createLegacyChartOptions());
+      controller.setChartMode?.(pendingChartMode);
+      controller.setPriceScaleMode?.(pendingPriceScaleMode);
+      legacyChart.value = controller;
+      legacyChartLoaded.value = true;
+      return controller;
+    });
+  }
+  return legacyChartLoadPromise;
+}
+
 const isLwcMode = computed(() => props.engineMode === "lwc");
-const activeChartController = computed(() => (isLwcMode.value ? lwcChart : legacyChart));
+const activeChartController = computed(() => (isLwcMode.value ? lwcChart : legacyChart.value));
 
 const chartMode = computed(() => activeChartController.value.chartMode.value);
 const priceScaleMode = computed(() => activeChartController.value.priceScaleMode.value);
@@ -764,9 +840,9 @@ watch(
 
 watch(
   () => props.engineMode,
-  (nextMode, previousMode) => {
-    const previousController = previousMode === "lwc" ? lwcChart : legacyChart;
-    const nextController = nextMode === "lwc" ? lwcChart : legacyChart;
+  async (nextMode, previousMode) => {
+    const previousController = previousMode === "lwc" ? lwcChart : legacyChart.value;
+    const nextController = nextMode === "lwc" ? lwcChart : await loadLegacyChart();
     nextController.setChartMode(previousController.chartMode.value);
     nextController.setPriceScaleMode(previousController.priceScaleMode.value);
     emit("hide-crosshair");
@@ -780,6 +856,14 @@ watch(
 
 onMounted(() => {
   window.addEventListener("keydown", handleKeydown);
+  if (!isLwcMode.value) {
+    void loadLegacyChart().then((controller) => {
+      nextTick(() => {
+        controller.refreshLayout?.();
+        window.dispatchEvent(new Event("resize"));
+      });
+    });
+  }
 });
 
 onBeforeUnmount(() => {

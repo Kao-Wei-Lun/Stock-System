@@ -26,5 +26,16 @@ export default defineConfig(({ command }) => {
       host: "0.0.0.0",
       port: 4173,
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("useChartEngine.js")) return "legacy-chart-engine";
+            if (id.includes("lightweight-charts")) return "lightweight-charts";
+            return undefined;
+          },
+        },
+      },
+    },
   };
 });
