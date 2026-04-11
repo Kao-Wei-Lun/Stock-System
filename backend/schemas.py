@@ -98,6 +98,9 @@ class QuoteResponse(BaseModel):
     source: str
     quote_type: str
     is_delayed: bool
+    resolved_symbol: str | None = None
+    market: str | None = None
+    exchange: str | None = None
     quote_timestamp: str | None = None
     synced_at: str | None = None
     name: str | None = None
@@ -111,6 +114,12 @@ class QuoteResponse(BaseModel):
     change_pct: float | None = None
     volume: int | None = None
     market_cap: int | None = None
+    bid: float | None = None
+    ask: float | None = None
+    bid_size: int | None = None
+    ask_size: int | None = None
+    bids: list[dict] | None = None
+    asks: list[dict] | None = None
     ts: int | None = None
 
 

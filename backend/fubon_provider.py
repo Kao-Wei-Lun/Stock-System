@@ -141,6 +141,8 @@ class FubonSDKManager:
         if not success:
             return False
 
+        self.start_ws_stock()
+        self.start_ws_futopt()
         for key in old_subscriptions:
             symbol, channel = key.split(":", 1)
             self.subscribe_stock(symbol, channel)
@@ -187,6 +189,41 @@ class FubonSDKManager:
                     log.warning("Fubon stock websocket %s failed: %s", method_name, exc)
                     return False
         return True
+
+    def start_ws_futopt(self) -> bool:
+        if not self._ws_futopt:
+            return False
+        for method_name in ("connect", "start"):
+            method = getattr(self._ws_futopt, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                    return True
+                except Exception as exc:
+                    log.warning("Fubon futopt websocket %s failed: %s", method_name, exc)
+                    return False
+        return True
+
+    def get_rest_stock(self):
+        if not self.connected or not self._sdk:
+            return None
+        marketdata = getattr(self._sdk, "marketdata", None)
+        rest_client = getattr(marketdata, "rest_client", None)
+        return getattr(rest_client, "stock", None)
+
+    async def fetch_stock_quote(self, symbol: str) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_stock, "intraday", None)
+            quote = getattr(intraday, "quote", None)
+            if not callable(quote):
+                return None
+            return quote(symbol=symbol)
+
+        return await asyncio.to_thread(_fetch_sync)
 
     def shutdown(self) -> None:
         self._best_effort_shutdown(self._ws_stock)
