@@ -8,6 +8,7 @@ import them without circular dependency issues.
 from alert_engine import AlertEngine
 from data_fetcher import DataFetcher
 from database import db
+from fubon_data_fetcher import HybridDataFetcher
 from fubon_symbols import supports_fubon_stock_realtime_ticker, tw_ticker_to_fubon
 from fubon_quote_provider import FubonQuoteProvider, HybridQuoteProvider
 from external_notifications import ExternalNotificationDispatcher
@@ -19,8 +20,9 @@ from screener_engine import ScreenerEngine
 from taiwan_chip_provider import TaiwanChipProvider
 from ws_manager import ConnectionManager
 
-fetcher = DataFetcher()
+_yahoo_fetcher = DataFetcher()
 fubon_manager = FubonSDKManager()
+fetcher = HybridDataFetcher(_yahoo_fetcher, fubon_manager)
 yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
 quote_provider = HybridQuoteProvider(fubon_quote_provider, yahoo_quote_provider)

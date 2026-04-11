@@ -217,6 +217,65 @@ class FubonSDKManager:
 
         return await asyncio.to_thread(_fetch_sync)
 
+    async def fetch_stock_intraday_candles(
+        self,
+        symbol: str,
+        *,
+        timeframe: str | None = None,
+        sort: str | None = None,
+    ) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_stock, "intraday", None)
+            candles = getattr(intraday, "candles", None)
+            if not callable(candles):
+                return None
+            kwargs = {"symbol": symbol}
+            if timeframe:
+                kwargs["timeframe"] = str(timeframe)
+            if sort:
+                kwargs["sort"] = str(sort)
+            return candles(**kwargs)
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_stock_historical_candles(
+        self,
+        symbol: str,
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        timeframe: str | None = None,
+        adjusted: bool | None = None,
+        sort: str | None = None,
+    ) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            historical = getattr(rest_stock, "historical", None) or getattr(rest_stock, "history", None)
+            candles = getattr(historical, "candles", None)
+            if not callable(candles):
+                return None
+            kwargs = {"symbol": symbol}
+            if from_date:
+                kwargs["from"] = from_date
+            if to_date:
+                kwargs["to"] = to_date
+            if timeframe:
+                kwargs["timeframe"] = str(timeframe)
+            if adjusted is not None:
+                kwargs["adjusted"] = "true" if adjusted else "false"
+            if sort:
+                kwargs["sort"] = str(sort)
+            return candles(**kwargs)
+
+        return await asyncio.to_thread(_fetch_sync)
+
     def shutdown(self) -> None:
         self._best_effort_shutdown(self._ws_stock)
         self._best_effort_shutdown(self._ws_futopt)
