@@ -77,6 +77,16 @@ class FakeWebSocket:
         return None
 
 
+class FakeConnectWebSocket:
+    def __init__(self):
+        self.connect_calls = 0
+
+    def connect(self):
+        self.connect_calls += 1
+        if self.connect_calls > 1:
+            raise RuntimeError("socket is already opened")
+
+
 def test_subscription_id_updates_from_subscribed_event():
     manager = FubonSDKManager()
     manager._ws_stock = FakeWebSocket()
@@ -108,6 +118,15 @@ def test_unsubscribe_uses_resolved_channel_id():
     manager.unsubscribe_stock("2330", "aggregates")
 
     assert manager._ws_stock.calls == [("unsubscribe", {"id": "resolved-id"})]
+
+
+def test_start_ws_stock_is_idempotent_for_already_started_socket():
+    manager = FubonSDKManager()
+    manager._ws_stock = FakeConnectWebSocket()
+
+    assert manager.start_ws_stock() is True
+    assert manager.start_ws_stock() is True
+    assert manager._ws_stock.connect_calls == 1
 
 
 class FakeSnapshotApi:

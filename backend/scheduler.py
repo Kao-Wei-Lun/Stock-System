@@ -191,8 +191,6 @@ async def fubon_ws_listener_loop(
     fubon_manager.register_message_handler(_on_fubon_message)
     await asyncio.sleep(3)
     if fubon_manager.connected:
-        fubon_manager.start_ws_stock()
-        fubon_manager.start_ws_futopt()
         log.info("Fubon websocket listener is active")
 
     while True:

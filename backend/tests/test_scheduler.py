@@ -141,14 +141,18 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
         def __init__(self):
             self.connected = True
             self.handler = None
+            self.start_stock_calls = 0
+            self.start_futopt_calls = 0
 
         def register_message_handler(self, handler):
             self.handler = handler
 
         def start_ws_stock(self):
+            self.start_stock_calls += 1
             return True
 
         def start_ws_futopt(self):
+            self.start_futopt_calls += 1
             return True
 
     manager = FakeFubonManager()
@@ -205,6 +209,8 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert manager.start_stock_calls == 0
+    assert manager.start_futopt_calls == 0
     assert stored_quotes[0]["ticker"] == "2330.TW"
     assert stored_quotes[0]["is_delayed"] is False
     assert messages[0][0] == "2330.TW"

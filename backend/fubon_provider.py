@@ -15,6 +15,7 @@ class FubonSDKManager:
         self._active_account_id: Optional[int] = None
         self._ws_stock = None
         self._ws_futopt = None
+        self._ws_started_targets: set[str] = set()
         self._subscriptions: Dict[str, str] = {}
         self._subscription_payloads: Dict[str, dict] = {}
         self._subscription_id_to_key: Dict[str, str] = {}
@@ -167,34 +168,10 @@ class FubonSDKManager:
         self._unsubscribe(self._ws_futopt, "futopt", symbol, channel)
 
     def start_ws_stock(self) -> bool:
-        if not self._ws_stock:
-            return False
-        self._attach_message_handlers()
-        for method_name in ("connect", "start"):
-            method = getattr(self._ws_stock, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                    return True
-                except Exception as exc:
-                    log.warning("Fubon stock websocket %s failed: %s", method_name, exc)
-                    return False
-        return True
+        return self._start_ws_target(self._ws_stock, "stock")
 
     def start_ws_futopt(self) -> bool:
-        if not self._ws_futopt:
-            return False
-        self._attach_message_handlers()
-        for method_name in ("connect", "start"):
-            method = getattr(self._ws_futopt, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                    return True
-                except Exception as exc:
-                    log.warning("Fubon futopt websocket %s failed: %s", method_name, exc)
-                    return False
-        return True
+        return self._start_ws_target(self._ws_futopt, "futopt")
 
     def get_rest_stock(self):
         if not self.connected or not self._sdk:
@@ -450,6 +427,7 @@ class FubonSDKManager:
         self._active_account_id = None
         self._ws_stock = None
         self._ws_futopt = None
+        self._ws_started_targets = set()
         self._subscriptions = {}
         self._subscription_payloads = {}
         self._subscription_id_to_key = {}
@@ -505,9 +483,11 @@ class FubonSDKManager:
                 log.warning("Fubon message handler failed: %s", exc)
 
     def _handle_ws_connect(self, market_type: str, *args) -> None:
+        self._ws_started_targets.add(market_type)
         log.info("Fubon %s websocket connected", market_type)
 
     def _handle_ws_disconnect(self, market_type: str, *args) -> None:
+        self._ws_started_targets.discard(market_type)
         log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
         self._reconnect_ws_target(market_type)
 
@@ -647,6 +627,32 @@ class FubonSDKManager:
         if result:
             return str(result)
         return None
+
+    def _start_ws_target(self, target, market_type: str) -> bool:
+        if not target:
+            return False
+        self._attach_message_handlers()
+        if market_type in self._ws_started_targets:
+            return True
+
+        for method_name in ("connect", "start"):
+            method = getattr(target, method_name, None)
+            if not callable(method):
+                continue
+            self._ws_started_targets.add(market_type)
+            try:
+                method()
+                return True
+            except Exception as exc:
+                message = str(exc).strip().lower()
+                if "socket is already opened" in message:
+                    log.info("Fubon %s websocket already running", market_type)
+                    return True
+                self._ws_started_targets.discard(market_type)
+                log.warning("Fubon %s websocket %s failed: %s", market_type, method_name, exc)
+                return False
+        self._ws_started_targets.add(market_type)
+        return True
 
     @staticmethod
     def _best_effort_shutdown(target) -> None:
