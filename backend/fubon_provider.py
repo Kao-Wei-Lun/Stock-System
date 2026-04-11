@@ -203,6 +203,13 @@ class FubonSDKManager:
         rest_client = getattr(marketdata, "rest_client", None)
         return getattr(rest_client, "stock", None)
 
+    def get_rest_futopt(self):
+        if not self.connected or not self._sdk:
+            return None
+        marketdata = getattr(self._sdk, "marketdata", None)
+        rest_client = getattr(marketdata, "rest_client", None)
+        return getattr(rest_client, "futopt", None)
+
     async def fetch_stock_quote(self, symbol: str) -> Optional[dict]:
         rest_stock = self.get_rest_stock()
         if not rest_stock:
@@ -272,6 +279,105 @@ class FubonSDKManager:
                 kwargs["adjusted"] = "true" if adjusted else "false"
             if sort:
                 kwargs["sort"] = str(sort)
+            return candles(**kwargs)
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_futopt_products(
+        self,
+        *,
+        type: str = "FUTURE",
+        exchange: str = "TAIFEX",
+        session: str = "REGULAR",
+        contractType: str = "I",
+    ) -> Optional[dict]:
+        rest_futopt = self.get_rest_futopt()
+        if not rest_futopt:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_futopt, "intraday", None)
+            products = getattr(intraday, "products", None)
+            if not callable(products):
+                return None
+            return products(
+                type=type,
+                exchange=exchange,
+                session=session,
+                contractType=contractType,
+            )
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_futopt_quote(
+        self,
+        symbol: str,
+        *,
+        session: str | None = None,
+    ) -> Optional[dict]:
+        rest_futopt = self.get_rest_futopt()
+        if not rest_futopt:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_futopt, "intraday", None)
+            quote = getattr(intraday, "quote", None)
+            if not callable(quote):
+                return None
+            kwargs = {"symbol": symbol}
+            if session:
+                kwargs["session"] = str(session)
+            return quote(**kwargs)
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_futopt_tickers(
+        self,
+        *,
+        type: str = "FUTURE",
+        exchange: str = "TAIFEX",
+        session: str = "REGULAR",
+        contractType: str = "I",
+    ) -> Optional[dict]:
+        rest_futopt = self.get_rest_futopt()
+        if not rest_futopt:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_futopt, "intraday", None)
+            tickers = getattr(intraday, "tickers", None)
+            if not callable(tickers):
+                return None
+            return tickers(
+                type=type,
+                exchange=exchange,
+                session=session,
+                contractType=contractType,
+            )
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_futopt_intraday_candles(
+        self,
+        symbol: str,
+        *,
+        timeframe: str | None = None,
+        session: str | None = None,
+    ) -> Optional[dict]:
+        rest_futopt = self.get_rest_futopt()
+        if not rest_futopt:
+            return None
+
+        def _fetch_sync():
+            intraday = getattr(rest_futopt, "intraday", None)
+            candles = getattr(intraday, "candles", None)
+            if not callable(candles):
+                return None
+            kwargs = {"symbol": symbol}
+            if timeframe:
+                kwargs["timeframe"] = str(timeframe)
+            if session:
+                kwargs["session"] = str(session)
             return candles(**kwargs)
 
         return await asyncio.to_thread(_fetch_sync)

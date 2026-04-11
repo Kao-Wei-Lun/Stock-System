@@ -4,6 +4,7 @@ Yahoo Finance data fetcher using the public chart endpoint.
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -37,6 +38,14 @@ RANGE_MAP = {
     "10y": "10y",
     "max": "max",
 }
+_FUTOPT_CONTRACT_PATTERN = re.compile(r"^[A-Z]{2,5}[A-L]\d$")
+_FUTOPT_BASE_ALIASES = {"TX", "TXF", "MTX", "MXF"}
+
+
+def _looks_like_futopt_symbol(raw: str) -> bool:
+    if raw in _FUTOPT_BASE_ALIASES:
+        return True
+    return bool(_FUTOPT_CONTRACT_PATTERN.fullmatch(raw))
 
 
 def normalize_ticker(ticker: str) -> str:
@@ -44,6 +53,8 @@ def normalize_ticker(ticker: str) -> str:
     if not raw:
         return raw
     if raw.startswith("^") or "-" in raw or "=" in raw:
+        return raw
+    if _looks_like_futopt_symbol(raw):
         return raw
     resolved_taiwan = resolve_taiwan_ticker(raw)
     if resolved_taiwan:

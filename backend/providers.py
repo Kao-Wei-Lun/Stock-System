@@ -9,7 +9,12 @@ from alert_engine import AlertEngine
 from data_fetcher import DataFetcher
 from database import db
 from fubon_data_fetcher import HybridDataFetcher
-from fubon_symbols import supports_fubon_stock_realtime_ticker, tw_ticker_to_fubon
+from fubon_futopt_provider import FubonFutoptProvider
+from fubon_symbols import (
+    is_exact_futopt_contract,
+    supports_fubon_stock_realtime_ticker,
+    tw_ticker_to_fubon,
+)
 from fubon_quote_provider import FubonQuoteProvider, HybridQuoteProvider
 from external_notifications import ExternalNotificationDispatcher
 from fubon_provider import FubonSDKManager
@@ -25,6 +30,7 @@ fubon_manager = FubonSDKManager()
 fetcher = HybridDataFetcher(_yahoo_fetcher, fubon_manager)
 yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
+fubon_futopt_provider = FubonFutoptProvider(fubon_manager)
 quote_provider = HybridQuoteProvider(fubon_quote_provider, yahoo_quote_provider)
 external_notifier = ExternalNotificationDispatcher.from_env()
 alert_engine = AlertEngine(db, quote_provider, external_notifier=external_notifier)
@@ -38,23 +44,33 @@ ws_manager = ConnectionManager()
 
 
 def _subscribe_fubon_streams(ticker: str) -> None:
-    if not fubon_manager.connected or not supports_fubon_stock_realtime_ticker(ticker):
+    if not fubon_manager.connected:
         return
-    symbol = tw_ticker_to_fubon(ticker)
-    if not symbol:
+    if supports_fubon_stock_realtime_ticker(ticker):
+        symbol = tw_ticker_to_fubon(ticker)
+        if not symbol:
+            return
+        for channel in ("aggregates", "books", "candles"):
+            fubon_manager.subscribe_stock(symbol, channel)
+        return
+    if not is_exact_futopt_contract(ticker):
         return
     for channel in ("aggregates", "books", "candles"):
-        fubon_manager.subscribe_stock(symbol, channel)
+        fubon_manager.subscribe_futopt(ticker, channel)
 
 
 def _unsubscribe_fubon_streams(ticker: str) -> None:
-    if not supports_fubon_stock_realtime_ticker(ticker):
+    if supports_fubon_stock_realtime_ticker(ticker):
+        symbol = tw_ticker_to_fubon(ticker)
+        if not symbol:
+            return
+        for channel in ("aggregates", "books", "candles"):
+            fubon_manager.unsubscribe_stock(symbol, channel)
         return
-    symbol = tw_ticker_to_fubon(ticker)
-    if not symbol:
+    if not is_exact_futopt_contract(ticker):
         return
     for channel in ("aggregates", "books", "candles"):
-        fubon_manager.unsubscribe_stock(symbol, channel)
+        fubon_manager.unsubscribe_futopt(ticker, channel)
 
 
 ws_manager.configure_market_data_hooks(

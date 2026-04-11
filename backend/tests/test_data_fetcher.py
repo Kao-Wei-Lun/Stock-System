@@ -38,6 +38,15 @@ def test_normalize_ticker_prefers_taiwan_lookup(monkeypatch):
     assert normalize_ticker(" aapl ") == "AAPL"
 
 
+def test_normalize_ticker_preserves_supported_futopt_aliases_and_contracts(monkeypatch):
+    monkeypatch.setattr(data_fetcher, "resolve_taiwan_ticker", lambda _ticker: None)
+
+    assert normalize_ticker("txf") == "TXF"
+    assert normalize_ticker("mtx") == "MTX"
+    assert normalize_ticker("TXFE6") == "TXFE6"
+    assert normalize_ticker("MXFJ6") == "MXFJ6"
+
+
 def test_ticker_candidates_adds_alternate_taiwan_suffix(monkeypatch):
     monkeypatch.setattr(data_fetcher, "resolve_taiwan_ticker", lambda _ticker: None)
 

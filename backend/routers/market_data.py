@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
-from providers import fetcher
+from providers import fetcher, fubon_futopt_provider
 from schemas import QuoteResponse
 from tw_symbol_lookup import search_taiwan_tickers
 
@@ -35,6 +35,7 @@ INTRADAY_DEFAULT_PERIODS = {
     "1h": "3mo",
 }
 INTRADAY_PERIODS = {"1d", "5d", "1mo", "3mo", "6mo"}
+FUTOPT_ALLOWED_INTERVALS = {"1m", "5m", "15m", "30m", "60m", "1h"}
 
 router = APIRouter(prefix="/api", tags=["market_data"])
 
@@ -77,6 +78,24 @@ async def _get_ohlc_payload(
         rows = await db.get_ohlcv(ticker, period=period, interval=interval)
 
     return {"ticker": ticker, "period": period, "interval": interval, "data": rows}
+
+
+def _normalize_futopt_ohlc_query(period: str | None, interval: str | None) -> tuple[str, str]:
+    normalized_interval = (interval or "1m").strip().lower()
+    if normalized_interval not in FUTOPT_ALLOWED_INTERVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported futopt interval '{normalized_interval}'. Use one of: {', '.join(sorted(FUTOPT_ALLOWED_INTERVALS))}",
+        )
+
+    normalized_period = (period or "1d").strip().lower()
+    if normalized_period not in INTRADAY_PERIODS:
+        allowed = ", ".join(sorted(INTRADAY_PERIODS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Futopt interval '{normalized_interval}' supports period values: {allowed}",
+        )
+    return normalized_period, normalized_interval
 
 
 def _normalize_ohlc_query(period: str | None, interval: str | None) -> tuple[str, str]:
@@ -142,6 +161,27 @@ async def get_quote(ticker: str):
     if not quote:
         raise HTTPException(404, "Unable to fetch quote")
     return quote
+
+
+@router.get("/futopt/quote/{symbol}", response_model=QuoteResponse)
+async def get_futopt_quote(symbol: str):
+    quote = await fubon_futopt_provider.fetch_quote(symbol)
+    if not quote:
+        raise HTTPException(404, "Unable to fetch futopt quote")
+    return quote
+
+
+@router.get("/futopt/ohlc/{symbol}")
+async def get_futopt_ohlc(
+    symbol: str,
+    period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo"),
+    interval: str = Query("1m", description="1m 5m 15m 30m 60m 1h"),
+):
+    period, interval = _normalize_futopt_ohlc_query(period, interval)
+    payload = await fubon_futopt_provider.fetch_intraday_ohlc(symbol, period=period, interval=interval)
+    if not payload:
+        raise HTTPException(404, "Unable to fetch futopt ohlc")
+    return payload
 
 
 @router.get("/info/{ticker}")
