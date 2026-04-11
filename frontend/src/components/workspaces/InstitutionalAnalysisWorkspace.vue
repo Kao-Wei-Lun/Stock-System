@@ -22,6 +22,10 @@
         :selected-futures-commodity="selectedFuturesCommodity"
         :selected-options-commodity="selectedOptionsCommodity"
         :history-days="historyDays"
+        :current-ticker="currentTicker"
+        :current-name="currentName"
+        :taiwan-chip-detail="taiwanChipDetail"
+        :taiwan-chip-summary="taiwanChipSummary"
         @set-date="$emit('set-date', $event)"
         @shift-date="$emit('shift-date', $event)"
         @refresh-dashboard="$emit('refresh-dashboard')"
@@ -49,6 +53,10 @@ defineProps({
   selectedFuturesCommodity: { type: String, default: "" },
   selectedOptionsCommodity: { type: String, default: "" },
   historyDays: { type: Number, required: true },
+  currentTicker: { type: String, default: "" },
+  currentName: { type: String, default: "" },
+  taiwanChipDetail: { type: Object, default: null },
+  taiwanChipSummary: { type: Object, default: null },
 });
 
 defineEmits([

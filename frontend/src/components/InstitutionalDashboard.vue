@@ -40,6 +40,52 @@
         {{ data.cash_summary_warning }}
       </div>
 
+      <div class="institutional-section">
+        <div class="institutional-section-head">
+          <div>
+            <div class="ind-group-title">目前標的籌碼快覽</div>
+            <div class="institutional-section-note">{{ currentChipNote }}</div>
+          </div>
+        </div>
+        <div class="institutional-card">
+          <div class="institutional-kpi-strip">
+            <div class="inst-kpi">
+              <div class="inst-kpi-label">標的</div>
+              <div class="inst-kpi-value">{{ currentName || currentTicker || "—" }}</div>
+              <div class="inst-kpi-change">{{ currentTicker || "—" }}</div>
+            </div>
+            <div class="inst-kpi">
+              <div class="inst-kpi-label">偏向</div>
+              <div class="inst-kpi-value">{{ currentChipBiasLabel }}</div>
+              <div class="inst-kpi-change">{{ currentChipSummary?.headline || "尚無個股籌碼摘要" }}</div>
+            </div>
+            <div class="inst-kpi">
+              <div class="inst-kpi-label">資料日</div>
+              <div class="inst-kpi-value">{{ taiwanChipDetail?.snapshot_date || "—" }}</div>
+              <div class="inst-kpi-change">{{ currentChipSourceLabel }}</div>
+            </div>
+            <div class="inst-kpi">
+              <div class="inst-kpi-label">法人方向</div>
+              <div class="inst-kpi-value">
+                {{ fmtTwMoney(currentChipSummary?.metrics?.institutional_net_buy_sell, { signed: true, empty: "—" }) }}
+              </div>
+              <div class="inst-kpi-change">目前標的</div>
+            </div>
+          </div>
+          <div v-if="currentChipSignals.length" class="institutional-rows compact">
+            <div v-for="signal in currentChipSignals" :key="signal.label" class="inst-row">
+              <span>{{ signal.label }}</span>
+              <span :class="signal.tone === 'positive' ? 'up' : signal.tone === 'caution' ? 'dn' : ''">
+                {{ signal.value }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="institutional-empty institutional-empty-compact">
+            目前標的不提供個股籌碼明細
+          </div>
+        </div>
+      </div>
+
       <InstitutionalOverviewGrid
         :data="data"
         :aggregated-cash-summary="aggregatedCashSummary"
@@ -128,7 +174,7 @@ import InstitutionalLeaderboards from "./institutional/InstitutionalLeaderboards
 import InstitutionalOverviewGrid from "./institutional/InstitutionalOverviewGrid.vue";
 import InstitutionalPositionTables from "./institutional/InstitutionalPositionTables.vue";
 import InstitutionalTrendPanels from "./institutional/InstitutionalTrendPanels.vue";
-import { fmtPrice } from "../utils/formatters";
+import { fmtPrice, fmtTwMoney } from "../utils/formatters";
 
 const props = defineProps({
   data: { type: Object, default: null },
@@ -141,6 +187,10 @@ const props = defineProps({
   selectedFuturesCommodity: { type: String, default: "" },
   selectedOptionsCommodity: { type: String, default: "" },
   historyDays: { type: Number, default: 30 },
+  currentTicker: { type: String, default: "" },
+  currentName: { type: String, default: "" },
+  taiwanChipDetail: { type: Object, default: null },
+  taiwanChipSummary: { type: Object, default: null },
 });
 
 defineEmits([
@@ -215,6 +265,30 @@ const foreignCallPutBalance = computed(() => {
   return Number(row?.balance || 0);
 });
 
+const currentChipSummary = computed(() => props.taiwanChipSummary || props.taiwanChipDetail?.summary || null);
+const currentChipSignals = computed(() => currentChipSummary.value?.signals || []);
+const currentChipBiasLabel = computed(() => ({
+  bullish: "偏多",
+  bearish: "偏空",
+  neutral: "中性",
+}[String(currentChipSummary.value?.bias || "neutral")] || "中性"));
+const currentChipSourceLabel = computed(() => {
+  const source = String(props.taiwanChipDetail?.source || "").trim().toLowerCase();
+  if (!source) return "無";
+  if (source === "local_derived_model") return "本地推估";
+  return source;
+});
+const currentChipNote = computed(() => {
+  if (!props.currentTicker) return "切到台股個股後，這裡會一起顯示目前標的的籌碼摘要。";
+  if (props.taiwanChipDetail?.source === "local_derived_model") {
+    return "目前為本地推估摘要，非富邦官方法人 / 融資券 API。";
+  }
+  if (!currentChipSignals.value.length) {
+    return "指數與非台股個股目前沒有可直接展示的個股籌碼明細。";
+  }
+  return "搭配目前圖表標的，一起看大盤籌碼與個股籌碼。";
+});
+
 const SPOT_REFERENCE_BY_COMMODITY = {
   "臺股期貨": "^TWII",
   "小型臺指期貨": "^TWII",
@@ -243,12 +317,7 @@ function formatPriceSigned(value) {
 
 function formatCashSigned(value) {
   const numeric = Number(value || 0);
-  if (!numeric) return "0";
-  const absValue = Math.abs(numeric);
-  if (absValue >= 1000) {
-    return `${numeric >= 0 ? "+" : "-"}${(absValue / 100).toFixed(1)}億`;
-  }
-  return `${numeric >= 0 ? "+" : "-"}${absValue.toFixed(1)}百萬`;
+  return fmtTwMoney(numeric, { signed: true, empty: "0" });
 }
 
 function analyzeHistorySeries(points, key = "合計") {

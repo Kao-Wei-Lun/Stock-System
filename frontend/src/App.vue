@@ -187,6 +187,10 @@
         :selected-futures-commodity="institutionalFuturesCommodity"
         :selected-options-commodity="institutionalOptionsCommodity"
         :history-days="institutionalHistoryDays"
+        :current-ticker="currentTicker"
+        :current-name="currentName"
+        :taiwan-chip-detail="taiwanChipDetail"
+        :taiwan-chip-summary="taiwanChipSummary"
         @open-terminal="handleOpenTerminal(currentTicker)"
         @set-date="setInstitutionalDate"
         @shift-date="shiftInstitutionalDate"
@@ -389,6 +393,8 @@ const {
   institutionalFuturesCommodity,
   institutionalOptionsCommodity,
   institutionalHistoryDays,
+  taiwanChipDetail,
+  taiwanChipSummary,
   calendarEvents,
   tickerEvents,
   tickerNews,

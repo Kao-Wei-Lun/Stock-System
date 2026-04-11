@@ -91,6 +91,31 @@ def test_fallback_cash_summary_prefers_last_known_snapshot():
     assert "2026-04-02" in meta["warning"]
 
 
+def test_resolve_dashboard_cash_summary_uses_previous_available_summary():
+    fetcher = TaifexFetcher()
+    responses = {
+        date(2026, 4, 10): (
+            [],
+            {"source": "unavailable", "warning": "TWSE ä¸»ä¾†æºæœªæä¾›ç¾è²¨ä¸‰å¤§æ³•äººè³‡æ–™"},
+        ),
+        date(2026, 4, 9): (
+            [{"institution": "å¤–è³‡", "buy_amount": 100, "sell_amount": 60, "net_amount": 40}],
+            {"source": "twse", "warning": None},
+        ),
+    }
+
+    fetcher._fetch_twse_cash_summary = lambda target_date: responses.get(
+        target_date,
+        ([], {"source": "none", "warning": None}),
+    )
+
+    rows, meta, previous_rows = fetcher._resolve_dashboard_cash_summary(date(2026, 4, 10), date(2026, 4, 9))
+
+    assert rows == previous_rows
+    assert meta["source"] == "twse-last-known"
+    assert "2026-04-09" in meta["warning"]
+
+
 def test_build_cost_estimates_summarizes_institution_and_retail_bias():
     fetcher = TaifexFetcher()
     futures_rows = [

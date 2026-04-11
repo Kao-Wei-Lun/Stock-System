@@ -239,17 +239,19 @@ class TaifexFetcher:
 
     def _fetch_dashboard_sync(self, target_date: date) -> Dict:
         resolved_date, overview = self._fetch_first_available("futAndOptDate", target_date)
+        previous_date = self._find_previous_available_date(resolved_date)
         futures = self._fetch_contract_rows("futContractsDate", resolved_date)
         options = self._fetch_contract_rows("optContractsDate", resolved_date)
         call_puts = self._fetch_call_put_rows(resolved_date)
-        cash_summary, cash_summary_meta = self._fetch_twse_cash_summary(resolved_date)
-        previous_date = self._find_previous_available_date(resolved_date)
+        cash_summary, cash_summary_meta, previous_cash_summary = self._resolve_dashboard_cash_summary(
+            resolved_date,
+            previous_date,
+        )
 
         previous_overview = self._fetch_overview(previous_date) if previous_date else []
         previous_futures = self._fetch_contract_rows("futContractsDate", previous_date) if previous_date else []
         previous_options = self._fetch_contract_rows("optContractsDate", previous_date) if previous_date else []
         previous_call_puts = self._fetch_call_put_rows(previous_date) if previous_date else []
-        previous_cash_summary = self._fetch_twse_cash_summary(previous_date)[0] if previous_date else []
 
         self._apply_changes(overview, previous_overview, ("institution",))
         self._apply_changes(futures, previous_futures, ("commodity", "institution"))
@@ -286,6 +288,32 @@ class TaifexFetcher:
                 call_puts,
             ),
         }
+
+    def _resolve_dashboard_cash_summary(
+        self,
+        resolved_date: date,
+        previous_date: Optional[date],
+    ) -> Tuple[List[Dict], Dict[str, Optional[str]], List[Dict]]:
+        cash_summary, cash_summary_meta = self._fetch_twse_cash_summary(resolved_date)
+        previous_cash_summary = self._fetch_twse_cash_summary(previous_date)[0] if previous_date else []
+        if cash_summary:
+            return cash_summary, cash_summary_meta, previous_cash_summary
+
+        if previous_cash_summary and previous_date:
+            fallback_warning = cash_summary_meta.get("warning") or "TWSE 主來源未提供現貨三大法人資料"
+            fallback_source = cash_summary_meta.get("source")
+            if fallback_source in {None, "", "none", "unavailable"}:
+                fallback_source = "twse-last-known"
+            return (
+                [dict(row) for row in previous_cash_summary],
+                {
+                    "source": fallback_source,
+                    "warning": f"{fallback_warning}，已改用最近可用的現貨摘要（{_format_iso_date(previous_date)}）",
+                },
+                previous_cash_summary,
+            )
+
+        return cash_summary, cash_summary_meta, previous_cash_summary
 
     async def _fetch_and_store_dashboard(self, target_date: date) -> Dict:
         loop = asyncio.get_event_loop()

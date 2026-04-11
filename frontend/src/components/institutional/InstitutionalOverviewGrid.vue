@@ -19,7 +19,7 @@
         <div v-for="row in aggregatedCashSummary" :key="row.institution" class="inst-row">
           <span>{{ row.institution }}</span>
           <span :class="Number(row.net_amount) >= 0 ? 'up' : 'dn'">
-            {{ formatSigned(row.net_amount, true) }}
+            {{ fmtTwMoney(row.net_amount, { signed: true }) }}
           </span>
         </div>
       </div>
@@ -80,7 +80,7 @@
 </template>
 
 <script setup>
-import { fmtPrice } from "../../utils/formatters";
+import { fmtPrice, fmtTwMoney } from "../../utils/formatters";
 
 defineProps({
   data: { type: Object, default: null },

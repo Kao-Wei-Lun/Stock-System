@@ -43,3 +43,34 @@ export function fmtMktCap(value) {
   }
   return Number(value).toLocaleString();
 }
+
+export function fmtTwMoney(value, options = {}) {
+  const { signed = false, empty = "—" } = options;
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return empty;
+  }
+  if (numericValue === 0) {
+    return "0";
+  }
+
+  const sign = signed ? (numericValue > 0 ? "+" : "-") : "";
+  const absoluteValue = Math.abs(numericValue);
+
+  if (absoluteValue >= 1e8) {
+    const digits = absoluteValue >= 1e10 ? 0 : 1;
+    return `${sign}${(absoluteValue / 1e8).toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: digits,
+    })}億`;
+  }
+
+  if (absoluteValue >= 1e4) {
+    return `${sign}${(absoluteValue / 1e4).toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1,
+    })}萬`;
+  }
+
+  return `${sign}${absoluteValue.toLocaleString()}`;
+}

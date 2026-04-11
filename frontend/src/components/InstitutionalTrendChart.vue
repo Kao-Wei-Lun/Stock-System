@@ -124,6 +124,7 @@
 
 <script setup>
 import { computed, ref } from "vue";
+import { fmtTwMoney } from "../utils/formatters";
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -286,8 +287,7 @@ function formatValue(value) {
   if (!Number.isFinite(numeric)) return "—";
   if (props.valueFormat === "price") return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (props.valueFormat === "amount") {
-    if (Math.abs(numeric) >= 1000) return `${numeric >= 0 ? "+" : "-"}${Math.abs(numeric / 100).toFixed(1)}億`;
-    return `${numeric >= 0 ? "+" : "-"}${Math.abs(numeric).toFixed(1)}百萬`;
+    return fmtTwMoney(numeric, { signed: true });
   }
   return `${numeric >= 0 ? "+" : ""}${Math.round(numeric).toLocaleString()}`;
 }
