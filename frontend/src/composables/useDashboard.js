@@ -16,6 +16,7 @@ import {
 } from "../utils/workspacePresets";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
+import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
 import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
 import { createDashboardScreener } from "./dashboard/dashboardScreener";
 import { createDashboardTradeWorkbench } from "./dashboard/dashboardTradeWorkbench";
@@ -610,6 +611,19 @@ export function useDashboard() {
     apiFetch,
     pushNotification,
     normalizeTicker,
+  });
+  const {
+    marketSnapshots,
+    marketStrongMovers,
+    marketWeakMovers,
+    marketActiveLeaders,
+    marketSnapshotLoading,
+    marketSnapshotError,
+    marketBreadthCards,
+    loadMarketSnapshots,
+  } = createDashboardMarketSnapshots({
+    dashboardApi,
+    pushNotification,
   });
   const {
     screenerResults,
@@ -2503,6 +2517,7 @@ export function useDashboard() {
         loadDbStats(),
         loadKline(currentTicker.value, currentPeriod.value, currentInterval.value),
         loadEventCalendar(true),
+        loadMarketSnapshots(true),
         loadMacroDashboard(true),
         loadTickerIntelligence(currentTicker.value, true),
       ]);
@@ -2652,6 +2667,7 @@ export function useDashboard() {
     await loadJournalData();
     await loadScreenerPresets();
     await loadWatchlist();
+    await loadMarketSnapshots();
     if (rightTab.value === "db") {
       await loadDbStats();
     }
@@ -2670,7 +2686,10 @@ export function useDashboard() {
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
     void loadTickerIntelligence(currentTicker.value);
     void ensureInstitutionalOverlayForTicker(currentTicker.value);
-    watchlistTimer = window.setInterval(loadWatchlist, 60000);
+    watchlistTimer = window.setInterval(() => {
+      void loadWatchlist();
+      void loadMarketSnapshots();
+    }, 60000);
     alertPollingTimer = window.setInterval(() => {
       void loadAlerts();
       void loadNotifications();
@@ -2747,6 +2766,13 @@ export function useDashboard() {
     tickerEvents,
     tickerNews,
     macroDashboard,
+    marketSnapshots,
+    marketStrongMovers,
+    marketWeakMovers,
+    marketActiveLeaders,
+    marketSnapshotLoading,
+    marketSnapshotError,
+    marketBreadthCards,
     fundamentalsDetail,
     fundamentalsSummary,
     taiwanChipDetail,
@@ -2813,6 +2839,7 @@ export function useDashboard() {
     loadInstitutionalInsights,
     loadEventCalendar,
     loadMacroDashboard,
+    loadMarketSnapshots,
     loadTickerIntelligence,
     setChartLayout,
     selectTicker,

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
-from providers import fetcher, fubon_futopt_provider
+from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
 from schemas import QuoteResponse
 from tw_symbol_lookup import search_taiwan_tickers
 
@@ -181,6 +181,64 @@ async def get_futopt_ohlc(
     payload = await fubon_futopt_provider.fetch_intraday_ohlc(symbol, period=period, interval=interval)
     if not payload:
         raise HTTPException(404, "Unable to fetch futopt ohlc")
+    return payload
+
+
+@router.get("/fubon/snapshot/{market}")
+async def get_fubon_snapshot(
+    market: str,
+    refresh: bool = Query(False),
+):
+    try:
+        payload = await fubon_market_snapshot_provider.fetch_snapshot(market, refresh=refresh)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not payload:
+        raise HTTPException(404, "Unable to fetch Fubon market snapshot")
+    return payload
+
+
+@router.get("/fubon/movers/{market}")
+async def get_fubon_movers(
+    market: str,
+    direction: str = Query("up", description="up or down"),
+    change: str = Query("percent", description="percent or value"),
+    limit: int = Query(10, ge=1, le=50),
+    refresh: bool = Query(False),
+):
+    try:
+        payload = await fubon_market_snapshot_provider.fetch_movers(
+            market,
+            direction=direction,
+            change=change,
+            limit=limit,
+            refresh=refresh,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not payload:
+        raise HTTPException(404, "Unable to fetch Fubon movers")
+    return payload
+
+
+@router.get("/fubon/actives/{market}")
+async def get_fubon_actives(
+    market: str,
+    trade: str = Query("value", description="value or volume"),
+    limit: int = Query(10, ge=1, le=50),
+    refresh: bool = Query(False),
+):
+    try:
+        payload = await fubon_market_snapshot_provider.fetch_actives(
+            market,
+            trade=trade,
+            limit=limit,
+            refresh=refresh,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not payload:
+        raise HTTPException(404, "Unable to fetch Fubon actives")
     return payload
 
 

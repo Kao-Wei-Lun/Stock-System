@@ -24,6 +24,97 @@
       />
     </div>
 
+    <div class="overview-grid snapshot-grid">
+      <div class="overview-card snapshot-summary-card">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">Market Pulse</div>
+            <div class="overview-card-title">台股快照</div>
+          </div>
+          <button class="hero-action ghost" type="button" @click="$emit('refresh-market-snapshot')">
+            {{ marketSnapshotLoading ? "更新中..." : "更新快照" }}
+          </button>
+        </div>
+        <div v-if="marketSnapshotError" class="snapshot-empty">{{ marketSnapshotError }}</div>
+        <div v-else class="snapshot-summary-grid">
+          <div v-for="card in marketBreadthCards" :key="card.key" class="snapshot-stat">
+            <div class="snapshot-stat-label">{{ card.label }}</div>
+            <strong>{{ formatCount(card.total) }}</strong>
+            <div class="snapshot-stat-rows">
+              <span class="up">上漲 {{ formatCount(card.advancers) }}</span>
+              <span class="dn">下跌 {{ formatCount(card.decliners) }}</span>
+              <span>平盤 {{ formatCount(card.unchanged) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="snapshot-active-head">成交額前段</div>
+        <div class="snapshot-active-list">
+          <button
+            v-for="item in marketActiveLeaders.slice(0, 5)"
+            :key="item.ticker"
+            class="snapshot-active-row"
+            type="button"
+            @click="$emit('select-ticker', { ticker: item.ticker, name: item.name })"
+          >
+            <span>{{ item.name || item.ticker }}</span>
+            <strong>{{ formatTradeValue(item.trade_value) }}</strong>
+          </button>
+        </div>
+      </div>
+
+      <div class="overview-card movers-card">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">Momentum</div>
+            <div class="overview-card-title">盤中強勢股</div>
+          </div>
+        </div>
+        <div class="mover-list">
+          <button
+            v-for="item in marketStrongMovers"
+            :key="item.ticker"
+            class="mover-row"
+            type="button"
+            @click="$emit('select-ticker', { ticker: item.ticker, name: item.name })"
+          >
+            <span class="mover-main">
+              <strong>{{ item.ticker }}</strong>
+              <span>{{ item.name }}</span>
+            </span>
+            <span class="mover-meta up">
+              {{ formatPrice(item.price) }} / {{ formatChange(item) }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div class="overview-card movers-card">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">Mean Reversion</div>
+            <div class="overview-card-title">盤中弱勢股</div>
+          </div>
+        </div>
+        <div class="mover-list">
+          <button
+            v-for="item in marketWeakMovers"
+            :key="item.ticker"
+            class="mover-row"
+            type="button"
+            @click="$emit('select-ticker', { ticker: item.ticker, name: item.name })"
+          >
+            <span class="mover-main">
+              <strong>{{ item.ticker }}</strong>
+              <span>{{ item.name }}</span>
+            </span>
+            <span class="mover-meta dn">
+              {{ formatPrice(item.price) }} / {{ formatChange(item) }}
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div ref="heatmapSectionRef" class="overview-grid widgets-grid">
       <div class="overview-card widget-card">
         <div class="overview-card-head">
@@ -227,6 +318,30 @@ function focusHeatmap() {
   heatmapSectionRef.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
+function formatCount(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function formatPrice(value) {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: Number(value) >= 1000 ? 0 : 2,
+    maximumFractionDigits: Number(value) >= 1000 ? 0 : 2,
+  });
+}
+
+function formatChange(item) {
+  const changePct = Number(item?.change_pct ?? 0);
+  return `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`;
+}
+
+function formatTradeValue(value) {
+  const numeric = Number(value || 0);
+  if (numeric >= 1e8) return `${(numeric / 1e8).toFixed(1)} 億`;
+  if (numeric >= 1e4) return `${(numeric / 1e4).toFixed(0)} 萬`;
+  return numeric.toLocaleString();
+}
+
 defineExpose({
   focusHeatmap,
 });
@@ -242,6 +357,12 @@ defineProps({
   currentTicker: { type: String, required: true },
   currentName: { type: String, required: true },
   macroDashboard: { type: Object, required: true },
+  marketBreadthCards: { type: Array, default: () => [] },
+  marketStrongMovers: { type: Array, default: () => [] },
+  marketWeakMovers: { type: Array, default: () => [] },
+  marketActiveLeaders: { type: Array, default: () => [] },
+  marketSnapshotLoading: { type: Boolean, default: false },
+  marketSnapshotError: { type: String, default: "" },
   calendarEvents: { type: Array, default: () => [] },
   tickerEvents: { type: Array, default: () => [] },
   tickerNews: { type: Array, default: () => [] },
@@ -254,6 +375,7 @@ defineProps({
 defineEmits([
   "open-terminal",
   "refresh-macro",
+  "refresh-market-snapshot",
   "refresh-events",
   "refresh-news",
   "create-alert",
@@ -371,6 +493,10 @@ defineEmits([
   align-items: start;
 }
 
+.snapshot-grid {
+  grid-template-columns: minmax(340px, 1.2fr) minmax(280px, 0.9fr) minmax(280px, 0.9fr);
+}
+
 .overview-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
@@ -385,6 +511,108 @@ defineEmits([
 
 .widget-card {
   min-height: 440px;
+}
+
+.snapshot-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 18px 12px;
+}
+
+.snapshot-stat {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.snapshot-stat-label {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.snapshot-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.snapshot-stat-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.snapshot-stat-rows .up,
+.mover-meta.up {
+  color: var(--green);
+}
+
+.snapshot-stat-rows .dn,
+.mover-meta.dn {
+  color: var(--red);
+}
+
+.snapshot-active-head {
+  padding: 0 18px;
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.snapshot-active-list,
+.mover-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px 18px 18px;
+}
+
+.snapshot-active-row,
+.mover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.snapshot-active-row strong {
+  color: var(--text2);
+}
+
+.mover-main {
+  display: grid;
+  gap: 4px;
+}
+
+.mover-main strong {
+  font-size: 12px;
+}
+
+.mover-main span {
+  color: var(--text3);
+  font-size: 11px;
+}
+
+.mover-meta {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.snapshot-empty {
+  padding: 0 18px 18px;
+  color: #ff8a9d;
+  font-size: 12px;
 }
 
 .widget-shell {

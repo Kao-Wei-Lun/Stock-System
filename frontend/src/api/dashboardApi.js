@@ -45,6 +45,29 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const query = params.toString();
       return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
     },
+    getFubonSnapshot(market, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fubon/snapshot/${encodeURIComponent(market)}${query ? `?${query}` : ""}`);
+    },
+    getFubonMovers(market, options = {}) {
+      const params = new URLSearchParams();
+      if (options.direction) params.set("direction", String(options.direction));
+      if (options.change) params.set("change", String(options.change));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fubon/movers/${encodeURIComponent(market)}${query ? `?${query}` : ""}`);
+    },
+    getFubonActives(market, options = {}) {
+      const params = new URLSearchParams();
+      if (options.trade) params.set("trade", String(options.trade));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fubon/actives/${encodeURIComponent(market)}${query ? `?${query}` : ""}`);
+    },
     listWatchlist() {
       return request("/api/watchlist");
     },

@@ -105,6 +105,22 @@ describe("dashboardApi", () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "http://localhost:8001/api/futopt/ohlc/TXF?period=5d&interval=5m", {});
   });
 
+  it("builds Fubon market snapshot endpoints", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ market: "TSE", data: [] }))
+      .mockImplementationOnce(() => jsonResponse({ market: "TSE", data: [] }))
+      .mockImplementationOnce(() => jsonResponse({ market: "OTC", data: [] }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    await api.getFubonSnapshot("TSE", { refresh: true });
+    await api.getFubonMovers("TSE", { direction: "down", change: "percent", limit: 5 });
+    await api.getFubonActives("OTC", { trade: "value", limit: 10, refresh: true });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "http://localhost:8001/api/fubon/snapshot/TSE?refresh=true", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "http://localhost:8001/api/fubon/movers/TSE?direction=down&change=percent&limit=5", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "http://localhost:8001/api/fubon/actives/OTC?trade=value&limit=10&refresh=true", {});
+  });
+
   it("creates persisted backtest runs", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 21, strategy_key: "ma_cross" }));
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });

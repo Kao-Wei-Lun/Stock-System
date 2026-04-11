@@ -1,3 +1,5 @@
+import asyncio
+
 from fubon_provider import FubonSDKManager
 
 
@@ -106,3 +108,52 @@ def test_unsubscribe_uses_resolved_channel_id():
     manager.unsubscribe_stock("2330", "aggregates")
 
     assert manager._ws_stock.calls == [("unsubscribe", {"id": "resolved-id"})]
+
+
+class FakeSnapshotApi:
+    def __init__(self):
+        self.calls = []
+
+    def quotes(self, **kwargs):
+        self.calls.append(("quotes", kwargs))
+        return {"market": kwargs["market"], "data": []}
+
+    def movers(self, **kwargs):
+        self.calls.append(("movers", kwargs))
+        return {"market": kwargs["market"], "direction": kwargs["direction"], "data": []}
+
+    def actives(self, **kwargs):
+        self.calls.append(("actives", kwargs))
+        return {"market": kwargs["market"], "trade": kwargs["trade"], "data": []}
+
+
+class FakeRestStock:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+
+def test_fetch_stock_snapshot_quotes_calls_sdk_snapshot_quotes():
+    manager = FubonSDKManager()
+    snapshot = FakeSnapshotApi()
+    manager.get_rest_stock = lambda: FakeRestStock(snapshot)
+
+    payload = asyncio.run(manager.fetch_stock_snapshot_quotes(market="TSE"))
+
+    assert payload["market"] == "TSE"
+    assert snapshot.calls == [("quotes", {"market": "TSE"})]
+
+
+def test_fetch_stock_snapshot_movers_and_actives_call_snapshot_methods():
+    manager = FubonSDKManager()
+    snapshot = FakeSnapshotApi()
+    manager.get_rest_stock = lambda: FakeRestStock(snapshot)
+
+    movers = asyncio.run(manager.fetch_stock_snapshot_movers(market="OTC", direction="down", change="percent"))
+    actives = asyncio.run(manager.fetch_stock_snapshot_actives(market="TSE", trade="value"))
+
+    assert movers["direction"] == "down"
+    assert actives["trade"] == "value"
+    assert snapshot.calls == [
+        ("movers", {"market": "OTC", "direction": "down", "change": "percent"}),
+        ("actives", {"market": "TSE", "trade": "value"}),
+    ]

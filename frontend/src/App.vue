@@ -137,6 +137,12 @@
         :current-ticker="currentTicker"
         :current-name="currentName"
         :macro-dashboard="macroDashboard"
+        :market-breadth-cards="marketBreadthCards"
+        :market-strong-movers="marketStrongMovers"
+        :market-weak-movers="marketWeakMovers"
+        :market-active-leaders="marketActiveLeaders"
+        :market-snapshot-loading="marketSnapshotLoading"
+        :market-snapshot-error="marketSnapshotError"
         :calendar-events="calendarEvents"
         :ticker-events="tickerEvents"
         :ticker-news="tickerNews"
@@ -146,6 +152,7 @@
         :screener-loading="screenerLoading"
         @open-terminal="handleOpenTerminal"
         @refresh-macro="loadMacroDashboard(true)"
+        @refresh-market-snapshot="loadMarketSnapshots(true)"
         @refresh-events="loadEventCalendar(true)"
         @refresh-news="loadTickerIntelligence(currentTicker, true)"
         @create-alert="handleOverviewAlertShortcut"
@@ -386,6 +393,12 @@ const {
   tickerEvents,
   tickerNews,
   macroDashboard,
+  marketBreadthCards,
+  marketStrongMovers,
+  marketWeakMovers,
+  marketActiveLeaders,
+  marketSnapshotLoading,
+  marketSnapshotError,
   screenerFilters,
   screenerResults,
   screenerPresets,
@@ -449,6 +462,7 @@ const {
   loadInstitutionalInsights,
   loadEventCalendar,
   loadMacroDashboard,
+  loadMarketSnapshots,
   loadTickerIntelligence,
   setChartLayout,
   selectTicker,

@@ -10,6 +10,7 @@ from data_fetcher import DataFetcher
 from database import db
 from fubon_data_fetcher import HybridDataFetcher
 from fubon_futopt_provider import FubonFutoptProvider
+from fubon_market_snapshot_provider import FubonMarketSnapshotProvider
 from fubon_symbols import (
     is_exact_futopt_contract,
     supports_fubon_stock_realtime_ticker,
@@ -31,6 +32,7 @@ fetcher = HybridDataFetcher(_yahoo_fetcher, fubon_manager)
 yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
 fubon_futopt_provider = FubonFutoptProvider(fubon_manager)
+fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager)
 quote_provider = HybridQuoteProvider(fubon_quote_provider, yahoo_quote_provider)
 external_notifier = ExternalNotificationDispatcher.from_env()
 alert_engine = AlertEngine(db, quote_provider, external_notifier=external_notifier)

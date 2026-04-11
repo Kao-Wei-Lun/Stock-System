@@ -283,6 +283,63 @@ class FubonSDKManager:
 
         return await asyncio.to_thread(_fetch_sync)
 
+    async def fetch_stock_snapshot_quotes(
+        self,
+        *,
+        market: str = "TSE",
+    ) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            snapshot = getattr(rest_stock, "snapshot", None)
+            quotes = getattr(snapshot, "quotes", None)
+            if not callable(quotes):
+                return None
+            return quotes(market=market)
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_stock_snapshot_movers(
+        self,
+        *,
+        market: str = "TSE",
+        direction: str = "up",
+        change: str = "percent",
+    ) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            snapshot = getattr(rest_stock, "snapshot", None)
+            movers = getattr(snapshot, "movers", None)
+            if not callable(movers):
+                return None
+            return movers(market=market, direction=direction, change=change)
+
+        return await asyncio.to_thread(_fetch_sync)
+
+    async def fetch_stock_snapshot_actives(
+        self,
+        *,
+        market: str = "TSE",
+        trade: str = "value",
+    ) -> Optional[dict]:
+        rest_stock = self.get_rest_stock()
+        if not rest_stock:
+            return None
+
+        def _fetch_sync():
+            snapshot = getattr(rest_stock, "snapshot", None)
+            actives = getattr(snapshot, "actives", None)
+            if not callable(actives):
+                return None
+            return actives(market=market, trade=trade)
+
+        return await asyncio.to_thread(_fetch_sync)
+
     async def fetch_futopt_products(
         self,
         *,
