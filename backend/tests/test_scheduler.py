@@ -3,10 +3,15 @@ import asyncio
 
 import pytest
 
-from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
+from scheduler import (
+    BackgroundScheduler,
+    SchedulerDependencies,
+    SchedulerSettings,
+    fubon_ws_listener_loop,
+)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_scheduler_starts_enabled_tasks_and_shutdowns():
     events = []
 
@@ -80,7 +85,7 @@ async def test_scheduler_starts_enabled_tasks_and_shutdowns():
     assert scheduler.task_count == 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_scheduler_skips_optional_jobs_when_disabled():
     async def noop_async(*_args, **_kwargs):
         await asyncio.sleep(0)
@@ -118,3 +123,90 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
     await scheduler.shutdown()
 
     assert scheduler.task_count == 0
+
+
+@pytest.mark.anyio
+async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
+    messages = []
+    stored_quotes = []
+
+    async def broadcast_to_ticker(ticker, payload):
+        messages.append((ticker, payload))
+
+    async def store_quote_to_db(payload):
+        stored_quotes.append(payload)
+        return payload
+
+    class FakeFubonManager:
+        def __init__(self):
+            self.connected = True
+            self.handler = None
+
+        def register_message_handler(self, handler):
+            self.handler = handler
+
+        def start_ws_stock(self):
+            return True
+
+        def start_ws_futopt(self):
+            return True
+
+    manager = FakeFubonManager()
+    task = asyncio.create_task(
+        fubon_ws_listener_loop(
+            fubon_manager=manager,
+            broadcast_to_ticker=broadcast_to_ticker,
+            store_quote_to_db=store_quote_to_db,
+        )
+    )
+
+    await asyncio.sleep(3.1)
+    manager.handler(
+        {
+            "event": "data",
+            "market_type": "stock",
+            "channel": "aggregates",
+            "data": {
+                "symbol": "2330",
+                "market": "TSE",
+                "exchange": "TWSE",
+                "name": "台積電",
+                "previousClose": 810,
+                "openPrice": 815,
+                "highPrice": 818,
+                "lowPrice": 812,
+                "closePrice": 817,
+                "change": 7,
+                "changePercent": 0.86,
+                "bids": [{"price": 816, "size": 21}],
+                "asks": [{"price": 817, "size": 15}],
+                "total": {"tradeVolume": 12345},
+                "lastUpdated": 1712805300000000,
+            },
+        }
+    )
+    manager.handler(
+        {
+            "event": "data",
+            "market_type": "stock",
+            "channel": "books",
+            "data": {
+                "symbol": "2330",
+                "market": "TSE",
+                "bids": [{"price": 816, "size": 21}],
+                "asks": [{"price": 817, "size": 15}],
+                "time": 1712805300000000,
+            },
+        }
+    )
+
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert stored_quotes[0]["ticker"] == "2330.TW"
+    assert stored_quotes[0]["is_delayed"] is False
+    assert messages[0][0] == "2330.TW"
+    assert messages[0][1]["type"] == "quote"
+    assert messages[1][1]["type"] == "books"

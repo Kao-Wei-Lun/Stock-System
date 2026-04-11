@@ -1,12 +1,12 @@
 """
-WebSocket 連線管理器
-管理多個客戶端的訂閱關係
+WebSocket connection manager.
+Tracks client subscriptions and triggers market-data hooks on first/last subscriber.
 """
 
 import json
 import logging
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Callable, Dict, Set
 
 from fastapi import WebSocket
 
@@ -15,39 +15,57 @@ log = logging.getLogger(__name__)
 
 class ConnectionManager:
     def __init__(self):
-        # websocket -> set of subscribed tickers
         self._clients: Dict[WebSocket, Set[str]] = {}
-        # ticker -> set of websockets
         self._ticker_subs: Dict[str, Set[WebSocket]] = defaultdict(set)
+        self._on_first_subscribe: Callable[[str], None] | None = None
+        self._on_last_unsubscribe: Callable[[str], None] | None = None
+
+    def configure_market_data_hooks(
+        self,
+        *,
+        on_first_subscribe: Callable[[str], None] | None = None,
+        on_last_unsubscribe: Callable[[str], None] | None = None,
+    ) -> None:
+        self._on_first_subscribe = on_first_subscribe
+        self._on_last_unsubscribe = on_last_unsubscribe
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
         self._clients[ws] = set()
-        log.info(f"WS 連線：共 {len(self._clients)} 個客戶端")
+        log.info("WS connect: %s clients", len(self._clients))
 
     def disconnect(self, ws: WebSocket):
         tickers = self._clients.pop(ws, set())
-        for t in tickers:
-            self._ticker_subs[t].discard(ws)
-        log.info(f"WS 斷線：剩 {len(self._clients)} 個客戶端")
+        for ticker in tickers:
+            self._ticker_subs[ticker].discard(ws)
+            if not self._ticker_subs[ticker]:
+                self._ticker_subs.pop(ticker, None)
+                self._notify_last_unsubscribe(ticker)
+        log.info("WS disconnect: %s clients", len(self._clients))
 
     def subscribe(self, ws: WebSocket, ticker: str):
-        if ws in self._clients:
-            self._clients[ws].add(ticker)
-            self._ticker_subs[ticker].add(ws)
-            log.debug(f"訂閱 {ticker}，共 {len(self._ticker_subs[ticker])} 個訂閱者")
+        if ws not in self._clients or not ticker:
+            return
+        is_first_subscriber = not self._ticker_subs[ticker]
+        self._clients[ws].add(ticker)
+        self._ticker_subs[ticker].add(ws)
+        if is_first_subscriber:
+            self._notify_first_subscribe(ticker)
+        log.debug("Subscribed %s with %s listeners", ticker, len(self._ticker_subs[ticker]))
 
     def unsubscribe(self, ws: WebSocket, ticker: str):
-        if ws in self._clients:
-            self._clients[ws].discard(ticker)
-            self._ticker_subs[ticker].discard(ws)
+        if ws not in self._clients or not ticker:
+            return
+        self._clients[ws].discard(ticker)
+        self._ticker_subs[ticker].discard(ws)
+        if not self._ticker_subs[ticker]:
+            self._ticker_subs.pop(ticker, None)
+            self._notify_last_unsubscribe(ticker)
 
     def get_subscribed_tickers(self) -> Set[str]:
-        """取得目前有人訂閱的所有 ticker"""
-        return {t for t, subs in self._ticker_subs.items() if subs}
+        return {ticker for ticker, subs in self._ticker_subs.items() if subs}
 
     async def broadcast_to_ticker(self, ticker: str, data: dict):
-        """廣播給所有訂閱該 ticker 的客戶端"""
         message = json.dumps(data)
         dead = set()
         for ws in list(self._ticker_subs.get(ticker, set())):
@@ -59,7 +77,6 @@ class ConnectionManager:
             self.disconnect(ws)
 
     async def broadcast_all(self, data: dict):
-        """廣播給所有連線的客戶端"""
         message = json.dumps(data)
         dead = set()
         for ws in list(self._clients.keys()):
@@ -69,3 +86,19 @@ class ConnectionManager:
                 dead.add(ws)
         for ws in dead:
             self.disconnect(ws)
+
+    def _notify_first_subscribe(self, ticker: str) -> None:
+        if not callable(self._on_first_subscribe):
+            return
+        try:
+            self._on_first_subscribe(ticker)
+        except Exception as exc:
+            log.warning("First subscribe hook failed for %s: %s", ticker, exc)
+
+    def _notify_last_unsubscribe(self, ticker: str) -> None:
+        if not callable(self._on_last_unsubscribe):
+            return
+        try:
+            self._on_last_unsubscribe(ticker)
+        except Exception as exc:
+            log.warning("Last unsubscribe hook failed for %s: %s", ticker, exc)

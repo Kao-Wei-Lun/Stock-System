@@ -4,33 +4,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from data_fetcher import normalize_ticker
+from fubon_symbols import (
+    fubon_market_to_ticker,
+    is_taiwan_stock_ticker,
+    tw_ticker_to_fubon,
+)
 from quote_provider import QuoteProvider
-
-
-def is_taiwan_stock_ticker(ticker: str) -> bool:
-    normalized = normalize_ticker(ticker)
-    if normalized.endswith(".TW"):
-        return normalized[:-3].isdigit()
-    if normalized.endswith(".TWO"):
-        return normalized[:-4].isdigit()
-    return False
-
-
-def tw_ticker_to_fubon(ticker: str) -> Optional[str]:
-    normalized = normalize_ticker(ticker)
-    if normalized.endswith(".TW") and normalized[:-3].isdigit():
-        return normalized[:-3]
-    if normalized.endswith(".TWO") and normalized[:-4].isdigit():
-        return normalized[:-4]
-    return None
-
-
-def fubon_market_to_ticker(symbol: str, market: str | None) -> str:
-    normalized_symbol = str(symbol or "").strip().upper()
-    normalized_market = str(market or "").strip().upper()
-    if normalized_market == "OTC":
-        return f"{normalized_symbol}.TWO"
-    return f"{normalized_symbol}.TW"
 
 
 def fubon_timestamp_to_iso(value: Any) -> Optional[str]:

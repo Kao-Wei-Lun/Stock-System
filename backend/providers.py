@@ -8,6 +8,7 @@ import them without circular dependency issues.
 from alert_engine import AlertEngine
 from data_fetcher import DataFetcher
 from database import db
+from fubon_symbols import supports_fubon_stock_realtime_ticker, tw_ticker_to_fubon
 from fubon_quote_provider import FubonQuoteProvider, HybridQuoteProvider
 from external_notifications import ExternalNotificationDispatcher
 from fubon_provider import FubonSDKManager
@@ -32,3 +33,29 @@ fundamentals_provider = FundamentalsProvider()
 taiwan_chip_provider = TaiwanChipProvider(fetcher)
 screener_engine = ScreenerEngine()
 ws_manager = ConnectionManager()
+
+
+def _subscribe_fubon_streams(ticker: str) -> None:
+    if not fubon_manager.connected or not supports_fubon_stock_realtime_ticker(ticker):
+        return
+    symbol = tw_ticker_to_fubon(ticker)
+    if not symbol:
+        return
+    for channel in ("aggregates", "books", "candles"):
+        fubon_manager.subscribe_stock(symbol, channel)
+
+
+def _unsubscribe_fubon_streams(ticker: str) -> None:
+    if not supports_fubon_stock_realtime_ticker(ticker):
+        return
+    symbol = tw_ticker_to_fubon(ticker)
+    if not symbol:
+        return
+    for channel in ("aggregates", "books", "candles"):
+        fubon_manager.unsubscribe_stock(symbol, channel)
+
+
+ws_manager.configure_market_data_hooks(
+    on_first_subscribe=_subscribe_fubon_streams,
+    on_last_unsubscribe=_unsubscribe_fubon_streams,
+)

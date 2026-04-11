@@ -28,6 +28,7 @@ from env_validation import (
     read_url_env,
     validate_runtime_environment,
 )
+from fubon_symbols import supports_fubon_stock_realtime_ticker
 from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
@@ -207,6 +208,9 @@ background_scheduler = BackgroundScheduler(
         sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
         get_subscribed_tickers=ws_manager.get_subscribed_tickers,
         broadcast_to_ticker=ws_manager.broadcast_to_ticker,
+        store_quote_to_db=db.upsert_market_quote,
+        fubon_manager=fubon_manager,
+        skip_poll_for_ticker=supports_fubon_stock_realtime_ticker,
     ),
     logger=log,
 )
@@ -222,6 +226,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     if getattr(db, "_pool", None) is not None and await fubon_manager.init_from_db(db):
         fubon_manager.start_ws_stock()
+        fubon_manager.start_ws_futopt()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,

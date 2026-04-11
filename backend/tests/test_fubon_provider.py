@@ -56,3 +56,53 @@ def test_login_account_falls_back_to_password_login_when_api_key_is_absent():
 def test_login_result_failure_is_detected():
     assert FubonSDKManager._is_login_success({"is_success": False, "message": "bad credentials"}) is False
     assert FubonSDKManager._login_message({"is_success": False, "message": "bad credentials"}) == "bad credentials"
+
+
+class FakeWebSocket:
+    def __init__(self):
+        self.handlers = {}
+        self.calls = []
+
+    def on(self, event_name, handler):
+        self.handlers[event_name] = handler
+
+    def subscribe(self, payload):
+        self.calls.append(("subscribe", payload))
+        return None
+
+    def unsubscribe(self, payload):
+        self.calls.append(("unsubscribe", payload))
+        return None
+
+
+def test_subscription_id_updates_from_subscribed_event():
+    manager = FubonSDKManager()
+    manager._ws_stock = FakeWebSocket()
+    manager.connected = True
+    manager._attach_message_handlers()
+
+    placeholder = manager.subscribe_stock("2330", "aggregates")
+
+    assert placeholder == "stock:2330:aggregates"
+
+    manager._dispatch_ws_message(
+        "stock",
+        {
+            "event": "subscribed",
+            "data": {"id": "abc123", "channel": "aggregates", "symbol": "2330"},
+        },
+    )
+
+    assert manager._subscriptions["stock:2330:aggregates"] == "abc123"
+
+
+def test_unsubscribe_uses_resolved_channel_id():
+    manager = FubonSDKManager()
+    manager._ws_stock = FakeWebSocket()
+    manager.connected = True
+    manager._subscriptions["stock:2330:aggregates"] = "resolved-id"
+    manager._subscription_payloads["stock:2330:aggregates"] = {"channel": "aggregates", "symbol": "2330"}
+
+    manager.unsubscribe_stock("2330", "aggregates")
+
+    assert manager._ws_stock.calls == [("unsubscribe", {"id": "resolved-id"})]
