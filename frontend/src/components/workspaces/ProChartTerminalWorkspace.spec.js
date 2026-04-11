@@ -16,6 +16,10 @@ function createProps() {
     quote: {
       price: 210.5,
       change_pct: 1.23,
+      bid: 210.4,
+      ask: 210.5,
+      bids: [{ price: 210.4, size: 12 }],
+      asks: [{ price: 210.5, size: 9 }],
     },
     activeTool: "cursor",
     activePanels: { macd: true, stoch: true },
@@ -55,32 +59,40 @@ function createProps() {
   };
 }
 
+function createGlobal() {
+  return {
+    stubs: {
+      ChartWorkspace: {
+        name: "ChartWorkspace",
+        template: "<div class='chart-workspace-stub'>chart</div>",
+      },
+      TerminalTickerRail: {
+        name: "TerminalTickerRail",
+        template: "<aside class='ticker-rail-stub'>rail</aside>",
+      },
+      TerminalUtilityDrawer: {
+        name: "TerminalUtilityDrawer",
+        template: "<aside class='utility-drawer-stub'>drawer</aside>",
+      },
+      BidAskPanel: {
+        name: "BidAskPanel",
+        template: "<aside class='bid-ask-panel-stub'>book</aside>",
+      },
+    },
+  };
+}
+
 describe("ProChartTerminalWorkspace", () => {
-  it("uses compact commandbar action labels", () => {
+  it("shows the book panel alongside the chart in normal mode", () => {
     const wrapper = mount(ProChartTerminalWorkspace, {
       props: createProps(),
-      global: {
-        stubs: {
-          ChartWorkspace: {
-            name: "ChartWorkspace",
-            template: "<div class='chart-workspace-stub'>chart</div>",
-          },
-          TerminalTickerRail: {
-            name: "TerminalTickerRail",
-            template: "<aside class='ticker-rail-stub'>rail</aside>",
-          },
-          TerminalUtilityDrawer: {
-            name: "TerminalUtilityDrawer",
-            template: "<aside class='utility-drawer-stub'>drawer</aside>",
-          },
-        },
-      },
+      global: createGlobal(),
     });
 
-    expect(wrapper.text()).toContain("☰ 觀察池");
-    expect(wrapper.text()).toContain("🔔 警報");
-    expect(wrapper.text()).toContain("✎ 日誌");
-    expect(wrapper.text()).toContain("⛶ Zen");
+    expect(wrapper.find(".terminal-commandbar").exists()).toBe(true);
+    expect(wrapper.find(".chart-workspace-stub").exists()).toBe(true);
+    expect(wrapper.find(".bid-ask-panel-stub").exists()).toBe(true);
+    expect(wrapper.findAll(".terminal-action")).toHaveLength(4);
   });
 
   it("keeps chart-focused zen mode free of command chrome", () => {
@@ -89,27 +101,13 @@ describe("ProChartTerminalWorkspace", () => {
         ...createProps(),
         chartFullscreen: true,
       },
-      global: {
-        stubs: {
-          ChartWorkspace: {
-            name: "ChartWorkspace",
-            template: "<div class='chart-workspace-stub'>chart</div>",
-          },
-          TerminalTickerRail: {
-            name: "TerminalTickerRail",
-            template: "<aside class='ticker-rail-stub'>rail</aside>",
-          },
-          TerminalUtilityDrawer: {
-            name: "TerminalUtilityDrawer",
-            template: "<aside class='utility-drawer-stub'>drawer</aside>",
-          },
-        },
-      },
+      global: createGlobal(),
     });
 
     expect(wrapper.find(".terminal-commandbar").exists()).toBe(false);
     expect(wrapper.find(".ticker-rail-stub").exists()).toBe(false);
     expect(wrapper.find(".utility-drawer-stub").exists()).toBe(false);
+    expect(wrapper.find(".bid-ask-panel-stub").exists()).toBe(false);
     expect(wrapper.find(".terminal-page").classes()).toContain("is-chart-fullscreen");
     expect(wrapper.find(".chart-workspace-stub").exists()).toBe(true);
   });

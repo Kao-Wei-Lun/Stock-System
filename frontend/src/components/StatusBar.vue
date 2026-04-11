@@ -7,7 +7,7 @@
     <div class="status-block">後端：<span class="status-accent">{{ backendUrl }}</span></div>
     <div class="status-block">延遲：<span class="status-accent">{{ latency }}</span></div>
     <div class="status-block">來源：<span>{{ quoteSource }}</span></div>
-    <div class="status-block">模式：<span>{{ quoteMode }}</span></div>
+    <div class="status-block">模式：<span>{{ normalizedQuoteMode }}</span></div>
     <div class="status-block">
       狀態：
       <span class="status-badge" :class="freshnessClass">{{ freshnessDisplayLabel }}</span>
@@ -36,6 +36,13 @@ const props = defineProps({
   clockTime: { type: String, required: true },
 });
 
+const normalizedQuoteMode = computed(() => {
+  if (props.quoteDelayed === false) return "即時";
+  if (props.quoteMode === "延遲快照") return "盤後快照";
+  if (props.quoteMode === "最新快照") return "即時";
+  return props.quoteMode || "快照";
+});
+
 const freshnessState = computed(() => {
   const rawValue = props.quoteTimestamp || props.quoteSyncedAt;
   if (!rawValue) return "missing";
@@ -49,7 +56,7 @@ const freshnessState = computed(() => {
 const freshnessLabel = computed(() => {
   if (freshnessState.value === "missing") return "無時間戳";
   if (freshnessState.value === "stale") return "資料較舊";
-  return freshnessState.value === "live" ? "最新快照" : "延遲快照";
+  return props.quoteDelayed ? normalizedQuoteMode.value : "即時資料";
 });
 
 function formatAgeLabel(ageMs) {
@@ -77,7 +84,7 @@ const freshnessAgeLabel = computed(() => {
 });
 
 const freshnessDisplayLabel = computed(() => (
-  freshnessAgeLabel.value ? `${freshnessLabel.value} · ${freshnessAgeLabel.value}` : freshnessLabel.value
+  freshnessAgeLabel.value ? `${freshnessLabel.value} / ${freshnessAgeLabel.value}` : freshnessLabel.value
 ));
 
 const freshnessClass = computed(() => freshnessState.value);

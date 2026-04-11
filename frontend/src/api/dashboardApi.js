@@ -38,6 +38,13 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const query = params.toString();
       return request(`/api/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
     },
+    getFutoptOhlc(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.period) params.set("period", String(options.period));
+      if (options.interval) params.set("interval", String(options.interval));
+      const query = params.toString();
+      return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
     listWatchlist() {
       return request("/api/watchlist");
     },
@@ -173,6 +180,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     },
     getQuote(ticker) {
       return request(`/api/quote/${encodeURIComponent(ticker)}`);
+    },
+    getFutoptQuote(ticker) {
+      return request(`/api/futopt/quote/${encodeURIComponent(ticker)}`);
     },
     listEventCalendar(options = {}) {
       const params = new URLSearchParams();

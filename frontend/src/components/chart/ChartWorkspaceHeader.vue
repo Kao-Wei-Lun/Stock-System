@@ -1,9 +1,18 @@
 <template>
   <div class="chart-header">
     <div>
-      <div style="display: flex; align-items: baseline; gap: 8px">
-        <div class="ch-ticker">{{ currentTicker || "—" }}</div>
-        <div style="font-size: 11px; color: var(--text3)">{{ currentName || "載入中..." }}</div>
+      <div class="ticker-row">
+        <div class="ch-ticker">{{ currentTicker || "-" }}</div>
+        <div class="ch-name">{{ currentName || "載入中..." }}</div>
+      </div>
+      <div class="quote-meta-row">
+        <span class="quote-meta-pill" :class="quote.is_delayed === false ? 'live' : 'delayed'">
+          {{ quoteModeLabel }}
+        </span>
+        <span class="quote-meta-pill">{{ quoteTimestampLabel }}</span>
+        <span v-if="quote.bid != null || quote.ask != null" class="quote-meta-pill">
+          B {{ fmtPrice(quote.bid) }} / A {{ fmtPrice(quote.ask) }}
+        </span>
       </div>
       <div v-if="quoteFreshnessState !== 'live'" class="quote-risk-banner" :class="quoteFreshnessState">
         {{ quoteFreshnessHint }}
@@ -35,6 +44,8 @@ defineProps({
   quote: { type: Object, required: true },
   displayPrice: { type: String, required: true },
   displayChange: { type: String, required: true },
+  quoteTimestampLabel: { type: String, required: true },
+  quoteModeLabel: { type: String, required: true },
   quoteFreshnessState: { type: String, required: true },
   quoteFreshnessHint: { type: String, required: true },
   showMacroRegimeBanner: { type: Boolean, default: false },
@@ -46,6 +57,47 @@ defineProps({
 </script>
 
 <style scoped>
+.ticker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ch-name {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.quote-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.quote-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.quote-meta-pill.live {
+  border-color: rgba(0, 217, 163, 0.24);
+  color: var(--green);
+}
+
+.quote-meta-pill.delayed {
+  border-color: rgba(255, 209, 102, 0.22);
+  color: #ffd166;
+}
+
 .quote-risk-banner {
   display: inline-flex;
   align-items: center;

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import StatusBar from "./StatusBar.vue";
 
 describe("StatusBar", () => {
-  it("shows stale quote warnings when timestamps are old", () => {
+  it("marks stale quote timestamps with the stale badge state", () => {
     const wrapper = mount(StatusBar, {
       props: {
         connected: true,
@@ -20,37 +20,38 @@ describe("StatusBar", () => {
       },
     });
 
+    expect(wrapper.find(".status-badge.stale").exists()).toBe(true);
     expect(wrapper.text()).toContain("資料較舊");
-    expect(wrapper.text()).toContain("·");
   });
 
-  it("shows missing timestamp warnings when no quote time is available", () => {
+  it("marks missing quote timestamps with the missing badge state", () => {
     const wrapper = mount(StatusBar, {
       props: {
         connected: false,
         backendUrl: "http://127.0.0.1:8001",
-        latency: "—",
+        latency: "-",
         quoteSource: "local_cache",
         quoteMode: "延遲快照",
         quoteTimestamp: null,
         quoteSyncedAt: null,
         quoteDelayed: true,
-        lastUpdate: "—",
+        lastUpdate: "-",
         clockTime: "2026/04/02 10:00:00",
       },
     });
 
+    expect(wrapper.find(".status-badge.missing").exists()).toBe(true);
     expect(wrapper.text()).toContain("無時間戳");
   });
 
-  it("adds quote age to fresh snapshot labels", () => {
+  it("shows live quote labels for fresh realtime payloads", () => {
     const timestamp = new Date(Date.now() - 4 * 60 * 1000).toISOString();
     const wrapper = mount(StatusBar, {
       props: {
         connected: true,
         backendUrl: "http://127.0.0.1:8001",
         latency: "15ms",
-        quoteSource: "yahoo_finance",
+        quoteSource: "fubon_neo",
         quoteMode: "最新快照",
         quoteTimestamp: timestamp,
         quoteSyncedAt: timestamp,
@@ -60,6 +61,8 @@ describe("StatusBar", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("最新快照 · 4分鐘前");
+    expect(wrapper.find(".status-badge.live").exists()).toBe(true);
+    expect(wrapper.text()).toContain("即時資料");
+    expect(wrapper.text()).toContain("4");
   });
 });

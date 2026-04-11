@@ -12,6 +12,7 @@
       :current-interval="currentInterval"
       :market-status="marketStatus"
       :ws-connected="wsConnected"
+      :active-quote="quote"
       @navigate="handleNavigate"
       @set-review-tab="handleReviewTabChange"
       @search-change="searchSymbols"

@@ -55,6 +55,8 @@ export const WATCHLIST_COLOR_OPTIONS = [
   "#9b6dff",
   "#ff4d6a",
 ];
+const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF"]);
+const FUTOPT_CONTRACT_RE = /^[A-Z]{2,5}[A-L]\d$/;
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional", "events", "macro", "screener"];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
@@ -380,8 +382,19 @@ function aggregateOhlcRows(rows, mode) {
 export function normalizeTicker(ticker) {
   const raw = (ticker || "").trim().toUpperCase();
   if (!raw || raw.startsWith("^") || raw.includes(".") || raw.includes("-") || raw.includes("=")) return raw;
+  if (FUTOPT_BASE_ALIASES.has(raw) || FUTOPT_CONTRACT_RE.test(raw)) return raw;
   if (!/^[A-Z]+$/.test(raw)) return `${raw}.TW`;
   return raw;
+}
+
+function isFutoptTicker(ticker) {
+  const normalized = normalizeTicker(ticker);
+  return FUTOPT_BASE_ALIASES.has(normalized) || FUTOPT_CONTRACT_RE.test(normalized);
+}
+
+function resolveFutoptInterval(interval) {
+  const normalized = String(interval || "").toLowerCase();
+  return ["1m", "5m", "15m", "30m", "60m", "1h"].includes(normalized) ? normalized : "1m";
 }
 
 function inferMarketFromTicker(ticker) {
@@ -554,6 +567,8 @@ export function useDashboard() {
     wsUrl,
     onMessage: (message) => {
       if (message.type === "quote") handleRealtimeQuote(message);
+      if (message.type === "books") handleRealtimeBook(message);
+      if (message.type === "candle") handleRealtimeCandle(message);
     },
   });
   const wsConnected = dashboardRealtime.wsConnected;
@@ -624,10 +639,19 @@ export function useDashboard() {
     market_cap: null,
     change: 0,
     change_pct: 0,
+    resolved_symbol: null,
+    market: null,
+    exchange: null,
     name: "載入中...",
     source: null,
     quote_type: null,
     is_delayed: true,
+    bid: null,
+    ask: null,
+    bid_size: null,
+    ask_size: null,
+    bids: [],
+    asks: [],
     quote_timestamp: null,
     synced_at: null,
   });
@@ -1226,10 +1250,19 @@ export function useDashboard() {
     quote.market_cap = data.market_cap ?? null;
     quote.change = data.change ?? 0;
     quote.change_pct = data.change_pct ?? 0;
+    quote.resolved_symbol = data.resolved_symbol ?? quote.resolved_symbol ?? null;
+    quote.market = data.market ?? quote.market ?? null;
+    quote.exchange = data.exchange ?? quote.exchange ?? null;
     quote.name = data.name || currentName.value;
     quote.source = data.source ?? quote.source ?? null;
     quote.quote_type = data.quote_type ?? quote.quote_type ?? null;
     quote.is_delayed = data.is_delayed ?? true;
+    quote.bid = data.bid ?? quote.bid ?? null;
+    quote.ask = data.ask ?? quote.ask ?? null;
+    quote.bid_size = data.bid_size ?? quote.bid_size ?? null;
+    quote.ask_size = data.ask_size ?? quote.ask_size ?? null;
+    quote.bids = Array.isArray(data.bids) ? data.bids : (quote.bids || []);
+    quote.asks = Array.isArray(data.asks) ? data.asks : (quote.asks || []);
     quote.quote_timestamp = data.quote_timestamp ?? null;
     quote.synced_at = data.synced_at ?? null;
     if (data.name) currentName.value = data.name;
@@ -1247,33 +1280,89 @@ export function useDashboard() {
       market_cap: null,
       change: 0,
       change_pct: 0,
+      resolved_symbol: null,
+      market: null,
+      exchange: null,
       name: currentName.value,
       source: null,
       quote_type: null,
       is_delayed: true,
+      bid: null,
+      ask: null,
+      bid_size: null,
+      ask_size: null,
+      bids: [],
+      asks: [],
       quote_timestamp: null,
       synced_at: null,
     });
+  }
+
+  function updateCurrentCandleFromQuote(data) {
+    if (!rawOhlcData.value.length || data.price == null) return;
+    const last = rawOhlcData.value[rawOhlcData.value.length - 1];
+    const today = new Date().toISOString().slice(0, 10);
+    if (!(last.date === today || String(last.date || "").startsWith(today))) return;
+    const updated = {
+      ...last,
+      close: data.price,
+      high: data.high && data.high > last.high ? data.high : last.high,
+      low: data.low && data.low < last.low ? data.low : last.low,
+      volume: data.volume ?? last.volume,
+    };
+    rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
+  }
+
+  function upsertRealtimeCandleRow(data) {
+    if (!data?.date || currentInterval.value !== "1m") return;
+    const normalizedDate = String(data.date).replace("T", " ");
+    const nextRow = {
+      date: normalizedDate,
+      open: Number(data.open ?? data.close ?? 0),
+      high: Number(data.high ?? data.close ?? 0),
+      low: Number(data.low ?? data.close ?? 0),
+      close: Number(data.close ?? data.open ?? 0),
+      volume: Number(data.volume ?? 0),
+      adj_close: Number(data.close ?? data.open ?? 0),
+      source: data.source || "fubon_neo",
+    };
+    const rows = [...rawOhlcData.value];
+    const last = rows[rows.length - 1];
+    if (last?.date === normalizedDate) {
+      rows[rows.length - 1] = nextRow;
+    } else {
+      rows.push(nextRow);
+    }
+    rawOhlcData.value = rows;
   }
 
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
     applyQuote(data);
-    if (rawOhlcData.value.length > 0) {
-      const last = rawOhlcData.value[rawOhlcData.value.length - 1];
-      const today = new Date().toISOString().slice(0, 10);
-      if (last.date === today || last.date.startsWith(today)) {
-        const updated = {
-          ...last,
-          close: data.price,
-          high: data.high && data.high > last.high ? data.high : last.high,
-          low: data.low && data.low < last.low ? data.low : last.low,
-        };
-          rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
-        }
-      }
+    updateCurrentCandleFromQuote(data);
+  }
+
+  function handleRealtimeBook(message) {
+    const data = message.data || {};
+    if (message.ticker !== currentTicker.value && message.ticker !== normalizeTicker(currentTicker.value)) return;
+    quote.bid = data.bid ?? quote.bid ?? null;
+    quote.ask = data.ask ?? quote.ask ?? null;
+    quote.bid_size = data.bid_size ?? quote.bid_size ?? null;
+    quote.ask_size = data.ask_size ?? quote.ask_size ?? null;
+    quote.bids = Array.isArray(data.bids) ? data.bids : [];
+    quote.asks = Array.isArray(data.asks) ? data.asks : [];
+    if (data.quote_timestamp) {
+      quote.quote_timestamp = data.quote_timestamp;
+      lastUpdate.value = formatQuoteTimestampLabel(data.quote_timestamp);
     }
+  }
+
+  function handleRealtimeCandle(message) {
+    const data = message.data;
+    if (message.ticker !== currentTicker.value && message.ticker !== normalizeTicker(currentTicker.value)) return;
+    upsertRealtimeCandleRow(data);
+  }
 
   async function loadWatchlist() {
     watchlistLoading.value = true;
@@ -1612,7 +1701,10 @@ export function useDashboard() {
 
   async function loadQuote(ticker = currentTicker.value) {
     try {
-      const data = await apiFetch(`/api/quote/${normalizeTicker(ticker)}`, { retries: 6, retryDelayMs: 1200 });
+      const normalized = normalizeTicker(ticker);
+      const data = isFutoptTicker(normalized)
+        ? await dashboardApi.getFutoptQuote(normalized)
+        : await apiFetch(`/api/quote/${normalized}`, { retries: 6, retryDelayMs: 1200 });
       if (data) applyQuote(data);
     } catch (error) {
       console.error(error);
@@ -1621,10 +1713,13 @@ export function useDashboard() {
 
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
     const normalized = normalizeTicker(ticker);
+    const isFutopt = isFutoptTicker(normalized);
     const resolvedPeriod = (period || "1y").toLowerCase();
-    const resolvedInterval = resolveTimeframeInterval(resolvedPeriod, interval);
+    const resolvedInterval = isFutopt
+      ? resolveFutoptInterval(interval)
+      : resolveTimeframeInterval(resolvedPeriod, interval);
     const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
-    const fetchPeriod = getExpandedFetchPeriod(resolvedPeriod, displayMode);
+    const fetchPeriod = isFutopt ? resolvedPeriod : getExpandedFetchPeriod(resolvedPeriod, displayMode);
     currentPeriod.value = resolvedPeriod;
     currentInterval.value = resolvedInterval;
     if (isIntradayInterval(resolvedInterval)) {
@@ -1633,16 +1728,21 @@ export function useDashboard() {
     chartLoading.value = true;
     loadingMessage.value = `載入 ${normalized} K 線...`;
     try {
-      const data = await dashboardApi.getOhlc(normalized, {
-        period: fetchPeriod,
-        interval: resolvedInterval,
-      });
+      const data = isFutopt
+        ? await dashboardApi.getFutoptOhlc(normalized, {
+          period: fetchPeriod,
+          interval: resolvedInterval,
+        })
+        : await dashboardApi.getOhlc(normalized, {
+          period: fetchPeriod,
+          interval: resolvedInterval,
+        });
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
         dashboardRealtime.unsubscribeTicker(currentTicker.value);
         currentTicker.value = resolvedTicker;
-        dashboardRealtime.subscribeTicker(resolvedTicker);
       }
+      dashboardRealtime.subscribeTicker(resolvedTicker);
       rawOhlcData.value = data.data || [];
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
@@ -1679,7 +1779,6 @@ export function useDashboard() {
     selectedDrawingId.value = null;
     rawOhlcData.value = [];
     crosshair.visible = false;
-    dashboardRealtime.subscribeTicker(normalized);
     rememberRecentTicker(normalized, name || normalized);
     await loadKline(normalized, currentPeriod.value, currentInterval.value);
     void loadBacktestHistory({ ticker: normalized });

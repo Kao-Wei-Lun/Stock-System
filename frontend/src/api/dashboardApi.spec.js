@@ -90,6 +90,21 @@ describe("dashboardApi", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/quote/AAPL", {});
   });
 
+  it("requests futopt quote and ohlc payloads from dedicated endpoints", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ ticker: "TXFE6", is_delayed: false }))
+      .mockImplementationOnce(() => jsonResponse({ ticker: "TXFE6", data: [] }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    const quote = await api.getFutoptQuote("TXF");
+    const ohlc = await api.getFutoptOhlc("TXF", { period: "5d", interval: "5m" });
+
+    expect(quote.ticker).toBe("TXFE6");
+    expect(ohlc.ticker).toBe("TXFE6");
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "http://localhost:8001/api/futopt/quote/TXF", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "http://localhost:8001/api/futopt/ohlc/TXF?period=5d&interval=5m", {});
+  });
+
   it("creates persisted backtest runs", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 21, strategy_key: "ma_cross" }));
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });

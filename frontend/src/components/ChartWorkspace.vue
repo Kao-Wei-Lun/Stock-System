@@ -7,6 +7,8 @@
       :quote="quote"
       :display-price="displayPrice"
       :display-change="displayChange"
+      :quote-timestamp-label="quoteTimestampCompactLabel"
+      :quote-mode-label="quoteModeLabel"
       :quote-freshness-state="quoteFreshnessState"
       :quote-freshness-hint="quoteFreshnessHint"
       :show-macro-regime-banner="showMacroRegimeBanner"
@@ -788,6 +790,20 @@ function deleteWorkspace() {
   emit("delete-workspace", workspaceSelection.value);
   workspaceSelection.value = "";
 }
+
+const quoteTimestampCompactLabel = computed(() => {
+  const value = props.quote.quote_timestamp || props.quote.synced_at;
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(-8);
+  return date.toLocaleTimeString("zh-TW", { hour12: false });
+});
+
+const quoteModeLabel = computed(() => {
+  if (props.quote.is_delayed === false) return "即時";
+  if (props.quote.quote_type === "delayed_snapshot") return "盤後快照";
+  return "快照";
+});
 
 function removeSelectedDrawing() {
   if (!props.selectedDrawingId) return;

@@ -121,6 +121,10 @@
         />
       </div>
 
+      <aside v-if="!chartFullscreen" class="terminal-book-shell">
+        <BidAskPanel :quote="quote" :ticker="currentTicker" />
+      </aside>
+
       <button
         v-if="!chartFullscreen && rightCollapsed"
         class="terminal-collapsed-toggle right"
@@ -162,6 +166,7 @@
 import { computed } from "vue";
 
 import ChartWorkspace from "../ChartWorkspace.vue";
+import BidAskPanel from "../terminal/BidAskPanel.vue";
 import TerminalTickerRail from "./TerminalTickerRail.vue";
 import TerminalUtilityDrawer from "./TerminalUtilityDrawer.vue";
 
@@ -391,6 +396,14 @@ function openDrawer(tab) {
   min-height: 0;
 }
 
+.terminal-book-shell {
+  width: 252px;
+  min-width: 252px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(7, 12, 19, 0.94);
+  overflow: auto;
+}
+
 .terminal-collapsed-toggle {
   position: absolute;
   top: 18px;
@@ -413,6 +426,13 @@ function openDrawer(tab) {
   right: 18px;
 }
 
+@media (max-width: 1320px) {
+  .terminal-book-shell {
+    width: 224px;
+    min-width: 224px;
+  }
+}
+
 @media (max-width: 1200px) {
   .terminal-commandbar {
     flex-direction: column;
@@ -420,6 +440,12 @@ function openDrawer(tab) {
 
   .terminal-commandbar-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1080px) {
+  .terminal-book-shell {
+    display: none;
   }
 }
 

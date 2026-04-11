@@ -88,6 +88,11 @@
         </div>
       </div>
 
+      <div class="quote-badge" :class="quoteStatusClass">
+        <span class="quote-badge-dot"></span>
+        <span>{{ quoteStatusLabel }}</span>
+      </div>
+
       <div v-if="workspacePage === 'review'" class="review-switch">
         <button
           class="review-switch-btn"
@@ -120,9 +125,9 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
-defineProps({
+const props = defineProps({
   workspacePage: { type: String, required: true },
   reviewTab: { type: String, default: "journal" },
   searchQuery: { type: String, required: true },
@@ -133,6 +138,7 @@ defineProps({
   currentInterval: { type: String, required: true },
   marketStatus: { type: Object, required: true },
   wsConnected: { type: Boolean, required: true },
+  activeQuote: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits([
@@ -158,6 +164,15 @@ const navItems = [
 
 const rootRef = ref(null);
 const searchInputRef = ref(null);
+const quoteStatusLabel = computed(() => {
+  if (props.activeQuote?.is_delayed === false) return "即時";
+  if (props.activeQuote?.quote_type === "delayed_snapshot") return "盤後快照";
+  return "快照";
+});
+const quoteStatusClass = computed(() => ({
+  live: props.activeQuote?.is_delayed === false,
+  delayed: props.activeQuote?.is_delayed !== false,
+}));
 
 function handleDocumentClick(event) {
   if (!rootRef.value?.contains(event.target)) {
@@ -381,11 +396,38 @@ onBeforeUnmount(() => {
 .tf-btns,
 .heatmap-link,
 .market-pills,
+.quote-badge,
 .review-switch,
 .nav-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.quote-badge {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text2);
+  font-size: 10px;
+}
+
+.quote-badge.live {
+  border-color: rgba(0, 217, 163, 0.24);
+  color: var(--green);
+}
+
+.quote-badge.delayed {
+  border-color: rgba(255, 209, 102, 0.18);
+  color: #ffd166;
+}
+
+.quote-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .tf-btn,

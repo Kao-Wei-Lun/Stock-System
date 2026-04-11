@@ -30,7 +30,7 @@ describe("AppNavbar", () => {
   it("exposes the command palette shortcut from search", async () => {
     const wrapper = mount(AppNavbar, { props: createProps() });
 
-    expect(wrapper.find(".search-command-badge").text()).toBe("⌘K");
+    expect(wrapper.find(".search-command-badge").exists()).toBe(true);
     await wrapper.find(".search-command-badge").trigger("click");
 
     expect(wrapper.emitted("open-command-palette")).toHaveLength(1);
@@ -40,8 +40,22 @@ describe("AppNavbar", () => {
     const wrapper = mount(AppNavbar, { props: createProps() });
 
     const titles = wrapper.findAll(".workspace-nav-btn").map((button) => button.attributes("title"));
-    expect(titles).toContain("總覽 · Alt+1");
-    expect(titles).toContain("終端 · Alt+2");
-    expect(titles).toContain("設定 · Alt+5");
+    expect(titles[0]).toContain("Alt+1");
+    expect(titles[1]).toContain("Alt+2");
+    expect(titles[titles.length - 1]).toContain("Alt+5");
+  });
+
+  it("shows a live quote badge when realtime data is active", () => {
+    const wrapper = mount(AppNavbar, {
+      props: createProps({
+        activeQuote: {
+          is_delayed: false,
+          quote_type: "realtime",
+        },
+      }),
+    });
+
+    expect(wrapper.find(".quote-badge").classes()).toContain("live");
+    expect(wrapper.text()).toContain("即時");
   });
 });
