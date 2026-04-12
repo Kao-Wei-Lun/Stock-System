@@ -282,12 +282,16 @@ const currentChipSourceLabel = computed(() => {
   if (!source) return "無";
   if (source === "local_derived_model") return "本地推估";
   if (source === "twse_t86") return "TWSE 三大法人";
+  if (source === "tpex_3itrade_hedge") return "TPEX 三大法人";
   return source;
 });
 const currentChipNote = computed(() => {
   if (!props.currentTicker) return "切到台股個股後，這裡會一起顯示目前標的的籌碼摘要。";
   if (props.taiwanChipDetail?.source === "twse_t86") {
     return "目前為 TWSE 盤後三大法人個股資料，會依查詢日或最近可用交易日顯示。";
+  }
+  if (props.taiwanChipDetail?.source === "tpex_3itrade_hedge") {
+    return "目前為 TPEX 盤後三大法人個股資料，會依查詢日或最近可用交易日顯示。";
   }
   if (props.taiwanChipDetail?.source === "local_derived_model") {
     return "目前為本地推估摘要，非富邦官方法人 / 融資券 API。";

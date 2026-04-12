@@ -10,16 +10,26 @@ import urllib3
 from data_fetcher import DataFetcher, normalize_ticker
 from database import db
 from market_intelligence import infer_market
+from tw_symbol_lookup import resolve_taiwan_ticker
 
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
+TPEX_3ITRADE_URL = "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
 TWSE_T86_EARLIEST_DATE = date(2012, 5, 2)
+OFFICIAL_TWSE_SOURCE = "twse_t86"
+OFFICIAL_TPEX_SOURCE = "tpex_3itrade_hedge"
+SUPPORTED_SYNC_SOURCES = ("twse", "tpex")
 TWSE_REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://www.twse.com.tw/zh/trading/foreign/t86.html",
+}
+TPEX_REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.tpex.org.tw/zh-tw/mainboard/trading/info/3itrade-hedge.html",
 }
 TWSE_FIELD_ALIASES = {
     "證券代號": "security_code",
@@ -47,6 +57,32 @@ TWSE_FIELD_ALIASES = {
     "自營商買賣超股數(避險)": "dealer_hedge_net",
     "三大法人買賣超股數": "institutional_net",
 }
+TPEX_JSON_FIELD_KEYS = [
+    "security_code",
+    "security_name",
+    "foreign_ex_dealer_buy",
+    "foreign_ex_dealer_sell",
+    "foreign_ex_dealer_net",
+    "foreign_dealer_buy",
+    "foreign_dealer_sell",
+    "foreign_dealer_net",
+    "foreign_buy",
+    "foreign_sell",
+    "foreign_net",
+    "investment_trust_buy",
+    "investment_trust_sell",
+    "investment_trust_net",
+    "dealer_self_buy",
+    "dealer_self_sell",
+    "dealer_self_net",
+    "dealer_hedge_buy",
+    "dealer_hedge_sell",
+    "dealer_hedge_net",
+    "dealer_buy",
+    "dealer_sell",
+    "dealer_net",
+    "institutional_net",
+]
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -103,10 +139,11 @@ def _signal_tone(value: Any) -> str:
     return "neutral"
 
 
-def _official_t86_available(snapshot: Optional[Dict[str, Any]]) -> bool:
+def _official_chip_available(snapshot: Optional[Dict[str, Any]]) -> bool:
     if not snapshot:
         return False
-    if str(snapshot.get("source") or "").strip().lower() == "twse_t86":
+    source = str(snapshot.get("source") or "").strip().lower()
+    if source in {OFFICIAL_TWSE_SOURCE, OFFICIAL_TPEX_SOURCE}:
         return True
     keys = (
         "foreign_net_buy_sell",
@@ -124,11 +161,16 @@ def build_taiwan_chip_summary(snapshot: Optional[Dict[str, Any]]) -> Dict[str, A
             "signals": [],
         }
 
-    if _official_t86_available(snapshot):
+    if _official_chip_available(snapshot):
         total_net = _safe_int(snapshot.get("institutional_net_buy_sell"))
         foreign_net = _safe_int(snapshot.get("foreign_net_buy_sell"))
         trust_net = _safe_int(snapshot.get("investment_trust_net_buy_sell"))
         dealer_net = _safe_int(snapshot.get("dealer_net_buy_sell"))
+        source_label = "官方三大法人"
+        if str(snapshot.get("source") or "").strip().lower() == OFFICIAL_TWSE_SOURCE:
+            source_label = "TWSE 官方三大法人"
+        elif str(snapshot.get("source") or "").strip().lower() == OFFICIAL_TPEX_SOURCE:
+            source_label = "TPEX 官方三大法人"
 
         bias = "neutral"
         if total_net > 0:
@@ -161,7 +203,7 @@ def build_taiwan_chip_summary(snapshot: Optional[Dict[str, Any]]) -> Dict[str, A
 
         return {
             "bias": bias,
-            "headline": f"{snapshot.get('ticker') or 'TW'} 官方三大法人 / {snapshot.get('snapshot_date') or 'N/A'}",
+            "headline": f"{snapshot.get('ticker') or 'TW'} {source_label} / {snapshot.get('snapshot_date') or 'N/A'}",
             "signals": signals,
             "metrics": {
                 "foreign_net_buy_sell": foreign_net,
@@ -248,7 +290,12 @@ class TaiwanChipProvider:
         if existing and not force_refresh:
             return existing
 
-        sync_result = await self.ensure_daily_snapshot(query_date, force_refresh=force_refresh, allow_fallback=True)
+        sync_result = await self.ensure_daily_snapshot(
+            query_date,
+            force_refresh=force_refresh,
+            allow_fallback=True,
+            sources=self._sources_for_ticker(normalized),
+        )
         resolved_date = sync_result.get("resolved_date") or query_date.isoformat()
         snapshot = await db.get_taiwan_chip_snapshot(normalized, resolved_date)
         if snapshot:
@@ -280,60 +327,87 @@ class TaiwanChipProvider:
         *,
         force_refresh: bool = False,
         allow_fallback: bool = True,
+        sources: tuple[str, ...] | None = None,
     ) -> Dict[str, Any]:
         requested_date = self._coerce_target_date(target_date)
-        if requested_date < TWSE_T86_EARLIEST_DATE:
+        normalized_sources = self._normalize_sources(sources)
+        if "twse" in normalized_sources and requested_date < TWSE_T86_EARLIEST_DATE:
             raise ValueError(f"TWSE T86 earliest date is {TWSE_T86_EARLIEST_DATE.isoformat()}")
 
         requested_iso = requested_date.isoformat()
         if not force_refresh:
-            existing_count = await db.get_taiwan_chip_snapshot_count(requested_iso)
-            if existing_count:
+            source_counts = await db.get_taiwan_chip_snapshot_source_counts(requested_iso)
+            if self._has_required_sources(source_counts, normalized_sources):
                 return {
                     "requested_date": requested_iso,
                     "resolved_date": requested_iso,
-                    "row_count": existing_count,
+                    "row_count": sum(source_counts.values()),
                     "source": "local_db",
                 }
 
         async with self._sync_lock:
             if not force_refresh:
-                existing_count = await db.get_taiwan_chip_snapshot_count(requested_iso)
-                if existing_count:
+                source_counts = await db.get_taiwan_chip_snapshot_source_counts(requested_iso)
+                if self._has_required_sources(source_counts, normalized_sources):
                     return {
                         "requested_date": requested_iso,
                         "resolved_date": requested_iso,
-                        "row_count": existing_count,
+                        "row_count": sum(source_counts.values()),
                         "source": "local_db",
                     }
 
-            fetched = await asyncio.to_thread(self._fetch_daily_snapshot_sync, requested_date)
-            if fetched["snapshots"]:
-                await db.upsert_taiwan_chip_snapshots(fetched["snapshots"])
+            fetched_results = await asyncio.to_thread(self._fetch_sources_sync, requested_date, normalized_sources)
+            merged_snapshots = [
+                snapshot
+                for result in fetched_results.values()
+                for snapshot in result.get("snapshots", [])
+            ]
+            if merged_snapshots:
+                await db.upsert_taiwan_chip_snapshots(merged_snapshots)
                 return {
                     "requested_date": requested_iso,
                     "resolved_date": requested_iso,
-                    "row_count": len(fetched["snapshots"]),
-                    "source": "twse_t86",
-                    "format_version": fetched["format_version"],
+                    "row_count": len(merged_snapshots),
+                    "source": "+".join(
+                        result.get("source_name")
+                        for result in fetched_results.values()
+                        if result.get("snapshots")
+                    ),
+                    "formats": {
+                        source_name: result.get("format_version")
+                        for source_name, result in fetched_results.items()
+                        if result.get("snapshots")
+                    },
                 }
 
+            failure_messages = [
+                result.get("message")
+                for result in fetched_results.values()
+                if result.get("message")
+            ]
+            failure_message = "；".join(dict.fromkeys(failure_messages))
             if allow_fallback:
-                fallback = await self._resolve_fallback_snapshot(requested_date, force_refresh=force_refresh)
+                fallback = await self._resolve_fallback_snapshot(
+                    requested_date,
+                    force_refresh=force_refresh,
+                    sources=normalized_sources,
+                )
                 if fallback:
                     fallback["requested_date"] = requested_iso
-                    fallback["warning"] = fetched["message"]
+                    fallback["warning"] = failure_message
                     return fallback
 
-            raise RuntimeError(fetched["message"] or f"TWSE T86 returned no data for {requested_iso}")
+            raise RuntimeError(failure_message or f"No Taiwan chip data available for {requested_iso}")
 
     async def _resolve_fallback_snapshot(
         self,
         requested_date: date,
         *,
         force_refresh: bool = False,
+        sources: tuple[str, ...] | None = None,
     ) -> Optional[Dict[str, Any]]:
         requested_iso = requested_date.isoformat()
+        normalized_sources = self._normalize_sources(sources)
         latest_local = await db.get_latest_taiwan_chip_snapshot_date(on_or_before=requested_iso)
         if latest_local:
             return {
@@ -344,28 +418,49 @@ class TaiwanChipProvider:
 
         for offset in range(1, 15):
             candidate = requested_date - timedelta(days=offset)
-            if candidate < TWSE_T86_EARLIEST_DATE:
+            if "twse" in normalized_sources and candidate < TWSE_T86_EARLIEST_DATE:
                 break
             candidate_iso = candidate.isoformat()
             if not force_refresh:
-                candidate_count = await db.get_taiwan_chip_snapshot_count(candidate_iso)
-                if candidate_count:
+                source_counts = await db.get_taiwan_chip_snapshot_source_counts(candidate_iso)
+                if self._has_required_sources(source_counts, normalized_sources):
                     return {
                         "resolved_date": candidate_iso,
-                        "row_count": candidate_count,
+                        "row_count": sum(source_counts.values()),
                         "source": "local_db",
                     }
-            fetched = await asyncio.to_thread(self._fetch_daily_snapshot_sync, candidate)
-            if not fetched["snapshots"]:
+            fetched_results = await asyncio.to_thread(self._fetch_sources_sync, candidate, normalized_sources)
+            merged_snapshots = [
+                snapshot
+                for result in fetched_results.values()
+                for snapshot in result.get("snapshots", [])
+            ]
+            if not merged_snapshots:
                 continue
-            await db.upsert_taiwan_chip_snapshots(fetched["snapshots"])
+            await db.upsert_taiwan_chip_snapshots(merged_snapshots)
             return {
                 "resolved_date": candidate_iso,
-                "row_count": len(fetched["snapshots"]),
-                "source": "twse_t86",
-                "format_version": fetched["format_version"],
+                "row_count": len(merged_snapshots),
+                "source": "+".join(
+                    result.get("source_name")
+                    for result in fetched_results.values()
+                    if result.get("snapshots")
+                ),
+                "formats": {
+                    source_name: result.get("format_version")
+                    for source_name, result in fetched_results.items()
+                    if result.get("snapshots")
+                },
             }
         return None
+
+    def _fetch_sources_sync(self, target_date: date, sources: tuple[str, ...]) -> Dict[str, Dict[str, Any]]:
+        results: Dict[str, Dict[str, Any]] = {}
+        if "twse" in sources:
+            results["twse"] = self._fetch_daily_snapshot_sync(target_date)
+        if "tpex" in sources:
+            results["tpex"] = self._fetch_tpex_daily_snapshot_sync(target_date)
+        return results
 
     def _fetch_daily_snapshot_sync(self, target_date: date) -> Dict[str, Any]:
         response = self._session.get(
@@ -389,6 +484,7 @@ class TaiwanChipProvider:
                 "snapshots": [],
                 "message": stat or f"TWSE T86 returned no rows for {target_date.isoformat()}",
                 "format_version": None,
+                "source_name": OFFICIAL_TWSE_SOURCE,
             }
 
         normalized_fields = [TWSE_FIELD_ALIASES.get(_canonicalize_twse_field(field), "") for field in fields]
@@ -404,6 +500,56 @@ class TaiwanChipProvider:
             "snapshots": snapshots,
             "message": "",
             "format_version": format_version,
+            "source_name": OFFICIAL_TWSE_SOURCE,
+        }
+
+    def _fetch_tpex_daily_snapshot_sync(self, target_date: date) -> Dict[str, Any]:
+        response = self._session.get(
+            TPEX_3ITRADE_URL,
+            params={
+                "l": "zh-tw",
+                "o": "json",
+                "d": self._to_roc_date_string(target_date),
+                "s": "0,asc",
+            },
+            timeout=30,
+            verify=self._verify_ssl,
+            headers=TPEX_REQUEST_HEADERS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        stat = str(payload.get("stat") or "").strip().lower()
+        tables = payload.get("tables") or []
+        table = tables[0] if tables else {}
+        rows = table.get("data") or []
+        if stat != "ok" or not rows:
+            return {
+                "snapshots": [],
+                "message": f"TPEX 3itrade returned no rows for {target_date.isoformat()}",
+                "format_version": None,
+                "source_name": OFFICIAL_TPEX_SOURCE,
+            }
+
+        snapshot_date = target_date.isoformat()
+        snapshots = []
+        for row in rows:
+            snapshot = self._build_snapshot_from_row(
+                row,
+                TPEX_JSON_FIELD_KEYS,
+                snapshot_date,
+                "current",
+                source=OFFICIAL_TPEX_SOURCE,
+                default_suffix="TWO",
+            )
+            if snapshot:
+                snapshots.append(snapshot)
+
+        return {
+            "snapshots": snapshots,
+            "message": "",
+            "format_version": "current",
+            "source_name": OFFICIAL_TPEX_SOURCE,
         }
 
     def _build_snapshot_from_row(
@@ -412,6 +558,9 @@ class TaiwanChipProvider:
         normalized_fields: list[str],
         snapshot_date: str,
         format_version: str,
+        *,
+        source: str = OFFICIAL_TWSE_SOURCE,
+        default_suffix: str = "TW",
     ) -> Optional[Dict[str, Any]]:
         if not isinstance(row, list) or not row:
             return None
@@ -426,6 +575,7 @@ class TaiwanChipProvider:
         security_name = str(row_map.get("security_name") or "").strip()
         if not security_code:
             return None
+        ticker = resolve_taiwan_ticker(security_code) or f"{security_code}.{default_suffix}"
 
         foreign_ex_buy = _parse_optional_int(row_map.get("foreign_ex_dealer_buy"))
         foreign_ex_sell = _parse_optional_int(row_map.get("foreign_ex_dealer_sell"))
@@ -470,7 +620,7 @@ class TaiwanChipProvider:
             institutional_net = _safe_int(foreign_net) + _safe_int(trust_net) + _safe_int(dealer_net)
 
         snapshot = {
-            "ticker": f"{security_code}.TW",
+            "ticker": ticker,
             "market": "TW",
             "snapshot_date": snapshot_date,
             "margin_balance": None,
@@ -480,11 +630,12 @@ class TaiwanChipProvider:
             "investment_trust_net_buy_sell": trust_net,
             "dealer_net_buy_sell": dealer_net,
             "institutional_net_buy_sell": institutional_net,
-            "source": "twse_t86",
+            "source": source,
             "branch_payload": {
                 "security_code": security_code,
                 "security_name": security_name,
                 "format_version": format_version,
+                "exchange": "TPEX" if source == OFFICIAL_TPEX_SOURCE else "TWSE",
                 "foreign_buy": foreign_buy,
                 "foreign_sell": foreign_sell,
                 "foreign_net": foreign_net,
@@ -575,3 +726,32 @@ class TaiwanChipProvider:
         if isinstance(value, str) and value.strip():
             return datetime.strptime(value.strip(), "%Y-%m-%d").date()
         return date.today()
+
+    @staticmethod
+    def _to_roc_date_string(value: date) -> str:
+        return f"{value.year - 1911:03d}/{value.month:02d}/{value.day:02d}"
+
+    @staticmethod
+    def _sources_for_ticker(ticker: str) -> tuple[str, ...]:
+        if str(ticker or "").strip().upper().endswith(".TWO"):
+            return ("tpex",)
+        return ("twse",)
+
+    @staticmethod
+    def _normalize_sources(sources: tuple[str, ...] | None) -> tuple[str, ...]:
+        if not sources:
+            return SUPPORTED_SYNC_SOURCES
+        normalized = tuple(
+            str(source).strip().lower()
+            for source in sources
+            if str(source).strip().lower() in SUPPORTED_SYNC_SOURCES
+        )
+        return normalized or SUPPORTED_SYNC_SOURCES
+
+    @staticmethod
+    def _has_required_sources(source_counts: Dict[str, int], sources: tuple[str, ...]) -> bool:
+        source_aliases = {
+            "twse": OFFICIAL_TWSE_SOURCE,
+            "tpex": OFFICIAL_TPEX_SOURCE,
+        }
+        return all(int(source_counts.get(source_aliases[source], 0)) > 0 for source in sources)

@@ -93,6 +93,22 @@ class TaiwanChipMixin:
         )
         return int((row or {}).get("row_count") or 0)
 
+    async def get_taiwan_chip_snapshot_source_counts(self, snapshot_date: str) -> Dict[str, int]:
+        rows = await self._fetchall(
+            """
+            SELECT `source`, COUNT(*) AS `row_count`
+            FROM `taiwan_chip_snapshots`
+            WHERE `snapshot_date`=%s
+            GROUP BY `source`
+            """,
+            (snapshot_date,),
+        )
+        return {
+            str(item.get("source") or ""): int(item.get("row_count") or 0)
+            for item in rows
+            if item.get("source")
+        }
+
     async def get_latest_taiwan_chip_snapshot_date(
         self,
         on_or_before: Optional[str] = None,
