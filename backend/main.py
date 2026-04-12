@@ -5,10 +5,13 @@ Refactored: routes are in backend/routers/*, schemas in backend/schemas.py.
 This file retains app creation, middleware, lifespan, and scheduler wiring.
 """
 
+import asyncio
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, time as time_of_day, timedelta, timezone
 from pathlib import Path
+from types import MethodType
 from zoneinfo import ZoneInfo
 
 import uvicorn
@@ -243,6 +246,44 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="QuantVision Pro API", version="1.0.0", lifespan=lifespan)
+
+
+def _install_quiet_router_lifespan(app: FastAPI) -> None:
+    router = app.router
+
+    async def quiet_lifespan(self, scope, receive, send):
+        started = False
+        lifespan_app = scope.get("app")
+        await receive()
+        try:
+            async with self.lifespan_context(lifespan_app) as maybe_state:
+                if maybe_state is not None:
+                    if "state" not in scope:
+                        raise RuntimeError('The server does not support "state" in the lifespan scope.')
+                    scope["state"].update(maybe_state)
+                await send({"type": "lifespan.startup.complete"})
+                started = True
+                await receive()
+        except asyncio.CancelledError:
+            if started:
+                log.info("Lifespan shutdown cancelled during reload; treating it as a normal shutdown.")
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+            raise
+        except BaseException:
+            exc_text = traceback.format_exc()
+            if started:
+                await send({"type": "lifespan.shutdown.failed", "message": exc_text})
+            else:
+                await send({"type": "lifespan.startup.failed", "message": exc_text})
+            raise
+        else:
+            await send({"type": "lifespan.shutdown.complete"})
+
+    router.lifespan = MethodType(quiet_lifespan, router)
+
+
+_install_quiet_router_lifespan(app)
 
 # ─── CORS ────────────────────────────────────────────────────
 
