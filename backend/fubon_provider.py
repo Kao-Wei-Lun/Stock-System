@@ -21,6 +21,7 @@ class FubonSDKManager:
         self._subscription_id_to_key: Dict[str, str] = {}
         self._message_handlers: list[Callable[[dict], None]] = []
         self._attached_targets: set[str] = set()
+        self._reinit_lock = asyncio.Lock()
         self._shutting_down = False
         self.connected = False
 
@@ -194,7 +195,49 @@ class FubonSDKManager:
         rest_client = getattr(marketdata, "rest_client", None)
         return getattr(rest_client, "futopt", None)
 
+    async def ensure_marketdata_ready(self, *, require_futopt: bool = False) -> bool:
+        if self._shutting_down:
+            return False
+        if self._has_marketdata_ready(require_futopt=require_futopt):
+            return True
+
+        async with self._reinit_lock:
+            if self._has_marketdata_ready(require_futopt=require_futopt):
+                return True
+
+            from database import db as _db
+            from repositories.fubon_accounts import FubonAccountRepository
+
+            repo = FubonAccountRepository(_db)
+            account = await repo.get_active_account()
+            if not account:
+                self.connected = False
+                log.info("No active Fubon account configured; marketdata reinitialization skipped")
+                return False
+
+            log.warning(
+                "Fubon marketdata client unavailable in memory; reinitializing active account %s",
+                account.get("label") or account.get("id"),
+            )
+            success = await self._init_with_account(account, repo)
+            if not success:
+                return False
+
+            self.start_ws_stock()
+            self.start_ws_futopt()
+            return self._has_marketdata_ready(require_futopt=require_futopt)
+
+    def _has_marketdata_ready(self, *, require_futopt: bool = False) -> bool:
+        if not self.connected:
+            return False
+        if self.get_rest_stock() is None:
+            return False
+        if require_futopt and self.get_rest_futopt() is None:
+            return False
+        return True
+
     async def fetch_stock_quote(self, symbol: str) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -215,6 +258,7 @@ class FubonSDKManager:
         timeframe: str | None = None,
         sort: str | None = None,
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -243,6 +287,7 @@ class FubonSDKManager:
         adjusted: bool | None = None,
         sort: str | None = None,
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -272,6 +317,7 @@ class FubonSDKManager:
         *,
         market: str = "TSE",
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -292,6 +338,7 @@ class FubonSDKManager:
         direction: str = "up",
         change: str = "percent",
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -311,6 +358,7 @@ class FubonSDKManager:
         market: str = "TSE",
         trade: str = "value",
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready()
         rest_stock = self.get_rest_stock()
         if not rest_stock:
             return None
@@ -332,6 +380,7 @@ class FubonSDKManager:
         session: str = "REGULAR",
         contractType: str = "I",
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready(require_futopt=True)
         rest_futopt = self.get_rest_futopt()
         if not rest_futopt:
             return None
@@ -356,6 +405,7 @@ class FubonSDKManager:
         *,
         session: str | None = None,
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready(require_futopt=True)
         rest_futopt = self.get_rest_futopt()
         if not rest_futopt:
             return None
@@ -380,6 +430,7 @@ class FubonSDKManager:
         session: str = "REGULAR",
         contractType: str = "I",
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready(require_futopt=True)
         rest_futopt = self.get_rest_futopt()
         if not rest_futopt:
             return None
@@ -405,6 +456,7 @@ class FubonSDKManager:
         timeframe: str | None = None,
         session: str | None = None,
     ) -> Optional[dict]:
+        await self.ensure_marketdata_ready(require_futopt=True)
         rest_futopt = self.get_rest_futopt()
         if not rest_futopt:
             return None

@@ -1,4 +1,6 @@
 import asyncio
+import database
+import repositories.fubon_accounts as fubon_accounts_repo
 
 from fubon_provider import FubonSDKManager
 
@@ -179,9 +181,18 @@ class FakeRestStock:
         self.snapshot = snapshot
 
 
+class FakeRepo:
+    def __init__(self, account):
+        self.account = account
+
+    async def get_active_account(self):
+        return self.account
+
+
 def test_fetch_stock_snapshot_quotes_calls_sdk_snapshot_quotes():
     manager = FubonSDKManager()
     snapshot = FakeSnapshotApi()
+    manager.connected = True
     manager.get_rest_stock = lambda: FakeRestStock(snapshot)
 
     payload = asyncio.run(manager.fetch_stock_snapshot_quotes(market="TSE"))
@@ -193,6 +204,7 @@ def test_fetch_stock_snapshot_quotes_calls_sdk_snapshot_quotes():
 def test_fetch_stock_snapshot_movers_and_actives_call_snapshot_methods():
     manager = FubonSDKManager()
     snapshot = FakeSnapshotApi()
+    manager.connected = True
     manager.get_rest_stock = lambda: FakeRestStock(snapshot)
 
     movers = asyncio.run(manager.fetch_stock_snapshot_movers(market="OTC", direction="down", change="percent"))
@@ -204,3 +216,62 @@ def test_fetch_stock_snapshot_movers_and_actives_call_snapshot_methods():
         ("movers", {"market": "OTC", "direction": "down", "change": "percent"}),
         ("actives", {"market": "TSE", "trade": "value"}),
     ]
+
+
+def test_ensure_marketdata_ready_reinitializes_when_rest_client_is_missing(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    state = {"ready": False}
+    calls = []
+
+    manager.get_rest_stock = lambda: object() if state["ready"] else None
+    manager.start_ws_stock = lambda: calls.append("start_ws_stock") or True
+    manager.start_ws_futopt = lambda: calls.append("start_ws_futopt") or True
+
+    fake_repo = FakeRepo({"id": 2, "label": "Kao"})
+
+    monkeypatch.setattr(database, "db", object())
+    monkeypatch.setattr(fubon_accounts_repo, "FubonAccountRepository", lambda _db: fake_repo)
+
+    async def fake_init_with_account(account, repo=None):
+        calls.append(("init", account["id"], repo is fake_repo))
+        state["ready"] = True
+        manager.connected = True
+        return True
+
+    monkeypatch.setattr(manager, "_init_with_account", fake_init_with_account)
+
+    assert asyncio.run(manager.ensure_marketdata_ready()) is True
+    assert calls == [
+        ("init", 2, True),
+        "start_ws_stock",
+        "start_ws_futopt",
+    ]
+
+
+def test_fetch_stock_snapshot_quotes_self_heals_missing_rest_client(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    snapshot = FakeSnapshotApi()
+    state = {"ready": False}
+
+    manager.get_rest_stock = lambda: FakeRestStock(snapshot) if state["ready"] else None
+    manager.start_ws_stock = lambda: True
+    manager.start_ws_futopt = lambda: True
+
+    fake_repo = FakeRepo({"id": 2, "label": "Kao"})
+
+    monkeypatch.setattr(database, "db", object())
+    monkeypatch.setattr(fubon_accounts_repo, "FubonAccountRepository", lambda _db: fake_repo)
+
+    async def fake_init_with_account(account, repo=None):
+        state["ready"] = True
+        manager.connected = True
+        return True
+
+    monkeypatch.setattr(manager, "_init_with_account", fake_init_with_account)
+
+    payload = asyncio.run(manager.fetch_stock_snapshot_quotes(market="TSE"))
+
+    assert payload["market"] == "TSE"
+    assert snapshot.calls == [("quotes", {"market": "TSE"})]
