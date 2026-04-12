@@ -141,11 +141,15 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
         def __init__(self):
             self.connected = True
             self.handler = None
+            self.unregistered = None
             self.start_stock_calls = 0
             self.start_futopt_calls = 0
 
         def register_message_handler(self, handler):
             self.handler = handler
+
+        def unregister_message_handler(self, handler):
+            self.unregistered = handler
 
         def start_ws_stock(self):
             self.start_stock_calls += 1
@@ -209,6 +213,7 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert manager.unregistered is manager.handler
     assert manager.start_stock_calls == 0
     assert manager.start_futopt_calls == 0
     assert stored_quotes[0]["ticker"] == "2330.TW"

@@ -21,6 +21,7 @@ class FubonSDKManager:
         self._subscription_id_to_key: Dict[str, str] = {}
         self._message_handlers: list[Callable[[dict], None]] = []
         self._attached_targets: set[str] = set()
+        self._shutting_down = False
         self.connected = False
 
     @property
@@ -46,6 +47,7 @@ class FubonSDKManager:
         if repo and account_id:
             await repo.update_connection_status(account_id, "connecting")
 
+        self._shutting_down = False
         old_targets = (self._ws_stock, self._ws_futopt, self._sdk)
         self._reset_runtime_state()
 
@@ -152,8 +154,13 @@ class FubonSDKManager:
         return True
 
     def register_message_handler(self, handler: Callable[[dict], None]) -> None:
+        if handler in self._message_handlers:
+            return
         self._message_handlers.append(handler)
         self._attach_message_handlers()
+
+    def unregister_message_handler(self, handler: Callable[[dict], None]) -> None:
+        self._message_handlers = [item for item in self._message_handlers if item is not handler]
 
     def subscribe_stock(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
         return self._subscribe(self._ws_stock, "stock", symbol, channel)
@@ -417,6 +424,9 @@ class FubonSDKManager:
         return await asyncio.to_thread(_fetch_sync)
 
     def shutdown(self) -> None:
+        self._shutting_down = True
+        self.connected = False
+        self._message_handlers.clear()
         self._best_effort_shutdown(self._ws_stock)
         self._best_effort_shutdown(self._ws_futopt)
         self._best_effort_shutdown(self._sdk)
@@ -472,6 +482,8 @@ class FubonSDKManager:
                     continue
 
     def _dispatch_ws_message(self, market_type: str, message: Any) -> None:
+        if self._shutting_down:
+            return
         payload = self._normalize_ws_message(market_type, message)
         if not payload:
             return
@@ -483,15 +495,22 @@ class FubonSDKManager:
                 log.warning("Fubon message handler failed: %s", exc)
 
     def _handle_ws_connect(self, market_type: str, *args) -> None:
+        if self._shutting_down:
+            return
         self._ws_started_targets.add(market_type)
         log.info("Fubon %s websocket connected", market_type)
 
     def _handle_ws_disconnect(self, market_type: str, *args) -> None:
         self._ws_started_targets.discard(market_type)
+        if self._shutting_down or not self.connected:
+            log.info("Fubon %s websocket closed during shutdown", market_type)
+            return
         log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
         self._reconnect_ws_target(market_type)
 
     def _handle_ws_error(self, market_type: str, *args) -> None:
+        if self._shutting_down:
+            return
         log.warning("Fubon %s websocket error: %s", market_type, args or "unknown")
 
     def _reconnect_ws_target(self, market_type: str) -> None:
@@ -629,7 +648,7 @@ class FubonSDKManager:
         return None
 
     def _start_ws_target(self, target, market_type: str) -> bool:
-        if not target:
+        if self._shutting_down or not target:
             return False
         self._attach_message_handlers()
         if market_type in self._ws_started_targets:

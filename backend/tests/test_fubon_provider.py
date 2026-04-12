@@ -129,6 +129,34 @@ def test_start_ws_stock_is_idempotent_for_already_started_socket():
     assert manager._ws_stock.connect_calls == 1
 
 
+def test_unregister_message_handler_and_shutdown_suppress_dispatch():
+    manager = FubonSDKManager()
+    received = []
+
+    def handler(message):
+        received.append(message)
+
+    manager.register_message_handler(handler)
+    manager.unregister_message_handler(handler)
+    manager._dispatch_ws_message("stock", {"event": "data", "data": {"symbol": "2330"}})
+
+    assert received == []
+
+
+def test_disconnect_during_shutdown_does_not_reconnect():
+    manager = FubonSDKManager()
+    manager.connected = True
+    manager._shutting_down = True
+    manager._ws_started_targets.add("stock")
+    reconnected = []
+    manager._reconnect_ws_target = lambda market_type: reconnected.append(market_type)
+
+    manager._handle_ws_disconnect("stock", None, None)
+
+    assert reconnected == []
+    assert "stock" not in manager._ws_started_targets
+
+
 class FakeSnapshotApi:
     def __init__(self):
         self.calls = []

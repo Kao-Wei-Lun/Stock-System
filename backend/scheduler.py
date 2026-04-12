@@ -186,76 +186,87 @@ async def fubon_ws_listener_loop(
     loop = asyncio.get_running_loop()
 
     def _on_fubon_message(message: dict) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, message)
+        if loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, message)
+        except RuntimeError:
+            return
 
     fubon_manager.register_message_handler(_on_fubon_message)
-    await asyncio.sleep(3)
-    if fubon_manager.connected:
-        log.info("Fubon websocket listener is active")
+    try:
+        await asyncio.sleep(3)
+        if fubon_manager.connected:
+            log.info("Fubon websocket listener is active")
 
-    while True:
-        try:
-            message = await asyncio.wait_for(queue.get(), timeout=60)
-        except asyncio.TimeoutError:
-            continue
-
-        try:
-            if str(message.get("event") or "").strip().lower() != "data":
-                continue
-            raw = message.get("data")
-            if not isinstance(raw, dict):
-                continue
-            market_type = str(message.get("market_type") or "stock").strip().lower()
-            channel = str(message.get("channel") or "").strip().lower()
-            ticker = _resolve_fubon_ticker(market_type, raw)
-            if not ticker or not channel:
+        while True:
+            try:
+                message = await asyncio.wait_for(queue.get(), timeout=60)
+            except asyncio.TimeoutError:
                 continue
 
-            if channel == "aggregates":
-                quote_payload = build_fubon_quote_payload(ticker, raw, source="fubon_neo")
-                if not quote_payload:
+            try:
+                if str(message.get("event") or "").strip().lower() != "data":
                     continue
-                if callable(store_quote_to_db):
-                    await store_quote_to_db(quote_payload)
-                await broadcast_to_ticker(
-                    ticker,
-                    {
-                        "type": "quote",
-                        "ticker": ticker,
-                        "data": quote_payload,
-                        "ts": int(time.time() * 1000),
-                    },
-                )
-                continue
-
-            if channel == "books":
-                await broadcast_to_ticker(
-                    ticker,
-                    {
-                        "type": "books",
-                        "ticker": ticker,
-                        "data": _build_fubon_book_payload(ticker, raw),
-                        "ts": int(time.time() * 1000),
-                    },
-                )
-                continue
-
-            if channel == "candles":
-                candle_payload = _build_fubon_candle_payload(ticker, raw)
-                if not candle_payload:
+                raw = message.get("data")
+                if not isinstance(raw, dict):
                     continue
-                await broadcast_to_ticker(
-                    ticker,
-                    {
-                        "type": "candle",
-                        "ticker": ticker,
-                        "data": candle_payload,
-                        "ts": int(time.time() * 1000),
-                    },
-                )
-        except Exception as exc:
-            log.warning("Fubon websocket message handling failed: %s", exc)
-            await asyncio.sleep(1)
+                market_type = str(message.get("market_type") or "stock").strip().lower()
+                channel = str(message.get("channel") or "").strip().lower()
+                ticker = _resolve_fubon_ticker(market_type, raw)
+                if not ticker or not channel:
+                    continue
+
+                if channel == "aggregates":
+                    quote_payload = build_fubon_quote_payload(ticker, raw, source="fubon_neo")
+                    if not quote_payload:
+                        continue
+                    if callable(store_quote_to_db):
+                        await store_quote_to_db(quote_payload)
+                    await broadcast_to_ticker(
+                        ticker,
+                        {
+                            "type": "quote",
+                            "ticker": ticker,
+                            "data": quote_payload,
+                            "ts": int(time.time() * 1000),
+                        },
+                    )
+                    continue
+
+                if channel == "books":
+                    await broadcast_to_ticker(
+                        ticker,
+                        {
+                            "type": "books",
+                            "ticker": ticker,
+                            "data": _build_fubon_book_payload(ticker, raw),
+                            "ts": int(time.time() * 1000),
+                        },
+                    )
+                    continue
+
+                if channel == "candles":
+                    candle_payload = _build_fubon_candle_payload(ticker, raw)
+                    if not candle_payload:
+                        continue
+                    await broadcast_to_ticker(
+                        ticker,
+                        {
+                            "type": "candle",
+                            "ticker": ticker,
+                            "data": candle_payload,
+                            "ts": int(time.time() * 1000),
+                        },
+                    )
+            except Exception as exc:
+                log.warning("Fubon websocket message handling failed: %s", exc)
+                await asyncio.sleep(1)
+    finally:
+        unregister = getattr(fubon_manager, "unregister_message_handler", None)
+        if callable(unregister):
+            with suppress(Exception):
+                unregister(_on_fubon_message)
 
 
 async def realtime_polling_loop(
