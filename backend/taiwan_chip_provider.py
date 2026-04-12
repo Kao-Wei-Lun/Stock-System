@@ -1,11 +1,52 @@
 from __future__ import annotations
 
-from datetime import date
+import asyncio
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
+
+import requests
+import urllib3
 
 from data_fetcher import DataFetcher, normalize_ticker
 from database import db
 from market_intelligence import infer_market
+
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
+TWSE_T86_EARLIEST_DATE = date(2012, 5, 2)
+TWSE_REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.twse.com.tw/zh/trading/foreign/t86.html",
+}
+TWSE_FIELD_ALIASES = {
+    "證券代號": "security_code",
+    "證券名稱": "security_name",
+    "外資買進股數": "foreign_buy",
+    "外資賣出股數": "foreign_sell",
+    "外資買賣超股數": "foreign_net",
+    "外資買進股數(不含外資自營商)": "foreign_ex_dealer_buy",
+    "外資賣出股數(不含外資自營商)": "foreign_ex_dealer_sell",
+    "外資買賣超股數(不含外資自營商)": "foreign_ex_dealer_net",
+    "外資自營商買進股數": "foreign_dealer_buy",
+    "外資自營商賣出股數": "foreign_dealer_sell",
+    "外資自營商買賣超股數": "foreign_dealer_net",
+    "投信買進股數": "investment_trust_buy",
+    "投信賣出股數": "investment_trust_sell",
+    "投信買賣超股數": "investment_trust_net",
+    "自營商買進股數": "dealer_buy",
+    "自營商賣出股數": "dealer_sell",
+    "自營商買賣超股數": "dealer_net",
+    "自營商買進股數(自行買賣)": "dealer_self_buy",
+    "自營商賣出股數(自行買賣)": "dealer_self_sell",
+    "自營商買賣超股數(自行買賣)": "dealer_self_net",
+    "自營商買進股數(避險)": "dealer_hedge_buy",
+    "自營商賣出股數(避險)": "dealer_hedge_sell",
+    "自營商買賣超股數(避險)": "dealer_hedge_net",
+    "三大法人買賣超股數": "institutional_net",
+}
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -22,38 +63,456 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _parse_optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().replace(",", "")
+    if not text or text in {"--", "-", "X", "除權息"}:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _canonicalize_twse_field(label: Any) -> str:
+    text = str(label or "").strip()
+    text = text.replace("\u3000", "").replace(" ", "")
+    text = text.replace("（", "(").replace("）", ")")
+    text = text.replace("外陸資", "外資").replace("外資及陸資", "外資")
+    return text
+
+
+def _signed_value(value: Any) -> str:
+    numeric = _safe_int(value)
+    if numeric > 0:
+        return f"+{numeric:,}"
+    if numeric < 0:
+        return f"-{abs(numeric):,}"
+    return "0"
+
+
+def _signal_tone(value: Any) -> str:
+    numeric = _safe_int(value)
+    if numeric > 0:
+        return "positive"
+    if numeric < 0:
+        return "caution"
+    return "neutral"
+
+
+def _official_t86_available(snapshot: Optional[Dict[str, Any]]) -> bool:
+    if not snapshot:
+        return False
+    if str(snapshot.get("source") or "").strip().lower() == "twse_t86":
+        return True
+    keys = (
+        "foreign_net_buy_sell",
+        "investment_trust_net_buy_sell",
+        "dealer_net_buy_sell",
+    )
+    return any(snapshot.get(key) is not None for key in keys)
+
+
+def build_taiwan_chip_summary(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not snapshot:
+        return {
+            "bias": "neutral",
+            "headline": "尚未同步台股籌碼資料",
+            "signals": [],
+        }
+
+    if _official_t86_available(snapshot):
+        total_net = _safe_int(snapshot.get("institutional_net_buy_sell"))
+        foreign_net = _safe_int(snapshot.get("foreign_net_buy_sell"))
+        trust_net = _safe_int(snapshot.get("investment_trust_net_buy_sell"))
+        dealer_net = _safe_int(snapshot.get("dealer_net_buy_sell"))
+
+        bias = "neutral"
+        if total_net > 0:
+            bias = "bullish"
+        elif total_net < 0:
+            bias = "bearish"
+
+        signals = [
+            {
+                "tone": _signal_tone(total_net),
+                "label": "三大法人合計",
+                "value": _signed_value(total_net),
+            },
+            {
+                "tone": _signal_tone(foreign_net),
+                "label": "外資",
+                "value": _signed_value(foreign_net),
+            },
+            {
+                "tone": _signal_tone(trust_net),
+                "label": "投信",
+                "value": _signed_value(trust_net),
+            },
+            {
+                "tone": _signal_tone(dealer_net),
+                "label": "自營商",
+                "value": _signed_value(dealer_net),
+            },
+        ]
+
+        return {
+            "bias": bias,
+            "headline": f"{snapshot.get('ticker') or 'TW'} 官方三大法人 / {snapshot.get('snapshot_date') or 'N/A'}",
+            "signals": signals,
+            "metrics": {
+                "foreign_net_buy_sell": foreign_net,
+                "investment_trust_net_buy_sell": trust_net,
+                "dealer_net_buy_sell": dealer_net,
+                "institutional_net_buy_sell": total_net,
+            },
+        }
+
+    margin_balance = _safe_int(snapshot.get("margin_balance"))
+    short_balance = _safe_int(snapshot.get("short_balance"))
+    lending_balance = _safe_int(snapshot.get("securities_lending_balance"))
+    institutional_net = _safe_int(snapshot.get("institutional_net_buy_sell"))
+    bias = "neutral"
+    if institutional_net > 0 and short_balance < margin_balance:
+        bias = "bullish"
+    elif institutional_net < 0 and short_balance >= margin_balance * 0.3:
+        bias = "bearish"
+
+    signals = [
+        {
+            "tone": "positive" if institutional_net > 0 else "caution" if institutional_net < 0 else "neutral",
+            "label": "法人方向",
+            "value": _signed_value(institutional_net),
+        },
+        {
+            "tone": "neutral",
+            "label": "融資餘額",
+            "value": f"{margin_balance:,}",
+        },
+        {
+            "tone": "neutral",
+            "label": "融券餘額",
+            "value": f"{short_balance:,}",
+        },
+        {
+            "tone": "neutral",
+            "label": "借券餘額",
+            "value": f"{lending_balance:,}",
+        },
+    ]
+
+    return {
+        "bias": bias,
+        "headline": f"{snapshot.get('ticker') or 'TW'} 籌碼摘要 / {snapshot.get('snapshot_date') or 'N/A'}",
+        "signals": signals,
+        "metrics": {
+            "margin_balance": margin_balance,
+            "short_balance": short_balance,
+            "securities_lending_balance": lending_balance,
+            "institutional_net_buy_sell": institutional_net,
+        },
+    }
+
+
 class TaiwanChipProvider:
-    """
-    A local-first Taiwan chip snapshot provider.
-
-    The current implementation derives a stable baseline snapshot from locally
-    persisted OHLCV plus fundamentals metadata, so the UI/API can ship today
-    while leaving room for future official source integrations.
-    """
-
-    def __init__(self, fetcher: Optional[DataFetcher] = None):
+    def __init__(
+        self,
+        fetcher: Optional[DataFetcher] = None,
+        session: Optional[requests.Session] = None,
+        *,
+        verify_ssl: bool = False,
+    ):
         self._fetcher = fetcher or DataFetcher()
+        self._session = session or requests.Session()
+        self._session.headers.update(TWSE_REQUEST_HEADERS)
+        self._verify_ssl = verify_ssl
+        self._sync_lock = asyncio.Lock()
 
-    async def sync_ticker_snapshot(self, ticker: str) -> Optional[Dict[str, Any]]:
+    async def sync_ticker_snapshot(
+        self,
+        ticker: str,
+        target_date: date | str | None = None,
+        *,
+        force_refresh: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         normalized = normalize_ticker(ticker)
         market = infer_market(normalized)
         if market != "TW":
             return await db.get_taiwan_chip_snapshot(normalized)
 
-        latest = await db.get_latest_ohlcv(normalized)
-        if not latest:
+        query_date = self._coerce_target_date(target_date)
+        existing = await db.get_taiwan_chip_snapshot(normalized, query_date.isoformat())
+        if existing and not force_refresh:
+            return existing
+
+        sync_result = await self.ensure_daily_snapshot(query_date, force_refresh=force_refresh, allow_fallback=True)
+        resolved_date = sync_result.get("resolved_date") or query_date.isoformat()
+        snapshot = await db.get_taiwan_chip_snapshot(normalized, resolved_date)
+        if snapshot:
+            return snapshot
+
+        if query_date < TWSE_T86_EARLIEST_DATE:
+            return existing
+
+        latest = await db.get_taiwan_chip_snapshot(normalized)
+        if latest:
+            return latest
+
+        latest_ohlcv = await db.get_latest_ohlcv(normalized)
+        if not latest_ohlcv:
             await self._fetcher.fetch_and_store(normalized, period="6mo", interval="1d", include_info=True)
-            latest = await db.get_latest_ohlcv(normalized)
-        if not latest:
+            latest_ohlcv = await db.get_latest_ohlcv(normalized)
+        if not latest_ohlcv:
             return None
 
         prev_close = await db.get_prev_close(normalized)
         info = await db.get_stock_info(normalized)
-        snapshot = self._build_snapshot(normalized, latest, prev_close, info)
-        await db.upsert_taiwan_chip_snapshots([snapshot])
-        return await db.get_taiwan_chip_snapshot(normalized)
+        derived_snapshot = self._build_derived_snapshot(normalized, latest_ohlcv, prev_close, info)
+        await db.upsert_taiwan_chip_snapshots([derived_snapshot])
+        return await db.get_taiwan_chip_snapshot(normalized, derived_snapshot["snapshot_date"])
 
-    def _build_snapshot(
+    async def ensure_daily_snapshot(
+        self,
+        target_date: date | str | None = None,
+        *,
+        force_refresh: bool = False,
+        allow_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        requested_date = self._coerce_target_date(target_date)
+        if requested_date < TWSE_T86_EARLIEST_DATE:
+            raise ValueError(f"TWSE T86 earliest date is {TWSE_T86_EARLIEST_DATE.isoformat()}")
+
+        requested_iso = requested_date.isoformat()
+        if not force_refresh:
+            existing_count = await db.get_taiwan_chip_snapshot_count(requested_iso)
+            if existing_count:
+                return {
+                    "requested_date": requested_iso,
+                    "resolved_date": requested_iso,
+                    "row_count": existing_count,
+                    "source": "local_db",
+                }
+
+        async with self._sync_lock:
+            if not force_refresh:
+                existing_count = await db.get_taiwan_chip_snapshot_count(requested_iso)
+                if existing_count:
+                    return {
+                        "requested_date": requested_iso,
+                        "resolved_date": requested_iso,
+                        "row_count": existing_count,
+                        "source": "local_db",
+                    }
+
+            fetched = await asyncio.to_thread(self._fetch_daily_snapshot_sync, requested_date)
+            if fetched["snapshots"]:
+                await db.upsert_taiwan_chip_snapshots(fetched["snapshots"])
+                return {
+                    "requested_date": requested_iso,
+                    "resolved_date": requested_iso,
+                    "row_count": len(fetched["snapshots"]),
+                    "source": "twse_t86",
+                    "format_version": fetched["format_version"],
+                }
+
+            if allow_fallback:
+                fallback = await self._resolve_fallback_snapshot(requested_date, force_refresh=force_refresh)
+                if fallback:
+                    fallback["requested_date"] = requested_iso
+                    fallback["warning"] = fetched["message"]
+                    return fallback
+
+            raise RuntimeError(fetched["message"] or f"TWSE T86 returned no data for {requested_iso}")
+
+    async def _resolve_fallback_snapshot(
+        self,
+        requested_date: date,
+        *,
+        force_refresh: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        requested_iso = requested_date.isoformat()
+        latest_local = await db.get_latest_taiwan_chip_snapshot_date(on_or_before=requested_iso)
+        if latest_local:
+            return {
+                "resolved_date": latest_local,
+                "row_count": await db.get_taiwan_chip_snapshot_count(latest_local),
+                "source": "local_db",
+            }
+
+        for offset in range(1, 15):
+            candidate = requested_date - timedelta(days=offset)
+            if candidate < TWSE_T86_EARLIEST_DATE:
+                break
+            candidate_iso = candidate.isoformat()
+            if not force_refresh:
+                candidate_count = await db.get_taiwan_chip_snapshot_count(candidate_iso)
+                if candidate_count:
+                    return {
+                        "resolved_date": candidate_iso,
+                        "row_count": candidate_count,
+                        "source": "local_db",
+                    }
+            fetched = await asyncio.to_thread(self._fetch_daily_snapshot_sync, candidate)
+            if not fetched["snapshots"]:
+                continue
+            await db.upsert_taiwan_chip_snapshots(fetched["snapshots"])
+            return {
+                "resolved_date": candidate_iso,
+                "row_count": len(fetched["snapshots"]),
+                "source": "twse_t86",
+                "format_version": fetched["format_version"],
+            }
+        return None
+
+    def _fetch_daily_snapshot_sync(self, target_date: date) -> Dict[str, Any]:
+        response = self._session.get(
+            TWSE_T86_URL,
+            params={
+                "date": target_date.strftime("%Y%m%d"),
+                "selectType": "ALL",
+                "response": "json",
+            },
+            timeout=30,
+            verify=self._verify_ssl,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        stat = str(payload.get("stat") or "").strip()
+        fields = payload.get("fields") or []
+        rows = payload.get("data") or []
+        if stat != "OK" or not fields or not rows:
+            return {
+                "snapshots": [],
+                "message": stat or f"TWSE T86 returned no rows for {target_date.isoformat()}",
+                "format_version": None,
+            }
+
+        normalized_fields = [TWSE_FIELD_ALIASES.get(_canonicalize_twse_field(field), "") for field in fields]
+        format_version = "current" if "foreign_ex_dealer_net" in normalized_fields else "legacy"
+        snapshots = []
+        snapshot_date = target_date.isoformat()
+        for row in rows:
+            snapshot = self._build_snapshot_from_row(row, normalized_fields, snapshot_date, format_version)
+            if snapshot:
+                snapshots.append(snapshot)
+
+        return {
+            "snapshots": snapshots,
+            "message": "",
+            "format_version": format_version,
+        }
+
+    def _build_snapshot_from_row(
+        self,
+        row: Any,
+        normalized_fields: list[str],
+        snapshot_date: str,
+        format_version: str,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, list) or not row:
+            return None
+
+        row_map: Dict[str, Any] = {}
+        for index, key in enumerate(normalized_fields):
+            if not key or index >= len(row):
+                continue
+            row_map[key] = row[index]
+
+        security_code = str(row_map.get("security_code") or "").strip().upper()
+        security_name = str(row_map.get("security_name") or "").strip()
+        if not security_code:
+            return None
+
+        foreign_ex_buy = _parse_optional_int(row_map.get("foreign_ex_dealer_buy"))
+        foreign_ex_sell = _parse_optional_int(row_map.get("foreign_ex_dealer_sell"))
+        foreign_ex_net = _parse_optional_int(row_map.get("foreign_ex_dealer_net"))
+        foreign_dealer_buy = _parse_optional_int(row_map.get("foreign_dealer_buy"))
+        foreign_dealer_sell = _parse_optional_int(row_map.get("foreign_dealer_sell"))
+        foreign_dealer_net = _parse_optional_int(row_map.get("foreign_dealer_net"))
+        foreign_buy = _parse_optional_int(row_map.get("foreign_buy"))
+        foreign_sell = _parse_optional_int(row_map.get("foreign_sell"))
+        foreign_net = _parse_optional_int(row_map.get("foreign_net"))
+
+        if foreign_net is None and any(value is not None for value in (foreign_ex_net, foreign_dealer_net)):
+            foreign_net = _safe_int(foreign_ex_net) + _safe_int(foreign_dealer_net)
+        if foreign_buy is None and any(value is not None for value in (foreign_ex_buy, foreign_dealer_buy)):
+            foreign_buy = _safe_int(foreign_ex_buy) + _safe_int(foreign_dealer_buy)
+        if foreign_sell is None and any(value is not None for value in (foreign_ex_sell, foreign_dealer_sell)):
+            foreign_sell = _safe_int(foreign_ex_sell) + _safe_int(foreign_dealer_sell)
+
+        trust_buy = _parse_optional_int(row_map.get("investment_trust_buy"))
+        trust_sell = _parse_optional_int(row_map.get("investment_trust_sell"))
+        trust_net = _parse_optional_int(row_map.get("investment_trust_net"))
+
+        dealer_buy = _parse_optional_int(row_map.get("dealer_buy"))
+        dealer_sell = _parse_optional_int(row_map.get("dealer_sell"))
+        dealer_net = _parse_optional_int(row_map.get("dealer_net"))
+        dealer_self_buy = _parse_optional_int(row_map.get("dealer_self_buy"))
+        dealer_self_sell = _parse_optional_int(row_map.get("dealer_self_sell"))
+        dealer_self_net = _parse_optional_int(row_map.get("dealer_self_net"))
+        dealer_hedge_buy = _parse_optional_int(row_map.get("dealer_hedge_buy"))
+        dealer_hedge_sell = _parse_optional_int(row_map.get("dealer_hedge_sell"))
+        dealer_hedge_net = _parse_optional_int(row_map.get("dealer_hedge_net"))
+
+        if dealer_buy is None and any(value is not None for value in (dealer_self_buy, dealer_hedge_buy)):
+            dealer_buy = _safe_int(dealer_self_buy) + _safe_int(dealer_hedge_buy)
+        if dealer_sell is None and any(value is not None for value in (dealer_self_sell, dealer_hedge_sell)):
+            dealer_sell = _safe_int(dealer_self_sell) + _safe_int(dealer_hedge_sell)
+        if dealer_net is None and any(value is not None for value in (dealer_self_net, dealer_hedge_net)):
+            dealer_net = _safe_int(dealer_self_net) + _safe_int(dealer_hedge_net)
+
+        institutional_net = _parse_optional_int(row_map.get("institutional_net"))
+        if institutional_net is None:
+            institutional_net = _safe_int(foreign_net) + _safe_int(trust_net) + _safe_int(dealer_net)
+
+        snapshot = {
+            "ticker": f"{security_code}.TW",
+            "market": "TW",
+            "snapshot_date": snapshot_date,
+            "margin_balance": None,
+            "short_balance": None,
+            "securities_lending_balance": None,
+            "foreign_net_buy_sell": foreign_net,
+            "investment_trust_net_buy_sell": trust_net,
+            "dealer_net_buy_sell": dealer_net,
+            "institutional_net_buy_sell": institutional_net,
+            "source": "twse_t86",
+            "branch_payload": {
+                "security_code": security_code,
+                "security_name": security_name,
+                "format_version": format_version,
+                "foreign_buy": foreign_buy,
+                "foreign_sell": foreign_sell,
+                "foreign_net": foreign_net,
+                "foreign_ex_dealer_buy": foreign_ex_buy,
+                "foreign_ex_dealer_sell": foreign_ex_sell,
+                "foreign_ex_dealer_net": foreign_ex_net,
+                "foreign_dealer_buy": foreign_dealer_buy,
+                "foreign_dealer_sell": foreign_dealer_sell,
+                "foreign_dealer_net": foreign_dealer_net,
+                "investment_trust_buy": trust_buy,
+                "investment_trust_sell": trust_sell,
+                "investment_trust_net": trust_net,
+                "dealer_buy": dealer_buy,
+                "dealer_sell": dealer_sell,
+                "dealer_net": dealer_net,
+                "dealer_self_buy": dealer_self_buy,
+                "dealer_self_sell": dealer_self_sell,
+                "dealer_self_net": dealer_self_net,
+                "dealer_hedge_buy": dealer_hedge_buy,
+                "dealer_hedge_sell": dealer_hedge_sell,
+                "dealer_hedge_net": dealer_hedge_net,
+                "institutional_net": institutional_net,
+            },
+        }
+        snapshot["summary"] = build_taiwan_chip_summary(snapshot)
+        return snapshot
+
+    def _build_derived_snapshot(
         self,
         ticker: str,
         latest: Dict[str, Any],
@@ -91,6 +550,9 @@ class TaiwanChipProvider:
             "margin_balance": margin_balance,
             "short_balance": short_balance,
             "securities_lending_balance": lending_balance,
+            "foreign_net_buy_sell": None,
+            "investment_trust_net_buy_sell": None,
+            "dealer_net_buy_sell": None,
             "institutional_net_buy_sell": institutional_net,
             "source": "local_derived_model",
             "branch_payload": {
@@ -106,56 +568,10 @@ class TaiwanChipProvider:
             "summary": summary,
         }
 
-
-def build_taiwan_chip_summary(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not snapshot:
-        return {
-            "bias": "neutral",
-            "headline": "尚未同步台股籌碼資料",
-            "signals": [],
-        }
-
-    margin_balance = _safe_int(snapshot.get("margin_balance"))
-    short_balance = _safe_int(snapshot.get("short_balance"))
-    lending_balance = _safe_int(snapshot.get("securities_lending_balance"))
-    institutional_net = _safe_int(snapshot.get("institutional_net_buy_sell"))
-    bias = "neutral"
-    if institutional_net > 0 and short_balance < margin_balance:
-        bias = "bullish"
-    elif institutional_net < 0 and short_balance >= margin_balance * 0.3:
-        bias = "bearish"
-
-    signals = [
-        {
-            "tone": "positive" if institutional_net > 0 else "caution" if institutional_net < 0 else "neutral",
-            "label": "法人方向",
-            "value": f"{institutional_net:+,}",
-        },
-        {
-            "tone": "neutral",
-            "label": "融資餘額",
-            "value": f"{margin_balance:,}",
-        },
-        {
-            "tone": "neutral",
-            "label": "融券餘額",
-            "value": f"{short_balance:,}",
-        },
-        {
-            "tone": "neutral",
-            "label": "借券餘額",
-            "value": f"{lending_balance:,}",
-        },
-    ]
-
-    return {
-        "bias": bias,
-        "headline": f"{snapshot.get('ticker') or 'TW'} 籌碼摘要 / {snapshot.get('snapshot_date') or 'N/A'}",
-        "signals": signals,
-        "metrics": {
-            "margin_balance": margin_balance,
-            "short_balance": short_balance,
-            "securities_lending_balance": lending_balance,
-            "institutional_net_buy_sell": institutional_net,
-        },
-    }
+    @staticmethod
+    def _coerce_target_date(value: date | str | None) -> date:
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str) and value.strip():
+            return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+        return date.today()

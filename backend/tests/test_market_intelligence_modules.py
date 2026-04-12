@@ -287,7 +287,7 @@ def intelligence_store(monkeypatch):
     async def get_stock_info(ticker):
         return store["fundamentals"] if ticker == "AAPL" else None
 
-    async def get_taiwan_chip_snapshot(ticker):
+    async def get_taiwan_chip_snapshot(ticker, snapshot_date=None):
         return store["chips"] if ticker == "2330.TW" else None
 
     async def list_screener_presets(owner_id=1):
@@ -316,8 +316,11 @@ def intelligence_store(monkeypatch):
     async def sync_ticker_fundamentals(ticker):
         return await get_stock_info(ticker)
 
-    async def sync_ticker_snapshot(ticker):
-        return await get_taiwan_chip_snapshot(ticker)
+    async def sync_ticker_snapshot(ticker, target_date=None, force_refresh=False):
+        return await get_taiwan_chip_snapshot(
+            ticker,
+            snapshot_date=target_date.isoformat() if target_date else None,
+        )
 
     async def run_screener(filters=None):
         return {

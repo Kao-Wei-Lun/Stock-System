@@ -14,6 +14,7 @@ from fubon_symbols import fubon_market_to_ticker
 class SchedulerSettings:
     startup_download_enabled: bool
     institutional_auto_sync_enabled: bool
+    taiwan_chip_auto_sync_enabled: bool
     latest_data_sync_on_startup: bool
     alert_evaluator_enabled: bool
     market_intelligence_sync_enabled: bool
@@ -29,6 +30,7 @@ class SchedulerDependencies:
     startup_download_tickers: list[str]
     fetch_history_for_ticker: Any
     sync_institutional_snapshot: Any
+    sync_taiwan_chip_snapshot: Any
     sync_tracked_market_data: Any
     fetch_and_store_quote_snapshot: Any
     evaluate_active_alerts: Any
@@ -73,6 +75,48 @@ async def startup_institutional_snapshot(sync_snapshot, logger: logging.Logger |
         )
     except Exception as exc:
         log.warning("Institutional snapshot sync failed: %s", exc)
+
+
+async def daily_taiwan_chip_sync_loop(
+    sync_snapshot,
+    app_tz: tzinfo,
+    daily_sync_time: time_of_day,
+    logger: logging.Logger | None = None,
+) -> None:
+    log = logger or logging.getLogger(__name__)
+    try:
+        payload = await sync_snapshot()
+        log.info(
+            "Taiwan chip snapshot ready: requested=%s resolved=%s rows=%s source=%s",
+            payload.get("requested_date"),
+            payload.get("resolved_date"),
+            payload.get("row_count"),
+            payload.get("source"),
+        )
+    except Exception as exc:
+        log.warning("Startup Taiwan chip sync failed: %s", exc)
+
+    while True:
+        now = datetime.now(app_tz)
+        next_run_date = now.date()
+        next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        if now >= next_run:
+            next_run_date += timedelta(days=1)
+            next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        sleep_seconds = max(60, int((next_run - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+        target_date = datetime.now(app_tz).date()
+        try:
+            payload = await sync_snapshot(target_date)
+            log.info(
+                "Taiwan chip snapshot synced: requested=%s resolved=%s rows=%s source=%s",
+                payload.get("requested_date"),
+                payload.get("resolved_date"),
+                payload.get("row_count"),
+                payload.get("source"),
+            )
+        except Exception as exc:
+            log.warning("Daily Taiwan chip sync failed: %s", exc)
 
 
 async def daily_latest_sync_loop(
@@ -402,6 +446,19 @@ class BackgroundScheduler:
             )
         else:
             self._log.info("Startup institutional snapshot sync skipped (INSTITUTIONAL_AUTO_SYNC_ENABLED=false).")
+
+        if self._settings.taiwan_chip_auto_sync_enabled and self._deps.sync_taiwan_chip_snapshot:
+            self._create_task(
+                "taiwan-chip-sync",
+                daily_taiwan_chip_sync_loop(
+                    sync_snapshot=self._deps.sync_taiwan_chip_snapshot,
+                    app_tz=self._settings.app_tz,
+                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    logger=self._log,
+                ),
+            )
+        else:
+            self._log.info("Taiwan chip auto sync skipped (TAIWAN_CHIP_AUTO_SYNC_ENABLED=false).")
 
         self._create_task(
             "daily-latest-sync",

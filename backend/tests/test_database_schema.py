@@ -81,3 +81,33 @@ def test_build_schema_plan_noops_when_schema_is_complete():
     plan = build_schema_plan(existing_tables, existing_columns, existing_indexes)
 
     assert plan == []
+
+
+def test_build_schema_plan_adds_missing_taiwan_chip_columns():
+    existing_tables = {"taiwan_chip_snapshots"}
+    existing_columns = {
+        "taiwan_chip_snapshots": {
+            "id",
+            "ticker",
+            "market",
+            "snapshot_date",
+            "margin_balance",
+            "short_balance",
+            "securities_lending_balance",
+            "institutional_net_buy_sell",
+            "source",
+            "branch_payload_json",
+            "summary_json",
+            "created_at",
+            "updated_at",
+        }
+    }
+
+    plan = build_schema_plan(existing_tables, existing_columns, {})
+
+    assert any("ALTER TABLE `taiwan_chip_snapshots`" in statement and "`foreign_net_buy_sell`" in statement for statement in plan)
+    assert any(
+        "ALTER TABLE `taiwan_chip_snapshots`" in statement and "`investment_trust_net_buy_sell`" in statement
+        for statement in plan
+    )
+    assert any("ALTER TABLE `taiwan_chip_snapshots`" in statement and "`dealer_net_buy_sell`" in statement for statement in plan)

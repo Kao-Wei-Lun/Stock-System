@@ -25,6 +25,11 @@ async def test_scheduler_starts_enabled_tasks_and_shutdowns():
         await asyncio.sleep(0)
         return {"query_date": "2026-04-04", "resolved_date": "2026-04-03"}
 
+    async def sync_taiwan_chip_snapshot(*args, **kwargs):
+        events.append(("taiwan-chip", args[0].isoformat() if args else "startup"))
+        await asyncio.sleep(0)
+        return {"requested_date": "2026-04-04", "resolved_date": "2026-04-03", "row_count": 1200, "source": "twse_t86"}
+
     async def sync_tracked_market_data(**kwargs):
         events.append(("sync", kwargs.get("reason")))
         await asyncio.sleep(0)
@@ -51,6 +56,7 @@ async def test_scheduler_starts_enabled_tasks_and_shutdowns():
         settings=SchedulerSettings(
             startup_download_enabled=True,
             institutional_auto_sync_enabled=True,
+            taiwan_chip_auto_sync_enabled=True,
             latest_data_sync_on_startup=False,
             alert_evaluator_enabled=True,
             market_intelligence_sync_enabled=True,
@@ -64,6 +70,7 @@ async def test_scheduler_starts_enabled_tasks_and_shutdowns():
             startup_download_tickers=["AAPL"],
             fetch_history_for_ticker=fetch_history_for_ticker,
             sync_institutional_snapshot=sync_institutional_snapshot,
+            sync_taiwan_chip_snapshot=sync_taiwan_chip_snapshot,
             sync_tracked_market_data=sync_tracked_market_data,
             fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
             evaluate_active_alerts=evaluate_active_alerts,
@@ -76,9 +83,10 @@ async def test_scheduler_starts_enabled_tasks_and_shutdowns():
     scheduler.start()
     await asyncio.sleep(0.05)
 
-    assert scheduler.task_count == 6
+    assert scheduler.task_count == 7
     assert ("history", "AAPL") in events
     assert ("institutional",) in events
+    assert ("taiwan-chip", "startup") in events
 
     await scheduler.shutdown()
 
@@ -95,6 +103,7 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
         settings=SchedulerSettings(
             startup_download_enabled=False,
             institutional_auto_sync_enabled=False,
+            taiwan_chip_auto_sync_enabled=False,
             latest_data_sync_on_startup=False,
             alert_evaluator_enabled=False,
             market_intelligence_sync_enabled=False,
@@ -107,6 +116,7 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
             startup_download_tickers=[],
             fetch_history_for_ticker=noop_async,
             sync_institutional_snapshot=noop_async,
+            sync_taiwan_chip_snapshot=noop_async,
             sync_tracked_market_data=noop_async,
             fetch_and_store_quote_snapshot=noop_async,
             evaluate_active_alerts=noop_async,

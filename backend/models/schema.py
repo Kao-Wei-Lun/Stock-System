@@ -473,6 +473,9 @@ CREATE_TABLE_STATEMENTS = {
             `margin_balance` BIGINT NULL,
             `short_balance` BIGINT NULL,
             `securities_lending_balance` BIGINT NULL,
+            `foreign_net_buy_sell` BIGINT NULL,
+            `investment_trust_net_buy_sell` BIGINT NULL,
+            `dealer_net_buy_sell` BIGINT NULL,
             `institutional_net_buy_sell` BIGINT NULL,
             `source` VARCHAR(128) NULL,
             `branch_payload_json` JSON NULL,
@@ -588,6 +591,20 @@ REQUIRED_COLUMN_MIGRATIONS = {
         "last_used_at": """
             ALTER TABLE `journal_filter_presets`
             ADD COLUMN `last_used_at` DATETIME NULL AFTER `use_count`
+        """,
+    },
+    "taiwan_chip_snapshots": {
+        "foreign_net_buy_sell": """
+            ALTER TABLE `taiwan_chip_snapshots`
+            ADD COLUMN `foreign_net_buy_sell` BIGINT NULL AFTER `securities_lending_balance`
+        """,
+        "investment_trust_net_buy_sell": """
+            ALTER TABLE `taiwan_chip_snapshots`
+            ADD COLUMN `investment_trust_net_buy_sell` BIGINT NULL AFTER `foreign_net_buy_sell`
+        """,
+        "dealer_net_buy_sell": """
+            ALTER TABLE `taiwan_chip_snapshots`
+            ADD COLUMN `dealer_net_buy_sell` BIGINT NULL AFTER `investment_trust_net_buy_sell`
         """,
     },
 }

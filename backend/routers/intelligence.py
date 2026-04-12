@@ -168,18 +168,34 @@ async def get_fundamental_events(
 @router.get("/tw/chips/{ticker}")
 async def get_taiwan_chip_detail(
     ticker: str,
+    date: str | None = Query(None, description="YYYY-MM-DD"),
     refresh: bool = Query(False),
 ):
     normalized = normalize_ticker(ticker)
-    snapshot = await db.get_taiwan_chip_snapshot(normalized)
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+
+    snapshot = await db.get_taiwan_chip_snapshot(normalized, target_date.isoformat() if target_date else None)
     if refresh or not snapshot:
         try:
-            snapshot = await taiwan_chip_provider.sync_ticker_snapshot(normalized)
+            snapshot = await taiwan_chip_provider.sync_ticker_snapshot(
+                normalized,
+                target_date=target_date,
+                force_refresh=refresh,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             log.warning("taiwan chip sync failed for %s: %s", normalized, exc)
-            snapshot = await db.get_taiwan_chip_snapshot(normalized)
+            snapshot = await db.get_taiwan_chip_snapshot(normalized, target_date.isoformat() if target_date else None)
     return {
         "ticker": normalized,
+        "requested_date": target_date.isoformat() if target_date else None,
+        "resolved_date": snapshot.get("snapshot_date") if snapshot else None,
         "detail": snapshot,
         "summary": build_taiwan_chip_summary(snapshot),
     }

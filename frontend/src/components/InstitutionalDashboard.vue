@@ -67,9 +67,9 @@
             <div class="inst-kpi">
               <div class="inst-kpi-label">法人方向</div>
               <div class="inst-kpi-value">
-                {{ fmtTwMoney(currentChipSummary?.metrics?.institutional_net_buy_sell, { signed: true, empty: "—" }) }}
+                {{ currentChipNetLabel }}
               </div>
-              <div class="inst-kpi-change">目前標的</div>
+              <div class="inst-kpi-change">買賣超股數</div>
             </div>
           </div>
           <div v-if="currentChipSignals.length" class="institutional-rows compact">
@@ -267,6 +267,11 @@ const foreignCallPutBalance = computed(() => {
 
 const currentChipSummary = computed(() => props.taiwanChipSummary || props.taiwanChipDetail?.summary || null);
 const currentChipSignals = computed(() => currentChipSummary.value?.signals || []);
+const currentChipNetLabel = computed(() => {
+  const numeric = Number(currentChipSummary.value?.metrics?.institutional_net_buy_sell);
+  if (!Number.isFinite(numeric)) return "—";
+  return formatSigned(numeric);
+});
 const currentChipBiasLabel = computed(() => ({
   bullish: "偏多",
   bearish: "偏空",
@@ -276,10 +281,14 @@ const currentChipSourceLabel = computed(() => {
   const source = String(props.taiwanChipDetail?.source || "").trim().toLowerCase();
   if (!source) return "無";
   if (source === "local_derived_model") return "本地推估";
+  if (source === "twse_t86") return "TWSE 三大法人";
   return source;
 });
 const currentChipNote = computed(() => {
   if (!props.currentTicker) return "切到台股個股後，這裡會一起顯示目前標的的籌碼摘要。";
+  if (props.taiwanChipDetail?.source === "twse_t86") {
+    return "目前為 TWSE 盤後三大法人個股資料，會依查詢日或最近可用交易日顯示。";
+  }
   if (props.taiwanChipDetail?.source === "local_derived_model") {
     return "目前為本地推估摘要，非富邦官方法人 / 融資券 API。";
   }

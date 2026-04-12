@@ -15,15 +15,19 @@ class TaiwanChipMixin:
                         """
                         INSERT INTO `taiwan_chip_snapshots`
                             (`ticker`, `market`, `snapshot_date`, `margin_balance`, `short_balance`,
-                             `securities_lending_balance`, `institutional_net_buy_sell`, `source`,
-                             `branch_payload_json`, `summary_json`)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             `securities_lending_balance`, `foreign_net_buy_sell`,
+                             `investment_trust_net_buy_sell`, `dealer_net_buy_sell`,
+                             `institutional_net_buy_sell`, `source`, `branch_payload_json`, `summary_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         AS `incoming`
                         ON DUPLICATE KEY UPDATE
                             `market`=`incoming`.`market`,
                             `margin_balance`=`incoming`.`margin_balance`,
                             `short_balance`=`incoming`.`short_balance`,
                             `securities_lending_balance`=`incoming`.`securities_lending_balance`,
+                            `foreign_net_buy_sell`=`incoming`.`foreign_net_buy_sell`,
+                            `investment_trust_net_buy_sell`=`incoming`.`investment_trust_net_buy_sell`,
+                            `dealer_net_buy_sell`=`incoming`.`dealer_net_buy_sell`,
                             `institutional_net_buy_sell`=`incoming`.`institutional_net_buy_sell`,
                             `source`=`incoming`.`source`,
                             `branch_payload_json`=`incoming`.`branch_payload_json`,
@@ -37,6 +41,9 @@ class TaiwanChipMixin:
                                 item["margin_balance"],
                                 item["short_balance"],
                                 item["securities_lending_balance"],
+                                item["foreign_net_buy_sell"],
+                                item["investment_trust_net_buy_sell"],
+                                item["dealer_net_buy_sell"],
                                 item["institutional_net_buy_sell"],
                                 item["source"],
                                 _json_dumps(item.get("branch_payload") or {}),
@@ -72,8 +79,47 @@ class TaiwanChipMixin:
                 LIMIT 1
                 """,
                 (ticker,),
-            )
+        )
         return _deserialize_taiwan_chip_snapshot(row)
+
+    async def get_taiwan_chip_snapshot_count(self, snapshot_date: str) -> int:
+        row = await self._fetchone(
+            """
+            SELECT COUNT(*) AS `row_count`
+            FROM `taiwan_chip_snapshots`
+            WHERE `snapshot_date`=%s
+            """,
+            (snapshot_date,),
+        )
+        return int((row or {}).get("row_count") or 0)
+
+    async def get_latest_taiwan_chip_snapshot_date(
+        self,
+        on_or_before: Optional[str] = None,
+    ) -> Optional[str]:
+        if on_or_before:
+            row = await self._fetchone(
+                """
+                SELECT `snapshot_date`
+                FROM `taiwan_chip_snapshots`
+                WHERE `snapshot_date`<=%s
+                ORDER BY `snapshot_date` DESC
+                LIMIT 1
+                """,
+                (on_or_before,),
+            )
+        else:
+            row = await self._fetchone(
+                """
+                SELECT `snapshot_date`
+                FROM `taiwan_chip_snapshots`
+                ORDER BY `snapshot_date` DESC
+                LIMIT 1
+                """,
+            )
+        if not row or not row.get("snapshot_date"):
+            return None
+        return _date_to_iso(row.get("snapshot_date"))
 
     async def list_taiwan_chip_snapshots(
         self,
