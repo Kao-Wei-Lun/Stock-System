@@ -1255,32 +1255,35 @@ export function useDashboard() {
   }
 
   function applyQuote(data) {
-    quote.price = data.price ?? null;
-    quote.open = data.open ?? null;
-    quote.high = data.high ?? null;
-    quote.low = data.low ?? null;
-    quote.prev_close = data.prev_close ?? null;
-    quote.volume = data.volume ?? null;
-    quote.market_cap = data.market_cap ?? null;
-    quote.change = data.change ?? 0;
-    quote.change_pct = data.change_pct ?? 0;
-    quote.resolved_symbol = data.resolved_symbol ?? quote.resolved_symbol ?? null;
-    quote.market = data.market ?? quote.market ?? null;
-    quote.exchange = data.exchange ?? quote.exchange ?? null;
-    quote.name = data.name || currentName.value;
-    quote.source = data.source ?? quote.source ?? null;
-    quote.quote_type = data.quote_type ?? quote.quote_type ?? null;
-    quote.is_delayed = data.is_delayed ?? true;
-    quote.bid = data.bid ?? quote.bid ?? null;
-    quote.ask = data.ask ?? quote.ask ?? null;
-    quote.bid_size = data.bid_size ?? quote.bid_size ?? null;
-    quote.ask_size = data.ask_size ?? quote.ask_size ?? null;
-    quote.bids = Array.isArray(data.bids) ? data.bids : (quote.bids || []);
-    quote.asks = Array.isArray(data.asks) ? data.asks : (quote.asks || []);
-    quote.quote_timestamp = data.quote_timestamp ?? null;
-    quote.synced_at = data.synced_at ?? null;
+    const hasField = (key) => Object.prototype.hasOwnProperty.call(data, key);
+    const nextValue = (key, fallback = null) => (hasField(key) ? data[key] : (quote[key] ?? fallback));
+
+    quote.price = nextValue("price", null);
+    quote.open = nextValue("open", null);
+    quote.high = nextValue("high", null);
+    quote.low = nextValue("low", null);
+    quote.prev_close = nextValue("prev_close", null);
+    quote.volume = nextValue("volume", null);
+    quote.market_cap = nextValue("market_cap", null);
+    quote.change = hasField("change") ? (data.change ?? 0) : (quote.change ?? 0);
+    quote.change_pct = hasField("change_pct") ? (data.change_pct ?? 0) : (quote.change_pct ?? 0);
+    quote.resolved_symbol = nextValue("resolved_symbol", null);
+    quote.market = nextValue("market", null);
+    quote.exchange = nextValue("exchange", null);
+    quote.name = hasField("name") ? (data.name || currentName.value) : (quote.name || currentName.value);
+    quote.source = nextValue("source", null);
+    quote.quote_type = nextValue("quote_type", null);
+    quote.is_delayed = hasField("is_delayed") ? (data.is_delayed ?? true) : (quote.is_delayed ?? true);
+    quote.bid = nextValue("bid", null);
+    quote.ask = nextValue("ask", null);
+    quote.bid_size = nextValue("bid_size", null);
+    quote.ask_size = nextValue("ask_size", null);
+    quote.bids = hasField("bids") ? (Array.isArray(data.bids) ? data.bids : []) : (quote.bids || []);
+    quote.asks = hasField("asks") ? (Array.isArray(data.asks) ? data.asks : []) : (quote.asks || []);
+    quote.quote_timestamp = nextValue("quote_timestamp", null);
+    quote.synced_at = nextValue("synced_at", null);
     if (data.name) currentName.value = data.name;
-    lastUpdate.value = formatQuoteTimestampLabel(data.quote_timestamp || data.synced_at);
+    lastUpdate.value = formatQuoteTimestampLabel(quote.quote_timestamp || quote.synced_at);
   }
 
   function resetQuote() {

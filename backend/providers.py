@@ -45,6 +45,18 @@ screener_engine = ScreenerEngine()
 ws_manager = ConnectionManager()
 
 
+def _fubon_stock_channels() -> tuple[str, ...]:
+    if fubon_manager.ws_mode == "Normal":
+        return ("aggregates", "books", "candles")
+    return ("trades", "books")
+
+
+def _fubon_futopt_channels() -> tuple[str, ...]:
+    if fubon_manager.ws_mode == "Normal":
+        return ("aggregates", "books", "candles")
+    return ("trades", "books")
+
+
 def _subscribe_fubon_streams(ticker: str) -> None:
     if not fubon_manager.connected:
         return
@@ -52,12 +64,12 @@ def _subscribe_fubon_streams(ticker: str) -> None:
         symbol = tw_ticker_to_fubon(ticker)
         if not symbol:
             return
-        for channel in ("aggregates", "books", "candles"):
+        for channel in _fubon_stock_channels():
             fubon_manager.subscribe_stock(symbol, channel)
         return
     if not is_exact_futopt_contract(ticker):
         return
-    for channel in ("aggregates", "books", "candles"):
+    for channel in _fubon_futopt_channels():
         fubon_manager.subscribe_futopt(ticker, channel)
 
 
@@ -66,12 +78,12 @@ def _unsubscribe_fubon_streams(ticker: str) -> None:
         symbol = tw_ticker_to_fubon(ticker)
         if not symbol:
             return
-        for channel in ("aggregates", "books", "candles"):
+        for channel in _fubon_stock_channels():
             fubon_manager.unsubscribe_stock(symbol, channel)
         return
     if not is_exact_futopt_contract(ticker):
         return
-    for channel in ("aggregates", "books", "candles"):
+    for channel in _fubon_futopt_channels():
         fubon_manager.unsubscribe_futopt(ticker, channel)
 
 

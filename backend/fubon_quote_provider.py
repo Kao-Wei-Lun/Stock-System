@@ -61,6 +61,20 @@ def _normalize_order_levels(levels: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_scalar_book_level(price: Any, size: Any = None) -> list[dict[str, Any]]:
+    if price in (None, ""):
+        return []
+    try:
+        return [
+            {
+                "price": float(price),
+                "size": int(size) if size not in (None, "") else None,
+            }
+        ]
+    except (TypeError, ValueError):
+        return []
+
+
 def build_fubon_quote_payload(
     ticker: str,
     payload: Dict[str, Any],
@@ -75,10 +89,18 @@ def build_fubon_quote_payload(
     if price is None:
         price = payload.get("lastPrice")
     if price is None:
+        price = payload.get("price")
+    if price is None and isinstance(payload.get("trades"), list) and payload["trades"]:
+        price = payload["trades"][0].get("price")
+    if price is None:
         return None
 
     bids = _normalize_order_levels(payload.get("bids"))
     asks = _normalize_order_levels(payload.get("asks"))
+    if not bids:
+        bids = _normalize_scalar_book_level(payload.get("bid"))
+    if not asks:
+        asks = _normalize_scalar_book_level(payload.get("ask"))
     total = payload.get("total") if isinstance(payload.get("total"), dict) else {}
 
     previous_close = payload.get("previousClose")
@@ -106,7 +128,7 @@ def build_fubon_quote_payload(
         "prev_close": previous_close,
         "change": change,
         "change_pct": payload.get("changePercent"),
-        "volume": total.get("tradeVolume"),
+        "volume": payload.get("volume") or total.get("tradeVolume"),
         "market_cap": None,
         "bid": bids[0].get("price") if bids else None,
         "ask": asks[0].get("price") if asks else None,
@@ -117,6 +139,7 @@ def build_fubon_quote_payload(
         "quote_timestamp": fubon_timestamp_to_iso(
             payload.get("lastUpdated")
             or payload.get("closeTime")
+            or payload.get("time")
             or total.get("time")
             or payload.get("date")
         ),

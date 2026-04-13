@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 import fubon_data_fetcher
@@ -160,3 +162,24 @@ async def test_hybrid_fetcher_uses_fubon_for_taiwan_realtime_quote():
     assert quote["ticker"] == "2330.TW"
     assert quote["source"] == "fubon_neo"
     assert yahoo.quote_calls == []
+
+
+def test_history_start_from_period_1y_stays_under_fubon_limit():
+    start = date.fromisoformat(fubon_data_fetcher._history_start_from_period("1y"))
+
+    assert (date.today() - start).days == fubon_data_fetcher.FUBON_HISTORY_MAX_RANGE_DAYS
+
+
+@pytest.mark.anyio
+async def test_hybrid_fetcher_uses_yahoo_for_periods_over_fubon_history_limit():
+    yahoo = StubYahooFetcher()
+    manager = StubFubonManager()
+    fetcher = HybridDataFetcher(yahoo, manager)
+
+    count = await fetcher.fetch_and_store("2330.TW", period="2y", interval="1d", include_info=False)
+
+    assert count == 77
+    assert yahoo.fetch_calls == [
+        {"ticker": "2330.TW", "period": "2y", "interval": "1d", "include_info": False}
+    ]
+    assert manager.history_calls == []

@@ -216,7 +216,9 @@ background_scheduler = BackgroundScheduler(
         broadcast_to_ticker=ws_manager.broadcast_to_ticker,
         store_quote_to_db=db.upsert_market_quote,
         fubon_manager=fubon_manager,
-        skip_poll_for_ticker=supports_fubon_stock_realtime_ticker,
+        skip_poll_for_ticker=lambda ticker: (
+            supports_fubon_stock_realtime_ticker(ticker) and fubon_manager.supports_full_ws_quotes
+        ),
     ),
     logger=log,
 )

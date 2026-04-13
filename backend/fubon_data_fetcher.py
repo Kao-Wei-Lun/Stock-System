@@ -25,6 +25,7 @@ FUBON_HISTORY_INTERVALS = {
     "1mo": "M",
 }
 FUBON_HISTORY_START = date(2010, 1, 1)
+FUBON_HISTORY_MAX_RANGE_DAYS = 364
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -51,15 +52,22 @@ def _history_start_from_period(period: str) -> str:
     if normalized == "max":
         return FUBON_HISTORY_START.isoformat()
     if normalized.endswith("d") and normalized[:-1].isdigit():
-        start = today - timedelta(days=int(normalized[:-1]) + 2)
+        offset_days = int(normalized[:-1]) + 2
+        if offset_days > FUBON_HISTORY_MAX_RANGE_DAYS:
+            offset_days = FUBON_HISTORY_MAX_RANGE_DAYS
+        start = today - timedelta(days=offset_days)
         return start.isoformat()
     if normalized.endswith("mo") and normalized[:-2].isdigit():
         start = today - timedelta(days=int(normalized[:-2]) * 31)
         return start.isoformat()
     if normalized.endswith("y") and normalized[:-1].isdigit():
-        start = today - timedelta(days=int(normalized[:-1]) * 366)
+        years = int(normalized[:-1])
+        if years <= 1:
+            start = today - timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS)
+        else:
+            start = today - timedelta(days=years * 365)
         return start.isoformat()
-    return (today - timedelta(days=366)).isoformat()
+    return (today - timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS)).isoformat()
 
 
 def _rows_from_fubon_candles(payload: Optional[dict]) -> list[dict]:
@@ -152,6 +160,16 @@ class HybridDataFetcher:
         normalized_interval = str(interval or "1d").strip().lower()
         return normalized_interval in FUBON_INTRADAY_INTERVALS or normalized_interval in FUBON_HISTORY_INTERVALS
 
+    def _should_use_fubon_historical_period(self, period: str) -> bool:
+        normalized = str(period or "1y").strip().lower()
+        if normalized == "max":
+            return False
+        if normalized.endswith("y") and normalized[:-1].isdigit():
+            return int(normalized[:-1]) <= 1
+        if normalized.endswith("mo") and normalized[:-2].isdigit():
+            return int(normalized[:-2]) <= 11
+        return True
+
     async def _fetch_and_store_fubon_stock(
         self,
         ticker: str,
@@ -172,6 +190,13 @@ class HybridDataFetcher:
                 sort="asc",
             )
         else:
+            if not self._should_use_fubon_historical_period(period):
+                return await self._yahoo.fetch_and_store(
+                    ticker,
+                    period=period,
+                    interval=interval,
+                    include_info=include_info,
+                )
             response = await self._fubon_manager.fetch_stock_historical_candles(
                 symbol,
                 from_date=_history_start_from_period(period),

@@ -1,6 +1,11 @@
 import pytest
 
-from fubon_quote_provider import FubonQuoteProvider, HybridQuoteProvider, tw_ticker_to_fubon
+from fubon_quote_provider import (
+    FubonQuoteProvider,
+    HybridQuoteProvider,
+    build_fubon_quote_payload,
+    tw_ticker_to_fubon,
+)
 from quote_provider import YahooFinanceQuoteProvider
 
 
@@ -120,3 +125,26 @@ def test_tw_ticker_to_fubon_converts_supported_taiwan_tickers():
     assert tw_ticker_to_fubon("2330.TW") == "2330"
     assert tw_ticker_to_fubon("2646.TWO") == "2646"
     assert tw_ticker_to_fubon("AAPL") is None
+
+
+def test_build_fubon_quote_payload_accepts_speed_mode_trade_messages():
+    payload = build_fubon_quote_payload(
+        "2330.TW",
+        {
+            "symbol": "2330",
+            "market": "TSE",
+            "exchange": "TWSE",
+            "price": 568,
+            "bid": 567,
+            "ask": 568,
+            "volume": 54538,
+            "time": 1685338200000000,
+        },
+    )
+
+    assert payload["ticker"] == "2330.TW"
+    assert payload["price"] == 568
+    assert payload["bid"] == 567
+    assert payload["ask"] == 568
+    assert payload["volume"] == 54538
+    assert payload["quote_timestamp"] is not None

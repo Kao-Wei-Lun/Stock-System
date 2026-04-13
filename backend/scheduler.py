@@ -278,6 +278,21 @@ async def fubon_ws_listener_loop(
                     )
                     continue
 
+                if channel == "trades":
+                    quote_payload = build_fubon_quote_payload(ticker, raw, source="fubon_neo")
+                    if not quote_payload:
+                        continue
+                    await broadcast_to_ticker(
+                        ticker,
+                        {
+                            "type": "quote",
+                            "ticker": ticker,
+                            "data": quote_payload,
+                            "ts": int(time.time() * 1000),
+                        },
+                    )
+                    continue
+
                 if channel == "books":
                     await broadcast_to_ticker(
                         ticker,

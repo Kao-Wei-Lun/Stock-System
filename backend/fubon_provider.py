@@ -13,6 +13,7 @@ class FubonSDKManager:
     def __init__(self):
         self._sdk = None
         self._active_account_id: Optional[int] = None
+        self._ws_mode = "Speed"
         self._ws_stock = None
         self._ws_futopt = None
         self._ws_started_targets: set[str] = set()
@@ -32,6 +33,14 @@ class FubonSDKManager:
     @property
     def active_account_id(self) -> Optional[int]:
         return self._active_account_id
+
+    @property
+    def ws_mode(self) -> str:
+        return self._ws_mode
+
+    @property
+    def supports_full_ws_quotes(self) -> bool:
+        return self._ws_mode == "Normal"
 
     async def init_from_db(self, db) -> bool:
         from repositories.fubon_accounts import FubonAccountRepository
@@ -67,6 +76,7 @@ class FubonSDKManager:
             self._best_effort_shutdown(target)
         self._sdk = sdk
         self._active_account_id = account_id
+        self._ws_mode = str(account.get("ws_mode") or "Speed")
         self._ws_stock = ws_stock
         self._ws_futopt = ws_futopt
         self.connected = True
@@ -487,6 +497,7 @@ class FubonSDKManager:
     def _reset_runtime_state(self) -> None:
         self._sdk = None
         self._active_account_id = None
+        self._ws_mode = "Speed"
         self._ws_stock = None
         self._ws_futopt = None
         self._ws_started_targets = set()
