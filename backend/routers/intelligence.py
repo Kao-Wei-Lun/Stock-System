@@ -192,6 +192,8 @@ async def get_taiwan_chip_detail(
         except Exception as exc:
             log.warning("taiwan chip sync failed for %s: %s", normalized, exc)
             snapshot = await db.get_taiwan_chip_snapshot(normalized, target_date.isoformat() if target_date else None)
+    if not snapshot:
+        raise HTTPException(404, f"No official Taiwan chip data available for {normalized}")
     return {
         "ticker": normalized,
         "requested_date": target_date.isoformat() if target_date else None,

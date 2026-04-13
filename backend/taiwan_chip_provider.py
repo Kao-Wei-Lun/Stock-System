@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import requests
 import urllib3
 
-from data_fetcher import DataFetcher, normalize_ticker
+from data_fetcher import normalize_ticker
 from database import db
 from market_intelligence import infer_market
 from tw_symbol_lookup import resolve_taiwan_ticker
@@ -88,13 +88,6 @@ TPEX_JSON_FIELD_KEYS = [
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -262,12 +255,12 @@ def build_taiwan_chip_summary(snapshot: Optional[Dict[str, Any]]) -> Dict[str, A
 class TaiwanChipProvider:
     def __init__(
         self,
-        fetcher: Optional[DataFetcher] = None,
+        fetcher: Optional[Any] = None,
         session: Optional[requests.Session] = None,
         *,
         verify_ssl: bool = False,
     ):
-        self._fetcher = fetcher or DataFetcher()
+        self._fetcher = fetcher
         self._session = session or requests.Session()
         self._session.headers.update(TWSE_REQUEST_HEADERS)
         self._verify_ssl = verify_ssl
@@ -304,22 +297,7 @@ class TaiwanChipProvider:
         if query_date < TWSE_T86_EARLIEST_DATE:
             return existing
 
-        latest = await db.get_taiwan_chip_snapshot(normalized)
-        if latest:
-            return latest
-
-        latest_ohlcv = await db.get_latest_ohlcv(normalized)
-        if not latest_ohlcv:
-            await self._fetcher.fetch_and_store(normalized, period="6mo", interval="1d", include_info=True)
-            latest_ohlcv = await db.get_latest_ohlcv(normalized)
-        if not latest_ohlcv:
-            return None
-
-        prev_close = await db.get_prev_close(normalized)
-        info = await db.get_stock_info(normalized)
-        derived_snapshot = self._build_derived_snapshot(normalized, latest_ohlcv, prev_close, info)
-        await db.upsert_taiwan_chip_snapshots([derived_snapshot])
-        return await db.get_taiwan_chip_snapshot(normalized, derived_snapshot["snapshot_date"])
+        return await db.get_taiwan_chip_snapshot(normalized)
 
     async def ensure_daily_snapshot(
         self,
@@ -480,9 +458,10 @@ class TaiwanChipProvider:
         fields = payload.get("fields") or []
         rows = payload.get("data") or []
         if stat != "OK" or not fields or not rows:
+            message = stat if stat and stat != "OK" else f"TWSE T86 returned no rows for {target_date.isoformat()}"
             return {
                 "snapshots": [],
-                "message": stat or f"TWSE T86 returned no rows for {target_date.isoformat()}",
+                "message": message,
                 "format_version": None,
                 "source_name": OFFICIAL_TWSE_SOURCE,
             }
@@ -662,62 +641,6 @@ class TaiwanChipProvider:
         }
         snapshot["summary"] = build_taiwan_chip_summary(snapshot)
         return snapshot
-
-    def _build_derived_snapshot(
-        self,
-        ticker: str,
-        latest: Dict[str, Any],
-        prev_close: Optional[float],
-        info: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        close = _safe_float(latest.get("close"))
-        open_price = _safe_float(latest.get("open"), close)
-        volume = max(0, _safe_int(latest.get("volume")))
-        avg_volume = max(1, _safe_int((info or {}).get("avg_volume"), volume or 1))
-        daily_change_pct = ((close - prev_close) / prev_close * 100.0) if prev_close else 0.0
-        intraday_pct = ((close - open_price) / open_price * 100.0) if open_price else 0.0
-        liquidity_multiplier = max(0.4, min(volume / avg_volume, 3.5))
-
-        institutional_net = int(volume * intraday_pct * 0.08)
-        margin_balance = int(volume * 0.12 * liquidity_multiplier)
-        short_balance = int(volume * 0.028 * max(0.6, 1.2 - intraday_pct / 10))
-        lending_balance = int(volume * 0.045 * max(0.8, 1 + abs(daily_change_pct) / 20))
-
-        summary = build_taiwan_chip_summary(
-            {
-                "ticker": ticker,
-                "margin_balance": margin_balance,
-                "short_balance": short_balance,
-                "securities_lending_balance": lending_balance,
-                "institutional_net_buy_sell": institutional_net,
-                "snapshot_date": latest.get("date") or date.today().isoformat(),
-            }
-        )
-
-        return {
-            "ticker": ticker,
-            "market": "TW",
-            "snapshot_date": latest.get("date") or date.today().isoformat(),
-            "margin_balance": margin_balance,
-            "short_balance": short_balance,
-            "securities_lending_balance": lending_balance,
-            "foreign_net_buy_sell": None,
-            "investment_trust_net_buy_sell": None,
-            "dealer_net_buy_sell": None,
-            "institutional_net_buy_sell": institutional_net,
-            "source": "local_derived_model",
-            "branch_payload": {
-                "close": close,
-                "open": open_price,
-                "prev_close": prev_close,
-                "volume": volume,
-                "avg_volume": avg_volume,
-                "daily_change_pct": daily_change_pct,
-                "intraday_pct": intraday_pct,
-                "model_version": "derived-v1",
-            },
-            "summary": summary,
-        }
 
     @staticmethod
     def _coerce_target_date(value: date | str | None) -> date:

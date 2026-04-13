@@ -3,6 +3,10 @@ from database.helpers import *
 from database.core import DEFAULT_OWNER_ID
 # Import common serialization helpers here if needed
 
+OFFICIAL_TAIWAN_CHIP_SOURCES = ("twse_t86", "tpex_3itrade_hedge")
+OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS = ", ".join(["%s"] * len(OFFICIAL_TAIWAN_CHIP_SOURCES))
+
+
 class TaiwanChipMixin:
     async def upsert_taiwan_chip_snapshots(self, snapshots: List[Dict[str, Any]]) -> int:
         if not snapshots:
@@ -61,47 +65,51 @@ class TaiwanChipMixin:
     ) -> Optional[Dict[str, Any]]:
         if snapshot_date:
             row = await self._fetchone(
-                """
+                f"""
                 SELECT *
                 FROM `taiwan_chip_snapshots`
                 WHERE `ticker`=%s AND `snapshot_date`=%s
+                  AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
                 LIMIT 1
                 """,
-                (ticker, snapshot_date),
+                (ticker, snapshot_date, *OFFICIAL_TAIWAN_CHIP_SOURCES),
             )
         else:
             row = await self._fetchone(
-                """
+                f"""
                 SELECT *
                 FROM `taiwan_chip_snapshots`
                 WHERE `ticker`=%s
+                  AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
                 ORDER BY `snapshot_date` DESC, `id` DESC
                 LIMIT 1
                 """,
-                (ticker,),
-        )
+                (ticker, *OFFICIAL_TAIWAN_CHIP_SOURCES),
+            )
         return _deserialize_taiwan_chip_snapshot(row)
 
     async def get_taiwan_chip_snapshot_count(self, snapshot_date: str) -> int:
         row = await self._fetchone(
-            """
+            f"""
             SELECT COUNT(*) AS `row_count`
             FROM `taiwan_chip_snapshots`
             WHERE `snapshot_date`=%s
+              AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
             """,
-            (snapshot_date,),
+            (snapshot_date, *OFFICIAL_TAIWAN_CHIP_SOURCES),
         )
         return int((row or {}).get("row_count") or 0)
 
     async def get_taiwan_chip_snapshot_source_counts(self, snapshot_date: str) -> Dict[str, int]:
         rows = await self._fetchall(
-            """
+            f"""
             SELECT `source`, COUNT(*) AS `row_count`
             FROM `taiwan_chip_snapshots`
             WHERE `snapshot_date`=%s
+              AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
             GROUP BY `source`
             """,
-            (snapshot_date,),
+            (snapshot_date, *OFFICIAL_TAIWAN_CHIP_SOURCES),
         )
         return {
             str(item.get("source") or ""): int(item.get("row_count") or 0)
@@ -115,23 +123,26 @@ class TaiwanChipMixin:
     ) -> Optional[str]:
         if on_or_before:
             row = await self._fetchone(
-                """
+                f"""
                 SELECT `snapshot_date`
                 FROM `taiwan_chip_snapshots`
                 WHERE `snapshot_date`<=%s
+                  AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
                 ORDER BY `snapshot_date` DESC
                 LIMIT 1
                 """,
-                (on_or_before,),
+                (on_or_before, *OFFICIAL_TAIWAN_CHIP_SOURCES),
             )
         else:
             row = await self._fetchone(
-                """
+                f"""
                 SELECT `snapshot_date`
                 FROM `taiwan_chip_snapshots`
+                WHERE `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
                 ORDER BY `snapshot_date` DESC
                 LIMIT 1
                 """,
+                OFFICIAL_TAIWAN_CHIP_SOURCES,
             )
         if not row or not row.get("snapshot_date"):
             return None
@@ -148,6 +159,7 @@ class TaiwanChipMixin:
         if ticker:
             filters.append("`ticker`=%s")
             params.append(ticker)
+        filters.append(f"`source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})")
         rows = await self._fetchall(
             f"""
             SELECT *
@@ -156,7 +168,7 @@ class TaiwanChipMixin:
             ORDER BY `snapshot_date` DESC, `id` DESC
             LIMIT %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + list(OFFICIAL_TAIWAN_CHIP_SOURCES) + [clean_limit]),
         )
         return [_deserialize_taiwan_chip_snapshot(item) for item in rows]
 

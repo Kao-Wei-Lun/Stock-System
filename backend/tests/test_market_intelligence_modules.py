@@ -394,6 +394,22 @@ def test_market_intelligence_routes(client, intelligence_store):
     assert screener_response.json()["market_context"]["trade_posture"] == "selective"
 
 
+def test_taiwan_chip_route_returns_404_when_official_data_is_unavailable(client, intelligence_store, monkeypatch):
+    async def get_taiwan_chip_snapshot(_ticker, snapshot_date=None):
+        return None
+
+    async def sync_ticker_snapshot(_ticker, target_date=None, force_refresh=False):
+        return None
+
+    monkeypatch.setattr(main.db, "get_taiwan_chip_snapshot", get_taiwan_chip_snapshot)
+    monkeypatch.setattr(main.taiwan_chip_provider, "sync_ticker_snapshot", sync_ticker_snapshot)
+
+    response = client.get("/api/tw/chips/2330?refresh=true")
+
+    assert response.status_code == 404
+    assert "No official Taiwan chip data available" in response.json()["detail"]
+
+
 def test_screener_preset_routes(client, intelligence_store):
     create_response = client.post(
         "/api/screener/presets",

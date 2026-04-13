@@ -302,3 +302,27 @@ def test_build_taiwan_chip_summary_uses_official_signals_when_available():
         "\u6295\u4fe1",
         "\u81ea\u71df\u5546",
     ]
+
+
+@pytest.mark.anyio
+async def test_taiwan_chip_provider_raises_when_official_sources_are_unavailable(monkeypatch):
+    async def get_taiwan_chip_snapshot(_ticker, _snapshot_date=None):
+        return None
+
+    async def get_taiwan_chip_snapshot_source_counts(_snapshot_date):
+        return {}
+
+    async def get_latest_taiwan_chip_snapshot_date(on_or_before=None):
+        return None
+
+    async def get_taiwan_chip_snapshot_count(_snapshot_date):
+        return 0
+
+    monkeypatch.setattr(provider_module.db, "get_taiwan_chip_snapshot", get_taiwan_chip_snapshot)
+    monkeypatch.setattr(provider_module.db, "get_taiwan_chip_snapshot_source_counts", get_taiwan_chip_snapshot_source_counts)
+    monkeypatch.setattr(provider_module.db, "get_latest_taiwan_chip_snapshot_date", get_latest_taiwan_chip_snapshot_date)
+    monkeypatch.setattr(provider_module.db, "get_taiwan_chip_snapshot_count", get_taiwan_chip_snapshot_count)
+
+    provider = TaiwanChipProvider(session=StubSession({"stat": "OK", "fields": [], "data": []}))
+    with pytest.raises(RuntimeError, match="TWSE T86 returned no rows"):
+        await provider.sync_ticker_snapshot("2330.TW", target_date="2026-04-10", force_refresh=True)
