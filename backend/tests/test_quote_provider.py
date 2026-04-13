@@ -1,5 +1,6 @@
 import pytest
 
+import fubon_symbols
 from fubon_quote_provider import (
     FubonQuoteProvider,
     HybridQuoteProvider,
@@ -120,7 +121,19 @@ async def test_hybrid_quote_provider_falls_back_to_yahoo_when_fubon_returns_none
     assert quote["is_delayed"] is True
 
 
-def test_tw_ticker_to_fubon_converts_supported_taiwan_tickers():
+def test_tw_ticker_to_fubon_converts_supported_taiwan_tickers(monkeypatch):
+    mapping = {
+        "2330": "2330.TW",
+        "2330.TW": "2330.TW",
+        "2646": "2646.TWO",
+        "2646.TWO": "2646.TWO",
+    }
+    monkeypatch.setattr(
+        fubon_symbols,
+        "resolve_taiwan_ticker",
+        lambda ticker: mapping.get(str(ticker or "").strip().upper()),
+    )
+
     assert tw_ticker_to_fubon("2330") == "2330"
     assert tw_ticker_to_fubon("2330.TW") == "2330"
     assert tw_ticker_to_fubon("2646.TWO") == "2646"

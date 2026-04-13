@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from data_fetcher import normalize_ticker
+from tw_symbol_lookup import resolve_taiwan_ticker
 
 _FUTOPT_CONTRACT_PATTERN = re.compile(r"^[A-Z]{2,5}[A-Z]\d$")
 _FUTOPT_BASE_ALIASES = {
@@ -14,13 +15,18 @@ _FUTOPT_BASE_ALIASES = {
 }
 
 
-def is_taiwan_stock_ticker(ticker: str) -> bool:
+def _resolve_taiwan_stock_ticker(ticker: str) -> Optional[str]:
     normalized = normalize_ticker(ticker)
-    if normalized.endswith(".TW"):
-        return normalized[:-3].isdigit()
-    if normalized.endswith(".TWO"):
-        return normalized[:-4].isdigit()
-    return False
+    resolved = resolve_taiwan_ticker(normalized) or resolve_taiwan_ticker(str(ticker or "").strip().upper())
+    if not resolved:
+        return None
+    if resolved.endswith(".TW") or resolved.endswith(".TWO"):
+        return resolved
+    return None
+
+
+def is_taiwan_stock_ticker(ticker: str) -> bool:
+    return _resolve_taiwan_stock_ticker(ticker) is not None
 
 
 def supports_fubon_stock_realtime_ticker(ticker: str) -> bool:
@@ -28,10 +34,10 @@ def supports_fubon_stock_realtime_ticker(ticker: str) -> bool:
 
 
 def tw_ticker_to_fubon(ticker: str) -> Optional[str]:
-    normalized = normalize_ticker(ticker)
-    if normalized.endswith(".TW") and normalized[:-3].isdigit():
+    normalized = _resolve_taiwan_stock_ticker(ticker)
+    if normalized and normalized.endswith(".TW"):
         return normalized[:-3]
-    if normalized.endswith(".TWO") and normalized[:-4].isdigit():
+    if normalized and normalized.endswith(".TWO"):
         return normalized[:-4]
     return None
 
