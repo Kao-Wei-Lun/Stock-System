@@ -14,6 +14,7 @@ import {
   readLegacyWorkspacePresets,
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
+import { upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
 import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
@@ -1317,17 +1318,11 @@ export function useDashboard() {
 
   function updateCurrentCandleFromQuote(data) {
     if (!rawOhlcData.value.length || data.price == null) return;
-    const last = rawOhlcData.value[rawOhlcData.value.length - 1];
-    const today = new Date().toISOString().slice(0, 10);
-    if (!(last.date === today || String(last.date || "").startsWith(today))) return;
-    const updated = {
-      ...last,
-      close: data.price,
-      high: data.high && data.high > last.high ? data.high : last.high,
-      low: data.low && data.low < last.low ? data.low : last.low,
-      volume: data.volume ?? last.volume,
-    };
-    rawOhlcData.value = [...rawOhlcData.value.slice(0, -1), updated];
+    rawOhlcData.value = upsertRealtimeOhlcFromQuote(
+      rawOhlcData.value,
+      data,
+      currentInterval.value,
+    );
   }
 
   function upsertRealtimeCandleRow(data) {
