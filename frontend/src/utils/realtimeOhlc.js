@@ -8,6 +8,7 @@ const INTRADAY_INTERVAL_MINUTES = {
   "90m": 90,
   "1h": 60,
 };
+const HIGHER_TIMEFRAME_INTERVALS = new Set(["1wk", "1mo"]);
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
@@ -38,6 +39,18 @@ function formatLocalDate(value, includeTime = false) {
   const minute = pad2(parsed.getMinutes());
   const second = pad2(parsed.getSeconds());
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function isIntradayInterval(interval) {
+  return Boolean(INTRADAY_INTERVAL_MINUTES[String(interval || "").toLowerCase()]);
+}
+
+function isHigherTimeframeInterval(interval) {
+  return HIGHER_TIMEFRAME_INTERVALS.has(String(interval || "").toLowerCase());
+}
+
+function formatBucketLabel(dateValue, interval) {
+  return formatLocalDate(dateValue, isIntradayInterval(interval));
 }
 
 function getWeekStart(date) {
@@ -71,12 +84,13 @@ export function getIntervalBucketStart(value, interval) {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
-function toRealtimeRow(dateValue, price, source, volume = 0) {
+function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m", quote = null) {
+  const normalizedInterval = String(interval || "").toLowerCase();
   return {
-    date: formatLocalDate(dateValue, true),
-    open: price,
-    high: price,
-    low: price,
+    date: formatBucketLabel(dateValue, normalizedInterval),
+    open: toFiniteNumber(quote?.open) ?? price,
+    high: toFiniteNumber(quote?.high) ?? price,
+    low: toFiniteNumber(quote?.low) ?? price,
     close: price,
     volume,
     adj_close: price,
@@ -101,7 +115,9 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   if (!lastBucket || !quoteBucket) return rows;
 
   const source = quote?.source || lastRow?.source || "fubon_neo";
+  const isIntraday = isIntradayInterval(normalizedInterval);
   const isDaily = normalizedInterval === "1d";
+  const isHigherTimeframe = isHigherTimeframeInterval(normalizedInterval);
   const isSameBucket = lastBucket.getTime() === quoteBucket.getTime();
 
   if (quoteBucket.getTime() < lastBucket.getTime()) {
@@ -111,38 +127,45 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   if (isSameBucket) {
     const baseHigh = toFiniteNumber(lastRow?.high) ?? price;
     const baseLow = toFiniteNumber(lastRow?.low) ?? price;
+    const quoteHigh = toFiniteNumber(quote?.high) ?? price;
+    const quoteLow = toFiniteNumber(quote?.low) ?? price;
+    const baseVolume = toFiniteNumber(lastRow?.volume) ?? 0;
+    const quoteVolume = toFiniteNumber(quote?.volume);
     nextRows[nextRows.length - 1] = {
       ...lastRow,
       close: price,
-      high: isDaily ? Math.max(baseHigh, toFiniteNumber(quote?.high) ?? price) : Math.max(baseHigh, price),
-      low: isDaily ? Math.min(baseLow, toFiniteNumber(quote?.low) ?? price) : Math.min(baseLow, price),
+      high: isIntraday ? Math.max(baseHigh, price) : Math.max(baseHigh, quoteHigh),
+      low: isIntraday ? Math.min(baseLow, price) : Math.min(baseLow, quoteLow),
       adj_close: price,
       source,
+      date: formatBucketLabel(quoteBucket, normalizedInterval),
       ...(isDaily ? {
         open: toFiniteNumber(quote?.open) ?? toFiniteNumber(lastRow?.open) ?? price,
-        volume: toFiniteNumber(quote?.volume) ?? toFiniteNumber(lastRow?.volume) ?? 0,
-        date: formatLocalDate(quoteBucket, false),
+        volume: quoteVolume ?? baseVolume,
+      } : isHigherTimeframe ? {
+        open: toFiniteNumber(lastRow?.open) ?? toFiniteNumber(quote?.open) ?? price,
+        volume: quoteVolume == null ? baseVolume : Math.max(baseVolume, quoteVolume),
       } : {
-        date: formatLocalDate(quoteBucket, true),
       }),
     };
     return nextRows;
   }
 
-  if (isDaily) {
+  if (isDaily || isHigherTimeframe) {
+    const nextVolume = toFiniteNumber(quote?.volume) ?? 0;
     nextRows.push({
-      date: formatLocalDate(quoteBucket, false),
+      date: formatBucketLabel(quoteBucket, normalizedInterval),
       open: toFiniteNumber(quote?.open) ?? price,
       high: toFiniteNumber(quote?.high) ?? price,
       low: toFiniteNumber(quote?.low) ?? price,
       close: price,
-      volume: toFiniteNumber(quote?.volume) ?? 0,
+      volume: nextVolume,
       adj_close: price,
       source,
     });
     return nextRows;
   }
 
-  nextRows.push(toRealtimeRow(quoteBucket, price, source));
+  nextRows.push(toRealtimeRow(quoteBucket, price, source, 0, normalizedInterval, quote));
   return nextRows;
 }

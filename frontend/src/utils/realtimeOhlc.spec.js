@@ -137,4 +137,82 @@ describe("realtimeOhlc", () => {
       volume: 2800,
     });
   });
+
+  it("keeps weekly candles as date-only rows while updating the current bucket", () => {
+    const rows = [
+      {
+        date: "2026-04-06",
+        open: 95,
+        high: 102,
+        low: 93,
+        close: 101,
+        volume: 6200,
+        adj_close: 101,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromQuote(
+      rows,
+      {
+        price: 103,
+        open: 96,
+        high: 104,
+        low: 92,
+        volume: 2400,
+        quote_timestamp: "2026-04-10T11:18:40+08:00",
+        source: "fubon_neo",
+      },
+      "1wk",
+    );
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      date: "2026-04-06",
+      open: 95,
+      high: 104,
+      low: 92,
+      close: 103,
+      volume: 6200,
+    });
+  });
+
+  it("creates month candles with date-only labels when a new month starts", () => {
+    const rows = [
+      {
+        date: "2026-04-01",
+        open: 90,
+        high: 106,
+        low: 88,
+        close: 104,
+        volume: 8200,
+        adj_close: 104,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromQuote(
+      rows,
+      {
+        price: 107,
+        open: 105,
+        high: 108,
+        low: 104,
+        volume: 1500,
+        quote_timestamp: "2026-05-04T09:06:00+08:00",
+        source: "fubon_neo",
+      },
+      "1mo",
+    );
+
+    expect(updated).toHaveLength(2);
+    expect(updated[1]).toMatchObject({
+      date: "2026-05-01",
+      open: 105,
+      high: 108,
+      low: 104,
+      close: 107,
+      volume: 1500,
+    });
+  });
 });
