@@ -161,3 +161,28 @@ def test_build_fubon_quote_payload_accepts_speed_mode_trade_messages():
     assert payload["ask"] == 568
     assert payload["volume"] == 54538
     assert payload["quote_timestamp"] is not None
+
+
+def test_build_fubon_quote_payload_ignores_non_positive_price_fields():
+    payload = build_fubon_quote_payload(
+        "2330.TW",
+        {
+            "symbol": "2330",
+            "market": "TSE",
+            "exchange": "TWSE",
+            "previousClose": 560,
+            "openPrice": 0,
+            "highPrice": 571,
+            "lowPrice": 0,
+            "closePrice": 568,
+            "changePercent": 1.42,
+            "lastUpdated": 1712805300000000,
+        },
+    )
+
+    assert payload["price"] == 568
+    assert payload["open"] is None
+    assert payload["high"] == 571
+    assert payload["low"] is None
+    assert payload["prev_close"] == 560
+    assert payload["change_pct"] == pytest.approx(1.42)

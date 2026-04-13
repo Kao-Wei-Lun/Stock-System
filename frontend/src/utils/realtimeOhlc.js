@@ -15,6 +15,21 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function toPositivePrice(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function resolveCandleHigh(open, close, high = null) {
+  const values = [toPositivePrice(open), toPositivePrice(close), toPositivePrice(high)].filter((value) => value != null);
+  return values.length ? Math.max(...values) : null;
+}
+
+function resolveCandleLow(open, close, low = null) {
+  const values = [toPositivePrice(open), toPositivePrice(close), toPositivePrice(low)].filter((value) => value != null);
+  return values.length ? Math.min(...values) : null;
+}
+
 function parseDate(value) {
   if (!value) return null;
   const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
@@ -86,11 +101,12 @@ export function getIntervalBucketStart(value, interval) {
 
 function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m", quote = null) {
   const normalizedInterval = String(interval || "").toLowerCase();
+  const open = toPositivePrice(quote?.open) ?? price;
   return {
     date: formatBucketLabel(dateValue, normalizedInterval),
-    open: toFiniteNumber(quote?.open) ?? price,
-    high: toFiniteNumber(quote?.high) ?? price,
-    low: toFiniteNumber(quote?.low) ?? price,
+    open,
+    high: resolveCandleHigh(open, price, quote?.high) ?? price,
+    low: resolveCandleLow(open, price, quote?.low) ?? price,
     close: price,
     volume,
     adj_close: price,
@@ -101,7 +117,7 @@ function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m", qu
 export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   if (!Array.isArray(rows) || !rows.length) return Array.isArray(rows) ? rows : [];
 
-  const price = toFiniteNumber(quote?.price);
+  const price = toPositivePrice(quote?.price);
   if (price == null) return rows;
 
   const normalizedInterval = String(interval || "1d").toLowerCase();
@@ -125,10 +141,11 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   }
 
   if (isSameBucket) {
-    const baseHigh = toFiniteNumber(lastRow?.high) ?? price;
-    const baseLow = toFiniteNumber(lastRow?.low) ?? price;
-    const quoteHigh = toFiniteNumber(quote?.high) ?? price;
-    const quoteLow = toFiniteNumber(quote?.low) ?? price;
+    const quoteOpen = toPositivePrice(quote?.open) ?? toPositivePrice(lastRow?.open) ?? price;
+    const baseHigh = toPositivePrice(lastRow?.high) ?? resolveCandleHigh(quoteOpen, price) ?? price;
+    const baseLow = toPositivePrice(lastRow?.low) ?? resolveCandleLow(quoteOpen, price) ?? price;
+    const quoteHigh = resolveCandleHigh(quoteOpen, price, quote?.high) ?? price;
+    const quoteLow = resolveCandleLow(quoteOpen, price, quote?.low) ?? price;
     const baseVolume = toFiniteNumber(lastRow?.volume) ?? 0;
     const quoteVolume = toFiniteNumber(quote?.volume);
     nextRows[nextRows.length - 1] = {
@@ -140,10 +157,10 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
       source,
       date: formatBucketLabel(quoteBucket, normalizedInterval),
       ...(isDaily ? {
-        open: toFiniteNumber(quote?.open) ?? toFiniteNumber(lastRow?.open) ?? price,
+        open: quoteOpen,
         volume: quoteVolume ?? baseVolume,
       } : isHigherTimeframe ? {
-        open: toFiniteNumber(lastRow?.open) ?? toFiniteNumber(quote?.open) ?? price,
+        open: toPositivePrice(lastRow?.open) ?? toPositivePrice(quote?.open) ?? price,
         volume: quoteVolume == null ? baseVolume : Math.max(baseVolume, quoteVolume),
       } : {
       }),
@@ -153,11 +170,12 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
 
   if (isDaily || isHigherTimeframe) {
     const nextVolume = toFiniteNumber(quote?.volume) ?? 0;
+    const open = toPositivePrice(quote?.open) ?? price;
     nextRows.push({
       date: formatBucketLabel(quoteBucket, normalizedInterval),
-      open: toFiniteNumber(quote?.open) ?? price,
-      high: toFiniteNumber(quote?.high) ?? price,
-      low: toFiniteNumber(quote?.low) ?? price,
+      open,
+      high: resolveCandleHigh(open, price, quote?.high) ?? price,
+      low: resolveCandleLow(open, price, quote?.low) ?? price,
       close: price,
       volume: nextVolume,
       adj_close: price,

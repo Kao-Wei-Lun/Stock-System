@@ -40,6 +40,18 @@ def fubon_timestamp_to_iso(value: Any) -> Optional[str]:
         return None
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_positive_float(value: Any) -> Optional[float]:
+    numeric = _coerce_float(value)
+    return numeric if numeric is not None and numeric > 0 else None
+
+
 def _normalize_order_levels(levels: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(levels, list):
@@ -47,12 +59,14 @@ def _normalize_order_levels(levels: Any) -> list[dict[str, Any]]:
     for item in levels[:5]:
         if not isinstance(item, dict):
             continue
-        price = item.get("price")
+        price = _coerce_positive_float(item.get("price"))
         size = item.get("size")
+        if price is None:
+            continue
         try:
             normalized.append(
                 {
-                    "price": float(price) if price is not None else None,
+                    "price": price,
                     "size": int(size) if size is not None else None,
                 }
             )
@@ -62,12 +76,13 @@ def _normalize_order_levels(levels: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_scalar_book_level(price: Any, size: Any = None) -> list[dict[str, Any]]:
-    if price in (None, ""):
+    normalized_price = _coerce_positive_float(price)
+    if normalized_price is None:
         return []
     try:
         return [
             {
-                "price": float(price),
+                "price": normalized_price,
                 "size": int(size) if size not in (None, "") else None,
             }
         ]
@@ -85,13 +100,13 @@ def build_fubon_quote_payload(
         return None
 
     normalized_ticker = normalize_ticker(ticker)
-    price = payload.get("closePrice")
+    price = _coerce_positive_float(payload.get("closePrice"))
     if price is None:
-        price = payload.get("lastPrice")
+        price = _coerce_positive_float(payload.get("lastPrice"))
     if price is None:
-        price = payload.get("price")
+        price = _coerce_positive_float(payload.get("price"))
     if price is None and isinstance(payload.get("trades"), list) and payload["trades"]:
-        price = payload["trades"][0].get("price")
+        price = _coerce_positive_float(payload["trades"][0].get("price"))
     if price is None:
         return None
 
@@ -103,11 +118,11 @@ def build_fubon_quote_payload(
         asks = _normalize_scalar_book_level(payload.get("ask"))
     total = payload.get("total") if isinstance(payload.get("total"), dict) else {}
 
-    previous_close = payload.get("previousClose")
-    change = payload.get("change")
+    previous_close = _coerce_positive_float(payload.get("previousClose"))
+    change = _coerce_float(payload.get("change"))
     if change is None and previous_close not in (None, ""):
         try:
-            change = float(price) - float(previous_close)
+            change = price - previous_close
         except (TypeError, ValueError):
             change = None
 
@@ -121,13 +136,13 @@ def build_fubon_quote_payload(
         "is_delayed": False,
         "name": payload.get("name") or normalized_ticker,
         "currency": "TWD",
-        "price": float(price),
-        "open": payload.get("openPrice"),
-        "high": payload.get("highPrice"),
-        "low": payload.get("lowPrice"),
+        "price": price,
+        "open": _coerce_positive_float(payload.get("openPrice")),
+        "high": _coerce_positive_float(payload.get("highPrice")),
+        "low": _coerce_positive_float(payload.get("lowPrice")),
         "prev_close": previous_close,
         "change": change,
-        "change_pct": payload.get("changePercent"),
+        "change_pct": _coerce_float(payload.get("changePercent")),
         "volume": payload.get("volume") or total.get("tradeVolume"),
         "market_cap": None,
         "bid": bids[0].get("price") if bids else None,

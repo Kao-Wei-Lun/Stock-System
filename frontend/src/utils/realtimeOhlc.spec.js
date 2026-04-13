@@ -138,6 +138,54 @@ describe("realtimeOhlc", () => {
     });
   });
 
+  it("ignores invalid zero lows when merging realtime quote candles", () => {
+    const rows = [
+      {
+        date: "2026-04-12",
+        open: 98,
+        high: 100,
+        low: 96,
+        close: 99,
+        volume: 1000,
+        adj_close: 99,
+        source: "yahoo_finance",
+      },
+      {
+        date: "2026-04-13",
+        open: 100,
+        high: 103,
+        low: 99,
+        close: 102,
+        volume: 2300,
+        adj_close: 102,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromQuote(
+      rows,
+      {
+        price: 104,
+        open: 100,
+        high: 105,
+        low: 0,
+        volume: 2800,
+        quote_timestamp: "2026-04-13T11:18:40+08:00",
+        source: "fubon_neo",
+      },
+      "1d",
+    );
+
+    expect(updated[1]).toMatchObject({
+      date: "2026-04-13",
+      open: 100,
+      high: 105,
+      low: 99,
+      close: 104,
+      volume: 2800,
+    });
+  });
+
   it("keeps weekly candles as date-only rows while updating the current bucket", () => {
     const rows = [
       {

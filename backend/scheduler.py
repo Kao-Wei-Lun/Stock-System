@@ -168,6 +168,14 @@ def _normalize_order_levels(levels: Any) -> list[dict]:
     return normalized
 
 
+def _coerce_positive_float(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+    return numeric if numeric is not None and numeric > 0 else None
+
+
 def _resolve_fubon_ticker(market_type: str, payload: dict) -> Optional[str]:
     symbol = str(payload.get("symbol") or "").strip().upper()
     if not symbol:
@@ -197,15 +205,23 @@ def _build_fubon_candle_payload(ticker: str, payload: dict) -> Optional[dict]:
     date_value = payload.get("date")
     if not date_value:
         return None
+    close_price = _coerce_positive_float(payload.get("close"))
+    if close_price is None:
+        return None
+    open_price = _coerce_positive_float(payload.get("open")) or close_price
+    raw_high = _coerce_positive_float(payload.get("high"))
+    raw_low = _coerce_positive_float(payload.get("low"))
+    high_candidates = [value for value in [raw_high, open_price, close_price] if value is not None]
+    low_candidates = [value for value in [raw_low, open_price, close_price] if value is not None]
     try:
-        row = {
+        return {
             "ticker": ticker,
             "date": str(date_value).replace("Z", "+00:00"),
             "timeframe": str(payload.get("timeframe") or "1"),
-            "open": float(payload.get("open")),
-            "high": float(payload.get("high")),
-            "low": float(payload.get("low")),
-            "close": float(payload.get("close")),
+            "open": open_price,
+            "high": max(high_candidates),
+            "low": min(low_candidates),
+            "close": close_price,
             "volume": int(payload.get("volume") or 0),
             "average": float(payload.get("average")) if payload.get("average") is not None else None,
             "source": "fubon_neo",
@@ -213,7 +229,6 @@ def _build_fubon_candle_payload(ticker: str, payload: dict) -> Optional[dict]:
         }
     except (TypeError, ValueError):
         return None
-    return row
 
 
 async def fubon_ws_listener_loop(

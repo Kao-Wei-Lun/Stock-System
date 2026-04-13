@@ -1257,13 +1257,26 @@ export function useDashboard() {
 
   function applyQuote(data) {
     const hasField = (key) => Object.prototype.hasOwnProperty.call(data, key);
+    const toFiniteNumberOrNull = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+    const toPositiveQuoteValue = (value) => {
+      const numeric = toFiniteNumberOrNull(value);
+      return numeric != null && numeric > 0 ? numeric : null;
+    };
+    const nextPositiveValue = (key, fallback = null) => {
+      if (!hasField(key)) return toPositiveQuoteValue(quote[key]) ?? fallback;
+      if (data[key] == null || data[key] === "") return fallback;
+      return toPositiveQuoteValue(data[key]) ?? toPositiveQuoteValue(quote[key]) ?? fallback;
+    };
     const nextValue = (key, fallback = null) => (hasField(key) ? data[key] : (quote[key] ?? fallback));
 
-    quote.price = nextValue("price", null);
-    quote.open = nextValue("open", null);
-    quote.high = nextValue("high", null);
-    quote.low = nextValue("low", null);
-    quote.prev_close = nextValue("prev_close", null);
+    quote.price = nextPositiveValue("price", null);
+    quote.open = nextPositiveValue("open", null);
+    quote.high = nextPositiveValue("high", null);
+    quote.low = nextPositiveValue("low", null);
+    quote.prev_close = nextPositiveValue("prev_close", null);
     quote.volume = nextValue("volume", null);
     quote.market_cap = nextValue("market_cap", null);
     quote.change = hasField("change") ? (data.change ?? 0) : (quote.change ?? 0);
@@ -1275,8 +1288,8 @@ export function useDashboard() {
     quote.source = nextValue("source", null);
     quote.quote_type = nextValue("quote_type", null);
     quote.is_delayed = hasField("is_delayed") ? (data.is_delayed ?? true) : (quote.is_delayed ?? true);
-    quote.bid = nextValue("bid", null);
-    quote.ask = nextValue("ask", null);
+    quote.bid = nextPositiveValue("bid", null);
+    quote.ask = nextPositiveValue("ask", null);
     quote.bid_size = nextValue("bid_size", null);
     quote.ask_size = nextValue("ask_size", null);
     quote.bids = hasField("bids") ? (Array.isArray(data.bids) ? data.bids : []) : (quote.bids || []);
@@ -1327,19 +1340,43 @@ export function useDashboard() {
 
   function upsertRealtimeCandleRow(data) {
     if (!data?.date || currentInterval.value !== "1m") return;
-    const normalizedDate = String(data.date).replace("T", " ");
-    const nextRow = {
-      date: normalizedDate,
-      open: Number(data.open ?? data.close ?? 0),
-      high: Number(data.high ?? data.close ?? 0),
-      low: Number(data.low ?? data.close ?? 0),
-      close: Number(data.close ?? data.open ?? 0),
-      volume: Number(data.volume ?? 0),
-      adj_close: Number(data.close ?? data.open ?? 0),
-      source: data.source || "fubon_neo",
+    const toFiniteNumberOrNull = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
     };
+    const toPositiveQuoteValue = (value) => {
+      const numeric = toFiniteNumberOrNull(value);
+      return numeric != null && numeric > 0 ? numeric : null;
+    };
+    const normalizedDate = String(data.date).replace("T", " ");
     const rows = [...rawOhlcData.value];
     const last = rows[rows.length - 1];
+    const lastSameBucket = last?.date === normalizedDate ? last : null;
+    const close = toPositiveQuoteValue(data.close) ?? toPositiveQuoteValue(data.open) ?? toPositiveQuoteValue(lastSameBucket?.close);
+    if (close == null) return;
+    const open = toPositiveQuoteValue(data.open) ?? toPositiveQuoteValue(lastSameBucket?.open) ?? close;
+    const highCandidates = [
+      open,
+      close,
+      toPositiveQuoteValue(data.high),
+      toPositiveQuoteValue(lastSameBucket?.high),
+    ].filter((value) => value != null);
+    const lowCandidates = [
+      open,
+      close,
+      toPositiveQuoteValue(data.low),
+      toPositiveQuoteValue(lastSameBucket?.low),
+    ].filter((value) => value != null);
+    const nextRow = {
+      date: normalizedDate,
+      open,
+      high: Math.max(...highCandidates),
+      low: Math.min(...lowCandidates),
+      close,
+      volume: toFiniteNumberOrNull(data.volume) ?? toFiniteNumberOrNull(lastSameBucket?.volume) ?? 0,
+      adj_close: close,
+      source: data.source || "fubon_neo",
+    };
     if (last?.date === normalizedDate) {
       rows[rows.length - 1] = nextRow;
     } else {
@@ -1357,9 +1394,22 @@ export function useDashboard() {
 
   function handleRealtimeBook(message) {
     const data = message.data || {};
+    const hasField = (key) => Object.prototype.hasOwnProperty.call(data, key);
+    const toFiniteNumberOrNull = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+    const toPositiveQuoteValue = (value) => {
+      const numeric = toFiniteNumberOrNull(value);
+      return numeric != null && numeric > 0 ? numeric : null;
+    };
     if (message.ticker !== currentTicker.value && message.ticker !== normalizeTicker(currentTicker.value)) return;
-    quote.bid = data.bid ?? quote.bid ?? null;
-    quote.ask = data.ask ?? quote.ask ?? null;
+    quote.bid = hasField("bid")
+      ? (data.bid == null || data.bid === "" ? null : (toPositiveQuoteValue(data.bid) ?? quote.bid ?? null))
+      : (quote.bid ?? null);
+    quote.ask = hasField("ask")
+      ? (data.ask == null || data.ask === "" ? null : (toPositiveQuoteValue(data.ask) ?? quote.ask ?? null))
+      : (quote.ask ?? null);
     quote.bid_size = data.bid_size ?? quote.bid_size ?? null;
     quote.ask_size = data.ask_size ?? quote.ask_size ?? null;
     quote.bids = Array.isArray(data.bids) ? data.bids : [];
