@@ -623,6 +623,16 @@ REQUIRED_INDEX_MIGRATIONS = {
             ADD INDEX `idx_market_quotes_latest_quote_recency` (`quote_timestamp`, `synced_at`)
         """,
     },
+    "taiwan_chip_snapshots": {
+        "idx_taiwan_chip_snapshots_source": """
+            ALTER TABLE `taiwan_chip_snapshots`
+            ADD INDEX `idx_taiwan_chip_snapshots_source` (`source`)
+        """,
+        "idx_taiwan_chip_snapshots_snapshot_date_source": """
+            ALTER TABLE `taiwan_chip_snapshots`
+            ADD INDEX `idx_taiwan_chip_snapshots_snapshot_date_source` (`snapshot_date`, `source`)
+        """,
+    },
 }
 
 
