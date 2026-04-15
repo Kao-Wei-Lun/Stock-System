@@ -319,6 +319,7 @@ class TaifexFetcher:
         loop = asyncio.get_event_loop()
         payload = await loop.run_in_executor(None, self._fetch_dashboard_sync, target_date)
         await db.upsert_institutional_snapshot(payload)
+        await db.upsert_taifex_structured_snapshot(payload)
         self._history_cache.clear()
         return payload
 

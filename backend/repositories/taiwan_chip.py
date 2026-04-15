@@ -5,6 +5,207 @@ from database.core import DEFAULT_OWNER_ID
 
 OFFICIAL_TAIWAN_CHIP_SOURCES = ("twse_t86", "tpex_3itrade_hedge")
 OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS = ", ".join(["%s"] * len(OFFICIAL_TAIWAN_CHIP_SOURCES))
+TAIFEX_OVERVIEW_FIELDS = (
+    "trade_long_futures_volume",
+    "trade_long_options_volume",
+    "trade_long_futures_amount",
+    "trade_long_options_amount",
+    "trade_short_futures_volume",
+    "trade_short_options_volume",
+    "trade_short_futures_amount",
+    "trade_short_options_amount",
+    "trade_net_futures_volume",
+    "trade_net_options_volume",
+    "trade_net_futures_amount",
+    "trade_net_options_amount",
+    "trade_net_futures_volume_change",
+    "trade_net_options_volume_change",
+    "trade_net_futures_amount_change",
+    "trade_net_options_amount_change",
+)
+TAIFEX_CONTRACT_FIELDS = (
+    "rank",
+    "trade_long_volume",
+    "trade_long_amount",
+    "trade_short_volume",
+    "trade_short_amount",
+    "trade_net_volume",
+    "trade_net_amount",
+    "oi_long_volume",
+    "oi_long_amount",
+    "oi_short_volume",
+    "oi_short_amount",
+    "oi_net_volume",
+    "oi_net_amount",
+    "trade_net_volume_change",
+    "trade_net_amount_change",
+    "oi_net_volume_change",
+    "oi_net_amount_change",
+)
+TAIFEX_CALL_PUT_FIELDS = (
+    "rank",
+    "trade_buy_volume",
+    "trade_buy_amount",
+    "trade_sell_volume",
+    "trade_sell_amount",
+    "trade_net_volume",
+    "trade_net_amount",
+    "oi_buy_volume",
+    "oi_buy_amount",
+    "oi_sell_volume",
+    "oi_sell_amount",
+    "oi_net_volume",
+    "oi_net_amount",
+    "trade_net_volume_change",
+    "trade_net_amount_change",
+    "oi_net_volume_change",
+    "oi_net_amount_change",
+)
+TAIFEX_CASH_SUMMARY_FIELDS = (
+    "buy_amount",
+    "sell_amount",
+    "net_amount",
+    "net_amount_change",
+)
+TAIFEX_STRUCTURED_ROW_TABLES = (
+    "taifex_overview_daily",
+    "taifex_futures_daily",
+    "taifex_options_daily",
+    "taifex_call_put_daily",
+    "taifex_cash_summary_daily",
+)
+
+
+def _normalize_taifex_date(value: Any) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value).strip() or None
+
+
+def _normalize_taifex_text(value: Any, max_length: int) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
+def _normalize_taifex_int(value: Any) -> int:
+    if value is None or value == "":
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
+
+def _normalize_taifex_meta_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    resolved_date = _normalize_taifex_date(payload.get("resolved_date"))
+    query_date = _normalize_taifex_date(payload.get("query_date") or resolved_date)
+    if not resolved_date or not query_date:
+        raise ValueError("Institutional snapshot requires query_date and resolved_date")
+    return {
+        "resolved_date": resolved_date,
+        "query_date": query_date,
+        "previous_date": _normalize_taifex_date(payload.get("previous_date")),
+        "default_futures_commodity": _normalize_taifex_text(payload.get("default_futures_commodity"), 64),
+        "default_options_commodity": _normalize_taifex_text(payload.get("default_options_commodity"), 64),
+        "cash_summary_source": _normalize_taifex_text(payload.get("cash_summary_source"), 64),
+        "cash_summary_warning": _normalize_taifex_text(payload.get("cash_summary_warning"), 65535),
+    }
+
+
+def _normalize_taifex_overview_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    resolved_date = _normalize_taifex_date(payload.get("resolved_date"))
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("overview") or []:
+        if not isinstance(item, dict):
+            continue
+        institution = _normalize_taifex_text(item.get("institution"), 32)
+        if not institution:
+            continue
+        normalized = {"resolved_date": resolved_date, "institution": institution}
+        normalized.update({field: _normalize_taifex_int(item.get(field)) for field in TAIFEX_OVERVIEW_FIELDS})
+        rows.append(normalized)
+    return rows
+
+
+def _normalize_taifex_contract_rows(
+    payload: Dict[str, Any],
+    key: str,
+) -> List[Dict[str, Any]]:
+    resolved_date = _normalize_taifex_date(payload.get("resolved_date"))
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get(key) or []:
+        if not isinstance(item, dict):
+            continue
+        commodity = _normalize_taifex_text(item.get("commodity"), 64)
+        institution = _normalize_taifex_text(item.get("institution"), 32)
+        if not commodity or not institution:
+            continue
+        normalized = {
+            "resolved_date": resolved_date,
+            "commodity": commodity,
+            "institution": institution,
+        }
+        normalized.update({field: _normalize_taifex_int(item.get(field)) for field in TAIFEX_CONTRACT_FIELDS})
+        rows.append(normalized)
+    return rows
+
+
+def _normalize_taifex_call_put_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    resolved_date = _normalize_taifex_date(payload.get("resolved_date"))
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("call_puts") or []:
+        if not isinstance(item, dict):
+            continue
+        commodity = _normalize_taifex_text(item.get("commodity"), 64)
+        option_side = _normalize_taifex_text(item.get("option_side"), 16)
+        institution = _normalize_taifex_text(item.get("institution"), 32)
+        if not commodity or not option_side or not institution:
+            continue
+        normalized = {
+            "resolved_date": resolved_date,
+            "commodity": commodity,
+            "option_side": option_side,
+            "institution": institution,
+        }
+        normalized.update({field: _normalize_taifex_int(item.get(field)) for field in TAIFEX_CALL_PUT_FIELDS})
+        rows.append(normalized)
+    return rows
+
+
+def _normalize_taifex_cash_summary_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    resolved_date = _normalize_taifex_date(payload.get("resolved_date"))
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("cash_summary") or []:
+        if not isinstance(item, dict):
+            continue
+        institution = _normalize_taifex_text(item.get("institution"), 64)
+        if not institution:
+            continue
+        normalized = {
+            "resolved_date": resolved_date,
+            "institution": institution,
+        }
+        normalized.update({field: _normalize_taifex_int(item.get(field)) for field in TAIFEX_CASH_SUMMARY_FIELDS})
+        rows.append(normalized)
+    return rows
+
+
+def _build_taifex_structured_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "meta": _normalize_taifex_meta_payload(payload),
+        "overview_rows": _normalize_taifex_overview_rows(payload),
+        "futures_rows": _normalize_taifex_contract_rows(payload, "futures"),
+        "options_rows": _normalize_taifex_contract_rows(payload, "options"),
+        "call_put_rows": _normalize_taifex_call_put_rows(payload),
+        "cash_summary_rows": _normalize_taifex_cash_summary_rows(payload),
+    }
 
 
 class TaiwanChipMixin:
@@ -198,6 +399,235 @@ class TaiwanChipMixin:
                 async with conn.cursor() as cur:
                     await cur.execute(sql, params)
 
+    async def upsert_taifex_structured_snapshot(self, payload: Dict[str, Any]) -> Dict[str, int]:
+        normalized = _build_taifex_structured_snapshot(payload)
+        meta = normalized["meta"]
+        resolved_date = meta["resolved_date"]
+
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        INSERT INTO `taifex_institutional_meta`
+                            (`resolved_date`, `query_date`, `previous_date`, `default_futures_commodity`,
+                             `default_options_commodity`, `cash_summary_source`, `cash_summary_warning`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        AS `incoming`
+                        ON DUPLICATE KEY UPDATE
+                            `query_date`=`incoming`.`query_date`,
+                            `previous_date`=`incoming`.`previous_date`,
+                            `default_futures_commodity`=`incoming`.`default_futures_commodity`,
+                            `default_options_commodity`=`incoming`.`default_options_commodity`,
+                            `cash_summary_source`=`incoming`.`cash_summary_source`,
+                            `cash_summary_warning`=`incoming`.`cash_summary_warning`
+                        """,
+                        (
+                            meta["resolved_date"],
+                            meta["query_date"],
+                            meta["previous_date"],
+                            meta["default_futures_commodity"],
+                            meta["default_options_commodity"],
+                            meta["cash_summary_source"],
+                            meta["cash_summary_warning"],
+                        ),
+                    )
+                    for table_name in TAIFEX_STRUCTURED_ROW_TABLES:
+                        await cur.execute(
+                            f"DELETE FROM `{table_name}` WHERE `resolved_date`=%s",
+                            (resolved_date,),
+                        )
+
+                    if normalized["overview_rows"]:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `taifex_overview_daily`
+                                (`resolved_date`, `institution`, `trade_long_futures_volume`,
+                                 `trade_long_options_volume`, `trade_long_futures_amount`,
+                                 `trade_long_options_amount`, `trade_short_futures_volume`,
+                                 `trade_short_options_volume`, `trade_short_futures_amount`,
+                                 `trade_short_options_amount`, `trade_net_futures_volume`,
+                                 `trade_net_options_volume`, `trade_net_futures_amount`,
+                                 `trade_net_options_amount`, `trade_net_futures_volume_change`,
+                                 `trade_net_options_volume_change`, `trade_net_futures_amount_change`,
+                                 `trade_net_options_amount_change`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    item["resolved_date"],
+                                    item["institution"],
+                                    item["trade_long_futures_volume"],
+                                    item["trade_long_options_volume"],
+                                    item["trade_long_futures_amount"],
+                                    item["trade_long_options_amount"],
+                                    item["trade_short_futures_volume"],
+                                    item["trade_short_options_volume"],
+                                    item["trade_short_futures_amount"],
+                                    item["trade_short_options_amount"],
+                                    item["trade_net_futures_volume"],
+                                    item["trade_net_options_volume"],
+                                    item["trade_net_futures_amount"],
+                                    item["trade_net_options_amount"],
+                                    item["trade_net_futures_volume_change"],
+                                    item["trade_net_options_volume_change"],
+                                    item["trade_net_futures_amount_change"],
+                                    item["trade_net_options_amount_change"],
+                                )
+                                for item in normalized["overview_rows"]
+                            ],
+                        )
+
+                    if normalized["futures_rows"]:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `taifex_futures_daily`
+                                (`resolved_date`, `commodity`, `institution`, `rank`,
+                                 `trade_long_volume`, `trade_long_amount`, `trade_short_volume`,
+                                 `trade_short_amount`, `trade_net_volume`, `trade_net_amount`,
+                                 `oi_long_volume`, `oi_long_amount`, `oi_short_volume`,
+                                 `oi_short_amount`, `oi_net_volume`, `oi_net_amount`,
+                                 `trade_net_volume_change`, `trade_net_amount_change`,
+                                 `oi_net_volume_change`, `oi_net_amount_change`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    item["resolved_date"],
+                                    item["commodity"],
+                                    item["institution"],
+                                    item["rank"],
+                                    item["trade_long_volume"],
+                                    item["trade_long_amount"],
+                                    item["trade_short_volume"],
+                                    item["trade_short_amount"],
+                                    item["trade_net_volume"],
+                                    item["trade_net_amount"],
+                                    item["oi_long_volume"],
+                                    item["oi_long_amount"],
+                                    item["oi_short_volume"],
+                                    item["oi_short_amount"],
+                                    item["oi_net_volume"],
+                                    item["oi_net_amount"],
+                                    item["trade_net_volume_change"],
+                                    item["trade_net_amount_change"],
+                                    item["oi_net_volume_change"],
+                                    item["oi_net_amount_change"],
+                                )
+                                for item in normalized["futures_rows"]
+                            ],
+                        )
+
+                    if normalized["options_rows"]:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `taifex_options_daily`
+                                (`resolved_date`, `commodity`, `institution`, `rank`,
+                                 `trade_long_volume`, `trade_long_amount`, `trade_short_volume`,
+                                 `trade_short_amount`, `trade_net_volume`, `trade_net_amount`,
+                                 `oi_long_volume`, `oi_long_amount`, `oi_short_volume`,
+                                 `oi_short_amount`, `oi_net_volume`, `oi_net_amount`,
+                                 `trade_net_volume_change`, `trade_net_amount_change`,
+                                 `oi_net_volume_change`, `oi_net_amount_change`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    item["resolved_date"],
+                                    item["commodity"],
+                                    item["institution"],
+                                    item["rank"],
+                                    item["trade_long_volume"],
+                                    item["trade_long_amount"],
+                                    item["trade_short_volume"],
+                                    item["trade_short_amount"],
+                                    item["trade_net_volume"],
+                                    item["trade_net_amount"],
+                                    item["oi_long_volume"],
+                                    item["oi_long_amount"],
+                                    item["oi_short_volume"],
+                                    item["oi_short_amount"],
+                                    item["oi_net_volume"],
+                                    item["oi_net_amount"],
+                                    item["trade_net_volume_change"],
+                                    item["trade_net_amount_change"],
+                                    item["oi_net_volume_change"],
+                                    item["oi_net_amount_change"],
+                                )
+                                for item in normalized["options_rows"]
+                            ],
+                        )
+
+                    if normalized["call_put_rows"]:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `taifex_call_put_daily`
+                                (`resolved_date`, `commodity`, `option_side`, `institution`, `rank`,
+                                 `trade_buy_volume`, `trade_buy_amount`, `trade_sell_volume`,
+                                 `trade_sell_amount`, `trade_net_volume`, `trade_net_amount`,
+                                 `oi_buy_volume`, `oi_buy_amount`, `oi_sell_volume`,
+                                 `oi_sell_amount`, `oi_net_volume`, `oi_net_amount`,
+                                 `trade_net_volume_change`, `trade_net_amount_change`,
+                                 `oi_net_volume_change`, `oi_net_amount_change`)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    item["resolved_date"],
+                                    item["commodity"],
+                                    item["option_side"],
+                                    item["institution"],
+                                    item["rank"],
+                                    item["trade_buy_volume"],
+                                    item["trade_buy_amount"],
+                                    item["trade_sell_volume"],
+                                    item["trade_sell_amount"],
+                                    item["trade_net_volume"],
+                                    item["trade_net_amount"],
+                                    item["oi_buy_volume"],
+                                    item["oi_buy_amount"],
+                                    item["oi_sell_volume"],
+                                    item["oi_sell_amount"],
+                                    item["oi_net_volume"],
+                                    item["oi_net_amount"],
+                                    item["trade_net_volume_change"],
+                                    item["trade_net_amount_change"],
+                                    item["oi_net_volume_change"],
+                                    item["oi_net_amount_change"],
+                                )
+                                for item in normalized["call_put_rows"]
+                            ],
+                        )
+
+                    if normalized["cash_summary_rows"]:
+                        await cur.executemany(
+                            """
+                            INSERT INTO `taifex_cash_summary_daily`
+                                (`resolved_date`, `institution`, `buy_amount`, `sell_amount`,
+                                 `net_amount`, `net_amount_change`)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    item["resolved_date"],
+                                    item["institution"],
+                                    item["buy_amount"],
+                                    item["sell_amount"],
+                                    item["net_amount"],
+                                    item["net_amount_change"],
+                                )
+                                for item in normalized["cash_summary_rows"]
+                            ],
+                        )
+
+        return {
+            "overview_rows": len(normalized["overview_rows"]),
+            "futures_rows": len(normalized["futures_rows"]),
+            "options_rows": len(normalized["options_rows"]),
+            "call_put_rows": len(normalized["call_put_rows"]),
+            "cash_summary_rows": len(normalized["cash_summary_rows"]),
+        }
+
     async def get_institutional_snapshot(self, target_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
         if target_date:
             sql = """
@@ -262,4 +692,58 @@ class TaiwanChipMixin:
         ]
         snapshots.reverse()
         return snapshots
+
+    async def list_institutional_snapshot_payloads(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        filters = ["1=1"]
+        params: List[Any] = []
+        normalized_start = _normalize_taifex_date(start_date)
+        normalized_end = _normalize_taifex_date(end_date)
+        if normalized_start:
+            filters.append("`resolved_date`>=%s")
+            params.append(normalized_start)
+        if normalized_end:
+            filters.append("`resolved_date`<=%s")
+            params.append(normalized_end)
+
+        sql = f"""
+            SELECT `resolved_date`, `query_date`, `payload_json`
+            FROM `institutional_snapshots`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `resolved_date` ASC
+        """
+        if limit and limit > 0:
+            sql += " LIMIT %s"
+            params.append(int(limit))
+
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, tuple(params))
+                rows = await cur.fetchall()
+        return [
+            snapshot
+            for snapshot in (_deserialize_institutional_snapshot(row) for row in rows)
+            if snapshot
+        ]
+
+    async def get_taifex_structured_snapshot_counts(self, resolved_date: str | date) -> Dict[str, int]:
+        normalized_date = _normalize_taifex_date(resolved_date)
+        if not normalized_date:
+            raise ValueError("resolved_date is required")
+
+        counts: Dict[str, int] = {}
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                for table_name in ("taifex_institutional_meta", *TAIFEX_STRUCTURED_ROW_TABLES):
+                    await cur.execute(
+                        f"SELECT COUNT(*) AS `row_count` FROM `{table_name}` WHERE `resolved_date`=%s",
+                        (normalized_date,),
+                    )
+                    row = await cur.fetchone()
+                    counts[table_name] = int((row or {}).get("row_count") or 0)
+        return counts
 

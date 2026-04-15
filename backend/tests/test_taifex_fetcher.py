@@ -25,7 +25,7 @@ class _MockResponse:
         return self._payload
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_fetch_dashboard_uses_exact_snapshot_from_db(monkeypatch):
     fetcher = TaifexFetcher()
     snapshot = {
@@ -55,6 +55,39 @@ async def test_fetch_dashboard_uses_exact_snapshot_from_db(monkeypatch):
 
     assert result == snapshot
     assert "2026-04-03" in fetcher._dashboard_cache
+
+
+@pytest.mark.anyio
+async def test_fetch_and_store_dashboard_dual_writes_raw_and_structured(monkeypatch):
+    fetcher = TaifexFetcher()
+    payload = {
+        "query_date": "2026-04-03",
+        "resolved_date": "2026-04-03",
+        "overview": [],
+        "futures": [],
+        "options": [],
+        "call_puts": [],
+        "cash_summary": [],
+        "leaderboards": {},
+        "cost_estimates": {},
+    }
+    writes = []
+
+    monkeypatch.setattr(fetcher, "_fetch_dashboard_sync", lambda _target_date: payload)
+
+    async def upsert_raw(snapshot):
+        writes.append(("raw", snapshot["resolved_date"]))
+
+    async def upsert_structured(snapshot):
+        writes.append(("structured", snapshot["resolved_date"]))
+
+    monkeypatch.setattr(taifex_fetcher.db, "upsert_institutional_snapshot", upsert_raw)
+    monkeypatch.setattr(taifex_fetcher.db, "upsert_taifex_structured_snapshot", upsert_structured)
+
+    result = await fetcher._fetch_and_store_dashboard(date(2026, 4, 3))
+
+    assert result == payload
+    assert writes == [("raw", "2026-04-03"), ("structured", "2026-04-03")]
 
 
 def test_fetch_twse_cash_summary_uses_finmind_when_primary_unavailable(monkeypatch):
