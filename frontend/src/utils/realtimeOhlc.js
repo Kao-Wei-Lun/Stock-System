@@ -114,6 +114,14 @@ function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m", qu
   };
 }
 
+function resolveIntradayVolumeDelta(quote) {
+  const currentTotalVolume = toFiniteNumber(quote?.volume);
+  const previousTotalVolume = toFiniteNumber(quote?.previous_total_volume);
+  if (currentTotalVolume == null || previousTotalVolume == null) return null;
+  if (currentTotalVolume < previousTotalVolume) return null;
+  return currentTotalVolume - previousTotalVolume;
+}
+
 export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   if (!Array.isArray(rows) || !rows.length) return Array.isArray(rows) ? rows : [];
 
@@ -148,6 +156,7 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
     const quoteLow = resolveCandleLow(quoteOpen, price, quote?.low) ?? price;
     const baseVolume = toFiniteNumber(lastRow?.volume) ?? 0;
     const quoteVolume = toFiniteNumber(quote?.volume);
+    const intradayVolumeDelta = resolveIntradayVolumeDelta(quote);
     nextRows[nextRows.length - 1] = {
       ...lastRow,
       close: price,
@@ -163,6 +172,7 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
         open: toPositivePrice(lastRow?.open) ?? toPositivePrice(quote?.open) ?? price,
         volume: quoteVolume == null ? baseVolume : Math.max(baseVolume, quoteVolume),
       } : {
+        volume: intradayVolumeDelta == null ? baseVolume : Math.max(0, baseVolume + intradayVolumeDelta),
       }),
     };
     return nextRows;
@@ -184,6 +194,13 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
     return nextRows;
   }
 
-  nextRows.push(toRealtimeRow(quoteBucket, price, source, 0, normalizedInterval, quote));
+  nextRows.push(toRealtimeRow(
+    quoteBucket,
+    price,
+    source,
+    Math.max(0, resolveIntradayVolumeDelta(quote) ?? 0),
+    normalizedInterval,
+    quote,
+  ));
   return nextRows;
 }

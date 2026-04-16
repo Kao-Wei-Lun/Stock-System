@@ -1,6 +1,10 @@
+const EMPTY_MARK = "\u2014";
+const TW_HUNDRED_MILLION = "\u5104";
+const TW_TEN_THOUSAND = "\u842c";
+
 export function fmtPrice(value) {
   if (value == null || Number.isNaN(Number(value))) {
-    return "—";
+    return EMPTY_MARK;
   }
   const numericValue = Number(value);
   if (numericValue >= 1000) {
@@ -13,24 +17,31 @@ export function fmtPrice(value) {
 }
 
 export function fmtVol(value) {
-  if (!value) {
-    return "—";
+  if (value == null || value === "") {
+    return EMPTY_MARK;
   }
-  if (value >= 1e9) {
-    return `${(value / 1e9).toFixed(2)}B`;
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return EMPTY_MARK;
   }
-  if (value >= 1e6) {
-    return `${(value / 1e6).toFixed(2)}M`;
+  if (numericValue === 0) {
+    return "0";
   }
-  if (value >= 1e3) {
-    return `${(value / 1e3).toFixed(0)}K`;
+  if (numericValue >= 1e9) {
+    return `${(numericValue / 1e9).toFixed(2)}B`;
   }
-  return String(value);
+  if (numericValue >= 1e6) {
+    return `${(numericValue / 1e6).toFixed(2)}M`;
+  }
+  if (numericValue >= 1e3) {
+    return `${(numericValue / 1e3).toFixed(0)}K`;
+  }
+  return String(numericValue);
 }
 
 export function fmtMktCap(value) {
   if (!value) {
-    return "—";
+    return EMPTY_MARK;
   }
   if (value >= 1e12) {
     return `${(value / 1e12).toFixed(2)}T`;
@@ -45,7 +56,7 @@ export function fmtMktCap(value) {
 }
 
 export function fmtTwMoney(value, options = {}) {
-  const { signed = false, empty = "—" } = options;
+  const { signed = false, empty = EMPTY_MARK } = options;
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
     return empty;
@@ -62,14 +73,14 @@ export function fmtTwMoney(value, options = {}) {
     return `${sign}${(absoluteValue / 1e8).toLocaleString(undefined, {
       minimumFractionDigits: 0,
       maximumFractionDigits: digits,
-    })}億`;
+    })}${TW_HUNDRED_MILLION}`;
   }
 
   if (absoluteValue >= 1e4) {
     return `${sign}${(absoluteValue / 1e4).toLocaleString(undefined, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 1,
-    })}萬`;
+    })}${TW_TEN_THOUSAND}`;
   }
 
   return `${sign}${absoluteValue.toLocaleString()}`;

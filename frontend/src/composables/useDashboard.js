@@ -15,6 +15,7 @@ import {
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
+import { mergeRealtimeQuote } from "../utils/realtimeQuote";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
 import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
@@ -1272,48 +1273,15 @@ export function useDashboard() {
   }
 
   function applyQuote(data) {
-    const hasField = (key) => Object.prototype.hasOwnProperty.call(data, key);
-    const toFiniteNumberOrNull = (value) => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : null;
-    };
-    const toPositiveQuoteValue = (value) => {
-      const numeric = toFiniteNumberOrNull(value);
-      return numeric != null && numeric > 0 ? numeric : null;
-    };
-    const nextPositiveValue = (key, fallback = null) => {
-      if (!hasField(key)) return toPositiveQuoteValue(quote[key]) ?? fallback;
-      if (data[key] == null || data[key] === "") return fallback;
-      return toPositiveQuoteValue(data[key]) ?? toPositiveQuoteValue(quote[key]) ?? fallback;
-    };
-    const nextValue = (key, fallback = null) => (hasField(key) ? data[key] : (quote[key] ?? fallback));
-
-    quote.price = nextPositiveValue("price", null);
-    quote.open = nextPositiveValue("open", null);
-    quote.high = nextPositiveValue("high", null);
-    quote.low = nextPositiveValue("low", null);
-    quote.prev_close = nextPositiveValue("prev_close", null);
-    quote.volume = nextValue("volume", null);
-    quote.market_cap = nextValue("market_cap", null);
-    quote.change = hasField("change") ? (data.change ?? 0) : (quote.change ?? 0);
-    quote.change_pct = hasField("change_pct") ? (data.change_pct ?? 0) : (quote.change_pct ?? 0);
-    quote.resolved_symbol = nextValue("resolved_symbol", null);
-    quote.market = nextValue("market", null);
-    quote.exchange = nextValue("exchange", null);
-    quote.name = hasField("name") ? (data.name || currentName.value) : (quote.name || currentName.value);
-    quote.source = nextValue("source", null);
-    quote.quote_type = nextValue("quote_type", null);
-    quote.is_delayed = hasField("is_delayed") ? (data.is_delayed ?? true) : (quote.is_delayed ?? true);
-    quote.bid = nextPositiveValue("bid", null);
-    quote.ask = nextPositiveValue("ask", null);
-    quote.bid_size = nextValue("bid_size", null);
-    quote.ask_size = nextValue("ask_size", null);
-    quote.bids = hasField("bids") ? (Array.isArray(data.bids) ? data.bids : []) : (quote.bids || []);
-    quote.asks = hasField("asks") ? (Array.isArray(data.asks) ? data.asks : []) : (quote.asks || []);
-    quote.quote_timestamp = nextValue("quote_timestamp", null);
-    quote.synced_at = nextValue("synced_at", null);
-    if (data.name) currentName.value = data.name;
+    const previousTotalVolume = Number.isFinite(Number(quote.volume)) ? Number(quote.volume) : null;
+    const merged = mergeRealtimeQuote(quote, data, currentName.value);
+    Object.assign(quote, merged);
+    if (merged.name) currentName.value = merged.name;
     lastUpdate.value = formatQuoteTimestampLabel(quote.quote_timestamp || quote.synced_at);
+    return {
+      ...merged,
+      previous_total_volume: previousTotalVolume,
+    };
   }
 
   function resetQuote() {
@@ -1404,8 +1372,8 @@ export function useDashboard() {
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
-    applyQuote(data);
-    updateCurrentCandleFromQuote(data);
+    const mergedQuote = applyQuote(data);
+    updateCurrentCandleFromQuote(mergedQuote);
   }
 
   function handleRealtimeBook(message) {

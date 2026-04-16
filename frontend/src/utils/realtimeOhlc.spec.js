@@ -89,6 +89,75 @@ describe("realtimeOhlc", () => {
     });
   });
 
+  it("adds intraday volume deltas for non-1m timeframe updates", () => {
+    const rows = [
+      {
+        date: "2026-04-13 09:05:00",
+        open: 101,
+        high: 103,
+        low: 100,
+        close: 102,
+        volume: 260,
+        adj_close: 102,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromQuote(
+      rows,
+      {
+        price: 104,
+        volume: 1520,
+        previous_total_volume: 1400,
+        quote_timestamp: "2026-04-13T09:07:21+08:00",
+        source: "fubon_neo",
+      },
+      "5m",
+    );
+
+    expect(updated[0]).toMatchObject({
+      date: "2026-04-13 09:05:00",
+      close: 104,
+      volume: 380,
+    });
+  });
+
+  it("starts a new intraday bucket with the latest volume delta", () => {
+    const rows = [
+      {
+        date: "2026-04-13 09:05:00",
+        open: 101,
+        high: 103,
+        low: 100,
+        close: 102,
+        volume: 260,
+        adj_close: 102,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromQuote(
+      rows,
+      {
+        price: 105,
+        volume: 1780,
+        previous_total_volume: 1520,
+        quote_timestamp: "2026-04-13T09:10:02+08:00",
+        source: "fubon_neo",
+      },
+      "5m",
+    );
+
+    expect(updated[1]).toMatchObject({
+      date: "2026-04-13 09:10:00",
+      open: 105,
+      high: 105,
+      low: 105,
+      close: 105,
+      volume: 260,
+    });
+  });
+
   it("uses daily quote fields to update the current day candle", () => {
     const rows = [
       {
