@@ -54,6 +54,15 @@ def configure(
     TAIFEX_SPOT_REFERENCE = taifex_spot_reference
 
 
+def _parse_iso_date_param(value: str | None, label: str):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(400, f"{label} must use YYYY-MM-DD") from exc
+
+
 # ─── Events ──────────────────────────────────────────────────
 
 @router.get("/events/calendar")
@@ -259,17 +268,61 @@ async def run_screener(payload: ScreenerRunPayload):
 
 # ─── TAIFEX ──────────────────────────────────────────────────
 
+@router.get("/taifex/structured/{section}")
+async def get_taifex_structured_rows(
+    section: str,
+    date: str | None = Query(None, description="Exact resolved date YYYY-MM-DD"),
+    start_date: str | None = Query(None, description="Start resolved date YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="End resolved date YYYY-MM-DD"),
+    commodity: str | None = Query(None, description="期貨/選擇權商品名稱"),
+    institution: str | None = Query(None, description="法人名稱"),
+    option_side: str | None = Query(None, description="買權 / 賣權"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    exact_date = _parse_iso_date_param(date, "date")
+    start = _parse_iso_date_param(start_date, "start_date")
+    end = _parse_iso_date_param(end_date, "end_date")
+
+    if exact_date and (start or end):
+        raise HTTPException(400, "date cannot be combined with start_date or end_date")
+    if start and end and end < start:
+        raise HTTPException(400, "end_date must be on or after start_date")
+
+    try:
+        items = await db.list_taifex_structured_rows(
+            section,
+            resolved_date=exact_date.isoformat() if exact_date else None,
+            start_date=start.isoformat() if start else None,
+            end_date=end.isoformat() if end else None,
+            commodity=commodity.strip() if commodity else None,
+            institution=institution.strip() if institution else None,
+            option_side=option_side.strip() if option_side else None,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    return {
+        "section": section,
+        "count": len(items),
+        "filters": {
+            "date": exact_date.isoformat() if exact_date else None,
+            "start_date": start.isoformat() if start else None,
+            "end_date": end.isoformat() if end else None,
+            "commodity": commodity.strip() if commodity else None,
+            "institution": institution.strip() if institution else None,
+            "option_side": option_side.strip() if option_side else None,
+            "limit": limit,
+        },
+        "items": items,
+    }
+
 @router.get("/taifex/institutional")
 async def get_taifex_institutional(
     date: str | None = Query(None, description="YYYY-MM-DD"),
     refresh: bool = Query(False, description="Force refresh from remote sources"),
 ):
-    target_date = None
-    if date:
-        try:
-            target_date = datetime.strptime(date, "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+    target_date = _parse_iso_date_param(date, "date")
 
     payload = await taifex_fetcher.fetch_dashboard(target_date, force_refresh=refresh)
 
@@ -306,12 +359,7 @@ async def get_taifex_institutional_insights(
     days: int = Query(30, description="10 20 30 60 90"),
     refresh: bool = Query(False, description="Force refresh from remote sources"),
 ):
-    target_date = None
-    if date:
-        try:
-            target_date = datetime.strptime(date, "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+    target_date = _parse_iso_date_param(date, "date")
 
     return await taifex_fetcher.fetch_insights(
         target_date,

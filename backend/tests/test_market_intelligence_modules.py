@@ -421,3 +421,69 @@ def test_screener_preset_routes(client, intelligence_store):
     list_response = client.get("/api/screener/presets")
     assert list_response.status_code == 200
     assert any(item["name"] == "Momentum" for item in list_response.json()["items"])
+
+
+def test_taifex_structured_route_supports_filtered_queries(client, monkeypatch):
+    captured = {}
+
+    async def list_taifex_structured_rows(
+        section,
+        *,
+        resolved_date=None,
+        start_date=None,
+        end_date=None,
+        commodity=None,
+        institution=None,
+        option_side=None,
+        limit=200,
+    ):
+        captured.update(
+            {
+                "section": section,
+                "resolved_date": resolved_date,
+                "start_date": start_date,
+                "end_date": end_date,
+                "commodity": commodity,
+                "institution": institution,
+                "option_side": option_side,
+                "limit": limit,
+            }
+        )
+        return [
+            {
+                "resolved_date": "2026-04-15",
+                "commodity": "臺股期貨",
+                "institution": "外資",
+                "oi_net_volume": 1234,
+            }
+        ]
+
+    monkeypatch.setattr(main.db, "list_taifex_structured_rows", list_taifex_structured_rows)
+
+    response = client.get(
+        "/api/taifex/structured/futures"
+        "?start_date=2026-04-01&end_date=2026-04-15&commodity=%E8%87%BA%E8%82%A1%E6%9C%9F%E8%B2%A8"
+        "&institution=%E5%A4%96%E8%B3%87&limit=50"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["oi_net_volume"] == 1234
+    assert captured == {
+        "section": "futures",
+        "resolved_date": None,
+        "start_date": "2026-04-01",
+        "end_date": "2026-04-15",
+        "commodity": "臺股期貨",
+        "institution": "外資",
+        "option_side": None,
+        "limit": 50,
+    }
+
+
+def test_taifex_structured_route_rejects_invalid_filter_combinations(client):
+    response = client.get("/api/taifex/structured/futures?date=2026-04-15&start_date=2026-04-01")
+
+    assert response.status_code == 400
+    assert "date cannot be combined" in response.json()["detail"]

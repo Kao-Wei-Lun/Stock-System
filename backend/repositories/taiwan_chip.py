@@ -74,6 +74,30 @@ TAIFEX_STRUCTURED_ROW_TABLES = (
     "taifex_call_put_daily",
     "taifex_cash_summary_daily",
 )
+TAIFEX_STRUCTURED_SECTION_TABLES = {
+    "meta": "taifex_institutional_meta",
+    "overview": "taifex_overview_daily",
+    "futures": "taifex_futures_daily",
+    "options": "taifex_options_daily",
+    "call_puts": "taifex_call_put_daily",
+    "cash_summary": "taifex_cash_summary_daily",
+}
+TAIFEX_STRUCTURED_SECTION_FILTERS = {
+    "meta": {"resolved_date", "query_date"},
+    "overview": {"resolved_date", "institution"},
+    "futures": {"resolved_date", "commodity", "institution"},
+    "options": {"resolved_date", "commodity", "institution"},
+    "call_puts": {"resolved_date", "commodity", "institution", "option_side"},
+    "cash_summary": {"resolved_date", "institution"},
+}
+TAIFEX_STRUCTURED_SECTION_ORDER = {
+    "meta": "`resolved_date` DESC",
+    "overview": "`resolved_date` DESC, `institution` ASC",
+    "futures": "`resolved_date` DESC, `commodity` ASC, `rank` ASC, `institution` ASC",
+    "options": "`resolved_date` DESC, `commodity` ASC, `rank` ASC, `institution` ASC",
+    "call_puts": "`resolved_date` DESC, `commodity` ASC, `option_side` ASC, `rank` ASC, `institution` ASC",
+    "cash_summary": "`resolved_date` DESC, `institution` ASC",
+}
 
 
 def _normalize_taifex_date(value: Any) -> Optional[str]:
@@ -228,6 +252,22 @@ def _deserialize_taifex_section_row(row: Dict[str, Any]) -> Dict[str, Any]:
         for key, value in row.items()
         if key not in {"resolved_date", "created_at", "updated_at"}
     }
+
+
+def _serialize_taifex_query_row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    payload: Dict[str, Any] = {}
+    for key, value in row.items():
+        if key in {"created_at", "updated_at"}:
+            continue
+        if key in {"resolved_date", "query_date", "previous_date"}:
+            payload[key] = _date_to_iso(value)
+        elif isinstance(value, datetime):
+            payload[key] = _datetime_to_iso(value)
+        else:
+            payload[key] = value
+    return payload
 
 
 def _group_taifex_rows_by_resolved_date(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -954,4 +994,84 @@ class TaiwanChipMixin:
         snapshots = await self._load_taifex_structured_snapshots_from_meta_rows(meta_rows)
         snapshots.sort(key=lambda item: str(item.get("resolved_date") or ""))
         return snapshots
+
+    async def list_taifex_structured_rows(
+        self,
+        section: str,
+        *,
+        resolved_date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        commodity: Optional[str] = None,
+        institution: Optional[str] = None,
+        option_side: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        normalized_section = str(section or "").strip().lower()
+        table_name = TAIFEX_STRUCTURED_SECTION_TABLES.get(normalized_section)
+        if not table_name:
+            raise ValueError(f"Unsupported TAIFEX structured section: {section}")
+
+        clean_limit = max(1, min(int(limit or 200), 1000))
+        supported_filters = TAIFEX_STRUCTURED_SECTION_FILTERS[normalized_section]
+        filters = ["1=1"]
+        params: List[Any] = []
+
+        normalized_resolved = _normalize_taifex_date(resolved_date)
+        normalized_start = _normalize_taifex_date(start_date)
+        normalized_end = _normalize_taifex_date(end_date)
+        normalized_commodity = _normalize_taifex_text(commodity, 64)
+        normalized_institution = _normalize_taifex_text(institution, 64)
+        normalized_option_side = _normalize_taifex_text(option_side, 16)
+
+        if normalized_resolved:
+            if "resolved_date" not in supported_filters:
+                raise ValueError(f"section '{normalized_section}' does not support resolved_date filtering")
+            filters.append("`resolved_date`=%s")
+            params.append(normalized_resolved)
+        else:
+            if normalized_start:
+                if "resolved_date" not in supported_filters:
+                    raise ValueError(f"section '{normalized_section}' does not support date range filtering")
+                filters.append("`resolved_date`>=%s")
+                params.append(normalized_start)
+            if normalized_end:
+                if "resolved_date" not in supported_filters:
+                    raise ValueError(f"section '{normalized_section}' does not support date range filtering")
+                filters.append("`resolved_date`<=%s")
+                params.append(normalized_end)
+
+        if normalized_commodity:
+            if "commodity" not in supported_filters:
+                raise ValueError(f"section '{normalized_section}' does not support commodity filtering")
+            filters.append("`commodity`=%s")
+            params.append(normalized_commodity)
+
+        if normalized_institution:
+            if "institution" not in supported_filters:
+                raise ValueError(f"section '{normalized_section}' does not support institution filtering")
+            filters.append("`institution`=%s")
+            params.append(normalized_institution)
+
+        if normalized_option_side:
+            if "option_side" not in supported_filters:
+                raise ValueError(f"section '{normalized_section}' does not support option_side filtering")
+            filters.append("`option_side`=%s")
+            params.append(normalized_option_side)
+
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `{table_name}`
+            WHERE {' AND '.join(filters)}
+            ORDER BY {TAIFEX_STRUCTURED_SECTION_ORDER[normalized_section]}
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [
+            item
+            for item in (_serialize_taifex_query_row(row) for row in rows)
+            if item
+        ]
 
