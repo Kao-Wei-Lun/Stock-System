@@ -15,14 +15,16 @@ const lwcMocks = vi.hoisted(() => {
 
   const chartApi = {
     addSeries: vi.fn(() => {
+      const priceScaleApi = {
+        applyOptions: vi.fn(),
+        setAutoScale: vi.fn(),
+        getVisibleRange: vi.fn(() => null),
+        setVisibleRange: vi.fn(),
+      };
       const instance = {
         setData: vi.fn(),
-        priceScale: vi.fn(() => ({
-          applyOptions: vi.fn(),
-          setAutoScale: vi.fn(),
-          getVisibleRange: vi.fn(() => null),
-          setVisibleRange: vi.fn(),
-        })),
+        priceScaleApi,
+        priceScale: vi.fn(() => priceScaleApi),
         createPriceLine: vi.fn(() => ({})),
       };
       seriesInstances.push(instance);
@@ -110,9 +112,23 @@ describe("useLWCChart", () => {
     expect(lwcMocks.createChart.mock.calls[0][1]).toMatchObject({
       width: expect.any(Number),
       height: expect.any(Number),
+      rightPriceScale: {
+        scaleMargins: {
+          top: 0.035,
+          bottom: 0.06,
+        },
+      },
     });
     expect(lwcMocks.createChart.mock.calls[0][1]).not.toHaveProperty("autoSize");
     expect(lwcMocks.seriesInstances[0].setData).toHaveBeenCalled();
+    expect(lwcMocks.seriesInstances[0].priceScaleApi.applyOptions).toHaveBeenCalledWith({
+      autoScale: true,
+      mode: 0,
+      scaleMargins: {
+        top: 0.035,
+        bottom: 0.06,
+      },
+    });
 
     const firstPayload = lwcMocks.seriesInstances[0].setData.mock.calls[0][0];
     expect(firstPayload[0]).toMatchObject({

@@ -15,6 +15,10 @@ import { useLWCDrawings } from "./useLWCDrawings";
 const DEFAULT_VISIBLE_BARS = 120;
 const MIN_VISIBLE_BARS = 20;
 const PAN_STEP_RATIO = 0.18;
+const MAIN_PRICE_SCALE_MARGINS = Object.freeze({
+  top: 0.035,
+  bottom: 0.06,
+});
 
 const SERIES_DEFINITIONS = {
   candles: {
@@ -274,6 +278,7 @@ export function useLWCChart({
     mainSeries.value.priceScale().applyOptions({
       autoScale: true,
       mode,
+      scaleMargins: MAIN_PRICE_SCALE_MARGINS,
     });
   }
 
@@ -514,6 +519,7 @@ export function useLWCChart({
       },
       rightPriceScale: {
         borderColor: "rgba(57, 79, 99, 0.58)",
+        scaleMargins: MAIN_PRICE_SCALE_MARGINS,
       },
       crosshair: {
         vertLine: {
