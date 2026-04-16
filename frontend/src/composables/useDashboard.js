@@ -593,18 +593,34 @@ export function useDashboard() {
     institutionalFuturesCommodity,
     institutionalOptionsCommodity,
     institutionalHistoryDays,
+    taifexStructuredSection,
+    taifexStructuredDateMode,
+    taifexStructuredExactDate,
+    taifexStructuredStartDate,
+    taifexStructuredEndDate,
+    taifexStructuredCommodity,
+    taifexStructuredInstitution,
+    taifexStructuredOptionSide,
+    taifexStructuredLimit,
+    taifexStructuredAutoSync,
+    taifexStructuredData,
+    taifexStructuredLoading,
+    taifexStructuredError,
     institutionalOverlay,
     loadEventCalendar: loadEventCalendarAction,
     loadMacroDashboard: loadMacroDashboardAction,
     loadTickerIntelligence: loadTickerIntelligenceAction,
     loadInstitutionalData: loadInstitutionalDataAction,
     loadInstitutionalInsights: loadInstitutionalInsightsAction,
+    loadTaifexStructuredData: loadTaifexStructuredDataAction,
     ensureInstitutionalOverlayForTicker: ensureInstitutionalOverlayForTickerAction,
     setInstitutionalDate: setInstitutionalDateAction,
     setInstitutionalFuturesCommodity: setInstitutionalFuturesCommodityAction,
     setInstitutionalOptionsCommodity: setInstitutionalOptionsCommodityAction,
     setInstitutionalHistoryDays: setInstitutionalHistoryDaysAction,
     shiftInstitutionalDate: shiftInstitutionalDateAction,
+    updateTaifexStructuredQuery: updateTaifexStructuredQueryAction,
+    resetTaifexStructuredQuery: resetTaifexStructuredQueryAction,
   } = createDashboardMarketIntel({
     storedPrefs,
     currentTicker,
@@ -1904,6 +1920,18 @@ export function useDashboard() {
     await shiftInstitutionalDateAction(days);
   }
 
+  async function loadTaifexStructuredData() {
+    await loadTaifexStructuredDataAction();
+  }
+
+  function updateTaifexStructuredQuery(patch) {
+    updateTaifexStructuredQueryAction(patch);
+  }
+
+  async function resetTaifexStructuredQuery() {
+    await resetTaifexStructuredQueryAction();
+  }
+
   async function setKlineDisplayMode(mode) {
     if (isIntradayInterval(currentInterval.value)) {
       klineDisplayMode.value = "day";
@@ -2810,6 +2838,19 @@ export function useDashboard() {
     institutionalFuturesCommodity,
     institutionalOptionsCommodity,
     institutionalHistoryDays,
+    taifexStructuredSection,
+    taifexStructuredDateMode,
+    taifexStructuredExactDate,
+    taifexStructuredStartDate,
+    taifexStructuredEndDate,
+    taifexStructuredCommodity,
+    taifexStructuredInstitution,
+    taifexStructuredOptionSide,
+    taifexStructuredLimit,
+    taifexStructuredAutoSync,
+    taifexStructuredData,
+    taifexStructuredLoading,
+    taifexStructuredError,
     calendarEvents,
     tickerEvents,
     tickerNews,
@@ -2885,6 +2926,9 @@ export function useDashboard() {
     shiftInstitutionalDate,
     loadInstitutionalData,
     loadInstitutionalInsights,
+    loadTaifexStructuredData,
+    updateTaifexStructuredQuery,
+    resetTaifexStructuredQuery,
     loadEventCalendar,
     loadMacroDashboard,
     loadMarketSnapshots,

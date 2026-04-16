@@ -328,6 +328,17 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .institutional-table th:nth-child(3),.institutional-table td:nth-child(3){text-align:left;}
 .institutional-table th{position:sticky;top:0;background:rgba(11,17,28,.98);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;z-index:1;}
 .institutional-table tr:hover td{background:rgba(17,25,39,.7);}
+.institutional-structured-panel{display:flex;flex-direction:column;gap:12px;}
+.institutional-structured-summary{margin-bottom:0;}
+.institutional-structured-actions{justify-content:flex-end;}
+.institutional-structured-controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+.institutional-structured-field{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.institutional-structured-field span{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;}
+.institutional-structured-field .compare-input,.institutional-structured-field .workspace-select{width:100%;}
+.institutional-structured-note{font-size:11px;color:var(--text3);line-height:1.6;}
+.institutional-structured-inline{margin:0;}
+.institutional-structured-table-head{margin-bottom:0;}
+.institutional-structured-table th.is-left,.institutional-structured-table td.is-left{text-align:left;}
 .institutional-empty{display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--text3);font-size:11px;}
 .institutional-empty-compact{min-height:88px;}
 .institutional-summary-list{display:flex;flex-direction:column;gap:10px;list-style:none;padding-left:0;color:var(--text2);font-size:11px;line-height:1.75;}
@@ -397,6 +408,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
   .institutional-trend-grid,
   .institutional-ranking-grid{grid-template-columns:1fr;}
   .institutional-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .institutional-structured-controls{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 
 @media (max-width: 1080px){
@@ -405,6 +417,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
   .institutional-grid{grid-template-columns:1fr;}
   .institutional-kpis{grid-template-columns:1fr;}
   .institutional-kpi-strip{grid-template-columns:1fr;}
+  .institutional-structured-controls{grid-template-columns:1fr;}
 }
 
 @media (max-width: 860px){

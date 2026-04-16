@@ -258,6 +258,18 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const query = params.toString();
       return request(`/api/tw/chips/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
     },
+    getTaifexStructured(section, options = {}) {
+      const params = new URLSearchParams();
+      if (options.date) params.set("date", String(options.date));
+      if (options.start_date) params.set("start_date", String(options.start_date));
+      if (options.end_date) params.set("end_date", String(options.end_date));
+      if (options.commodity) params.set("commodity", String(options.commodity));
+      if (options.institution) params.set("institution", String(options.institution));
+      if (options.option_side) params.set("option_side", String(options.option_side));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/taifex/structured/${encodeURIComponent(section)}${query ? `?${query}` : ""}`);
+    },
     listScreenerPresets() {
       return request("/api/screener/presets");
     },

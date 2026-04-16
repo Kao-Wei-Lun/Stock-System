@@ -26,6 +26,10 @@
         :current-name="currentName"
         :taiwan-chip-detail="taiwanChipDetail"
         :taiwan-chip-summary="taiwanChipSummary"
+        :taifex-structured-query="taifexStructuredQuery"
+        :taifex-structured-data="taifexStructuredData"
+        :taifex-structured-loading="taifexStructuredLoading"
+        :taifex-structured-error="taifexStructuredError"
         @set-date="$emit('set-date', $event)"
         @shift-date="$emit('shift-date', $event)"
         @refresh-dashboard="$emit('refresh-dashboard')"
@@ -34,6 +38,9 @@
         @set-options-commodity="$emit('set-options-commodity', $event)"
         @set-history-days="$emit('set-history-days', $event)"
         @create-alert="$emit('create-alert', $event)"
+        @update-taifex-structured-query="$emit('update-taifex-structured-query', $event)"
+        @refresh-taifex-structured="$emit('refresh-taifex-structured')"
+        @reset-taifex-structured="$emit('reset-taifex-structured')"
       />
     </div>
   </section>
@@ -57,6 +64,10 @@ defineProps({
   currentName: { type: String, default: "" },
   taiwanChipDetail: { type: Object, default: null },
   taiwanChipSummary: { type: Object, default: null },
+  taifexStructuredQuery: { type: Object, default: () => ({}) },
+  taifexStructuredData: { type: Object, default: () => ({ section: "futures", count: 0, filters: {}, items: [] }) },
+  taifexStructuredLoading: { type: Boolean, default: false },
+  taifexStructuredError: { type: String, default: "" },
 });
 
 defineEmits([
@@ -69,6 +80,9 @@ defineEmits([
   "set-options-commodity",
   "set-history-days",
   "create-alert",
+  "update-taifex-structured-query",
+  "refresh-taifex-structured",
+  "reset-taifex-structured",
 ]);
 </script>
 

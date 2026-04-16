@@ -121,6 +121,24 @@ describe("dashboardApi", () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "http://localhost:8001/api/fubon/actives/OTC?trade=value&limit=10&refresh=true", {});
   });
 
+  it("builds TAIFEX structured query endpoints", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ section: "futures", items: [] }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    await api.getTaifexStructured("futures", {
+      start_date: "2026-03-01",
+      end_date: "2026-03-31",
+      commodity: "臺股期貨",
+      institution: "外資",
+      limit: 300,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:8001/api/taifex/structured/futures?start_date=2026-03-01&end_date=2026-03-31&commodity=%E8%87%BA%E8%82%A1%E6%9C%9F%E8%B2%A8&institution=%E5%A4%96%E8%B3%87&limit=300",
+      {},
+    );
+  });
+
   it("creates persisted backtest runs", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 21, strategy_key: "ma_cross" }));
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });

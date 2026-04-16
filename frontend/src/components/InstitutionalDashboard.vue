@@ -155,6 +155,19 @@
         />
       </template>
 
+      <InstitutionalStructuredQueryPanel
+        :query="taifexStructuredQuery"
+        :data="taifexStructuredData"
+        :loading="taifexStructuredLoading"
+        :error="taifexStructuredError"
+        :selected-date="selectedDate"
+        :selected-futures-commodity="selectedFuturesCommodity"
+        :selected-options-commodity="selectedOptionsCommodity"
+        @update-query="$emit('update-taifex-structured-query', $event)"
+        @refresh="$emit('refresh-taifex-structured')"
+        @reset="$emit('reset-taifex-structured')"
+      />
+
       <InstitutionalPositionTables
         :filtered-futures="filteredFutures"
         :filtered-options="filteredOptions"
@@ -173,6 +186,7 @@ import InstitutionalInsightsSummary from "./institutional/InstitutionalInsightsS
 import InstitutionalLeaderboards from "./institutional/InstitutionalLeaderboards.vue";
 import InstitutionalOverviewGrid from "./institutional/InstitutionalOverviewGrid.vue";
 import InstitutionalPositionTables from "./institutional/InstitutionalPositionTables.vue";
+import InstitutionalStructuredQueryPanel from "./institutional/InstitutionalStructuredQueryPanel.vue";
 import InstitutionalTrendPanels from "./institutional/InstitutionalTrendPanels.vue";
 import { fmtPrice, fmtTwMoney } from "../utils/formatters";
 
@@ -191,6 +205,10 @@ const props = defineProps({
   currentName: { type: String, default: "" },
   taiwanChipDetail: { type: Object, default: null },
   taiwanChipSummary: { type: Object, default: null },
+  taifexStructuredQuery: { type: Object, default: () => ({}) },
+  taifexStructuredData: { type: Object, default: () => ({ section: "futures", count: 0, filters: {}, items: [] }) },
+  taifexStructuredLoading: { type: Boolean, default: false },
+  taifexStructuredError: { type: String, default: "" },
 });
 
 defineEmits([
@@ -202,6 +220,9 @@ defineEmits([
   "set-options-commodity",
   "set-history-days",
   "create-alert",
+  "update-taifex-structured-query",
+  "refresh-taifex-structured",
+  "reset-taifex-structured",
 ]);
 
 const institutionFilter = ref("");

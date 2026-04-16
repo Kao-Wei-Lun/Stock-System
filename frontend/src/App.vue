@@ -191,6 +191,21 @@
         :current-name="currentName"
         :taiwan-chip-detail="taiwanChipDetail"
         :taiwan-chip-summary="taiwanChipSummary"
+        :taifex-structured-query="{
+          section: taifexStructuredSection,
+          dateMode: taifexStructuredDateMode,
+          exactDate: taifexStructuredExactDate,
+          startDate: taifexStructuredStartDate,
+          endDate: taifexStructuredEndDate,
+          commodity: taifexStructuredCommodity,
+          institution: taifexStructuredInstitution,
+          optionSide: taifexStructuredOptionSide,
+          limit: taifexStructuredLimit,
+          autoSync: taifexStructuredAutoSync,
+        }"
+        :taifex-structured-data="taifexStructuredData"
+        :taifex-structured-loading="taifexStructuredLoading"
+        :taifex-structured-error="taifexStructuredError"
         @open-terminal="handleOpenTerminal(currentTicker)"
         @set-date="setInstitutionalDate"
         @shift-date="shiftInstitutionalDate"
@@ -200,6 +215,9 @@
         @set-options-commodity="setInstitutionalOptionsCommodity"
         @set-history-days="setInstitutionalHistoryDays"
         @create-alert="openAlertModal($event)"
+        @update-taifex-structured-query="updateTaifexStructuredQuery"
+        @refresh-taifex-structured="loadTaifexStructuredData"
+        @reset-taifex-structured="resetTaifexStructuredQuery"
       />
 
       <SettingsWorkspace v-else-if="activeWorkspacePage === 'settings'" />
@@ -393,6 +411,19 @@ const {
   institutionalFuturesCommodity,
   institutionalOptionsCommodity,
   institutionalHistoryDays,
+  taifexStructuredSection,
+  taifexStructuredDateMode,
+  taifexStructuredExactDate,
+  taifexStructuredStartDate,
+  taifexStructuredEndDate,
+  taifexStructuredCommodity,
+  taifexStructuredInstitution,
+  taifexStructuredOptionSide,
+  taifexStructuredLimit,
+  taifexStructuredAutoSync,
+  taifexStructuredData,
+  taifexStructuredLoading,
+  taifexStructuredError,
   taiwanChipDetail,
   taiwanChipSummary,
   calendarEvents,
@@ -464,6 +495,9 @@ const {
   setInstitutionalOptionsCommodity,
   setInstitutionalHistoryDays,
   shiftInstitutionalDate,
+  loadTaifexStructuredData,
+  updateTaifexStructuredQuery,
+  resetTaifexStructuredQuery,
   loadInstitutionalData,
   loadInstitutionalInsights,
   loadEventCalendar,

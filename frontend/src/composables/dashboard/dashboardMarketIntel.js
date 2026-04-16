@@ -1,6 +1,17 @@
 import { computed, ref } from "vue";
 
 export const INSTITUTIONAL_HISTORY_OPTIONS = [10, 20, 30, 60, 90];
+const TAIFEX_STRUCTURED_SECTIONS = new Set(["meta", "overview", "futures", "options", "call_puts", "cash_summary"]);
+const TAIFEX_STRUCTURED_COMMODITY_SECTIONS = new Set(["futures", "options", "call_puts"]);
+const TAIFEX_STRUCTURED_OPTION_SIDE_SECTIONS = new Set(["call_puts"]);
+const TAIFEX_STRUCTURED_LIMITS = {
+  meta: 120,
+  overview: 200,
+  futures: 300,
+  options: 300,
+  call_puts: 300,
+  cash_summary: 200,
+};
 
 const FUTURES_OVERLAY_TICKER_MAP = {
   "^TWII": "台股期貨",
@@ -23,6 +34,46 @@ function normalizeMacroDashboard(payload) {
     summary: payload?.summary || {},
     snapshot_date: payload?.snapshot_date || null,
   };
+}
+
+function formatIsoDate(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function shiftIsoDate(value, days) {
+  const base = formatIsoDate(value);
+  if (!base) return "";
+  const date = new Date(`${base}T00:00:00`);
+  date.setDate(date.getDate() + Number(days || 0));
+  return formatIsoDate(date);
+}
+
+function normalizeTaifexStructuredSection(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return TAIFEX_STRUCTURED_SECTIONS.has(normalized) ? normalized : "futures";
+}
+
+function clampTaifexStructuredLimit(section, value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return TAIFEX_STRUCTURED_LIMITS[normalizeTaifexStructuredSection(section)];
+  }
+  return Math.max(1, Math.min(1000, Math.round(numeric)));
+}
+
+function resolveTaifexStructuredCommodity(section, futuresCommodity, optionsCommodity) {
+  const normalizedSection = normalizeTaifexStructuredSection(section);
+  if (normalizedSection === "futures") return String(futuresCommodity || "").trim();
+  if (normalizedSection === "options" || normalizedSection === "call_puts") {
+    return String(optionsCommodity || "").trim();
+  }
+  return "";
 }
 
 export function createDashboardMarketIntel({
@@ -56,6 +107,139 @@ export function createDashboardMarketIntel({
   const institutionalFuturesCommodity = ref(storedPrefs?.institutionalFuturesCommodity || "");
   const institutionalOptionsCommodity = ref(storedPrefs?.institutionalOptionsCommodity || "");
   const institutionalHistoryDays = ref(initialInstitutionalHistoryDays);
+  const taifexStructuredSection = ref("futures");
+  const taifexStructuredDateMode = ref("range");
+  const taifexStructuredExactDate = ref("");
+  const taifexStructuredStartDate = ref("");
+  const taifexStructuredEndDate = ref("");
+  const taifexStructuredCommodity = ref("");
+  const taifexStructuredInstitution = ref("");
+  const taifexStructuredOptionSide = ref("");
+  const taifexStructuredLimit = ref(TAIFEX_STRUCTURED_LIMITS.futures);
+  const taifexStructuredAutoSync = ref(true);
+  const taifexStructuredData = ref({
+    section: "futures",
+    count: 0,
+    filters: {},
+    items: [],
+  });
+  const taifexStructuredLoading = ref(false);
+  const taifexStructuredError = ref("");
+
+  function syncTaifexStructuredDefaults(
+    dateValue = institutionalDate.value,
+    futuresCommodity = institutionalFuturesCommodity.value,
+    optionsCommodity = institutionalOptionsCommodity.value,
+    force = false,
+  ) {
+    if (!force && !taifexStructuredAutoSync.value) return;
+    const section = normalizeTaifexStructuredSection(taifexStructuredSection.value);
+    const endDate = formatIsoDate(dateValue) || formatIsoDate(new Date());
+    taifexStructuredSection.value = section;
+    taifexStructuredDateMode.value = "range";
+    taifexStructuredExactDate.value = endDate;
+    taifexStructuredStartDate.value = shiftIsoDate(endDate, -30) || endDate;
+    taifexStructuredEndDate.value = endDate;
+    taifexStructuredCommodity.value = resolveTaifexStructuredCommodity(section, futuresCommodity, optionsCommodity);
+    taifexStructuredInstitution.value = "";
+    taifexStructuredOptionSide.value = TAIFEX_STRUCTURED_OPTION_SIDE_SECTIONS.has(section)
+      ? String(taifexStructuredOptionSide.value || "").trim()
+      : "";
+    taifexStructuredLimit.value = TAIFEX_STRUCTURED_LIMITS[section];
+    taifexStructuredAutoSync.value = true;
+  }
+
+  async function loadTaifexStructuredData() {
+    const section = normalizeTaifexStructuredSection(taifexStructuredSection.value);
+    const query = {
+      limit: clampTaifexStructuredLimit(section, taifexStructuredLimit.value),
+    };
+
+    if (taifexStructuredDateMode.value === "date") {
+      query.date = formatIsoDate(taifexStructuredExactDate.value) || formatIsoDate(institutionalDate.value);
+    } else {
+      query.start_date = formatIsoDate(taifexStructuredStartDate.value) || shiftIsoDate(institutionalDate.value, -30);
+      query.end_date = formatIsoDate(taifexStructuredEndDate.value) || formatIsoDate(institutionalDate.value);
+    }
+
+    if (TAIFEX_STRUCTURED_COMMODITY_SECTIONS.has(section) && taifexStructuredCommodity.value) {
+      query.commodity = String(taifexStructuredCommodity.value).trim();
+    }
+    if (taifexStructuredInstitution.value) {
+      query.institution = String(taifexStructuredInstitution.value).trim();
+    }
+    if (TAIFEX_STRUCTURED_OPTION_SIDE_SECTIONS.has(section) && taifexStructuredOptionSide.value) {
+      query.option_side = String(taifexStructuredOptionSide.value).trim();
+    }
+
+    taifexStructuredLoading.value = true;
+    taifexStructuredError.value = "";
+    try {
+      const payload = await dashboardApi.getTaifexStructured(section, query);
+      taifexStructuredData.value = {
+        section,
+        count: Number(payload?.count || 0),
+        filters: payload?.filters || query,
+        items: Array.isArray(payload?.items) ? payload.items : [],
+      };
+    } catch (error) {
+      taifexStructuredError.value = error.message || "ç„¡æ³•å–å¾— TAIFEX çµæ§‹åŒ–è³‡æ–™";
+    } finally {
+      taifexStructuredLoading.value = false;
+    }
+  }
+
+  function updateTaifexStructuredQuery(patch = {}) {
+    const nextPatch = patch && typeof patch === "object" ? patch : {};
+    const hasManualKeys = Object.keys(nextPatch).some((key) => key !== "autoSync");
+
+    if (nextPatch.section != null) {
+      const nextSection = normalizeTaifexStructuredSection(nextPatch.section);
+      taifexStructuredSection.value = nextSection;
+      if (!TAIFEX_STRUCTURED_COMMODITY_SECTIONS.has(nextSection)) {
+        taifexStructuredCommodity.value = "";
+      } else if (!Object.prototype.hasOwnProperty.call(nextPatch, "commodity") && taifexStructuredAutoSync.value) {
+        taifexStructuredCommodity.value = resolveTaifexStructuredCommodity(
+          nextSection,
+          institutionalFuturesCommodity.value,
+          institutionalOptionsCommodity.value,
+        );
+      }
+      if (!TAIFEX_STRUCTURED_OPTION_SIDE_SECTIONS.has(nextSection)) {
+        taifexStructuredOptionSide.value = "";
+      }
+      if (!Object.prototype.hasOwnProperty.call(nextPatch, "limit")) {
+        taifexStructuredLimit.value = TAIFEX_STRUCTURED_LIMITS[nextSection];
+      }
+    }
+    if (nextPatch.dateMode != null) {
+      taifexStructuredDateMode.value = String(nextPatch.dateMode) === "date" ? "date" : "range";
+    }
+    if (nextPatch.exactDate != null) taifexStructuredExactDate.value = formatIsoDate(nextPatch.exactDate);
+    if (nextPatch.startDate != null) taifexStructuredStartDate.value = formatIsoDate(nextPatch.startDate);
+    if (nextPatch.endDate != null) taifexStructuredEndDate.value = formatIsoDate(nextPatch.endDate);
+    if (nextPatch.commodity != null) taifexStructuredCommodity.value = String(nextPatch.commodity || "").trim();
+    if (nextPatch.institution != null) taifexStructuredInstitution.value = String(nextPatch.institution || "").trim();
+    if (nextPatch.optionSide != null) taifexStructuredOptionSide.value = String(nextPatch.optionSide || "").trim();
+    if (nextPatch.limit != null) {
+      taifexStructuredLimit.value = clampTaifexStructuredLimit(taifexStructuredSection.value, nextPatch.limit);
+    }
+    if (typeof nextPatch.autoSync === "boolean") {
+      taifexStructuredAutoSync.value = nextPatch.autoSync;
+    } else if (hasManualKeys) {
+      taifexStructuredAutoSync.value = false;
+    }
+  }
+
+  async function resetTaifexStructuredQuery() {
+    syncTaifexStructuredDefaults(
+      institutionalDate.value,
+      institutionalFuturesCommodity.value,
+      institutionalOptionsCommodity.value,
+      true,
+    );
+    await loadTaifexStructuredData();
+  }
 
   const institutionalOverlay = computed(() => {
     const mappedCommodity = FUTURES_OVERLAY_TICKER_MAP[currentTicker.value];
@@ -202,6 +386,10 @@ export function createDashboardMarketIntel({
         : (payload?.default_options_commodity || payload?.options_commodities?.[0] || "");
       institutionalFuturesCommodity.value = nextFuturesCommodity;
       institutionalOptionsCommodity.value = nextOptionsCommodity;
+      if (taifexStructuredAutoSync.value || !(taifexStructuredData.value?.items || []).length) {
+        syncTaifexStructuredDefaults(dateValue, nextFuturesCommodity, nextOptionsCommodity, true);
+        await loadTaifexStructuredData();
+      }
       await loadInstitutionalInsights(
         dateValue,
         nextFuturesCommodity,
@@ -247,12 +435,20 @@ export function createDashboardMarketIntel({
     if (!value || value === institutionalFuturesCommodity.value) return;
     institutionalFuturesCommodity.value = value;
     await loadInstitutionalInsights();
+    if (taifexStructuredAutoSync.value) {
+      syncTaifexStructuredDefaults(institutionalDate.value, value, institutionalOptionsCommodity.value, true);
+      await loadTaifexStructuredData();
+    }
   }
 
   async function setInstitutionalOptionsCommodity(value) {
     if (!value || value === institutionalOptionsCommodity.value) return;
     institutionalOptionsCommodity.value = value;
     await loadInstitutionalInsights();
+    if (taifexStructuredAutoSync.value) {
+      syncTaifexStructuredDefaults(institutionalDate.value, institutionalFuturesCommodity.value, value, true);
+      await loadTaifexStructuredData();
+    }
   }
 
   async function setInstitutionalHistoryDays(value) {
@@ -286,17 +482,33 @@ export function createDashboardMarketIntel({
     institutionalFuturesCommodity,
     institutionalOptionsCommodity,
     institutionalHistoryDays,
+    taifexStructuredSection,
+    taifexStructuredDateMode,
+    taifexStructuredExactDate,
+    taifexStructuredStartDate,
+    taifexStructuredEndDate,
+    taifexStructuredCommodity,
+    taifexStructuredInstitution,
+    taifexStructuredOptionSide,
+    taifexStructuredLimit,
+    taifexStructuredAutoSync,
+    taifexStructuredData,
+    taifexStructuredLoading,
+    taifexStructuredError,
     institutionalOverlay,
     loadEventCalendar,
     loadMacroDashboard,
     loadTickerIntelligence,
     loadInstitutionalData,
     loadInstitutionalInsights,
+    loadTaifexStructuredData,
     ensureInstitutionalOverlayForTicker,
     setInstitutionalDate,
     setInstitutionalFuturesCommodity,
     setInstitutionalOptionsCommodity,
     setInstitutionalHistoryDays,
     shiftInstitutionalDate,
+    updateTaifexStructuredQuery,
+    resetTaifexStructuredQuery,
   };
 }
