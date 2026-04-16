@@ -208,6 +208,57 @@ def _build_taifex_structured_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+def _deserialize_taifex_meta_row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "resolved_date": _date_to_iso(row.get("resolved_date")),
+        "query_date": _date_to_iso(row.get("query_date")),
+        "previous_date": _date_to_iso(row.get("previous_date")),
+        "default_futures_commodity": row.get("default_futures_commodity"),
+        "default_options_commodity": row.get("default_options_commodity"),
+        "cash_summary_source": row.get("cash_summary_source"),
+        "cash_summary_warning": row.get("cash_summary_warning"),
+    }
+
+
+def _deserialize_taifex_section_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in row.items()
+        if key not in {"resolved_date", "created_at", "updated_at"}
+    }
+
+
+def _group_taifex_rows_by_resolved_date(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        resolved_date = _date_to_iso(row.get("resolved_date"))
+        if not resolved_date:
+            continue
+        grouped.setdefault(resolved_date, []).append(_deserialize_taifex_section_row(row))
+    return grouped
+
+
+def _build_taifex_snapshot_payload_from_tables(
+    meta_row: Dict[str, Any],
+    overview_rows: List[Dict[str, Any]],
+    futures_rows: List[Dict[str, Any]],
+    options_rows: List[Dict[str, Any]],
+    call_put_rows: List[Dict[str, Any]],
+    cash_summary_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    meta = _deserialize_taifex_meta_row(meta_row) or {}
+    return {
+        **meta,
+        "overview": overview_rows,
+        "futures": futures_rows,
+        "options": options_rows,
+        "call_puts": call_put_rows,
+        "cash_summary": cash_summary_rows,
+    }
+
+
 class TaiwanChipMixin:
     async def upsert_taiwan_chip_snapshots(self, snapshots: List[Dict[str, Any]]) -> int:
         if not snapshots:
@@ -746,4 +797,161 @@ class TaiwanChipMixin:
                     row = await cur.fetchone()
                     counts[table_name] = int((row or {}).get("row_count") or 0)
         return counts
+
+    async def _load_taifex_structured_snapshots_from_meta_rows(
+        self,
+        meta_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not meta_rows:
+            return []
+
+        resolved_dates = [
+            _date_to_iso(item.get("resolved_date"))
+            for item in meta_rows
+            if _date_to_iso(item.get("resolved_date"))
+        ]
+        if not resolved_dates:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(resolved_dates))
+        params = tuple(resolved_dates)
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    f"""
+                    SELECT *
+                    FROM `taifex_overview_daily`
+                    WHERE `resolved_date` IN ({placeholders})
+                    ORDER BY `resolved_date` ASC, `institution` ASC
+                    """,
+                    params,
+                )
+                overview_rows = await cur.fetchall()
+
+                await cur.execute(
+                    f"""
+                    SELECT *
+                    FROM `taifex_futures_daily`
+                    WHERE `resolved_date` IN ({placeholders})
+                    ORDER BY `resolved_date` ASC, `rank` ASC, `commodity` ASC, `institution` ASC
+                    """,
+                    params,
+                )
+                futures_rows = await cur.fetchall()
+
+                await cur.execute(
+                    f"""
+                    SELECT *
+                    FROM `taifex_options_daily`
+                    WHERE `resolved_date` IN ({placeholders})
+                    ORDER BY `resolved_date` ASC, `rank` ASC, `commodity` ASC, `institution` ASC
+                    """,
+                    params,
+                )
+                options_rows = await cur.fetchall()
+
+                await cur.execute(
+                    f"""
+                    SELECT *
+                    FROM `taifex_call_put_daily`
+                    WHERE `resolved_date` IN ({placeholders})
+                    ORDER BY `resolved_date` ASC, `rank` ASC, `commodity` ASC, `option_side` ASC, `institution` ASC
+                    """,
+                    params,
+                )
+                call_put_rows = await cur.fetchall()
+
+                await cur.execute(
+                    f"""
+                    SELECT *
+                    FROM `taifex_cash_summary_daily`
+                    WHERE `resolved_date` IN ({placeholders})
+                    ORDER BY `resolved_date` ASC, `institution` ASC
+                    """,
+                    params,
+                )
+                cash_summary_rows = await cur.fetchall()
+
+        overview_map = _group_taifex_rows_by_resolved_date(overview_rows)
+        futures_map = _group_taifex_rows_by_resolved_date(futures_rows)
+        options_map = _group_taifex_rows_by_resolved_date(options_rows)
+        call_put_map = _group_taifex_rows_by_resolved_date(call_put_rows)
+        cash_summary_map = _group_taifex_rows_by_resolved_date(cash_summary_rows)
+
+        snapshots: List[Dict[str, Any]] = []
+        for meta_row in meta_rows:
+            resolved_date = _date_to_iso(meta_row.get("resolved_date"))
+            if not resolved_date:
+                continue
+            snapshots.append(
+                _build_taifex_snapshot_payload_from_tables(
+                    meta_row,
+                    overview_map.get(resolved_date, []),
+                    futures_map.get(resolved_date, []),
+                    options_map.get(resolved_date, []),
+                    call_put_map.get(resolved_date, []),
+                    cash_summary_map.get(resolved_date, []),
+                )
+            )
+        return snapshots
+
+    async def get_taifex_structured_snapshot(self, target_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
+        if target_date:
+            sql = """
+                SELECT *
+                FROM `taifex_institutional_meta`
+                WHERE `resolved_date`<=%s
+                ORDER BY `resolved_date` DESC
+                LIMIT 1
+            """
+            params = (target_date.isoformat(),)
+        else:
+            sql = """
+                SELECT *
+                FROM `taifex_institutional_meta`
+                ORDER BY `resolved_date` DESC
+                LIMIT 1
+            """
+            params = ()
+
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                meta_row = await cur.fetchone()
+        snapshots = await self._load_taifex_structured_snapshots_from_meta_rows([meta_row] if meta_row else [])
+        return snapshots[0] if snapshots else None
+
+    async def get_taifex_structured_snapshot_exact(self, target_date: date) -> Optional[Dict[str, Any]]:
+        sql = """
+            SELECT *
+            FROM `taifex_institutional_meta`
+            WHERE `resolved_date`=%s
+            LIMIT 1
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, (target_date.isoformat(),))
+                meta_row = await cur.fetchone()
+        snapshots = await self._load_taifex_structured_snapshots_from_meta_rows([meta_row] if meta_row else [])
+        return snapshots[0] if snapshots else None
+
+    async def get_taifex_structured_snapshots(self, target_date: date, limit: int) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        sql = """
+            SELECT *
+            FROM `taifex_institutional_meta`
+            WHERE `resolved_date`<=%s
+            ORDER BY `resolved_date` DESC
+            LIMIT %s
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, (target_date.isoformat(), limit))
+                meta_rows = await cur.fetchall()
+
+        snapshots = await self._load_taifex_structured_snapshots_from_meta_rows(meta_rows)
+        snapshots.sort(key=lambda item: str(item.get("resolved_date") or ""))
+        return snapshots
 

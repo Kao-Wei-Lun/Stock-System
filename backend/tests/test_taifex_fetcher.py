@@ -31,10 +31,10 @@ async def test_fetch_dashboard_uses_exact_snapshot_from_db(monkeypatch):
     snapshot = {
         "query_date": "2026-04-03",
         "resolved_date": "2026-04-03",
-        "overview": [],
-        "futures": [],
-        "options": [],
-        "call_puts": [],
+        "overview": [{"institution": "外資", "trade_net_futures_volume": 10}],
+        "futures": [{"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 5, "trade_net_volume": 2}],
+        "options": [{"commodity": "臺指選擇權", "institution": "外資", "oi_net_volume": 3}],
+        "call_puts": [{"commodity": "臺指選擇權", "option_side": "買權", "institution": "外資", "oi_net_volume": 20}],
         "cash_summary": [],
         "leaderboards": {},
         "cost_estimates": {},
@@ -44,17 +44,97 @@ async def test_fetch_dashboard_uses_exact_snapshot_from_db(monkeypatch):
         assert target_date == date(2026, 4, 3)
         return snapshot
 
+    async def no_structured_exact(_target_date):
+        return None
+
+    async def noop_backfill(_snapshot):
+        return None
+
     async def unexpected(*_args, **_kwargs):
         pytest.fail("network/db fallback should not be needed when exact snapshot exists")
 
+    monkeypatch.setattr(taifex_fetcher.db, "get_taifex_structured_snapshot_exact", no_structured_exact)
     monkeypatch.setattr(taifex_fetcher.db, "get_institutional_snapshot_exact", get_exact)
+    monkeypatch.setattr(taifex_fetcher.db, "upsert_taifex_structured_snapshot", noop_backfill)
     monkeypatch.setattr(taifex_fetcher.db, "get_institutional_snapshot", unexpected)
     monkeypatch.setattr(fetcher, "_fetch_and_store_dashboard", unexpected)
 
     result = await fetcher.fetch_dashboard(date(2026, 4, 3))
 
-    assert result == snapshot
+    assert result["resolved_date"] == "2026-04-03"
+    assert result["futures_commodities"] == ["臺股期貨"]
+    assert result["options_commodities"] == ["臺指選擇權"]
     assert "2026-04-03" in fetcher._dashboard_cache
+
+
+@pytest.mark.anyio
+async def test_fetch_dashboard_prefers_structured_snapshot(monkeypatch):
+    fetcher = TaifexFetcher()
+    structured_snapshot = {
+        "query_date": "2026-04-03",
+        "resolved_date": "2026-04-03",
+        "previous_date": "2026-04-02",
+        "overview": [{"institution": "外資", "trade_net_futures_volume": 10}],
+        "futures": [{"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 5, "trade_net_volume": 2}],
+        "options": [{"commodity": "臺指選擇權", "institution": "外資", "oi_net_volume": 3}],
+        "call_puts": [{"commodity": "臺指選擇權", "option_side": "買權", "institution": "外資", "oi_net_volume": 20}],
+        "cash_summary": [{"institution": "外資及陸資(不含外資自營商)", "net_amount": 100}],
+        "cash_summary_source": "twse",
+        "cash_summary_warning": None,
+    }
+
+    async def get_structured_exact(target_date):
+        assert target_date == date(2026, 4, 3)
+        return structured_snapshot
+
+    async def unexpected(*_args, **_kwargs):
+        pytest.fail("raw snapshot should not be needed when structured snapshot is complete")
+
+    monkeypatch.setattr(taifex_fetcher.db, "get_taifex_structured_snapshot_exact", get_structured_exact)
+    monkeypatch.setattr(taifex_fetcher.db, "get_institutional_snapshot_exact", unexpected)
+    monkeypatch.setattr(fetcher, "_fetch_and_store_dashboard", unexpected)
+
+    result = await fetcher.fetch_dashboard(date(2026, 4, 3))
+
+    assert result["resolved_date"] == "2026-04-03"
+    assert result["futures_commodities"] == ["臺股期貨"]
+    assert result["options_commodities"] == ["臺指選擇權"]
+    assert result["cash_summary_aggregated"][0]["institution"] == "外資"
+
+
+@pytest.mark.anyio
+async def test_fetch_dashboard_falls_back_to_raw_and_backfills_structured(monkeypatch):
+    fetcher = TaifexFetcher()
+    raw_snapshot = {
+        "query_date": "2026-04-03",
+        "resolved_date": "2026-04-03",
+        "previous_date": "2026-04-02",
+        "overview": [{"institution": "外資", "trade_net_futures_volume": 10}],
+        "futures": [{"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 5, "trade_net_volume": 2}],
+        "options": [{"commodity": "臺指選擇權", "institution": "外資", "oi_net_volume": 3}],
+        "call_puts": [{"commodity": "臺指選擇權", "option_side": "買權", "institution": "外資", "oi_net_volume": 20}],
+        "cash_summary": [{"institution": "外資及陸資(不含外資自營商)", "net_amount": 100}],
+    }
+    writes = []
+
+    async def get_structured_exact(_target_date):
+        return None
+
+    async def get_raw_exact(target_date):
+        assert target_date == date(2026, 4, 3)
+        return raw_snapshot
+
+    async def backfill_structured(snapshot):
+        writes.append(snapshot["resolved_date"])
+
+    monkeypatch.setattr(taifex_fetcher.db, "get_taifex_structured_snapshot_exact", get_structured_exact)
+    monkeypatch.setattr(taifex_fetcher.db, "get_institutional_snapshot_exact", get_raw_exact)
+    monkeypatch.setattr(taifex_fetcher.db, "upsert_taifex_structured_snapshot", backfill_structured)
+
+    result = await fetcher.fetch_dashboard(date(2026, 4, 3))
+
+    assert result["resolved_date"] == "2026-04-03"
+    assert writes == ["2026-04-03"]
 
 
 @pytest.mark.anyio
@@ -88,6 +168,46 @@ async def test_fetch_and_store_dashboard_dual_writes_raw_and_structured(monkeypa
 
     assert result == payload
     assert writes == [("raw", "2026-04-03"), ("structured", "2026-04-03")]
+
+
+@pytest.mark.anyio
+async def test_load_history_snapshots_prefers_structured_rows(monkeypatch):
+    fetcher = TaifexFetcher()
+    structured_snapshots = [
+        {
+            "query_date": "2026-04-02",
+            "resolved_date": "2026-04-02",
+            "overview": [{"institution": "外資", "trade_net_futures_volume": 1}],
+            "futures": [{"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 1, "trade_net_volume": 1}],
+            "options": [{"commodity": "臺指選擇權", "institution": "外資", "oi_net_volume": 1}],
+            "call_puts": [{"commodity": "臺指選擇權", "option_side": "買權", "institution": "外資", "oi_net_volume": 1}],
+            "cash_summary": [],
+        },
+        {
+            "query_date": "2026-04-03",
+            "resolved_date": "2026-04-03",
+            "overview": [{"institution": "外資", "trade_net_futures_volume": 2}],
+            "futures": [{"commodity": "臺股期貨", "institution": "外資", "oi_net_volume": 2, "trade_net_volume": 2}],
+            "options": [{"commodity": "臺指選擇權", "institution": "外資", "oi_net_volume": 2}],
+            "call_puts": [{"commodity": "臺指選擇權", "option_side": "買權", "institution": "外資", "oi_net_volume": 2}],
+            "cash_summary": [],
+        },
+    ]
+
+    async def get_structured_snapshots(target_date, limit):
+        assert target_date == date(2026, 4, 3)
+        assert limit == 2
+        return structured_snapshots
+
+    async def unexpected(*_args, **_kwargs):
+        pytest.fail("raw history should not be needed when structured snapshots are complete")
+
+    monkeypatch.setattr(taifex_fetcher.db, "get_taifex_structured_snapshots", get_structured_snapshots)
+    monkeypatch.setattr(taifex_fetcher.db, "get_institutional_snapshots", unexpected)
+
+    result = await fetcher._load_history_snapshots(date(2026, 4, 3), 2)
+
+    assert [item["resolved_date"] for item in result] == ["2026-04-02", "2026-04-03"]
 
 
 def test_fetch_twse_cash_summary_uses_finmind_when_primary_unavailable(monkeypatch):

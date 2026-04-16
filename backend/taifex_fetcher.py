@@ -133,6 +133,124 @@ class TaifexFetcher:
         self._cash_summary_cache: Dict[str, List[Dict]] = {}
         self._latest_cash_summary_snapshot: Optional[Tuple[str, List[Dict]]] = None
 
+    def _is_complete_snapshot(self, snapshot: Optional[Dict]) -> bool:
+        if not isinstance(snapshot, dict):
+            return False
+        if not snapshot.get("resolved_date") or not snapshot.get("query_date"):
+            return False
+        return all(snapshot.get(key) for key in ("overview", "futures", "options", "call_puts"))
+
+    def _hydrate_stored_snapshot(self, snapshot: Optional[Dict]) -> Optional[Dict]:
+        if not isinstance(snapshot, dict):
+            return None
+
+        query_date = str(snapshot.get("query_date") or snapshot.get("resolved_date") or "").strip()
+        resolved_date = str(snapshot.get("resolved_date") or "").strip()
+        if not query_date or not resolved_date:
+            return None
+
+        overview = [dict(item) for item in snapshot.get("overview") or [] if isinstance(item, dict)]
+        futures = [dict(item) for item in snapshot.get("futures") or [] if isinstance(item, dict)]
+        options = [dict(item) for item in snapshot.get("options") or [] if isinstance(item, dict)]
+        call_puts = [dict(item) for item in snapshot.get("call_puts") or [] if isinstance(item, dict)]
+        cash_summary = [dict(item) for item in snapshot.get("cash_summary") or [] if isinstance(item, dict)]
+
+        futures_commodities = self._collect_commodities(futures)
+        options_commodities = self._collect_commodities(options)
+        default_futures = self._default_commodity(
+            futures_commodities,
+            snapshot.get("default_futures_commodity"),
+        )
+        default_options = self._default_commodity(
+            options_commodities,
+            snapshot.get("default_options_commodity"),
+        )
+
+        return {
+            "query_date": query_date,
+            "resolved_date": resolved_date,
+            "previous_date": snapshot.get("previous_date"),
+            "overview": overview,
+            "futures": futures,
+            "options": options,
+            "call_puts": call_puts,
+            "cash_summary": cash_summary,
+            "cash_summary_aggregated": self._aggregate_cash_summary(cash_summary),
+            "cash_summary_source": snapshot.get("cash_summary_source"),
+            "cash_summary_warning": snapshot.get("cash_summary_warning"),
+            "futures_commodities": futures_commodities,
+            "options_commodities": options_commodities,
+            "default_futures_commodity": default_futures,
+            "default_options_commodity": default_options,
+            "leaderboards": self._build_leaderboards(futures, options, call_puts),
+            "cost_estimates": self._build_cost_estimates(
+                default_futures,
+                default_options,
+                futures,
+                call_puts,
+            ),
+        }
+
+    async def _backfill_structured_snapshot_from_raw(self, snapshot: Optional[Dict]) -> None:
+        hydrated = self._hydrate_stored_snapshot(snapshot)
+        if not self._is_complete_snapshot(hydrated):
+            return
+        try:
+            await db.upsert_taifex_structured_snapshot(hydrated)
+        except Exception as exc:
+            log.warning(
+                "Failed to backfill structured TAIFEX snapshot for %s: %s",
+                hydrated.get("resolved_date"),
+                exc,
+            )
+
+    async def _get_preferred_stored_snapshot(self, target_date: date, *, exact: bool) -> Optional[Dict]:
+        structured = (
+            await db.get_taifex_structured_snapshot_exact(target_date)
+            if exact
+            else await db.get_taifex_structured_snapshot(target_date)
+        )
+        hydrated_structured = self._hydrate_stored_snapshot(structured)
+        if self._is_complete_snapshot(hydrated_structured):
+            return hydrated_structured
+
+        raw = (
+            await db.get_institutional_snapshot_exact(target_date)
+            if exact
+            else await db.get_institutional_snapshot(target_date)
+        )
+        hydrated_raw = self._hydrate_stored_snapshot(raw)
+        if self._is_complete_snapshot(hydrated_raw):
+            if not self._is_complete_snapshot(hydrated_structured):
+                await self._backfill_structured_snapshot_from_raw(hydrated_raw)
+            return hydrated_raw
+        return None
+
+    async def _get_preferred_history_snapshots(self, target_date: date, limit: int) -> List[Dict]:
+        if limit <= 0:
+            return []
+
+        structured = await db.get_taifex_structured_snapshots(target_date, limit)
+        structured_snapshots = [
+            snapshot
+            for snapshot in (self._hydrate_stored_snapshot(item) for item in structured)
+            if self._is_complete_snapshot(snapshot)
+        ]
+        if len(structured_snapshots) >= limit:
+            return structured_snapshots
+
+        raw = await db.get_institutional_snapshots(target_date, limit)
+        raw_snapshots = [
+            snapshot
+            for snapshot in (self._hydrate_stored_snapshot(item) for item in raw)
+            if self._is_complete_snapshot(snapshot)
+        ]
+        structured_dates = {item.get("resolved_date") for item in structured_snapshots}
+        for snapshot in raw_snapshots:
+            if snapshot.get("resolved_date") not in structured_dates:
+                await self._backfill_structured_snapshot_from_raw(snapshot)
+        return raw_snapshots if len(raw_snapshots) > len(structured_snapshots) else structured_snapshots
+
     async def fetch_dashboard(self, query_date: Optional[date] = None, force_refresh: bool = False) -> Dict:
         target_date = query_date or datetime.now().date()
         cache_key = _format_iso_date(target_date)
@@ -141,13 +259,13 @@ class TaifexFetcher:
             if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
                 return cached[1]
 
-            exact_snapshot = await db.get_institutional_snapshot_exact(target_date)
+            exact_snapshot = await self._get_preferred_stored_snapshot(target_date, exact=True)
             if exact_snapshot:
                 self._dashboard_cache[cache_key] = (time.time(), exact_snapshot)
                 return exact_snapshot
 
             if target_date.weekday() >= 5:
-                stored = await db.get_institutional_snapshot(target_date)
+                stored = await self._get_preferred_stored_snapshot(target_date, exact=False)
                 if stored:
                     self._dashboard_cache[cache_key] = (time.time(), stored)
                     return stored
@@ -222,7 +340,7 @@ class TaifexFetcher:
 
     async def ensure_daily_snapshot(self) -> Dict:
         today = datetime.now().date()
-        latest = await db.get_institutional_snapshot(today)
+        latest = await self._get_preferred_stored_snapshot(today, exact=False)
         if latest and (latest.get("resolved_date") == today.isoformat() or today.weekday() >= 5):
             self._dashboard_cache[_format_iso_date(today)] = (time.time(), latest)
             return latest
@@ -329,7 +447,7 @@ class TaifexFetcher:
         days: int,
         force_refresh: bool = False,
     ) -> List[Dict]:
-        existing_snapshots = await db.get_institutional_snapshots(target_date, days)
+        existing_snapshots = await self._get_preferred_history_snapshots(target_date, days)
         if len(existing_snapshots) >= days and not force_refresh:
             return existing_snapshots
 
@@ -337,11 +455,11 @@ class TaifexFetcher:
         cursor = target_date
         attempts = 0
         while len(resolved_dates) < days and attempts < MAX_LOOKBACK_DAYS:
-            exact_snapshot = await db.get_institutional_snapshot_exact(cursor)
+            exact_snapshot = await self._get_preferred_stored_snapshot(cursor, exact=True)
             if exact_snapshot:
                 resolved_dates.add(exact_snapshot.get("resolved_date"))
             elif cursor.weekday() >= 5:
-                nearest_snapshot = await db.get_institutional_snapshot(cursor)
+                nearest_snapshot = await self._get_preferred_stored_snapshot(cursor, exact=False)
                 if nearest_snapshot:
                     resolved_dates.add(nearest_snapshot.get("resolved_date"))
                 else:
@@ -353,7 +471,7 @@ class TaifexFetcher:
             cursor -= timedelta(days=1)
             attempts += 1
 
-        return await db.get_institutional_snapshots(target_date, days)
+        return await self._get_preferred_history_snapshots(target_date, days)
 
     def _build_history_from_snapshots(self, snapshots: List[Dict], futures_commodity: str, options_commodity: str) -> Dict:
         futures_oi_series = []
