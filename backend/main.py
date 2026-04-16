@@ -7,6 +7,7 @@ This file retains app creation, middleware, lifespan, and scheduler wiring.
 
 import asyncio
 import logging
+import sys
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, time as time_of_day, timedelta, timezone
@@ -50,6 +51,11 @@ from routers import alerts, backtest, intelligence, journal, market_data, settin
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -357,4 +363,4 @@ app.include_router(system.router)
 
 if __name__ == "__main__":
     validate_runtime_environment()
-    uvicorn.run("main:app", host="0.0.0.0", port=APP_PORT, reload=False, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=APP_PORT, reload=False, log_level="info", use_colors=False)

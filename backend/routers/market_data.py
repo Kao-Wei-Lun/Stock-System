@@ -166,7 +166,11 @@ async def get_quote(ticker: str):
 
 @router.get("/futopt/quote/{symbol}", response_model=QuoteResponse)
 async def get_futopt_quote(symbol: str):
-    quote = await fubon_futopt_provider.fetch_quote(symbol)
+    try:
+        quote = await fubon_futopt_provider.fetch_quote(symbol)
+    except Exception as exc:
+        log.warning("futopt quote fetch failed for %s: %s", symbol, exc)
+        raise HTTPException(502, f"Unable to fetch futopt quote: {exc}") from exc
     if not quote:
         raise HTTPException(404, "Unable to fetch futopt quote")
     return quote
@@ -179,7 +183,11 @@ async def get_futopt_ohlc(
     interval: str = Query("1m", description="1m 5m 15m 30m 60m 1h"),
 ):
     period, interval = _normalize_futopt_ohlc_query(period, interval)
-    payload = await fubon_futopt_provider.fetch_intraday_ohlc(symbol, period=period, interval=interval)
+    try:
+        payload = await fubon_futopt_provider.fetch_intraday_ohlc(symbol, period=period, interval=interval)
+    except Exception as exc:
+        log.warning("futopt ohlc fetch failed for %s (%s/%s): %s", symbol, period, interval, exc)
+        raise HTTPException(502, f"Unable to fetch futopt ohlc: {exc}") from exc
     if not payload:
         raise HTTPException(404, "Unable to fetch futopt ohlc")
     return payload

@@ -9,6 +9,13 @@ from typing import Any, Callable, Dict, Optional
 log = logging.getLogger(__name__)
 
 
+def _normalize_futopt_session(session: str | None) -> Optional[str]:
+    raw = str(session or "").strip().lower()
+    if raw in {"afterhours", "night", "night_session"}:
+        return "afterhours"
+    return None
+
+
 class FubonSDKManager:
     def __init__(self):
         self._sdk = None
@@ -426,8 +433,9 @@ class FubonSDKManager:
             if not callable(quote):
                 return None
             kwargs = {"symbol": symbol}
-            if session:
-                kwargs["session"] = str(session)
+            normalized_session = _normalize_futopt_session(session)
+            if normalized_session:
+                kwargs["session"] = normalized_session
             return quote(**kwargs)
 
         return await asyncio.to_thread(_fetch_sync)
@@ -483,8 +491,9 @@ class FubonSDKManager:
             kwargs = {"symbol": symbol}
             if timeframe:
                 kwargs["timeframe"] = str(timeframe)
-            if session:
-                kwargs["session"] = str(session)
+            normalized_session = _normalize_futopt_session(session)
+            if normalized_session:
+                kwargs["session"] = normalized_session
             return candles(**kwargs)
 
         return await asyncio.to_thread(_fetch_sync)

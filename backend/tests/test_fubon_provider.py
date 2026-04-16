@@ -181,6 +181,24 @@ class FakeRestStock:
         self.snapshot = snapshot
 
 
+class FakeFutoptIntradayApi:
+    def __init__(self):
+        self.calls = []
+
+    def quote(self, **kwargs):
+        self.calls.append(("quote", kwargs))
+        return {"symbol": kwargs["symbol"]}
+
+    def candles(self, **kwargs):
+        self.calls.append(("candles", kwargs))
+        return {"symbol": kwargs["symbol"], "data": []}
+
+
+class FakeRestFutopt:
+    def __init__(self, intraday):
+        self.intraday = intraday
+
+
 class FakeRepo:
     def __init__(self, account):
         self.account = account
@@ -275,3 +293,23 @@ def test_fetch_stock_snapshot_quotes_self_heals_missing_rest_client(monkeypatch)
 
     assert payload["market"] == "TSE"
     assert snapshot.calls == [("quotes", {"market": "TSE"})]
+
+
+def test_fetch_futopt_requests_omit_regular_session_and_keep_afterhours():
+    manager = FubonSDKManager()
+    intraday = FakeFutoptIntradayApi()
+    manager.connected = True
+    manager.ensure_marketdata_ready = lambda require_futopt=False: asyncio.sleep(0, result=True)
+    manager.get_rest_futopt = lambda: FakeRestFutopt(intraday)
+
+    asyncio.run(manager.fetch_futopt_quote("MXFE6", session="REGULAR"))
+    asyncio.run(manager.fetch_futopt_intraday_candles("MXFE6", timeframe="1", session="REGULAR"))
+    asyncio.run(manager.fetch_futopt_quote("MXFE6", session="afterhours"))
+    asyncio.run(manager.fetch_futopt_intraday_candles("MXFE6", timeframe="1", session="afterhours"))
+
+    assert intraday.calls == [
+        ("quote", {"symbol": "MXFE6"}),
+        ("candles", {"symbol": "MXFE6", "timeframe": "1"}),
+        ("quote", {"symbol": "MXFE6", "session": "afterhours"}),
+        ("candles", {"symbol": "MXFE6", "timeframe": "1", "session": "afterhours"}),
+    ]

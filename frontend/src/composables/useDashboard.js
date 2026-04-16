@@ -656,6 +656,7 @@ export function useDashboard() {
     apiFetch,
     pushNotification,
     normalizeTicker,
+    isFutoptTicker,
   });
   const {
     marketSnapshots,

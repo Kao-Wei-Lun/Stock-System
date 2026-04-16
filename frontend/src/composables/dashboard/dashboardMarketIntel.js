@@ -83,6 +83,7 @@ export function createDashboardMarketIntel({
   apiFetch,
   pushNotification,
   normalizeTicker,
+  isFutoptTicker,
 } = {}) {
   const calendarEvents = ref([]);
   const tickerEvents = ref([]);
@@ -315,18 +316,24 @@ export function createDashboardMarketIntel({
   async function loadTickerIntelligence(ticker = currentTicker.value, forceRefresh = false) {
     const normalizedTicker = normalizeTicker(ticker);
     try {
-      const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse] = await Promise.all([
-        dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
-        dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
-        dashboardApi.getFundamentals(normalizedTicker, { refresh: forceRefresh }),
-        dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null),
-      ]);
+      const futoptTicker = typeof isFutoptTicker === "function" && isFutoptTicker(normalizedTicker);
+      const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse] = futoptTicker
+        ? await Promise.all([
+          dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
+          dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
+        ])
+        : await Promise.all([
+          dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
+          dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
+          dashboardApi.getFundamentals(normalizedTicker, { refresh: forceRefresh }),
+          dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null),
+        ]);
       tickerEvents.value = Array.isArray(eventsResponse?.items) ? eventsResponse.items : [];
       tickerNews.value = Array.isArray(newsResponse?.items) ? newsResponse.items : [];
-      fundamentalsDetail.value = fundamentalsResponse?.detail || null;
-      fundamentalsSummary.value = fundamentalsResponse?.summary || null;
-      taiwanChipDetail.value = chipsResponse?.detail || null;
-      taiwanChipSummary.value = chipsResponse?.summary || null;
+      fundamentalsDetail.value = futoptTicker ? null : (fundamentalsResponse?.detail || null);
+      fundamentalsSummary.value = futoptTicker ? null : (fundamentalsResponse?.summary || null);
+      taiwanChipDetail.value = futoptTicker ? null : (chipsResponse?.detail || null);
+      taiwanChipSummary.value = futoptTicker ? null : (chipsResponse?.summary || null);
     } catch (error) {
       console.error(error);
       if (forceRefresh) {
