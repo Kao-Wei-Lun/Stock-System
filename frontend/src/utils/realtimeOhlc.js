@@ -99,14 +99,13 @@ export function getIntervalBucketStart(value, interval) {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
-function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m", quote = null) {
+function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m") {
   const normalizedInterval = String(interval || "").toLowerCase();
-  const open = toPositivePrice(quote?.open) ?? price;
   return {
     date: formatBucketLabel(dateValue, normalizedInterval),
-    open,
-    high: resolveCandleHigh(open, price, quote?.high) ?? price,
-    low: resolveCandleLow(open, price, quote?.low) ?? price,
+    open: price,
+    high: price,
+    low: price,
     close: price,
     volume,
     adj_close: price,
@@ -149,11 +148,17 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
   }
 
   if (isSameBucket) {
-    const quoteOpen = toPositivePrice(quote?.open) ?? toPositivePrice(lastRow?.open) ?? price;
-    const baseHigh = toPositivePrice(lastRow?.high) ?? resolveCandleHigh(quoteOpen, price) ?? price;
-    const baseLow = toPositivePrice(lastRow?.low) ?? resolveCandleLow(quoteOpen, price) ?? price;
-    const quoteHigh = resolveCandleHigh(quoteOpen, price, quote?.high) ?? price;
-    const quoteLow = resolveCandleLow(quoteOpen, price, quote?.low) ?? price;
+    const quoteOpen = isIntraday
+      ? (toPositivePrice(lastRow?.open) ?? price)
+      : (toPositivePrice(quote?.open) ?? toPositivePrice(lastRow?.open) ?? price);
+    const baseHigh = toPositivePrice(lastRow?.high) ?? price;
+    const baseLow = toPositivePrice(lastRow?.low) ?? price;
+    const quoteHigh = isIntraday
+      ? price
+      : (resolveCandleHigh(quoteOpen, price, quote?.high) ?? price);
+    const quoteLow = isIntraday
+      ? price
+      : (resolveCandleLow(quoteOpen, price, quote?.low) ?? price);
     const baseVolume = toFiniteNumber(lastRow?.volume) ?? 0;
     const quoteVolume = toFiniteNumber(quote?.volume);
     const intradayVolumeDelta = resolveIntradayVolumeDelta(quote);
@@ -200,7 +205,6 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
     source,
     Math.max(0, resolveIntradayVolumeDelta(quote) ?? 0),
     normalizedInterval,
-    quote,
   ));
   return nextRows;
 }
