@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
+from fubon_symbols import looks_like_futopt_search_query
 from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
 from schemas import QuoteResponse
 from tw_symbol_lookup import search_taiwan_tickers
@@ -275,8 +276,9 @@ async def sync_all_tracked(
 async def search(q: str = Query(..., min_length=1)):
     results = []
     seen = set()
+    normalized_query = q.strip().upper()
 
-    for row in await db.search_tickers(q.upper()):
+    for row in await db.search_tickers(normalized_query):
         ticker = normalize_ticker(row.get("ticker", ""))
         if not ticker or ticker in seen:
             continue
@@ -287,6 +289,26 @@ async def search(q: str = Query(..., min_length=1)):
             }
         )
         seen.add(ticker)
+
+    if looks_like_futopt_search_query(normalized_query):
+        for row in await fubon_futopt_provider.search_contracts(normalized_query, limit=20):
+            ticker = normalize_ticker(row.get("ticker", ""))
+            if not ticker or ticker in seen:
+                continue
+            results.append(
+                {
+                    "ticker": ticker,
+                    "name": row.get("name") or ticker,
+                    "asset_class": row.get("asset_class") or "futopt",
+                    "instrument_type": row.get("instrument_type") or "future",
+                    "exchange": row.get("exchange") or "TAIFEX",
+                    "market": row.get("market") or "FUTOPT",
+                    "source": row.get("source") or "fubon_neo",
+                }
+            )
+            seen.add(ticker)
+            if len(results) >= 20:
+                break
 
     for row in search_taiwan_tickers(q):
         ticker = normalize_ticker(row.get("ticker", ""))

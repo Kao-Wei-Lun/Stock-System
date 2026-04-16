@@ -54,4 +54,24 @@ describe("GlobalSearchCommand", () => {
 
     expect(wrapper.emitted("navigate")[0]).toEqual(["overview"]);
   });
+
+  it("shows futopt result tags for option contracts", () => {
+    const wrapper = mount(GlobalSearchCommand, {
+      props: createProps({
+        query: "TXO",
+        searchResults: [
+          {
+            ticker: "TXO20000E4",
+            name: "臺指選擇權20000買權04",
+            asset_class: "futopt",
+            instrument_type: "option",
+            exchange: "TAIFEX",
+          },
+        ],
+      }),
+    });
+
+    expect(wrapper.text()).toContain("選擇權");
+    expect(wrapper.text()).toContain("TAIFEX");
+  });
 });

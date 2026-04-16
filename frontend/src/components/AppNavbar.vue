@@ -50,8 +50,11 @@
             type="button"
             @click="$emit('select-search-result', result)"
           >
-            <span class="st">{{ result.ticker }}</span>
-            <span class="sn">{{ result.name || "" }}</span>
+            <div class="search-item-main">
+              <span class="st">{{ result.ticker }}</span>
+              <span class="sn">{{ formatSearchMeta(result) }}</span>
+            </div>
+            <span v-if="searchResultTag(result)" class="search-tag">{{ searchResultTag(result) }}</span>
           </button>
         </div>
       </div>
@@ -173,6 +176,22 @@ const quoteStatusClass = computed(() => ({
   live: props.activeQuote?.is_delayed === false,
   delayed: props.activeQuote?.is_delayed !== false,
 }));
+
+function searchResultTag(result) {
+  if (result?.asset_class === "futopt") {
+    return result?.instrument_type === "option" ? "選擇權" : "期貨";
+  }
+  if (result?.market === "TW") return "台股";
+  if (result?.market === "HK") return "港股";
+  if (result?.market === "INDEX") return "指數";
+  return "";
+}
+
+function formatSearchMeta(result) {
+  const name = String(result?.name || result?.ticker || "");
+  const exchange = String(result?.exchange || "");
+  return exchange && exchange !== name ? `${name} · ${exchange}` : name;
+}
 
 function handleDocumentClick(event) {
   if (!rootRef.value?.contains(event.target)) {
@@ -369,6 +388,7 @@ onBeforeUnmount(() => {
   color: var(--text1);
   cursor: pointer;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   text-align: left;
@@ -382,15 +402,32 @@ onBeforeUnmount(() => {
   border-bottom: 0;
 }
 
+.search-item-main {
+  min-width: 0;
+}
+
 .st {
+  display: block;
   font-weight: 700;
 }
 
 .sn {
+  display: block;
+  margin-top: 3px;
   color: var(--text3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.search-tag {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid rgba(123, 231, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.1);
+  color: #d7fbff;
+  font-size: 10px;
 }
 
 .tf-btns,

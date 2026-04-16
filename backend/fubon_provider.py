@@ -439,6 +439,7 @@ class FubonSDKManager:
         exchange: str = "TAIFEX",
         session: str = "REGULAR",
         contractType: str = "I",
+        product: str | None = None,
     ) -> Optional[dict]:
         await self.ensure_marketdata_ready(require_futopt=True)
         rest_futopt = self.get_rest_futopt()
@@ -450,12 +451,15 @@ class FubonSDKManager:
             tickers = getattr(intraday, "tickers", None)
             if not callable(tickers):
                 return None
-            return tickers(
+            kwargs = dict(
                 type=type,
                 exchange=exchange,
                 session=session,
                 contractType=contractType,
             )
+            if product:
+                kwargs["product"] = str(product)
+            return tickers(**kwargs)
 
         return await asyncio.to_thread(_fetch_sync)
 

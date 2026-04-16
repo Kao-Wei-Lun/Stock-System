@@ -144,8 +144,8 @@ const searchEntries = computed(() => (Array.isArray(props.searchResults) ? props
     ticker: item.ticker,
     name: item.name || item.ticker,
     label: item.ticker,
-    meta: item.name || item.ticker,
-    tag: "Search",
+    meta: formatSearchEntryMeta(item),
+    tag: searchResultTag(item),
   })));
 
 const recentEntries = computed(() => (Array.isArray(props.recentTickers) ? props.recentTickers : [])
@@ -178,6 +178,19 @@ const resultEntries = computed(() => (
     ? searchEntries.value
     : [...recentEntries.value, ...hotEntries.value]
 ));
+
+function searchResultTag(item) {
+  if (item?.asset_class === "futopt") {
+    return item?.instrument_type === "option" ? "選擇權" : "期貨";
+  }
+  return "Search";
+}
+
+function formatSearchEntryMeta(item) {
+  const name = String(item?.name || item?.ticker || "");
+  const exchange = String(item?.exchange || "");
+  return exchange && exchange !== name ? `${name} · ${exchange}` : name;
+}
 
 const selectableEntries = computed(() => [...workspaceEntries.value, ...resultEntries.value]);
 

@@ -58,4 +58,24 @@ describe("AppNavbar", () => {
     expect(wrapper.find(".quote-badge").classes()).toContain("live");
     expect(wrapper.text()).toContain("即時");
   });
+
+  it("shows futopt search result tags in the navbar dropdown", () => {
+    const wrapper = mount(AppNavbar, {
+      props: createProps({
+        searchOpen: true,
+        searchResults: [
+          {
+            ticker: "TXO20000E4",
+            name: "臺指選擇權20000買權04",
+            asset_class: "futopt",
+            instrument_type: "option",
+            exchange: "TAIFEX",
+          },
+        ],
+      }),
+    });
+
+    expect(wrapper.text()).toContain("選擇權");
+    expect(wrapper.text()).toContain("TAIFEX");
+  });
 });

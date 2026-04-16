@@ -8,6 +8,7 @@ from typing import Any, Optional
 from data_fetcher import normalize_ticker
 from fubon_quote_provider import build_fubon_quote_payload
 from fubon_symbols import (
+    derive_futopt_product_query,
     is_exact_futopt_contract,
     is_futopt_base_alias,
     normalize_futopt_symbol_query,
@@ -31,6 +32,7 @@ FUTOPT_PERIOD_OFFSETS = {
     "3mo": timedelta(days=93),
     "6mo": timedelta(days=186),
 }
+FUTOPT_SEARCH_CONTRACT_TYPES = ("I", "S", "E", "C", "R", "B")
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -110,10 +112,39 @@ def _filter_rows_by_period(rows: list[dict], period: str | None) -> list[dict]:
     return filtered or rows
 
 
+def _instrument_type_label(item: dict, default_type: str) -> str:
+    raw_type = str(item.get("type") or default_type or "").upper()
+    return "option" if raw_type.startswith("OPTION") else "future"
+
+
+def _contract_sort_key(item: dict, query: str) -> tuple[int, int, date, str]:
+    symbol = str(item.get("symbol") or "").upper()
+    name = str(item.get("name") or "").upper()
+    today = date.today()
+    end_date = _parse_contract_date(item.get("endDate") or item.get("settlementDate")) or date.max
+    if symbol == query:
+        match_rank = 0
+    elif symbol.startswith(query):
+        match_rank = 1
+    elif query in symbol:
+        match_rank = 2
+    elif query in name:
+        match_rank = 3
+    else:
+        match_rank = 4
+    active_rank = 0 if end_date >= today else 1
+    return (match_rank, active_rank, end_date, symbol)
+
+
+def _instrument_type_from_symbol(symbol: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    return "option" if any(char.isdigit() for char in raw[:-2]) else "future"
+
+
 class FubonFutoptProvider:
     def __init__(self, manager):
         self._manager = manager
-        self._contract_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+        self._contract_cache: dict[tuple[str, str, str, str | None], tuple[float, list[dict]]] = {}
 
     async def resolve_contract(self, symbol: str, *, session: str = "REGULAR") -> Optional[dict]:
         normalized_symbol = normalize_ticker(symbol)
@@ -125,6 +156,7 @@ class FubonFutoptProvider:
                 "name": query,
                 "contract_type": None,
                 "end_date": None,
+                "instrument_type": _instrument_type_from_symbol(query),
             }
         if not is_futopt_base_alias(query):
             return None
@@ -146,6 +178,7 @@ class FubonFutoptProvider:
             "name": resolved.get("name") or query,
             "contract_type": resolved.get("contractType"),
             "end_date": resolved.get("endDate") or resolved.get("settlementDate"),
+            "instrument_type": _instrument_type_label(resolved, "FUTURE"),
         }
 
     async def fetch_quote(self, symbol: str, *, session: str = "REGULAR") -> Optional[dict]:
@@ -164,7 +197,7 @@ class FubonFutoptProvider:
 
         payload["ticker"] = resolved["resolved_symbol"]
         payload["resolved_symbol"] = str(response.get("symbol") or resolved["resolved_symbol"])
-        payload["market"] = "FUTURE"
+        payload["market"] = "OPTION" if resolved.get("instrument_type") == "option" else "FUTURE"
         payload["exchange"] = response.get("exchange") or "TAIFEX"
         payload["name"] = response.get("name") or resolved.get("name") or resolved["resolved_symbol"]
         payload["currency"] = response.get("currency") or "TWD"
@@ -202,17 +235,87 @@ class FubonFutoptProvider:
             "data": rows,
         }
 
-    async def _load_contracts(self, base_symbol: str, *, session: str) -> list[dict]:
-        cache_key = (base_symbol, session)
-        cached = self._contract_cache.get(cache_key)
-        now = time.time()
-        if cached and now - cached[0] < FUTOPT_CACHE_TTL_SECONDS:
-            return list(cached[1])
+    async def search_contracts(
+        self,
+        query: str,
+        *,
+        session: str = "REGULAR",
+        limit: int = 20,
+    ) -> list[dict]:
+        normalized_query = normalize_futopt_symbol_query(str(query or "").strip().upper())
+        if not normalized_query:
+            return []
 
+        product_query = derive_futopt_product_query(normalized_query)
+        if not product_query:
+            return []
+
+        search_types = ["OPTION"] if product_query.endswith("O") else ["FUTURE"]
+        if is_exact_futopt_contract(normalized_query):
+            if any(char.isdigit() for char in normalized_query[:-2]):
+                search_types = ["OPTION"]
+            elif product_query not in {"TXF", "MXF"}:
+                search_types = ["FUTURE", "OPTION"]
+
+        matches: dict[str, dict] = {}
+        for search_type in search_types:
+            for contract_type in FUTOPT_SEARCH_CONTRACT_TYPES:
+                try:
+                    contracts = await self._fetch_cached_tickers(
+                        type=search_type,
+                        exchange="TAIFEX",
+                        session=session,
+                        contractType=contract_type,
+                        product=product_query,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Fubon futopt search failed for %s/%s/%s: %s",
+                        product_query,
+                        search_type,
+                        contract_type,
+                        exc,
+                    )
+                    continue
+
+                for item in contracts:
+                    symbol = str(item.get("symbol") or "").upper()
+                    name = str(item.get("name") or "")
+                    haystack_name = name.upper()
+                    if not symbol:
+                        continue
+                    if normalized_query not in symbol and normalized_query not in haystack_name and not symbol.startswith(product_query):
+                        continue
+                    matches[symbol] = {
+                        "ticker": symbol,
+                        "name": name or symbol,
+                        "exchange": "TAIFEX",
+                        "market": "FUTOPT",
+                        "asset_class": "futopt",
+                        "instrument_type": _instrument_type_label(item, search_type),
+                        "source": "fubon_neo",
+                        "contract_type": item.get("contractType"),
+                        "end_date": item.get("endDate") or item.get("settlementDate"),
+                    }
+
+        sorted_items = sorted(
+            matches.values(),
+            key=lambda item: _contract_sort_key(
+                {
+                    "symbol": item.get("ticker"),
+                    "name": item.get("name"),
+                    "endDate": item.get("end_date"),
+                },
+                normalized_query,
+            ),
+        )
+        return sorted_items[: max(1, min(int(limit or 20), 50))]
+
+    async def _load_contracts(self, base_symbol: str, *, session: str) -> list[dict]:
         contracts: list[dict] = []
         for contract_type in ("I", "E"):
             try:
-                payload = await self._manager.fetch_futopt_tickers(
+                contracts_for_type = await self._fetch_cached_tickers(
                     type="FUTURE",
                     exchange="TAIFEX",
                     session=session,
@@ -222,14 +325,41 @@ class FubonFutoptProvider:
                 log.warning("Fubon futopt tickers fetch failed for %s/%s: %s", base_symbol, contract_type, exc)
                 continue
 
-            for item in payload.get("data") or [] if isinstance(payload, dict) else []:
+            for item in contracts_for_type:
                 if not isinstance(item, dict):
                     continue
                 symbol = str(item.get("symbol") or "").upper()
                 if symbol.startswith(base_symbol):
                     contracts.append(item)
 
-        deduped = {str(item.get("symbol") or "").upper(): item for item in contracts}
-        items = list(deduped.values())
+        return list({str(item.get("symbol") or "").upper(): item for item in contracts}.values())
+
+    async def _fetch_cached_tickers(
+        self,
+        *,
+        type: str,
+        exchange: str,
+        session: str,
+        contractType: str,
+        product: str | None = None,
+    ) -> list[dict]:
+        cache_key = (type, contractType, session, str(product or "").upper() or None)
+        cached = self._contract_cache.get(cache_key)
+        now = time.time()
+        if cached and now - cached[0] < FUTOPT_CACHE_TTL_SECONDS:
+            return list(cached[1])
+
+        payload = await self._manager.fetch_futopt_tickers(
+            type=type,
+            exchange=exchange,
+            session=session,
+            contractType=contractType,
+            product=product,
+        )
+        items = [
+            item
+            for item in (payload.get("data") or [] if isinstance(payload, dict) else [])
+            if isinstance(item, dict)
+        ]
         self._contract_cache[cache_key] = (now, items)
-        return items
+        return list(items)

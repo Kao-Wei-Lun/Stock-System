@@ -59,7 +59,17 @@ export const WATCHLIST_COLOR_OPTIONS = [
   "#ff4d6a",
 ];
 const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF"]);
-const FUTOPT_CONTRACT_RE = /^[A-Z]{2,5}[A-L]\d$/;
+const FUTOPT_FUTURE_CONTRACT_RE = /^[A-Z]{2,5}[A-Z]\d$/;
+const FUTOPT_OPTION_CONTRACT_RE = /^[A-Z]{2,5}\d{3,6}[A-Z]\d$/;
+const FUTOPT_ALLOWED_PERIODS = new Set(["1d", "5d", "1mo", "3mo", "6mo"]);
+const FUTOPT_DEFAULT_PERIODS = {
+  "1m": "1d",
+  "5m": "5d",
+  "15m": "1mo",
+  "30m": "1mo",
+  "60m": "3mo",
+  "1h": "3mo",
+};
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional", "events", "macro", "screener"];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
@@ -385,14 +395,22 @@ function aggregateOhlcRows(rows, mode) {
 export function normalizeTicker(ticker) {
   const raw = (ticker || "").trim().toUpperCase();
   if (!raw || raw.startsWith("^") || raw.includes(".") || raw.includes("-") || raw.includes("=")) return raw;
-  if (FUTOPT_BASE_ALIASES.has(raw) || FUTOPT_CONTRACT_RE.test(raw)) return raw;
+  if (
+    FUTOPT_BASE_ALIASES.has(raw)
+    || FUTOPT_FUTURE_CONTRACT_RE.test(raw)
+    || FUTOPT_OPTION_CONTRACT_RE.test(raw)
+  ) return raw;
   if (!/^[A-Z]+$/.test(raw)) return `${raw}.TW`;
   return raw;
 }
 
 function isFutoptTicker(ticker) {
   const normalized = normalizeTicker(ticker);
-  return FUTOPT_BASE_ALIASES.has(normalized) || FUTOPT_CONTRACT_RE.test(normalized);
+  return (
+    FUTOPT_BASE_ALIASES.has(normalized)
+    || FUTOPT_FUTURE_CONTRACT_RE.test(normalized)
+    || FUTOPT_OPTION_CONTRACT_RE.test(normalized)
+  );
 }
 
 function resolveFutoptInterval(interval) {
@@ -400,8 +418,17 @@ function resolveFutoptInterval(interval) {
   return ["1m", "5m", "15m", "30m", "60m", "1h"].includes(normalized) ? normalized : "1m";
 }
 
+function resolveFutoptPeriod(period, interval) {
+  const normalizedPeriod = String(period || "").toLowerCase();
+  if (FUTOPT_ALLOWED_PERIODS.has(normalizedPeriod)) {
+    return normalizedPeriod;
+  }
+  return FUTOPT_DEFAULT_PERIODS[resolveFutoptInterval(interval)] || "1d";
+}
+
 function inferMarketFromTicker(ticker) {
   const normalized = normalizeTicker(ticker);
+  if (isFutoptTicker(normalized)) return "FUTOPT";
   if (normalized.endsWith(".TW") || normalized.endsWith(".TWO")) return "TW";
   if (normalized.endsWith(".HK")) return "HK";
   if (normalized.startsWith("^")) return "INDEX";
@@ -420,7 +447,7 @@ function resolveSearchInputTicker(rawInput, searchResults) {
   const exact = searchResults.find((item) => item?.ticker?.toUpperCase() === raw);
   if (exact) return exact;
   const byStockCode = searchResults.find((item) => item?.ticker?.toUpperCase().startsWith(`${raw}.`));
-  return byStockCode || null;
+  return byStockCode || searchResults[0] || null;
 }
 
 function getExchangeClockParts(date, timeZone) {
@@ -1682,16 +1709,26 @@ export function useDashboard() {
       rawCompareSeries.value = [];
       return;
     }
-    const resolvedInterval = resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
-    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
-    const fetchPeriod = getExpandedFetchPeriod(currentPeriod.value, displayMode);
+    const mainTickerIsFutopt = isFutoptTicker(currentTicker.value);
+    const resolvedInterval = mainTickerIsFutopt
+      ? resolveFutoptInterval(currentInterval.value)
+      : resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
+    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
+    const fetchPeriod = mainTickerIsFutopt
+      ? resolveFutoptPeriod(currentPeriod.value, resolvedInterval)
+      : getExpandedFetchPeriod(currentPeriod.value, displayMode);
 
     const results = await Promise.allSettled(
       normalizedTickers.map(async (ticker, index) => {
-        const payload = await dashboardApi.getOhlc(ticker, {
-          period: fetchPeriod,
-          interval: resolvedInterval,
-        });
+        const payload = isFutoptTicker(ticker)
+          ? await dashboardApi.getFutoptOhlc(ticker, {
+            period: resolveFutoptPeriod(fetchPeriod, resolvedInterval),
+            interval: resolveFutoptInterval(resolvedInterval),
+          })
+          : await dashboardApi.getOhlc(ticker, {
+            period: fetchPeriod,
+            interval: resolvedInterval,
+          });
         const data = payload.data || [];
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
         const lastClose = data.length ? data[data.length - 1].close : null;
@@ -1764,10 +1801,13 @@ export function useDashboard() {
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
     const normalized = normalizeTicker(ticker);
     const isFutopt = isFutoptTicker(normalized);
-    const resolvedPeriod = (period || "1y").toLowerCase();
+    const requestedPeriod = (period || "1y").toLowerCase();
     const resolvedInterval = isFutopt
       ? resolveFutoptInterval(interval)
-      : resolveTimeframeInterval(resolvedPeriod, interval);
+      : resolveTimeframeInterval(requestedPeriod, interval);
+    const resolvedPeriod = isFutopt
+      ? resolveFutoptPeriod(requestedPeriod, resolvedInterval)
+      : requestedPeriod;
     const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
     const fetchPeriod = isFutopt ? resolvedPeriod : getExpandedFetchPeriod(resolvedPeriod, displayMode);
     currentPeriod.value = resolvedPeriod;
