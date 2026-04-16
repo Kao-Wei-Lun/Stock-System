@@ -703,6 +703,68 @@ export function useLWCChart({
     chartRows,
     (rows, previousRows) => {
       if (!chartApi.value) return;
+
+      // ─── 增量更新：長度相同 → 只有最後一根 K 棒被即時報價更新 ───
+      const isIncrementalUpdate =
+        mainSeries.value &&
+        previousRows?.length > 0 &&
+        rows.length === previousRows.length &&
+        rows.length > 0;
+
+      if (isIncrementalUpdate) {
+        const lastEntry = rows[rows.length - 1];
+        const seriesDataKey = SERIES_DATA_KEYS[chartMode.value] || "candle";
+        const lastPoint = lastEntry?.[seriesDataKey];
+        if (lastPoint?.time != null) {
+          try {
+            mainSeries.value.update(lastPoint);
+          } catch (error) {
+            if (!isIgnorableSeriesError(error)) {
+              createMainSeries();
+            }
+          }
+          if (volumeSeries.value && lastEntry?.volume) {
+            try {
+              volumeSeries.value.update(lastEntry.volume);
+            } catch { /* ignore */ }
+          }
+          drawingsBridge.scheduleRender();
+          return;
+        }
+      }
+
+      // ─── 新增 K 棒：長度多 1 根 ───
+      const isNewBar =
+        mainSeries.value &&
+        previousRows?.length > 0 &&
+        rows.length === previousRows.length + 1;
+
+      if (isNewBar) {
+        const lastEntry = rows[rows.length - 1];
+        const seriesDataKey = SERIES_DATA_KEYS[chartMode.value] || "candle";
+        const lastPoint = lastEntry?.[seriesDataKey];
+        if (lastPoint?.time != null) {
+          try {
+            mainSeries.value.update(lastPoint);
+          } catch (error) {
+            if (!isIgnorableSeriesError(error)) {
+              createMainSeries();
+              applyTimeScaleOptions();
+              syncVolumeSeries();
+            }
+          }
+          if (volumeSeries.value && lastEntry?.volume) {
+            try {
+              volumeSeries.value.update(lastEntry.volume);
+            } catch { /* ignore */ }
+          }
+          syncIndicatorPanes();
+          drawingsBridge.scheduleRender();
+          return;
+        }
+      }
+
+      // ─── 全量重建：切標的、切周期、初始載入、chartMode 切換 ───
       createMainSeries();
       applyTimeScaleOptions();
       syncVolumeSeries();
