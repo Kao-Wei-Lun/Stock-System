@@ -1332,7 +1332,11 @@ export function useDashboard() {
       const numeric = toFiniteNumberOrNull(value);
       return numeric != null && numeric > 0 ? numeric : null;
     };
-    const normalizedDate = String(data.date).replace("T", " ");
+    const normalizedDate = String(data.date)
+      .replace("T", " ")
+      .replace(/[+-]\d{2}:\d{2}$/, "")
+      .replace(/Z$/, "")
+      .trim();
     const rows = [...rawOhlcData.value];
     const last = rows[rows.length - 1];
     const lastSameBucket = last?.date === normalizedDate ? last : null;
