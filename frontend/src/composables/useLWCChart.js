@@ -345,9 +345,9 @@ export function useLWCChart({
     staleSeries.forEach((series) => removeSeriesSafely(series));
   }
 
-  function createMainSeries() {
+  function createMainSeries(preserveRange = true) {
     if (!chartApi.value) return;
-    const currentRange = getCurrentLogicalRange();
+    const currentRange = preserveRange ? getCurrentLogicalRange() : null;
     if (mainSeries.value) {
       removeSeriesSafely(mainSeries.value);
       mainSeries.value = null;
@@ -382,6 +382,7 @@ export function useLWCChart({
         priceFormat: { type: "volume" },
         priceLineVisible: false,
         lastValueVisible: false,
+        priceScaleId: "volume",
         base: 0,
       }, 1);
     }
@@ -409,6 +410,12 @@ export function useLWCChart({
 
     indicatorModel.value.overlays.forEach((descriptor) => {
       const series = chartApi.value.addSeries(resolveSeriesDefinition(descriptor.type), descriptor.options, 0);
+      // 排除 overlay 指標對 Y 軸 autoScale 的影響，
+      // 讓 Y 軸只根據主 series（K 線）的價格範圍自動縮放。
+      // 使用 applyOptions 確保 LWC v5 正確套用 autoscaleInfoProvider。
+      series.applyOptions({
+        autoscaleInfoProvider: (/* original */) => null,
+      });
       series.setData(descriptor.data);
       dynamicSeries.value.push(series);
     });
@@ -453,6 +460,10 @@ export function useLWCChart({
     const from = Math.max(0, rowCount - DEFAULT_VISIBLE_BARS);
     const to = rowCount + 4;
     setLogicalRange({ from, to });
+    // 強制重新啟用 autoScale，以防用戶之前手動拖動 Y 軸導致 autoScale 被關閉
+    if (mainSeries.value) {
+      mainSeries.value.priceScale().setAutoScale(true);
+    }
   }
 
   function getContainerSize() {
@@ -765,11 +776,20 @@ export function useLWCChart({
       }
 
       // ─── 全量重建：切標的、切周期、初始載入、chartMode 切換 ───
-      createMainSeries();
+      // 判斷資料是否發生結構性變化（切周期/切標的/初始載入），
+      // 而非僅切換圖表模式（candle→line）。
+      // 只有 chartMode 切換時才保留舊的 visible range。
+      const isDataStructureChange =
+        !previousRows?.length ||
+        rows.length !== previousRows.length ||
+        rows[0]?.time !== previousRows[0]?.time ||
+        rows[rows.length - 1]?.time !== previousRows[previousRows.length - 1]?.time;
+
+      createMainSeries(!isDataStructureChange);
       applyTimeScaleOptions();
       syncVolumeSeries();
       syncIndicatorPanes();
-      if (!previousRows?.length || props.currentTicker !== previousTicker.value) {
+      if (isDataStructureChange || props.currentTicker !== previousTicker.value) {
         applyDefaultVisibleRange();
       }
       if (!rows.length) {
