@@ -412,7 +412,6 @@ function savePreset() {
   padding: 18px;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
   background: linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(12, 18, 28, 0.98) 100%);
 }
 

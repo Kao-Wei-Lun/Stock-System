@@ -64,4 +64,26 @@ describe("TradingViewWidgetEmbed", () => {
     expect(frameConfig.colorTheme).toBe("light");
     expect(wrapper.find("script").exists()).toBe(false);
   });
+
+  it("keeps overview scrolling by disabling widget interaction until requested", async () => {
+    const wrapper = mount(TradingViewWidgetEmbed, {
+      props: {
+        scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js",
+        config: { colorTheme: "dark" },
+      },
+    });
+
+    const frame = wrapper.find("iframe.tv-widget-frame");
+    expect(frame.classes()).not.toContain("interactive");
+    expect(wrapper.text()).toContain("頁面捲動優先");
+
+    await wrapper.find(".tv-widget-overlay-btn").trigger("click");
+
+    expect(frame.classes()).toContain("interactive");
+    expect(wrapper.find(".tv-widget-interaction-exit").exists()).toBe(true);
+
+    await wrapper.find(".tv-widget-interaction-exit").trigger("click");
+
+    expect(frame.classes()).not.toContain("interactive");
+  });
 });

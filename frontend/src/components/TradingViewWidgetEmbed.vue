@@ -1,15 +1,34 @@
 <template>
-  <div class="tv-widget-shell">
-    <iframe
-      v-if="scriptAllowed"
-      :key="iframeKey"
-      class="tv-widget-frame"
-      :src="iframeSrc"
-      title="TradingView widget"
-      loading="lazy"
-      sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      referrerpolicy="no-referrer-when-downgrade"
-    ></iframe>
+  <div class="tv-widget-shell" :class="{ 'is-interactive': interactionEnabled }" @mouseleave="disableInteraction">
+    <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
+      <iframe
+        :key="iframeKey"
+        class="tv-widget-frame"
+        :class="{ interactive: interactionEnabled }"
+        :src="iframeSrc"
+        title="TradingView widget"
+        loading="lazy"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
+      <div v-if="!interactionEnabled" class="tv-widget-overlay">
+        <div class="tv-widget-overlay-card">
+          <strong>頁面捲動優先</strong>
+          <span>滑鼠滾輪會直接捲動總覽頁。要操作元件時，再切到互動模式。</span>
+          <button class="tv-widget-overlay-btn" type="button" @click="enableInteraction">
+            啟用互動
+          </button>
+        </div>
+      </div>
+      <button
+        v-else
+        class="tv-widget-interaction-exit"
+        type="button"
+        @click="disableInteraction"
+      >
+        返回頁面捲動
+      </button>
+    </div>
     <div v-if="!scriptAllowed" class="tv-widget-warning">
       此 TradingView 來源未在允許清單內。
     </div>
@@ -26,7 +45,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   scriptSrc: { type: String, required: true },
@@ -38,6 +57,8 @@ const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
 const WIDGET_HOST = "https://www.tradingview-widget.com";
 const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
+
+const interactionEnabled = ref(false);
 
 const widgetName = computed(() => {
   try {
@@ -83,6 +104,14 @@ const iframeSrc = computed(() => {
 });
 
 const iframeKey = computed(() => `${iframeSrc.value}`);
+
+function enableInteraction() {
+  interactionEnabled.value = true;
+}
+
+function disableInteraction() {
+  interactionEnabled.value = false;
+}
 </script>
 
 <style scoped>
@@ -94,6 +123,13 @@ const iframeKey = computed(() => `${iframeSrc.value}`);
   height: 100%;
 }
 
+.tv-widget-frame-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: inherit;
+}
+
 .tv-widget-frame {
   display: block;
   flex: 1 1 auto;
@@ -101,6 +137,67 @@ const iframeKey = computed(() => `${iframeSrc.value}`);
   min-height: 260px;
   border: 0;
   background: transparent;
+  pointer-events: none;
+}
+
+.tv-widget-frame.interactive {
+  pointer-events: auto;
+}
+
+.tv-widget-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(8, 12, 18, 0.18), rgba(8, 12, 18, 0.42));
+}
+
+.tv-widget-overlay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 320px;
+  padding: 14px 16px;
+  border: 1px solid rgba(123, 231, 255, 0.2);
+  border-radius: 14px;
+  background: rgba(8, 12, 18, 0.9);
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.tv-widget-overlay-card strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.tv-widget-overlay-btn,
+.tv-widget-interaction-exit {
+  border: 1px solid rgba(123, 231, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.12);
+  color: #d7fbff;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.tv-widget-overlay-btn {
+  align-self: center;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.tv-widget-interaction-exit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  min-height: 30px;
+  padding: 0 12px;
 }
 
 .tv-widget-link {
