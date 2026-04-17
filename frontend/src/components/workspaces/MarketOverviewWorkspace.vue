@@ -146,7 +146,22 @@
           </button>
         </div>
         <div class="widget-shell heatmap-shell">
-          <TaiwanHeatmap @select-ticker="$emit('select-ticker', $event)" />
+          <TaiwanHeatmap mode="stocks" @select-ticker="$emit('select-ticker', $event)" />
+        </div>
+      </div>
+
+      <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'twIndicesHeatmap' }">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">Local Data</div>
+            <div class="overview-card-title">大盤指數與 ETF (ECharts)</div>
+          </div>
+          <button class="hero-action ghost" type="button" @click="toggleFullscreen('twIndicesHeatmap')">
+            {{ fullscreenWidget === 'twIndicesHeatmap' ? '還原' : '放大全螢幕' }}
+          </button>
+        </div>
+        <div class="widget-shell heatmap-shell">
+          <TaiwanHeatmap mode="indices" @select-ticker="$emit('select-ticker', $event)" />
         </div>
       </div>
 
@@ -571,7 +586,7 @@ defineEmits([
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.widgets-grid > .widget-card:nth-child(4) {
+.widgets-grid > .widget-card:nth-child(5) {
   grid-column: span 2;
 }
 

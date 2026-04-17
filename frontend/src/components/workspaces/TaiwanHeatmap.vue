@@ -18,6 +18,13 @@ use([CanvasRenderer, TreemapChart, TooltipComponent]);
 
 provide(THEME_KEY, "dark");
 
+const props = defineProps({
+  mode: {
+    type: String,
+    default: "stocks" // "stocks" or "indices"
+  }
+});
+
 const emit = defineEmits(["select-ticker"]);
 
 const loading = ref(true);
@@ -172,6 +179,16 @@ async function fetchHeatmapData() {
 
     // Filter out inactive stocks
     data = data.filter(item => item.trade_value > 0);
+
+    // Filter by mode
+    if (props.mode === "stocks") {
+      data = data.filter(item => item.sector && item.sector !== "未分類");
+    } else if (props.mode === "indices") {
+      data = data.filter(item => !item.sector || item.sector === "未分類");
+      // Since they are all "未分類", we can assign them to a single visual block or no block at all.
+      // To prevent a single giant "未分類" border, we rename it to "大盤指數與 ETF"
+      data.forEach(item => item.sector = "大盤指數與 ETF");
+    }
 
     // Sort by trade value descending to ensure biggest boxes are top
     data.sort((a, b) => (b.trade_value || 0) - (a.trade_value || 0));
