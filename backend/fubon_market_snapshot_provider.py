@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fubon_quote_provider import fubon_timestamp_to_iso
 from fubon_symbols import fubon_market_to_ticker
+from tw_symbol_lookup import get_taiwan_ticker_industry
 
 SNAPSHOT_CACHE_TTL_SECONDS = 60
 SUPPORTED_MARKETS = {"TSE", "OTC"}
@@ -69,12 +70,14 @@ def _normalize_snapshot_row(row: Dict[str, Any], market: str) -> Optional[Dict[s
         return None
 
     resolved_market = str(row.get("market") or market).strip().upper() or market
+    ticker = fubon_market_to_ticker(symbol, resolved_market)
     return {
-        "ticker": fubon_market_to_ticker(symbol, resolved_market),
+        "ticker": ticker,
         "symbol": symbol,
         "market": resolved_market,
         "type": row.get("type"),
         "name": row.get("name") or symbol,
+        "sector": get_taiwan_ticker_industry(ticker) or "未分類",
         "open": _coerce_float(row.get("openPrice")),
         "high": _coerce_float(row.get("highPrice")),
         "low": _coerce_float(row.get("lowPrice")),

@@ -13,6 +13,7 @@ _lookup_cache = {
     "expires_at": 0.0,
     "names": {},
     "canonical": {},
+    "industries": {},
     "rows": [],
 }
 
@@ -28,13 +29,14 @@ def _build_ticker_aliases(stock_id: str, market_type: str) -> tuple[str, List[st
     return primary_ticker, aliases
 
 
-def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], List[Dict[str, str]]]:
+def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], Dict[str, str], List[Dict[str, str]]]:
     now = time.time()
     cached_names = _lookup_cache["names"]
     cached_canonical = _lookup_cache["canonical"]
+    cached_industries = _lookup_cache.get("industries", {})
     cached_rows = _lookup_cache["rows"]
     if not force and cached_names and now < _lookup_cache["expires_at"]:
-        return cached_names, cached_canonical, cached_rows
+        return cached_names, cached_canonical, cached_industries, cached_rows
 
     try:
         response = requests.get(
@@ -49,12 +51,14 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], L
 
         names: Dict[str, str] = {}
         canonical: Dict[str, str] = {}
+        industries: Dict[str, str] = {}
         rows: List[Dict[str, str]] = []
         primary_seen = set()
         for item in payload.get("data", []):
             stock_id = str(item.get("stock_id") or "").strip().upper()
             stock_name = str(item.get("stock_name") or "").strip()
             market_type = str(item.get("type") or "").strip().lower()
+            industry = str(item.get("industry_category") or "").strip()
             if not stock_id or not stock_name:
                 continue
 
@@ -62,6 +66,8 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], L
             for alias in aliases:
                 names.setdefault(alias, stock_name)
                 canonical.setdefault(alias, primary_ticker)
+                if industry:
+                    industries.setdefault(alias, industry)
             if primary_ticker in primary_seen:
                 continue
             primary_seen.add(primary_ticker)
@@ -77,21 +83,22 @@ def _load_lookup(force: bool = False) -> tuple[Dict[str, str], Dict[str, str], L
         _lookup_cache["expires_at"] = now + LOOKUP_CACHE_TTL_SECONDS
         _lookup_cache["names"] = names
         _lookup_cache["canonical"] = canonical
+        _lookup_cache["industries"] = industries
         _lookup_cache["rows"] = rows
-        return names, canonical, rows
+        return names, canonical, industries, rows
     except Exception as exc:
         if cached_names:
             log.warning("taiwan symbol lookup refresh failed, using cached data: %s", exc)
-            return cached_names, cached_canonical, cached_rows
+            return cached_names, cached_canonical, cached_industries, cached_rows
         log.warning("taiwan symbol lookup failed: %s", exc)
-        return {}, {}, []
+        return {}, {}, {}, []
 
 
 def get_taiwan_ticker_name(ticker: str) -> str | None:
     raw = (ticker or "").strip().upper()
     if not raw:
         return None
-    names, _, _ = _load_lookup()
+    names, _, _, _ = _load_lookup()
     return names.get(raw)
 
 
@@ -99,8 +106,16 @@ def resolve_taiwan_ticker(ticker: str) -> str | None:
     raw = (ticker or "").strip().upper()
     if not raw:
         return None
-    _, canonical, _ = _load_lookup()
+    _, canonical, _, _ = _load_lookup()
     return canonical.get(raw)
+
+
+def get_taiwan_ticker_industry(ticker: str) -> str | None:
+    raw = (ticker or "").strip().upper()
+    if not raw:
+        return None
+    _, _, industries, _ = _load_lookup()
+    return industries.get(raw)
 
 
 def search_taiwan_tickers(query: str, limit: int = 20) -> List[Dict[str, str]]:
@@ -108,7 +123,7 @@ def search_taiwan_tickers(query: str, limit: int = 20) -> List[Dict[str, str]]:
     if not keyword:
         return []
 
-    _, _, rows = _load_lookup()
+    _, _, _, rows = _load_lookup()
     upper_keyword = keyword.upper()
 
     def score(row: Dict[str, str]) -> tuple[int, str]:

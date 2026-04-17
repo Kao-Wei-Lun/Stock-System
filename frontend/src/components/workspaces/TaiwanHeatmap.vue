@@ -41,10 +41,23 @@ function getColor(changePct) {
 }
 
 const chartOption = computed(() => {
-  const treemapData = marketData.value.map((item) => {
+  const sectorGroups = {};
+
+  marketData.value.forEach((item) => {
+    const sector = item.sector || "未分類";
+    if (!sectorGroups[sector]) {
+      sectorGroups[sector] = {
+        name: sector,
+        value: 0,
+        children: [],
+        itemStyle: { borderWidth: 3, borderColor: "#1e222d", gapWidth: 2 }
+      };
+    }
     const val = item.trade_value || Math.random() * 10000 + 10000;
     const change = item.change_pct || 0;
-    return {
+    
+    sectorGroups[sector].value += val;
+    sectorGroups[sector].children.push({
       name: `${item.name}\n${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
       value: val,
       ticker: item.ticker,
@@ -64,9 +77,13 @@ const chartOption = computed(() => {
         color: "#fff",
         fontSize: 13,
         fontWeight: 500,
+        overflow: "truncate",
+        minMargin: 2
       },
-    };
+    });
   });
+
+  const treemapData = Object.values(sectorGroups);
 
   return {
     backgroundColor: "transparent",
@@ -93,9 +110,13 @@ const chartOption = computed(() => {
         type: "treemap",
         width: "100%",
         height: "100%",
-        roam: false,
-        nodeClick: false,
-        breadcrumb: { show: false },
+        roam: true,
+        nodeClick: "zoomToNode",
+        breadcrumb: {
+          show: true,
+          itemStyle: { textStyle: { color: "#d1d4dc" } },
+          emptyItemWidth: 25
+        },
         itemStyle: {
           borderColor: "#1e222d",
         },
