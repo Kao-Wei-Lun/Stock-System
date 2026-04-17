@@ -2,7 +2,7 @@
   <div class="tw-heatmap-container">
     <div v-if="loading" class="heatmap-loading">載入中...</div>
     <div v-else-if="error" class="heatmap-error">{{ error }}</div>
-    <v-chart v-else class="echarts-heatmap" :option="chartOption" autoresize @click="handleChartClick" />
+    <v-chart ref="chartRef" v-else class="echarts-heatmap" :option="chartOption" autoresize @click="handleChartClick" />
   </div>
 </template>
 
@@ -30,6 +30,7 @@ const emit = defineEmits(["select-ticker"]);
 const loading = ref(true);
 const error = ref(null);
 const marketData = ref([]);
+const chartRef = ref(null);
 const HEATMAP_SURFACE = "#131722";
 const SECTOR_BORDER = "rgba(255, 255, 255, 0.08)";
 const TILE_BORDER = "rgba(255, 255, 255, 0.08)";
@@ -116,6 +117,8 @@ const chartOption = computed(() => {
 
   const treemapData = Object.values(sectorGroups);
 
+  const chartInstance = chartRef.value;
+
   return {
     backgroundColor: "transparent",
     tooltip: {
@@ -160,7 +163,7 @@ const chartOption = computed(() => {
       borderWidth: 1,
       textStyle: { color: "#d1d4dc" },
       padding: 0,
-      extraCssText: "border-radius: 14px; box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35); overflow: hidden;",
+      extraCssText: "border-radius: 14px; box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35); overflow: hidden; backdrop-filter: blur(8px);",
     },
     series: [
       {
@@ -168,7 +171,7 @@ const chartOption = computed(() => {
         width: "100%",
         height: "100%",
         roam: true,
-        nodeClick: "zoomToNode",
+        nodeClick: false, // Disabling automatic zoom; will manually dispatch action
         sort: "desc",
         animationDurationUpdate: 220,
         breadcrumb: {
@@ -178,22 +181,20 @@ const chartOption = computed(() => {
           height: 30,
           emptyItemWidth: 18,
           itemStyle: {
-            color: HEATMAP_SURFACE,
-            borderColor: "rgba(123, 231, 255, 0.2)",
+            color: "rgba(10, 13, 18, 0.8)",
+            borderColor: "rgba(255, 255, 255, 0.1)",
             borderWidth: 1,
-            shadowBlur: 14,
-            shadowColor: "rgba(123, 231, 255, 0.16)",
+            shadowBlur: 10,
+            shadowColor: "rgba(0,0,0,0.5)",
             textStyle: {
-              color: BREADCRUMB_TEXT,
+              color: "#a3a6af",
               fontSize: 12,
-              fontWeight: 700,
-              textShadowBlur: 10,
-              textShadowColor: "rgba(123, 231, 255, 0.35)",
+              fontWeight: 500,
             },
           },
           emphasis: {
             itemStyle: {
-              color: "#1b2331",
+              color: "#1e222d",
             },
           },
         },
@@ -203,29 +204,28 @@ const chartOption = computed(() => {
               color: "transparent",
               borderColor: "transparent",
               borderWidth: 0,
-              gapWidth: 3,
+              gapWidth: 2,
             },
           },
           {
             upperLabel: {
               show: true,
-              height: 28,
-              formatter: ({ name }) => `${name} >`,
-              color: UPPER_LABEL_TEXT,
-              backgroundColor: HEADER_SURFACE,
-              padding: [4, 10],
-              borderColor: SECTOR_BORDER,
-              borderWidth: 1,
-              fontWeight: 800,
-              fontSize: 28,
-              lineHeight: 28,
+              height: 24,
+              formatter: ({ name }) => `${name}`,
+              color: "#a3a6af",
+              backgroundColor: "#131722",
+              padding: [0, 8],
+              fontWeight: 600,
+              fontSize: 12,
+              lineHeight: 24,
+              align: 'left',
               overflow: "truncate",
             },
             itemStyle: {
               color: "transparent",
-              borderColor: SECTOR_BORDER,
+              borderColor: "#1e222d",
               borderWidth: 1,
-              gapWidth: 3,
+              gapWidth: 2,
             }
           },
           {
@@ -233,16 +233,16 @@ const chartOption = computed(() => {
               show: true,
               formatter: ({ data }) => `${data.symbolName}\n${formatChange(data.changePct)}`,
               color: "#ffffff",
-              fontSize: 13,
-              fontWeight: 700,
-              lineHeight: 18,
+              fontSize: 11,
+              fontWeight: 500,
+              lineHeight: 16,
               overflow: "truncate",
               minMargin: 3,
             },
             itemStyle: {
-              borderColor: TILE_BORDER,
+              borderColor: "#131722",
               borderWidth: 1,
-              gapWidth: 1
+              gapWidth: 0
             }
           }
         ],
@@ -298,11 +298,24 @@ async function fetchHeatmapData() {
 }
 
 function handleChartClick(params) {
-  if (params && params.data && params.data.ticker) {
-    emit("select-ticker", {
-      ticker: params.data.ticker,
-      name: params.data.symbolName,
-    });
+  if (params && params.data) {
+    if (params.data.ticker) {
+      // 點擊到底層個股：觸發選擇股票事件，開啟相關視窗
+      emit("select-ticker", {
+        ticker: params.data.ticker,
+        name: params.data.symbolName,
+      });
+    } else if (params.treePathInfo && params.treePathInfo.length === 2 && chartRef.value) {
+      // 點擊到外層（產業板塊），且目前處於第一層時：用程式觸發 zoomToNode
+      const echartInstance = chartRef.value.getEchartsInstance();
+      if (echartInstance) {
+        echartInstance.dispatchAction({
+          type: 'treemapZoomToNode',
+          seriesIndex: 0,
+          targetNode: params.name
+        });
+      }
+    }
   }
 }
 
