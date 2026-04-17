@@ -35,6 +35,7 @@ const SECTOR_BORDER = "rgba(255, 255, 255, 0.08)";
 const TILE_BORDER = "rgba(255, 255, 255, 0.08)";
 const HEADER_SURFACE = "rgba(10, 13, 18, 0.92)";
 const UPPER_LABEL_TEXT = "#f5f7fa";
+const BREADCRUMB_TEXT = "#d7fbff";
 const TOOLTIP_SURFACE = "rgba(12, 16, 24, 0.96)";
 const TOOLTIP_BORDER = "rgba(139, 149, 167, 0.26)";
 
@@ -169,10 +170,32 @@ const chartOption = computed(() => {
         roam: true,
         nodeClick: "zoomToNode",
         sort: "desc",
+        animationDurationUpdate: 220,
         breadcrumb: {
           show: true,
-          itemStyle: { textStyle: { color: "#d1d4dc" } },
-          emptyItemWidth: 25
+          left: 12,
+          top: 12,
+          height: 30,
+          emptyItemWidth: 18,
+          itemStyle: {
+            color: HEATMAP_SURFACE,
+            borderColor: "rgba(123, 231, 255, 0.2)",
+            borderWidth: 1,
+            shadowBlur: 14,
+            shadowColor: "rgba(123, 231, 255, 0.16)",
+            textStyle: {
+              color: BREADCRUMB_TEXT,
+              fontSize: 12,
+              fontWeight: 700,
+              textShadowBlur: 10,
+              textShadowColor: "rgba(123, 231, 255, 0.35)",
+            },
+          },
+          emphasis: {
+            itemStyle: {
+              color: "#1b2331",
+            },
+          },
         },
         levels: [
           {
@@ -187,6 +210,7 @@ const chartOption = computed(() => {
             upperLabel: {
               show: true,
               height: 28,
+              formatter: ({ name }) => `${name} >`,
               color: UPPER_LABEL_TEXT,
               backgroundColor: HEADER_SURFACE,
               padding: [4, 10],

@@ -101,4 +101,65 @@ describe("TaiwanHeatmap", () => {
     expect(tooltipHtml).toContain("#f23645");
     expect(wrapper.find(".heatmap-loading").exists()).toBe(false);
   });
+
+  it("groups indices for drill-down navigation and emits ticker selection from leaf nodes", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          data: [
+            {
+              ticker: "2330",
+              name: "台積電",
+              sector: "半導體",
+              trade_value: 1200000000,
+              change_pct: 4.12,
+              price: 812,
+            },
+          ],
+        }),
+      )
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          data: [
+            {
+              ticker: "0050",
+              name: "元大台灣50",
+              sector: "未分類",
+              trade_value: 900000000,
+              change_pct: 0.52,
+              price: 182.4,
+            },
+          ],
+        }),
+      );
+
+    const wrapper = mount(TaiwanHeatmap, {
+      props: {
+        mode: "indices",
+      },
+    });
+
+    await flushPromises();
+
+    const chart = wrapper.findComponent({ name: "VChart" });
+    const option = chart.props("option");
+    const [indexSector] = option.series[0].data;
+
+    expect(option.series[0].roam).toBe(true);
+    expect(option.series[0].nodeClick).toBe("zoomToNode");
+    expect(option.series[0].breadcrumb.itemStyle.color).toBe("#131722");
+    expect(option.series[0].levels[1].upperLabel.formatter({ name: "大盤指數與 ETF" })).toContain(">");
+    expect(indexSector.name).toBe("大盤指數與 ETF");
+    expect(indexSector.children).toHaveLength(1);
+
+    chart.vm.$emit("click", { data: indexSector.children[0] });
+    await flushPromises();
+
+    expect(wrapper.emitted("select-ticker")[0]).toEqual([
+      {
+        ticker: "0050",
+        name: "元大台灣50",
+      },
+    ]);
+  });
 });
