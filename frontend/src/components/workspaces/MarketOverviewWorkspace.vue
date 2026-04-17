@@ -135,6 +135,21 @@
         </div>
       </div>
 
+      <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'twEchartsHeatmap' }">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">Local Data</div>
+            <div class="overview-card-title">台股資金熱力圖 (ECharts)</div>
+          </div>
+          <button class="hero-action ghost" type="button" @click="toggleFullscreen('twEchartsHeatmap')">
+            {{ fullscreenWidget === 'twEchartsHeatmap' ? '還原' : '放大全螢幕' }}
+          </button>
+        </div>
+        <div class="widget-shell heatmap-shell">
+          <TaiwanHeatmap @select-ticker="$emit('select-ticker', $event)" />
+        </div>
+      </div>
+
       <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'twScreener' }">
         <div class="overview-card-head">
           <div>
@@ -265,6 +280,7 @@ import MacroDashboard from "../MacroDashboard.vue";
 import ScreenerWorkspace from "../ScreenerWorkspace.vue";
 import TradingViewWidgetEmbed from "../TradingViewWidgetEmbed.vue";
 import WatchlistPanel from "../WatchlistPanel.vue";
+import TaiwanHeatmap from "./TaiwanHeatmap.vue";
 
 const heatmapSectionRef = ref(null);
 const fullscreenWidget = ref(null);
@@ -555,12 +571,12 @@ defineEmits([
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.widgets-grid > .widget-card:nth-child(3) {
+.widgets-grid > .widget-card:nth-child(4) {
   grid-column: span 2;
 }
 
 .widget-card {
-  min-height: 440px;
+  min-height: 480px;
 }
 
 .widget-card.is-fullscreen {

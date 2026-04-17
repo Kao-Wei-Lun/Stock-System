@@ -10,8 +10,10 @@
     "test": "vitest run --config vitest.config.js"
   },
   "dependencies": {
+    "echarts": "^6.0.0",
     "lightweight-charts": "^5.1.0",
     "vue": "^3.5.0",
+    "vue-echarts": "^8.0.1",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
