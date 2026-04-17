@@ -117,9 +117,33 @@ const chartOption = computed(() => {
           itemStyle: { textStyle: { color: "#d1d4dc" } },
           emptyItemWidth: 25
         },
-        itemStyle: {
-          borderColor: "#1e222d",
-        },
+        levels: [
+          {
+            itemStyle: { borderColor: "#0e1015", borderWidth: 0, gapWidth: 2 }
+          },
+          {
+            upperLabel: {
+              show: true,
+              height: 24,
+              color: "#d1d4dc",
+              backgroundColor: "transparent",
+              fontWeight: "bold",
+              fontSize: 14,
+            },
+            itemStyle: {
+              borderColor: "#1e222d",
+              borderWidth: 4,
+              gapWidth: 4
+            }
+          },
+          {
+            itemStyle: {
+              borderColor: "#2a2e39",
+              borderWidth: 1,
+              gapWidth: 1
+            }
+          }
+        ],
         data: treemapData,
       },
     ],
@@ -132,8 +156,8 @@ async function fetchHeatmapData() {
     error.value = null;
 
     const [tseRes, otcRes] = await Promise.all([
-      fetch("/api/fubon/actives/TSE?trade=value&limit=50"),
-      fetch("/api/fubon/actives/OTC?trade=value&limit=50")
+      fetch("/api/fubon/snapshot/TSE"),
+      fetch("/api/fubon/snapshot/OTC")
     ]);
 
     let data = [];
@@ -145,6 +169,9 @@ async function fetchHeatmapData() {
       const otcData = await otcRes.json();
       data = data.concat(otcData.data || []);
     }
+
+    // Filter out inactive stocks
+    data = data.filter(item => item.trade_value > 0);
 
     // Sort by trade value descending to ensure biggest boxes are top
     data.sort((a, b) => (b.trade_value || 0) - (a.trade_value || 0));
