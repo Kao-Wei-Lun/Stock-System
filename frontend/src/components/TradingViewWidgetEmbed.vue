@@ -5,7 +5,8 @@
         :key="iframeKey"
         class="tv-widget-frame"
         :class="{ interactive: isActuallyInteractive }"
-        :src="iframeSrc"
+        :src="iframeSrc || undefined"
+        :srcdoc="iframeSrcdoc || undefined"
         title="TradingView widget"
         loading="lazy"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
@@ -82,8 +83,16 @@ const widgetName = computed(() => {
 });
 
 const scriptAllowed = computed(() => Boolean(widgetName.value));
+const useEmbeddedScriptIframe = computed(() => widgetName.value === "screener");
 
-const widgetConfig = computed(() => {
+function escapeScriptContent(value) {
+  return String(value ?? "")
+    .replaceAll("</script", "<\\/script")
+    .replaceAll("<!--", "<\\!--")
+    .replaceAll("<", "\\u003C");
+}
+
+const iframeWidgetConfig = computed(() => {
   const { locale, ...config } = props.config ?? {};
 
   return {
@@ -96,17 +105,65 @@ const widgetConfig = computed(() => {
 
 const locale = computed(() => props.config?.locale || "en");
 
-const serializedConfig = computed(() => JSON.stringify(widgetConfig.value));
+const serializedIframeConfig = computed(() => JSON.stringify(iframeWidgetConfig.value));
+
+const embeddedScriptConfig = computed(() => ({
+  ...(props.config ?? {}),
+  utm_source: "",
+  utm_medium: "widget",
+  utm_campaign: widgetName.value,
+}));
+
+const serializedEmbeddedScriptConfig = computed(() =>
+  escapeScriptContent(JSON.stringify(embeddedScriptConfig.value, null, 2)),
+);
 
 const iframeSrc = computed(() => {
-  if (!scriptAllowed.value) return "";
+  if (!scriptAllowed.value || useEmbeddedScriptIframe.value) return "";
 
   const query = new URLSearchParams({ locale: locale.value });
-  const configHash = encodeURIComponent(serializedConfig.value);
+  const configHash = encodeURIComponent(serializedIframeConfig.value);
   return `${WIDGET_HOST}/embed-widget/${widgetName.value}/?${query.toString()}#${configHash}`;
 });
 
-const iframeKey = computed(() => `${iframeSrc.value}`);
+const iframeSrcdoc = computed(() => {
+  if (!scriptAllowed.value || !useEmbeddedScriptIframe.value) return "";
+
+  return `<!DOCTYPE html>
+<html lang="${locale.value}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      html, body, .tradingview-widget-container, .tradingview-widget-container__widget {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      body {
+        color-scheme: ${embeddedScriptConfig.value.colorTheme === "light" ? "light" : "dark"};
+      }
+    </style>
+    <script>
+      window.environment = "battle";
+      window.locale = ${JSON.stringify(locale.value)};
+      window.language = ${JSON.stringify(locale.value)};
+    <\/script>
+  </head>
+  <body>
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <script type="text/javascript" src="${props.scriptSrc}" async>
+${serializedEmbeddedScriptConfig.value}
+      <\/script>
+    </div>
+  </body>
+</html>`;
+});
+
+const iframeKey = computed(() => iframeSrc.value || iframeSrcdoc.value);
 
 function enableInteraction() {
   interactionEnabled.value = true;

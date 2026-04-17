@@ -43,6 +43,31 @@ describe("TradingViewWidgetEmbed", () => {
     expect(wrapper.text()).toContain("未在允許清單");
   });
 
+  it("uses an embedded script iframe for screener widgets and seeds TradingView environment", () => {
+    const wrapper = mount(TradingViewWidgetEmbed, {
+      props: {
+        scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-screener.js",
+        config: {
+          colorTheme: "dark",
+          locale: "zh_TW",
+          market: "taiwan",
+          defaultColumn: "overview",
+          defaultScreen: "top_gainers",
+        },
+      },
+    });
+
+    const frame = wrapper.find("iframe.tv-widget-frame");
+    const srcdoc = frame.attributes("srcdoc");
+
+    expect(frame.exists()).toBe(true);
+    expect(frame.attributes("src")).toBeUndefined();
+    expect(srcdoc).toContain('window.environment = "battle"');
+    expect(srcdoc).toContain('window.locale = "zh_TW"');
+    expect(srcdoc).toContain("embed-widget-screener.js");
+    expect(srcdoc).toContain('"market": "taiwan"');
+  });
+
   it("rebuilds the iframe url when the widget config changes", async () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
