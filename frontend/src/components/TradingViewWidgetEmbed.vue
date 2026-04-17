@@ -1,15 +1,20 @@
 <template>
   <div class="tv-widget-shell" :class="{ 'is-interactive': isActuallyInteractive }" @mouseleave="disableInteraction">
     <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
+      <div
+        v-if="useInjectedScriptWidget"
+        ref="scriptWidgetHost"
+        class="tv-widget-script-host tradingview-widget-container"
+      ></div>
       <iframe
+        v-else
         :key="iframeKey"
         class="tv-widget-frame"
         :class="{ interactive: isActuallyInteractive }"
         :src="iframeSrc || undefined"
-        :srcdoc="iframeSrcdoc || undefined"
         title="TradingView widget"
         loading="lazy"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         referrerpolicy="no-referrer-when-downgrade"
       ></iframe>
       <div v-if="!isActuallyInteractive" class="tv-widget-overlay">
@@ -46,7 +51,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
   scriptSrc: { type: String, required: true },
@@ -61,6 +66,7 @@ const WIDGET_HOST = "https://www.tradingview-widget.com";
 const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
 
 const interactionEnabled = ref(false);
+const scriptWidgetHost = ref(null);
 
 const isActuallyInteractive = computed(() => props.isFullscreen || interactionEnabled.value);
 
@@ -83,14 +89,7 @@ const widgetName = computed(() => {
 });
 
 const scriptAllowed = computed(() => Boolean(widgetName.value));
-const useEmbeddedScriptIframe = computed(() => widgetName.value === "screener");
-
-function escapeScriptContent(value) {
-  return String(value ?? "")
-    .replaceAll("</script", "<\\/script")
-    .replaceAll("<!--", "<\\!--")
-    .replaceAll("<", "\\u003C");
-}
+const useInjectedScriptWidget = computed(() => widgetName.value === "screener");
 
 const iframeWidgetConfig = computed(() => {
   const { locale, ...config } = props.config ?? {};
@@ -107,63 +106,56 @@ const locale = computed(() => props.config?.locale || "en");
 
 const serializedIframeConfig = computed(() => JSON.stringify(iframeWidgetConfig.value));
 
-const embeddedScriptConfig = computed(() => ({
+const injectedScriptConfig = computed(() => ({
   ...(props.config ?? {}),
   utm_source: "",
   utm_medium: "widget",
   utm_campaign: widgetName.value,
 }));
 
-const serializedEmbeddedScriptConfig = computed(() =>
-  escapeScriptContent(JSON.stringify(embeddedScriptConfig.value, null, 2)),
-);
-
 const iframeSrc = computed(() => {
-  if (!scriptAllowed.value || useEmbeddedScriptIframe.value) return "";
+  if (!scriptAllowed.value || useInjectedScriptWidget.value) return "";
 
   const query = new URLSearchParams({ locale: locale.value });
   const configHash = encodeURIComponent(serializedIframeConfig.value);
   return `${WIDGET_HOST}/embed-widget/${widgetName.value}/?${query.toString()}#${configHash}`;
 });
 
-const iframeSrcdoc = computed(() => {
-  if (!scriptAllowed.value || !useEmbeddedScriptIframe.value) return "";
+const iframeKey = computed(() => iframeSrc.value);
 
-  return `<!DOCTYPE html>
-<html lang="${locale.value}">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      html, body, .tradingview-widget-container, .tradingview-widget-container__widget {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: transparent;
-      }
-      body {
-        color-scheme: ${embeddedScriptConfig.value.colorTheme === "light" ? "light" : "dark"};
-      }
-    </style>
-    <script>
-      window.environment = "battle";
-      window.locale = ${JSON.stringify(locale.value)};
-      window.language = ${JSON.stringify(locale.value)};
-    <\/script>
-  </head>
-  <body>
-    <div class="tradingview-widget-container">
-      <div class="tradingview-widget-container__widget"></div>
-      <script type="text/javascript" src="${props.scriptSrc}" async>
-${serializedEmbeddedScriptConfig.value}
-      <\/script>
-    </div>
-  </body>
-</html>`;
-});
+function clearInjectedScriptWidget() {
+  if (!scriptWidgetHost.value) return;
+  scriptWidgetHost.value.replaceChildren();
+}
 
-const iframeKey = computed(() => iframeSrc.value || iframeSrcdoc.value);
+function renderInjectedScriptWidget() {
+  if (!scriptAllowed.value || !useInjectedScriptWidget.value || !scriptWidgetHost.value) return;
+
+  const host = scriptWidgetHost.value;
+  clearInjectedScriptWidget();
+
+  const widgetRoot = document.createElement("div");
+  widgetRoot.className = "tradingview-widget-container__widget";
+  widgetRoot.style.width = "100%";
+  widgetRoot.style.height = "100%";
+
+  const script = document.createElement("script");
+  script.type = "text/javascript";
+  script.async = true;
+  script.src = props.scriptSrc;
+  script.text = JSON.stringify(injectedScriptConfig.value, null, 2);
+
+  host.append(widgetRoot, script);
+}
+
+function syncInjectedScriptWidget() {
+  if (!useInjectedScriptWidget.value || !scriptAllowed.value) {
+    clearInjectedScriptWidget();
+    return;
+  }
+
+  renderInjectedScriptWidget();
+}
 
 function enableInteraction() {
   interactionEnabled.value = true;
@@ -172,6 +164,30 @@ function enableInteraction() {
 function disableInteraction() {
   interactionEnabled.value = false;
 }
+
+onMounted(() => {
+  syncInjectedScriptWidget();
+});
+
+onBeforeUnmount(() => {
+  clearInjectedScriptWidget();
+});
+
+watch(
+  () => props.scriptSrc,
+  () => syncInjectedScriptWidget(),
+);
+
+watch(
+  () => props.config,
+  () => syncInjectedScriptWidget(),
+  { deep: true },
+);
+
+watch(
+  () => [scriptAllowed.value, useInjectedScriptWidget.value],
+  () => syncInjectedScriptWidget(),
+);
 </script>
 
 <style scoped>
@@ -198,6 +214,14 @@ function disableInteraction() {
   border: 0;
   background: transparent;
   pointer-events: none;
+}
+
+.tv-widget-script-host {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 260px;
+  background: transparent;
 }
 
 .tv-widget-frame.interactive {
