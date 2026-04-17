@@ -1,17 +1,17 @@
 <template>
-  <div class="tv-widget-shell" :class="{ 'is-interactive': interactionEnabled }" @mouseleave="disableInteraction">
+  <div class="tv-widget-shell" :class="{ 'is-interactive': isActuallyInteractive }" @mouseleave="disableInteraction">
     <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
       <iframe
         :key="iframeKey"
         class="tv-widget-frame"
-        :class="{ interactive: interactionEnabled }"
+        :class="{ interactive: isActuallyInteractive }"
         :src="iframeSrc"
         title="TradingView widget"
         loading="lazy"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         referrerpolicy="no-referrer-when-downgrade"
       ></iframe>
-      <div v-if="!interactionEnabled" class="tv-widget-overlay">
+      <div v-if="!isActuallyInteractive" class="tv-widget-overlay">
         <div class="tv-widget-overlay-card">
           <strong>頁面捲動優先</strong>
           <span>滑鼠滾輪會直接捲動總覽頁。要操作元件時，再切到互動模式。</span>
@@ -21,7 +21,7 @@
         </div>
       </div>
       <button
-        v-else
+        v-else-if="!isFullscreen"
         class="tv-widget-interaction-exit"
         type="button"
         @click="disableInteraction"
@@ -51,6 +51,7 @@ const props = defineProps({
   scriptSrc: { type: String, required: true },
   config: { type: Object, required: true },
   fallbackUrl: { type: String, default: "https://www.tradingview.com/" },
+  isFullscreen: { type: Boolean, default: false },
 });
 
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
@@ -59,6 +60,8 @@ const WIDGET_HOST = "https://www.tradingview-widget.com";
 const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
 
 const interactionEnabled = ref(false);
+
+const isActuallyInteractive = computed(() => props.isFullscreen || interactionEnabled.value);
 
 const widgetName = computed(() => {
   try {
@@ -193,11 +196,21 @@ function disableInteraction() {
 
 .tv-widget-interaction-exit {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  min-height: 30px;
-  padding: 0 12px;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  min-height: 32px;
+  padding: 0 16px;
+  background: rgba(8, 12, 18, 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(123, 231, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.tv-widget-interaction-exit:hover {
+  background: rgba(123, 231, 255, 0.15);
+  border-color: rgba(123, 231, 255, 0.5);
 }
 
 .tv-widget-link {

@@ -131,6 +131,7 @@
             script-src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"
             :config="usHeatmapConfig"
             fallback-url="https://www.tradingview.com/heatmap/stock/"
+            :is-fullscreen="fullscreenWidget === 'usHeatmap'"
           />
         </div>
       </div>
@@ -180,6 +181,7 @@
             script-src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js"
             :config="twScreenerConfig"
             fallback-url="https://www.tradingview.com/screener/"
+            :is-fullscreen="fullscreenWidget === 'twScreener'"
           />
         </div>
       </div>
@@ -199,6 +201,7 @@
             script-src="https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js"
             :config="marketOverviewConfig"
             fallback-url="https://www.tradingview.com/markets/"
+            :is-fullscreen="fullscreenWidget === 'overview'"
           />
         </div>
       </div>
