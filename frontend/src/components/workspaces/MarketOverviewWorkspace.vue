@@ -247,7 +247,7 @@ import WatchlistPanel from "../WatchlistPanel.vue";
 const heatmapSectionRef = ref(null);
 
 const heatmapConfig = {
-  dataSource: "SPX500",
+  dataSource: "TWSE",
   blockSize: "market_cap_basic",
   blockColor: "change",
   grouping: "sector",
