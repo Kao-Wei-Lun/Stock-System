@@ -30,21 +30,53 @@ const emit = defineEmits(["select-ticker"]);
 const loading = ref(true);
 const error = ref(null);
 const marketData = ref([]);
+const HEATMAP_SURFACE = "#131722";
+const SECTOR_BORDER = "rgba(255, 255, 255, 0.08)";
+const TILE_BORDER = "rgba(255, 255, 255, 0.08)";
+const HEADER_SURFACE = "rgba(10, 13, 18, 0.92)";
+const UPPER_LABEL_TEXT = "#f5f7fa";
+const TOOLTIP_SURFACE = "rgba(12, 16, 24, 0.96)";
+const TOOLTIP_BORDER = "rgba(139, 149, 167, 0.26)";
 
 function formatNumber(num) {
-  if (!num) return "0";
-  if (num >= 100000000) return (num / 100000000).toFixed(2) + " 億";
-  if (num >= 10000) return (num / 10000).toFixed(2) + " 萬";
-  return num.toString();
+  const value = Number(num || 0);
+  if (!value) return "0";
+  if (value >= 100000000) return (value / 100000000).toFixed(2) + " 億";
+  if (value >= 10000) return (value / 10000).toFixed(2) + " 萬";
+  return value.toLocaleString();
+}
+
+function formatPrice(price) {
+  const value = Number(price);
+  if (!Number.isFinite(value)) return "--";
+  const digits = value >= 1000 ? 0 : 2;
+  return value.toLocaleString("zh-TW", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatChange(changePct) {
+  const pct = Number.parseFloat(changePct) || 0;
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function getColor(changePct) {
-  const pct = parseFloat(changePct) || 0;
-  if (pct >= 5) return "#ee354a"; // 強漲
-  if (pct > 0) return "#ff4d6a"; // 上漲
-  if (pct <= -5) return "#00aa80"; // 強跌
-  if (pct < 0) return "#00d9a3"; // 下跌
-  return "#303e4d"; // 平盤
+  const pct = Number.parseFloat(changePct);
+  if (!Number.isFinite(pct) || pct === 0) return "#2a2e39"; // 平盤
+  if (pct >= 3) return "#f23645"; // 強漲（台股紅漲）
+  if (pct > 0) return "#f7525f"; // 微漲
+  if (pct <= -3) return "#089981"; // 強跌（台股綠跌）
+  return "#22ab94"; // 微跌
 }
 
 const chartOption = computed(() => {
@@ -52,40 +84,31 @@ const chartOption = computed(() => {
 
   marketData.value.forEach((item) => {
     const sector = item.sector || "未分類";
+    const tradeValue = Number(item.trade_value || 0);
+    const sizeValue = tradeValue > 0 ? tradeValue : 1;
+    const change = Number(item.change_pct || 0);
+    const symbolName = item.name || item.ticker || "未命名";
+
     if (!sectorGroups[sector]) {
       sectorGroups[sector] = {
         name: sector,
         value: 0,
         children: [],
-        itemStyle: { borderWidth: 3, borderColor: "#1e222d", gapWidth: 2 }
       };
     }
-    const val = item.trade_value || Math.random() * 10000 + 10000;
-    const change = item.change_pct || 0;
-    
-    sectorGroups[sector].value += val;
+
+    sectorGroups[sector].value += sizeValue;
     sectorGroups[sector].children.push({
-      name: `${item.name}\n${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
-      value: val,
+      name: symbolName,
+      value: sizeValue,
       ticker: item.ticker,
-      symbolName: item.name,
+      symbolName,
+      sectorName: sector,
       changePct: change,
       price: item.price,
-      tradeValue: item.trade_value,
+      tradeValue,
       itemStyle: {
         color: getColor(change),
-        borderColor: "#1e222d",
-        borderWidth: 2,
-        gapWidth: 1,
-      },
-      label: {
-        show: true,
-        formatter: "{b}",
-        color: "#fff",
-        fontSize: 13,
-        fontWeight: 500,
-        overflow: "truncate",
-        minMargin: 2
       },
     });
   });
@@ -98,19 +121,45 @@ const chartOption = computed(() => {
       formatter: function (info) {
         const data = info.data;
         if (!data || !data.ticker) return "";
+
+        const color = data.itemStyle?.color || getColor(data.changePct);
+
         return `
-          <div style="font-weight:bold; color:#fff; margin-bottom:4px;">
-            ${data.symbolName} (${data.ticker})
+          <div style="min-width: 210px; padding: 12px 14px;">
+            <div style="margin-bottom: 8px; color: #8b95a7; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;">
+              ${escapeHtml(data.sectorName || "台股熱力圖")}
+            </div>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+              <div style="font-size: 15px; font-weight: 700; color: #f5f7fa;">
+                ${escapeHtml(data.symbolName)}
+              </div>
+              <div style="font-size: 12px; color: #8b95a7;">
+                ${escapeHtml(data.ticker)}
+              </div>
+            </div>
+            <div style="display: grid; gap: 6px; color: #d1d4dc; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between; gap: 12px;">
+                <span>股價</span>
+                <strong style="color: #f5f7fa;">${escapeHtml(formatPrice(data.price))}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 12px;">
+                <span>漲跌</span>
+                <strong style="color: ${color};">${escapeHtml(formatChange(data.changePct))}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 12px;">
+                <span>成交值</span>
+                <strong style="color: #f5f7fa;">${escapeHtml(formatNumber(data.tradeValue))}</strong>
+              </div>
+            </div>
           </div>
-          <div>股價: ${data.price}</div>
-          <div>漲跌: <span style="color:${data.itemStyle.color}">${data.changePct > 0 ? "+" : ""}${data.changePct.toFixed(2)}%</span></div>
-          <div>成交值: ${formatNumber(data.tradeValue)}</div>
-        `;
+        `.trim();
       },
-      backgroundColor: "rgba(30, 34, 45, 0.9)",
-      borderColor: "#2a2e39",
+      backgroundColor: TOOLTIP_SURFACE,
+      borderColor: TOOLTIP_BORDER,
+      borderWidth: 1,
       textStyle: { color: "#d1d4dc" },
-      padding: [8, 12],
+      padding: 0,
+      extraCssText: "border-radius: 14px; box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35); overflow: hidden;",
     },
     series: [
       {
@@ -119,6 +168,7 @@ const chartOption = computed(() => {
         height: "100%",
         roam: true,
         nodeClick: "zoomToNode",
+        sort: "desc",
         breadcrumb: {
           show: true,
           itemStyle: { textStyle: { color: "#d1d4dc" } },
@@ -126,26 +176,47 @@ const chartOption = computed(() => {
         },
         levels: [
           {
-            itemStyle: { borderColor: "#0e1015", borderWidth: 0, gapWidth: 2 }
+            itemStyle: {
+              color: "transparent",
+              borderColor: "transparent",
+              borderWidth: 0,
+              gapWidth: 3,
+            },
           },
           {
             upperLabel: {
               show: true,
-              height: 24,
-              color: "#d1d4dc",
-              backgroundColor: "transparent",
-              fontWeight: "bold",
-              fontSize: 14,
+              height: 28,
+              color: UPPER_LABEL_TEXT,
+              backgroundColor: HEADER_SURFACE,
+              padding: [4, 10],
+              borderColor: SECTOR_BORDER,
+              borderWidth: 1,
+              fontWeight: 800,
+              fontSize: 28,
+              lineHeight: 28,
+              overflow: "truncate",
             },
             itemStyle: {
-              borderColor: "#1e222d",
-              borderWidth: 4,
-              gapWidth: 4
+              color: "transparent",
+              borderColor: SECTOR_BORDER,
+              borderWidth: 1,
+              gapWidth: 3,
             }
           },
           {
+            label: {
+              show: true,
+              formatter: ({ data }) => `${data.symbolName}\n${formatChange(data.changePct)}`,
+              color: "#ffffff",
+              fontSize: 13,
+              fontWeight: 700,
+              lineHeight: 18,
+              overflow: "truncate",
+              minMargin: 3,
+            },
             itemStyle: {
-              borderColor: "#2a2e39",
+              borderColor: TILE_BORDER,
               borderWidth: 1,
               gapWidth: 1
             }
@@ -224,13 +295,28 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: var(--color-bg-elevated);
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background:
+    radial-gradient(circle at top, rgba(123, 231, 255, 0.08), transparent 38%),
+    #131722;
 }
 
 .heatmap-loading,
 .heatmap-error {
-  color: var(--color-text-muted);
-  font-size: 14px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #8b95a7;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.heatmap-error {
+  color: #ff8a9d;
 }
 
 .echarts-heatmap {
