@@ -1,8 +1,13 @@
 <template>
-  <div class="tw-heatmap-container">
+  <div class="tw-heatmap-container" style="position: relative;">
     <div v-if="loading" class="heatmap-loading">載入中...</div>
     <div v-else-if="error" class="heatmap-error">{{ error }}</div>
-    <v-chart ref="chartRef" v-else class="echarts-heatmap" :option="chartOption" autoresize @click="handleChartClick" />
+    <template v-else>
+      <div v-if="activeSector" class="heatmap-back-btn" @click="clearSector">
+        <span class="icon">&larr;</span> 返回全部產業
+      </div>
+      <v-chart ref="chartRef" class="echarts-heatmap" :option="chartOption" autoresize @click="handleChartClick" />
+    </template>
   </div>
 </template>
 
@@ -31,6 +36,11 @@ const loading = ref(true);
 const error = ref(null);
 const marketData = ref([]);
 const chartRef = ref(null);
+const activeSector = ref(null);
+
+function clearSector() {
+  activeSector.value = null;
+}
 const HEATMAP_SURFACE = "#131722";
 const SECTOR_BORDER = "rgba(255, 255, 255, 0.08)";
 const TILE_BORDER = "rgba(255, 255, 255, 0.08)";
@@ -115,7 +125,11 @@ const chartOption = computed(() => {
     });
   });
 
-  const treemapData = Object.values(sectorGroups);
+  let treemapData = Object.values(sectorGroups);
+  
+  if (activeSector.value && sectorGroups[activeSector.value]) {
+    treemapData = [sectorGroups[activeSector.value]];
+  }
 
   const chartInstance = chartRef.value;
 
@@ -175,28 +189,7 @@ const chartOption = computed(() => {
         sort: "desc",
         animationDurationUpdate: 220,
         breadcrumb: {
-          show: true,
-          left: 12,
-          top: 12,
-          height: 30,
-          emptyItemWidth: 18,
-          itemStyle: {
-            color: "rgba(10, 13, 18, 0.8)",
-            borderColor: "rgba(255, 255, 255, 0.1)",
-            borderWidth: 1,
-            shadowBlur: 10,
-            shadowColor: "rgba(0,0,0,0.5)",
-            textStyle: {
-              color: "#a3a6af",
-              fontSize: 12,
-              fontWeight: 500,
-            },
-          },
-          emphasis: {
-            itemStyle: {
-              color: "#1e222d",
-            },
-          },
+          show: false, // Use our custom Vue back button instead
         },
         levels: [
           {
@@ -305,16 +298,9 @@ function handleChartClick(params) {
         ticker: params.data.ticker,
         name: params.data.symbolName,
       });
-    } else if (params.treePathInfo && params.treePathInfo.length === 2 && chartRef.value) {
-      // 點擊到外層（產業板塊），且目前處於第一層時：用程式觸發 zoomToNode
-      const echartInstance = chartRef.value.getEchartsInstance();
-      if (echartInstance) {
-        echartInstance.dispatchAction({
-          type: 'treemapZoomToNode',
-          seriesIndex: 0,
-          targetNode: params.name
-        });
-      }
+    } else if (params.treePathInfo && params.treePathInfo.length === 2 && !activeSector.value) {
+      // 點擊到外層（產業板塊），設定 activeSector 來過濾資料
+      activeSector.value = params.name;
     }
   }
 }
@@ -360,5 +346,32 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   min-height: inherit;
+}
+
+.heatmap-back-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid rgba(123, 231, 255, 0.2);
+  border-radius: 6px;
+  color: #a3a6af;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  transition: all 0.2s;
+}
+
+.heatmap-back-btn:hover {
+  color: #d7fbff;
+  border-color: rgba(123, 231, 255, 0.5);
+  background: rgba(10, 13, 18, 1);
 }
 </style>
