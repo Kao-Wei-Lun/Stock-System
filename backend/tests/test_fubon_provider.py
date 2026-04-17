@@ -1,5 +1,6 @@
 import asyncio
 import database
+import pytest
 import repositories.fubon_accounts as fubon_accounts_repo
 
 from fubon_provider import FubonSDKManager
@@ -108,6 +109,49 @@ def test_subscription_id_updates_from_subscribed_event():
     )
 
     assert manager._subscriptions["stock:2330:aggregates"] == "abc123"
+
+
+def test_subscribe_stock_async_waits_for_subscribed_event():
+    manager = FubonSDKManager()
+    manager._ws_stock = FakeWebSocket()
+    manager.connected = True
+    manager._attach_message_handlers()
+
+    async def run():
+        task = asyncio.create_task(manager.subscribe_stock_async("2330", "aggregates", timeout=1.0))
+        await asyncio.sleep(0)
+        manager._dispatch_ws_message(
+            "stock",
+            {
+                "event": "subscribed",
+                "data": {"id": "async-123", "channel": "aggregates", "symbol": "2330"},
+            },
+        )
+        return await task
+
+    assert asyncio.run(run()) == "async-123"
+
+
+def test_subscribe_stock_async_raises_on_error_event():
+    manager = FubonSDKManager()
+    manager._ws_stock = FakeWebSocket()
+    manager.connected = True
+    manager._attach_message_handlers()
+
+    async def run():
+        task = asyncio.create_task(manager.subscribe_stock_async("2330", "aggregates", timeout=1.0))
+        await asyncio.sleep(0)
+        manager._dispatch_ws_message(
+            "stock",
+            {
+                "event": "error",
+                "data": {"message": "subscription limit reached"},
+            },
+        )
+        with pytest.raises(RuntimeError, match="subscription limit reached"):
+            await task
+
+    asyncio.run(run())
 
 
 def test_unsubscribe_uses_resolved_channel_id():

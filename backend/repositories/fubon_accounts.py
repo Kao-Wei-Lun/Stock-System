@@ -93,6 +93,17 @@ class FubonAccountRepository:
         )
         return self._with_decrypted_secrets(row)
 
+    async def list_enabled_accounts_with_secrets(self) -> List[Dict[str, Any]]:
+        rows = await self._db._fetchall(
+            """
+            SELECT *
+            FROM fubon_api_accounts
+            WHERE is_enabled=1
+            ORDER BY is_active DESC, id ASC
+            """
+        )
+        return [item for item in (self._with_decrypted_secrets(row) for row in rows) if item]
+
     async def create_account(self, data: Dict[str, Any]) -> int:
         return await self._db._execute_insert(
             """

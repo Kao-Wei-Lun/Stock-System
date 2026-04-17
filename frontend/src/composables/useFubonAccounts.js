@@ -53,6 +53,15 @@ export function useFubonAccounts() {
       account.last_connected_at = status.last_connected_at;
       account.is_active = status.is_active;
       account.is_enabled = status.is_enabled;
+      account.realtime_assigned_count = status.realtime_assigned_count || 0;
+      account.realtime_assigned_tickers = Array.isArray(status.realtime_assigned_tickers)
+        ? status.realtime_assigned_tickers
+        : [];
+      account.realtime_resolved_tickers = Array.isArray(status.realtime_resolved_tickers)
+        ? status.realtime_resolved_tickers
+        : [];
+      account.realtime_ws_mode = status.realtime_ws_mode || account.ws_mode;
+      account.realtime_connected = Boolean(status.realtime_connected);
     });
   }
 

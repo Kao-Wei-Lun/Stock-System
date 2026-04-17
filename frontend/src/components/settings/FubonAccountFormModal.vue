@@ -60,9 +60,15 @@
         <label class="settings-field">
           <span>行情模式</span>
           <select v-model="form.ws_mode">
-            <option value="Speed">Speed</option>
-            <option value="Normal">Normal</option>
+            <option value="Speed">Speed · 自選觀察池 / 背景分流</option>
+            <option value="Normal">Normal · 盤中焦點 / 完整即時</option>
           </select>
+          <small class="settings-field-hint">
+            {{ form.ws_mode === "Normal"
+              ? "目前開啟中的盤中標的會優先分配到 Normal 帳號。"
+              : "自選觀察池與背景即時訂閱會優先分配到 Speed 帳號。"
+            }}
+          </small>
         </label>
       </div>
 
@@ -213,6 +219,12 @@ watch(
 .settings-check span {
   font-size: 10px;
   color: var(--text3);
+}
+
+.settings-field-hint {
+  color: var(--text3);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .settings-field input,

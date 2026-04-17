@@ -32,12 +32,12 @@ from env_validation import (
     read_url_env,
     validate_runtime_environment,
 )
-from fubon_symbols import supports_fubon_stock_realtime_ticker
 from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
     fetcher,
     fubon_manager,
+    fubon_realtime_pool,
     fundamentals_provider,
     macro_snapshot_provider,
     market_event_provider,
@@ -191,8 +191,10 @@ background_tasks = BackgroundTaskService(
 get_tracked_sync_tickers = background_tasks.get_tracked_sync_tickers
 sync_tracked_market_data = background_tasks.sync_tracked_market_data
 fetch_and_store_quote_snapshot = background_tasks.fetch_and_store_quote_snapshot
+store_realtime_quote = background_tasks.store_realtime_quote
 sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
 fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
+fubon_realtime_pool.configure_store_quote(store_realtime_quote)
 
 
 background_scheduler = BackgroundScheduler(
@@ -220,11 +222,9 @@ background_scheduler = BackgroundScheduler(
         sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
         get_subscribed_tickers=ws_manager.get_subscribed_tickers,
         broadcast_to_ticker=ws_manager.broadcast_to_ticker,
-        store_quote_to_db=db.upsert_market_quote,
-        fubon_manager=fubon_manager,
-        skip_poll_for_ticker=lambda ticker: (
-            supports_fubon_stock_realtime_ticker(ticker) and fubon_manager.supports_full_ws_quotes
-        ),
+        store_quote_to_db=store_realtime_quote,
+        fubon_manager=fubon_realtime_pool,
+        skip_poll_for_ticker=lambda ticker: fubon_realtime_pool.supports_full_ws_quotes_for_ticker(ticker),
     ),
     logger=log,
 )
@@ -238,16 +238,17 @@ async def lifespan(app: FastAPI):
 
     validate_runtime_environment()
     await init_db()
-    if getattr(db, "_pool", None) is not None and await fubon_manager.init_from_db(db):
-        fubon_manager.start_ws_stock()
-        fubon_manager.start_ws_futopt()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
     await db.ensure_watchlist_group_items(
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,
     )
+    if getattr(db, "_pool", None) is not None:
+        await fubon_realtime_pool.init_from_db(db)
+        await fubon_realtime_pool.sync_watchlist_from_db(db)
     background_scheduler.start()
     yield
     await background_scheduler.shutdown()
+    fubon_realtime_pool.shutdown()
     fubon_manager.shutdown()
     await db.close()
     log.info("QuantVision Pro backend stopped")

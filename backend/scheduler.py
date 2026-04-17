@@ -275,64 +275,76 @@ async def fubon_ws_listener_loop(
                 ticker = _resolve_fubon_ticker(market_type, raw)
                 if not ticker or not channel:
                     continue
+                target_tickers = [ticker]
+                resolver = getattr(fubon_manager, "resolve_broadcast_tickers", None)
+                if callable(resolver):
+                    resolved_targets = [item for item in resolver(ticker) if item]
+                    if resolved_targets:
+                        target_tickers = resolved_targets
 
                 if channel == "aggregates":
-                    quote_payload = build_fubon_quote_payload(ticker, raw, source="fubon_neo")
-                    if not quote_payload:
-                        continue
-                    if callable(store_quote_to_db):
-                        await store_quote_to_db(quote_payload)
-                    await broadcast_to_ticker(
-                        ticker,
-                        {
-                            "type": "quote",
-                            "ticker": ticker,
-                            "data": quote_payload,
-                            "ts": int(time.time() * 1000),
-                        },
-                    )
+                    for target_ticker in target_tickers:
+                        quote_payload = build_fubon_quote_payload(target_ticker, raw, source="fubon_neo")
+                        if not quote_payload:
+                            continue
+                        if callable(store_quote_to_db):
+                            await store_quote_to_db(quote_payload)
+                        await broadcast_to_ticker(
+                            target_ticker,
+                            {
+                                "type": "quote",
+                                "ticker": target_ticker,
+                                "data": quote_payload,
+                                "ts": int(time.time() * 1000),
+                            },
+                        )
                     continue
 
                 if channel == "trades":
-                    quote_payload = build_fubon_quote_payload(ticker, raw, source="fubon_neo")
-                    if not quote_payload:
-                        continue
-                    await broadcast_to_ticker(
-                        ticker,
-                        {
-                            "type": "quote",
-                            "ticker": ticker,
-                            "data": quote_payload,
-                            "ts": int(time.time() * 1000),
-                        },
-                    )
+                    for target_ticker in target_tickers:
+                        quote_payload = build_fubon_quote_payload(target_ticker, raw, source="fubon_neo")
+                        if not quote_payload:
+                            continue
+                        if callable(store_quote_to_db):
+                            await store_quote_to_db(quote_payload)
+                        await broadcast_to_ticker(
+                            target_ticker,
+                            {
+                                "type": "quote",
+                                "ticker": target_ticker,
+                                "data": quote_payload,
+                                "ts": int(time.time() * 1000),
+                            },
+                        )
                     continue
 
                 if channel == "books":
-                    await broadcast_to_ticker(
-                        ticker,
-                        {
-                            "type": "books",
-                            "ticker": ticker,
-                            "data": _build_fubon_book_payload(ticker, raw),
-                            "ts": int(time.time() * 1000),
-                        },
-                    )
+                    for target_ticker in target_tickers:
+                        await broadcast_to_ticker(
+                            target_ticker,
+                            {
+                                "type": "books",
+                                "ticker": target_ticker,
+                                "data": _build_fubon_book_payload(target_ticker, raw),
+                                "ts": int(time.time() * 1000),
+                            },
+                        )
                     continue
 
                 if channel == "candles":
-                    candle_payload = _build_fubon_candle_payload(ticker, raw)
-                    if not candle_payload:
-                        continue
-                    await broadcast_to_ticker(
-                        ticker,
-                        {
-                            "type": "candle",
-                            "ticker": ticker,
-                            "data": candle_payload,
-                            "ts": int(time.time() * 1000),
-                        },
-                    )
+                    for target_ticker in target_tickers:
+                        candle_payload = _build_fubon_candle_payload(target_ticker, raw)
+                        if not candle_payload:
+                            continue
+                        await broadcast_to_ticker(
+                            target_ticker,
+                            {
+                                "type": "candle",
+                                "ticker": target_ticker,
+                                "data": candle_payload,
+                                "ts": int(time.time() * 1000),
+                            },
+                        )
             except Exception as exc:
                 log.warning("Fubon websocket message handling failed: %s", exc)
                 await asyncio.sleep(1)

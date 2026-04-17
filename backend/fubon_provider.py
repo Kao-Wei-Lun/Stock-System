@@ -31,6 +31,7 @@ class FubonSDKManager:
         self._attached_targets: set[str] = set()
         self._reinit_lock = asyncio.Lock()
         self._shutting_down = False
+        self._pending_subscription_acks: Dict[str, list[asyncio.Future[str]]] = {}
         self.connected = False
 
     @property
@@ -183,11 +184,29 @@ class FubonSDKManager:
     def subscribe_stock(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
         return self._subscribe(self._ws_stock, "stock", symbol, channel)
 
+    async def subscribe_stock_async(
+        self,
+        symbol: str,
+        channel: str = "aggregates",
+        *,
+        timeout: float = 2.5,
+    ) -> Optional[str]:
+        return await self._subscribe_async(self._ws_stock, "stock", symbol, channel, timeout=timeout)
+
     def unsubscribe_stock(self, symbol: str, channel: str = "aggregates") -> None:
         self._unsubscribe(self._ws_stock, "stock", symbol, channel)
 
     def subscribe_futopt(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
         return self._subscribe(self._ws_futopt, "futopt", symbol, channel)
+
+    async def subscribe_futopt_async(
+        self,
+        symbol: str,
+        channel: str = "aggregates",
+        *,
+        timeout: float = 2.5,
+    ) -> Optional[str]:
+        return await self._subscribe_async(self._ws_futopt, "futopt", symbol, channel, timeout=timeout)
 
     def unsubscribe_futopt(self, symbol: str, channel: str = "aggregates") -> None:
         self._unsubscribe(self._ws_futopt, "futopt", symbol, channel)
@@ -517,6 +536,7 @@ class FubonSDKManager:
         self._subscriptions = {}
         self._subscription_payloads = {}
         self._subscription_id_to_key = {}
+        self._pending_subscription_acks = {}
         self._attached_targets = set()
         self.connected = False
 
@@ -564,6 +584,7 @@ class FubonSDKManager:
         if not payload:
             return
         self._update_subscription_state(payload)
+        self._update_pending_subscription_acks(payload)
         for handler in list(self._message_handlers):
             try:
                 handler(payload)
@@ -643,6 +664,41 @@ class FubonSDKManager:
             self._subscription_id_to_key[channel_id] = key
         return channel_id
 
+    async def _subscribe_async(
+        self,
+        target,
+        market_type: str,
+        symbol: str,
+        channel: str,
+        *,
+        force: bool = False,
+        timeout: float = 2.5,
+    ) -> Optional[str]:
+        if not target:
+            return None
+        key = self._subscription_key(market_type, symbol, channel)
+        if key in self._subscriptions and not force:
+            return self._subscriptions[key]
+
+        loop = asyncio.get_running_loop()
+        ack_future: asyncio.Future[str] = loop.create_future()
+        pending = self._pending_subscription_acks.setdefault(key, [])
+        pending.append(ack_future)
+
+        channel_id = None
+        try:
+            channel_id = self._subscribe(target, market_type, symbol, channel, force=force)
+            if channel_id and channel_id != key:
+                if not ack_future.done():
+                    ack_future.set_result(channel_id)
+            return await asyncio.wait_for(ack_future, timeout=max(float(timeout or 0), 0.1))
+        except Exception:
+            if channel_id:
+                self._unsubscribe(target, market_type, symbol, channel)
+            raise
+        finally:
+            self._discard_pending_subscription_ack(key, ack_future)
+
     def _unsubscribe(self, target, market_type: str, symbol: str, channel: str) -> None:
         key = self._subscription_key(market_type, symbol, channel)
         channel_id = self._subscriptions.pop(key, None)
@@ -681,6 +737,48 @@ class FubonSDKManager:
             resolved_key = self._subscription_id_to_key.pop(channel_id, None) if channel_id else None
             self._subscriptions.pop(resolved_key or key, None)
             self._subscription_payloads.pop(resolved_key or key, None)
+
+    def _update_pending_subscription_acks(self, message: dict) -> None:
+        event = str(message.get("event") or "").strip().lower()
+        if event == "subscribed":
+            market_type = str(message.get("market_type") or "stock")
+            data = message.get("data")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                symbol = item.get("symbol")
+                channel = item.get("channel")
+                channel_id = self._extract_subscription_id(item)
+                if not symbol or not channel:
+                    continue
+                key = self._subscription_key(market_type, str(symbol), str(channel))
+                for future in list(self._pending_subscription_acks.get(key, [])):
+                    if not future.done():
+                        future.set_result(str(channel_id or key))
+                continue
+            return
+
+        if event != "error":
+            return
+
+        data = message.get("data")
+        message_text = ""
+        if isinstance(data, dict):
+            message_text = str(data.get("message") or data.get("detail") or "").strip()
+        error = RuntimeError(message_text or "Fubon realtime subscription failed")
+        for futures in self._pending_subscription_acks.values():
+            for future in list(futures):
+                if not future.done():
+                    future.set_exception(error)
+
+    def _discard_pending_subscription_ack(self, key: str, future: asyncio.Future[str]) -> None:
+        futures = self._pending_subscription_acks.get(key)
+        if not futures:
+            return
+        self._pending_subscription_acks[key] = [item for item in futures if item is not future and not item.done()]
+        if not self._pending_subscription_acks[key]:
+            self._pending_subscription_acks.pop(key, None)
 
     @staticmethod
     def _normalize_ws_message(market_type: str, message: Any) -> Optional[dict]:

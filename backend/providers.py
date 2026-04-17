@@ -11,6 +11,7 @@ from database import db
 from fubon_data_fetcher import HybridDataFetcher
 from fubon_futopt_provider import FubonFutoptProvider
 from fubon_market_snapshot_provider import FubonMarketSnapshotProvider
+from fubon_realtime_pool import FubonRealtimeSubscriptionPool
 from fubon_symbols import (
     is_exact_futopt_contract,
     supports_fubon_stock_realtime_ticker,
@@ -33,6 +34,16 @@ yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
 fubon_futopt_provider = FubonFutoptProvider(fubon_manager)
 fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager)
+
+
+async def _resolve_realtime_futopt_contract(ticker: str) -> dict | None:
+    return await fubon_futopt_provider.resolve_contract(ticker)
+
+
+fubon_realtime_pool = FubonRealtimeSubscriptionPool(
+    fubon_manager,
+    resolve_futopt_contract=_resolve_realtime_futopt_contract,
+)
 quote_provider = HybridQuoteProvider(fubon_quote_provider, yahoo_quote_provider)
 external_notifier = ExternalNotificationDispatcher.from_env()
 alert_engine = AlertEngine(db, quote_provider, external_notifier=external_notifier)
@@ -58,33 +69,21 @@ def _fubon_futopt_channels() -> tuple[str, ...]:
 
 
 def _subscribe_fubon_streams(ticker: str) -> None:
-    if not fubon_manager.connected:
+    normalized = str(ticker or "").strip()
+    if not normalized:
         return
-    if supports_fubon_stock_realtime_ticker(ticker):
-        symbol = tw_ticker_to_fubon(ticker)
-        if not symbol:
-            return
-        for channel in _fubon_stock_channels():
-            fubon_manager.subscribe_stock(symbol, channel)
+    if not supports_fubon_stock_realtime_ticker(normalized) and not (
+        is_exact_futopt_contract(normalized) or normalized in {"TX", "TXF", "MTX", "MXF"}
+    ):
         return
-    if not is_exact_futopt_contract(ticker):
-        return
-    for channel in _fubon_futopt_channels():
-        fubon_manager.subscribe_futopt(ticker, channel)
+    fubon_realtime_pool.track_ticker(normalized, source="ws")
 
 
 def _unsubscribe_fubon_streams(ticker: str) -> None:
-    if supports_fubon_stock_realtime_ticker(ticker):
-        symbol = tw_ticker_to_fubon(ticker)
-        if not symbol:
-            return
-        for channel in _fubon_stock_channels():
-            fubon_manager.unsubscribe_stock(symbol, channel)
+    normalized = str(ticker or "").strip()
+    if not normalized:
         return
-    if not is_exact_futopt_contract(ticker):
-        return
-    for channel in _fubon_futopt_channels():
-        fubon_manager.unsubscribe_futopt(ticker, channel)
+    fubon_realtime_pool.untrack_ticker(normalized, source="ws")
 
 
 ws_manager.configure_market_data_hooks(

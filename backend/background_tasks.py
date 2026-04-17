@@ -8,6 +8,30 @@ from typing import Any
 from data_fetcher import normalize_ticker
 
 
+def _merge_market_quote(existing: dict | None, incoming: dict | None) -> dict | None:
+    if not incoming and not existing:
+        return None
+
+    merged = dict(existing or {})
+    source = dict(incoming or {})
+    incoming_ticker = normalize_ticker(source.get("ticker")) if source.get("ticker") else None
+    if incoming_ticker:
+        merged["ticker"] = incoming_ticker
+
+    for key, value in source.items():
+        if key == "ticker":
+            continue
+        if value is None:
+            continue
+        if key == "name" and merged.get("name") and incoming_ticker and str(value).upper() == incoming_ticker.upper():
+            continue
+        if key in {"bids", "asks"} and not value:
+            continue
+        merged[key] = value
+
+    return merged
+
+
 @dataclass(slots=True)
 class BackgroundTaskService:
     db: Any
@@ -107,7 +131,23 @@ class BackgroundTaskService:
         quote = await self.quote_provider.fetch_quote(ticker)
         if not quote:
             return None
-        return await self.db.upsert_market_quote(quote)
+        return await self.store_realtime_quote(quote)
+
+    async def store_realtime_quote(self, quote: dict | None) -> dict | None:
+        if not quote:
+            return None
+
+        ticker = normalize_ticker(quote.get("ticker"))
+        if not ticker:
+            return None
+
+        incoming = dict(quote)
+        incoming["ticker"] = ticker
+        existing = await self.db.get_market_quote(ticker)
+        merged = _merge_market_quote(existing, incoming)
+        if not merged:
+            return None
+        return await self.db.upsert_market_quote(merged)
 
     async def sync_market_intelligence_snapshot(self, reason: str = "manual") -> dict:
         tickers = await self.get_tracked_sync_tickers()

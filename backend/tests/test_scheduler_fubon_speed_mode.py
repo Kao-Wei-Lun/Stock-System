@@ -63,7 +63,9 @@ async def test_fubon_ws_listener_broadcasts_trade_messages_as_quotes():
         await task
 
     assert manager.unregistered is manager.handler
-    assert stored_quotes == []
+    assert stored_quotes[0]["ticker"] == "2330.TW"
+    assert stored_quotes[0]["is_delayed"] is False
+    assert stored_quotes[0]["price"] == 568
     assert messages[0][0] == "2330.TW"
     assert messages[0][1]["type"] == "quote"
     assert messages[0][1]["data"]["price"] == 568

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
-from providers import fetcher
+from providers import fetcher, fubon_realtime_pool
 from schemas import (
     WatchlistGroupCreate,
     WatchlistGroupUpdate,
@@ -130,6 +130,7 @@ async def delete_watchlist_group(group_id: int):
     deleted = await db.delete_watchlist_group(group_id)
     if not deleted:
         raise HTTPException(404, "Watchlist group not found")
+    await fubon_realtime_pool.sync_watchlist_from_db(db)
     return {"ok": True, "group_id": group_id}
 
 
@@ -155,6 +156,7 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
     except Exception as exc:
         log.warning("watchlist info %s failed: %s", ticker, exc)
 
+    await fubon_realtime_pool.sync_watchlist_from_db(db)
     hydrated = await hydrate_watchlist_item(ticker, group, item)
     hydrated["id"] = item["id"]
     hydrated["sort_order"] = item["sort_order"]
@@ -166,6 +168,7 @@ async def delete_watchlist_item(item_id: int):
     deleted = await db.delete_watchlist_item(item_id)
     if not deleted:
         raise HTTPException(404, "Watchlist item not found")
+    await fubon_realtime_pool.sync_watchlist_from_db(db)
     return {"ok": True, "item_id": item_id}
 
 

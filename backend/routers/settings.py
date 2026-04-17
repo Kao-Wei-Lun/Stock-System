@@ -42,22 +42,33 @@ async def list_fubon_accounts():
 
 @router.post("/fubon-accounts", status_code=201)
 async def create_fubon_account(body: FubonAccountCreate):
+    from providers import fubon_realtime_pool
+
     repo = FubonAccountRepository(db)
     try:
         account_id = await repo.create_account(body.model_dump())
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
+    await fubon_realtime_pool.reload_from_db(db)
     return {"id": account_id, "message": "帳號已建立"}
 
 
 @router.get("/fubon-accounts/status")
 async def get_fubon_accounts_status():
+    from providers import fubon_realtime_pool
+
     repo = FubonAccountRepository(db)
-    return {"accounts": await repo.list_statuses()}
+    accounts = await repo.list_statuses()
+    runtime = fubon_realtime_pool.get_account_runtime_statuses()
+    for account in accounts:
+        account.update(runtime.get(int(account.get("id") or 0), {}))
+    return {"accounts": accounts}
 
 
 @router.put("/fubon-accounts/{account_id}")
 async def update_fubon_account(account_id: int, body: FubonAccountUpdate):
+    from providers import fubon_realtime_pool
+
     repo = FubonAccountRepository(db)
     try:
         updated = await repo.update_account(account_id, body.model_dump(exclude_none=True))
@@ -65,21 +76,25 @@ async def update_fubon_account(account_id: int, body: FubonAccountUpdate):
         raise HTTPException(500, str(exc)) from exc
     if updated == 0:
         raise HTTPException(404, "帳號不存在或沒有變更")
+    await fubon_realtime_pool.reload_from_db(db)
     return {"message": "帳號已更新"}
 
 
 @router.delete("/fubon-accounts/{account_id}")
 async def delete_fubon_account(account_id: int):
+    from providers import fubon_realtime_pool
+
     repo = FubonAccountRepository(db)
     deleted = await repo.delete_account(account_id)
     if deleted == 0:
         raise HTTPException(404, "帳號不存在")
+    await fubon_realtime_pool.reload_from_db(db)
     return {"message": "帳號已刪除"}
 
 
 @router.post("/fubon-accounts/{account_id}/activate")
 async def activate_fubon_account(account_id: int):
-    from providers import fubon_manager
+    from providers import fubon_manager, fubon_realtime_pool
 
     repo = FubonAccountRepository(db)
     account = await repo.get_account_with_secrets(account_id)
@@ -93,6 +108,7 @@ async def activate_fubon_account(account_id: int):
         raise HTTPException(404, "帳號不存在或已停用")
 
     success = await fubon_manager.hot_switch(account)
+    await fubon_realtime_pool.reload_from_db(db)
     return {
         "success": success,
         "message": "已設為使用中" if success else "已設為使用中，但 SDK 連線尚未成功",

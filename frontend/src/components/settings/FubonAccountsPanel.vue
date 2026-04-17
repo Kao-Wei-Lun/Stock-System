@@ -3,7 +3,7 @@
     <div class="settings-section-head">
       <div>
         <h2>富邦 API 帳號</h2>
-        <p>新增帳號後，先測試連線，再設為使用中。</p>
+        <p>新增帳號後，先測試連線，再設為使用中。其餘啟用中的帳號會自動參與即時訂閱分流。混合模式下，watchlist 會優先走 Speed，目前開啟中的盤中標的會優先升級到 Normal。</p>
       </div>
       <button class="primary-btn" type="button" @click="openCreateModal">新增帳號</button>
     </div>
@@ -27,7 +27,8 @@
             <span class="status-dot" :class="statusClass(account.connection_status)"></span>
             <div>
               <h3>{{ account.label }}</h3>
-              <div class="account-sub">{{ account.user_id }} · {{ account.ws_mode }}</div>
+              <div class="account-sub">{{ account.user_id }} · {{ modeLabel(account.realtime_ws_mode || account.ws_mode) }}</div>
+              <div class="account-mode-note">{{ modeHint(account.realtime_ws_mode || account.ws_mode) }}</div>
             </div>
           </div>
           <span v-if="account.is_active" class="active-badge">使用中</span>
@@ -37,6 +38,10 @@
           <div>
             <span>連線狀態</span>
             <strong>{{ statusLabel(account.connection_status) }}</strong>
+          </div>
+          <div>
+            <span>即時訂閱</span>
+            <strong>{{ account.realtime_assigned_count || 0 }} 檔</strong>
           </div>
           <div>
             <span>憑證</span>
@@ -50,6 +55,19 @@
 
         <div v-if="account.connection_error" class="account-error">
           {{ account.connection_error }}
+        </div>
+
+        <div v-if="account.realtime_assigned_tickers?.length" class="account-symbols">
+          <span
+            v-for="ticker in account.realtime_assigned_tickers.slice(0, 8)"
+            :key="`${account.id}-${ticker}`"
+            class="account-symbol-chip"
+          >
+            {{ ticker }}
+          </span>
+          <span v-if="account.realtime_assigned_tickers.length > 8" class="account-symbol-chip muted">
+            +{{ account.realtime_assigned_tickers.length - 8 }}
+          </span>
         </div>
 
         <div class="account-actions">
@@ -219,6 +237,16 @@ function formatTime(value) {
   return date.toLocaleString("zh-TW", { hour12: false });
 }
 
+function modeLabel(mode) {
+  return mode === "Normal" ? "Normal · 盤中焦點" : "Speed · 自選觀察池";
+}
+
+function modeHint(mode) {
+  return mode === "Normal"
+    ? "目前畫面正在看的 ticker 會優先分配到這組帳號。"
+    : "watchlist 與背景即時訂閱會優先分配到這組帳號。";
+}
+
 onMounted(() => {
   fetchAccounts().catch(() => {});
   startStatusPolling();
@@ -323,6 +351,13 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
+.account-mode-note {
+  margin-top: 3px;
+  color: var(--text3);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .status-dot {
   width: 10px;
   height: 10px;
@@ -355,7 +390,7 @@ onBeforeUnmount(() => {
 
 .account-meta {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -376,6 +411,27 @@ onBeforeUnmount(() => {
   font-weight: 500;
   word-break: break-all;
   line-height: 1.5;
+}
+
+.account-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.account-symbol-chip {
+  border: 1px solid rgba(123, 231, 255, 0.24);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--text2);
+  background: rgba(123, 231, 255, 0.08);
+}
+
+.account-symbol-chip.muted {
+  border-color: var(--border2);
+  color: var(--text3);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .account-actions {
@@ -424,6 +480,10 @@ onBeforeUnmount(() => {
   }
 
   .account-list {
+    grid-template-columns: 1fr;
+  }
+
+  .account-meta {
     grid-template-columns: 1fr;
   }
 }
