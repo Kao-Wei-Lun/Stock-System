@@ -116,31 +116,53 @@
     </div>
 
     <div ref="heatmapSectionRef" class="overview-grid widgets-grid">
-      <div class="overview-card widget-card">
+      <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'usHeatmap' }">
         <div class="overview-card-head">
           <div>
             <div class="overview-card-kicker">TradingView</div>
-            <div class="overview-card-title">Market Heatmap</div>
+            <div class="overview-card-title">美股板塊熱力圖</div>
           </div>
-          <button class="hero-action ghost" type="button" @click="focusHeatmap">
-            聚焦區塊
+          <button class="hero-action ghost" type="button" @click="toggleFullscreen('usHeatmap')">
+            {{ fullscreenWidget === 'usHeatmap' ? '還原' : '放大全螢幕' }}
           </button>
         </div>
         <div class="widget-shell heatmap-shell">
           <TradingViewWidgetEmbed
             script-src="https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js"
-            :config="heatmapConfig"
+            :config="usHeatmapConfig"
             fallback-url="https://www.tradingview.com/heatmap/stock/"
           />
         </div>
       </div>
 
-      <div class="overview-card widget-card">
+      <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'twScreener' }">
         <div class="overview-card-head">
           <div>
             <div class="overview-card-kicker">TradingView</div>
-            <div class="overview-card-title">Market Overview Widget</div>
+            <div class="overview-card-title">台股強勢股篩選</div>
           </div>
+          <button class="hero-action ghost" type="button" @click="toggleFullscreen('twScreener')">
+            {{ fullscreenWidget === 'twScreener' ? '還原' : '放大全螢幕' }}
+          </button>
+        </div>
+        <div class="widget-shell heatmap-shell">
+          <TradingViewWidgetEmbed
+            script-src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js"
+            :config="twScreenerConfig"
+            fallback-url="https://www.tradingview.com/screener/"
+          />
+        </div>
+      </div>
+
+      <div class="overview-card widget-card" :class="{ 'is-fullscreen': fullscreenWidget === 'overview' }">
+        <div class="overview-card-head">
+          <div>
+            <div class="overview-card-kicker">TradingView</div>
+            <div class="overview-card-title">全球大盤快照</div>
+          </div>
+          <button class="hero-action ghost" type="button" @click="toggleFullscreen('overview')">
+            {{ fullscreenWidget === 'overview' ? '還原' : '放大全螢幕' }}
+          </button>
         </div>
         <div class="widget-shell market-overview-shell">
           <TradingViewWidgetEmbed
@@ -245,9 +267,9 @@ import TradingViewWidgetEmbed from "../TradingViewWidgetEmbed.vue";
 import WatchlistPanel from "../WatchlistPanel.vue";
 
 const heatmapSectionRef = ref(null);
+const fullscreenWidget = ref(null);
 
-const heatmapConfig = {
-  dataSource: "TWSE",
+const baseHeatmapConfig = {
   blockSize: "market_cap_basic",
   blockColor: "change",
   grouping: "sector",
@@ -261,6 +283,22 @@ const heatmapConfig = {
   isMonoSize: false,
   width: "100%",
   height: "100%",
+};
+
+const usHeatmapConfig = {
+  ...baseHeatmapConfig,
+  dataSource: "SPX500",
+};
+
+const twScreenerConfig = {
+  width: "100%",
+  height: "100%",
+  defaultColumn: "overview",
+  defaultScreen: "top_gainers",
+  market: "taiwan",
+  showToolbar: true,
+  colorTheme: "dark",
+  locale: "zh_TW"
 };
 
 const marketOverviewConfig = {
@@ -316,6 +354,14 @@ const marketOverviewConfig = {
 
 function focusHeatmap() {
   heatmapSectionRef.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+function toggleFullscreen(widgetId) {
+  if (fullscreenWidget.value === widgetId) {
+    fullscreenWidget.value = null;
+  } else {
+    fullscreenWidget.value = widgetId;
+  }
 }
 
 function formatCount(value) {
@@ -506,11 +552,32 @@ defineEmits([
 
 .widgets-grid {
   margin-top: 18px;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.widgets-grid > .widget-card:nth-child(3) {
+  grid-column: span 2;
 }
 
 .widget-card {
   min-height: 440px;
+}
+
+.widget-card.is-fullscreen {
+  position: fixed;
+  inset: 18px;
+  z-index: 9999;
+  min-height: unset;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 12, 18, 0.98);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+
+.widget-card.is-fullscreen .widget-shell {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 .snapshot-summary-grid {
@@ -681,6 +748,10 @@ defineEmits([
 
   .widgets-grid {
     grid-template-columns: 1fr;
+  }
+
+  .widgets-grid > .widget-card:nth-child(3) {
+    grid-column: span 1;
   }
 
   .overview-watch,
