@@ -2,21 +2,10 @@
   <div class="tv-widget-shell" :class="{ 'is-interactive': isActuallyInteractive }" @mouseleave="disableInteraction">
     <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
       <div
-        v-if="useInjectedScriptWidget"
         ref="scriptWidgetHost"
         class="tv-widget-script-host tradingview-widget-container"
-      ></div>
-      <iframe
-        v-else
-        :key="iframeKey"
-        class="tv-widget-frame"
         :class="{ interactive: isActuallyInteractive }"
-        :src="iframeSrc || undefined"
-        title="TradingView widget"
-        loading="lazy"
-        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-        referrerpolicy="no-referrer-when-downgrade"
-      ></iframe>
+      ></div>
       <div v-if="!isActuallyInteractive" class="tv-widget-overlay">
         <div class="tv-widget-overlay-card">
           <strong>頁面捲動優先</strong>
@@ -62,7 +51,6 @@ const props = defineProps({
 
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
-const WIDGET_HOST = "https://www.tradingview-widget.com";
 const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
 
 const interactionEnabled = ref(false);
@@ -89,23 +77,6 @@ const widgetName = computed(() => {
 });
 
 const scriptAllowed = computed(() => Boolean(widgetName.value));
-const useInjectedScriptWidget = computed(() => widgetName.value === "screener");
-
-const iframeWidgetConfig = computed(() => {
-  const { locale, ...config } = props.config ?? {};
-
-  return {
-    ...config,
-    utm_source: "",
-    utm_medium: "widget",
-    utm_campaign: widgetName.value,
-  };
-});
-
-const locale = computed(() => props.config?.locale || "en");
-
-const serializedIframeConfig = computed(() => JSON.stringify(iframeWidgetConfig.value));
-
 const injectedScriptConfig = computed(() => ({
   ...(props.config ?? {}),
   utm_source: "",
@@ -113,23 +84,13 @@ const injectedScriptConfig = computed(() => ({
   utm_campaign: widgetName.value,
 }));
 
-const iframeSrc = computed(() => {
-  if (!scriptAllowed.value || useInjectedScriptWidget.value) return "";
-
-  const query = new URLSearchParams({ locale: locale.value });
-  const configHash = encodeURIComponent(serializedIframeConfig.value);
-  return `${WIDGET_HOST}/embed-widget/${widgetName.value}/?${query.toString()}#${configHash}`;
-});
-
-const iframeKey = computed(() => iframeSrc.value);
-
 function clearInjectedScriptWidget() {
   if (!scriptWidgetHost.value) return;
   scriptWidgetHost.value.replaceChildren();
 }
 
 function renderInjectedScriptWidget() {
-  if (!scriptAllowed.value || !useInjectedScriptWidget.value || !scriptWidgetHost.value) return;
+  if (!scriptAllowed.value || !scriptWidgetHost.value) return;
 
   const host = scriptWidgetHost.value;
   clearInjectedScriptWidget();
@@ -149,7 +110,7 @@ function renderInjectedScriptWidget() {
 }
 
 function syncInjectedScriptWidget() {
-  if (!useInjectedScriptWidget.value || !scriptAllowed.value) {
+  if (!scriptAllowed.value) {
     clearInjectedScriptWidget();
     return;
   }
@@ -185,7 +146,7 @@ watch(
 );
 
 watch(
-  () => [scriptAllowed.value, useInjectedScriptWidget.value],
+  () => scriptAllowed.value,
   () => syncInjectedScriptWidget(),
 );
 </script>
@@ -206,25 +167,16 @@ watch(
   min-height: inherit;
 }
 
-.tv-widget-frame {
-  display: block;
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 260px;
-  border: 0;
-  background: transparent;
-  pointer-events: none;
-}
-
 .tv-widget-script-host {
   display: block;
   flex: 1 1 auto;
   width: 100%;
   min-height: 260px;
   background: transparent;
+  pointer-events: none;
 }
 
-.tv-widget-frame.interactive {
+.tv-widget-script-host.interactive {
   pointer-events: auto;
 }
 
