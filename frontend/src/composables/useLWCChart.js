@@ -9,6 +9,7 @@ import {
 } from "lightweight-charts";
 
 import { fmtPrice, fmtVol } from "../utils/formatters";
+import { isRenderableOhlcRow } from "../utils/chartOhlc";
 import { buildLWCIndicatorModel } from "./useLWCIndicators";
 import { useLWCDrawings } from "./useLWCDrawings";
 
@@ -163,13 +164,12 @@ export function useLWCChart({
     Array.isArray(props.ohlcData)
       ? props.ohlcData
         .map((row, index) => {
+          if (!isRenderableOhlcRow(row)) return null;
           const time = toChartTime(row?.date);
-          if (!time) return null;
           const open = Number(row.open ?? row.close);
           const high = Number(row.high ?? row.close);
           const low = Number(row.low ?? row.close);
           const close = Number(row.close ?? row.open);
-          if (![open, high, low, close].every(Number.isFinite)) return null;
           return {
             index,
             raw: row,

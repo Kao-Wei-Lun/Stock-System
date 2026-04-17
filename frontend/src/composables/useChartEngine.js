@@ -29,12 +29,12 @@ import {
 import { fmtPrice, fmtVol } from "../utils/formatters";
 
 const PAD = { top: 20, right: 70, bottom: 22, left: 10 };
-const DEFAULT_VISIBLE_BARS = 90;
+const DEFAULT_VISIBLE_BARS = 120;
 const MIN_VISIBLE_BARS = 20;
 const PAN_STEP_RATIO = 0.18;
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-const AUTO_Y_PADDING_RATIO = 0.07;
-const AUTO_Y_MIN_PADDING_RATIO = 0.015;
+const AUTO_Y_TARGET_OCCUPANCY = 0.9;
+const AUTO_Y_MIN_PADDING_ABS = 0.005;
 const DRAWING_HIT_TOLERANCE = 10;
 const VIEW_HISTORY_LIMIT = 80;
 const CHART_PREFS_KEY = "quantvision.chart.prefs.v1";
@@ -47,6 +47,43 @@ const DRAWING_LINE_STYLES = {
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const clampPositive = (value) => Math.max(value, Number.EPSILON);
 const isFiniteNumber = (value) => Number.isFinite(value);
+const resolveAutoYPadding = (range) => (
+  Math.max((((1 / AUTO_Y_TARGET_OCCUPANCY) - 1) * range) / 2, AUTO_Y_MIN_PADDING_ABS)
+);
+
+export function resolveLegacyMainChartAutoScaleRange(data, _overlayValues = [], scaleMode = "linear") {
+  const pricePoints = (Array.isArray(data) ? data : [])
+    .flatMap((row) => [row?.high, row?.low])
+    .filter(isFiniteNumber);
+
+  if (!pricePoints.length) {
+    return { min: 0, max: 1 };
+  }
+
+  const rawMin = Math.min(...pricePoints);
+  const rawMax = Math.max(...pricePoints);
+
+  let min = rawMin;
+  let max = rawMax;
+
+  if (rawMin === rawMax) {
+    const singlePad = Math.max(Math.abs(rawMin) * 0.08, 1);
+    min = rawMin - singlePad;
+    max = rawMax + singlePad;
+  } else {
+    const range = rawMax - rawMin;
+    const padding = resolveAutoYPadding(range);
+    min = rawMin - padding;
+    max = rawMax + padding;
+  }
+
+  if (scaleMode === "log" && rawMin > 0) {
+    min = Math.max(min, rawMin * 0.42);
+    max = Math.max(max, clampPositive(rawMax) * 1.08);
+  }
+
+  return { min, max };
+}
 
 const getDpr = () => window.devicePixelRatio || 1;
 const canvasWidth = (canvas) => canvas.width / getDpr();
@@ -388,8 +425,7 @@ export function useChartEngine({
       max = rawMax + singlePad;
     } else {
       const range = rawMax - rawMin;
-      const edgeMagnitude = Math.max(Math.abs(rawMax), Math.abs(rawMin));
-      const padding = Math.max(range * AUTO_Y_PADDING_RATIO, edgeMagnitude * AUTO_Y_MIN_PADDING_RATIO, 0.05);
+      const padding = resolveAutoYPadding(range);
       min = rawMin - padding;
       max = rawMax + padding;
     }
@@ -422,6 +458,8 @@ export function useChartEngine({
     const rawMax = Math.max(...pricePoints);
     return getPaddedPriceRange(rawMin, rawMax, scaleMode);
   };
+
+  const resolveMainChartAutoScale = resolveLegacyMainChartAutoScaleRange;
 
   const scaleY = (value, min, max, topPad, chartHeight, scaleMode = "linear") => {
     if (scaleMode === "log" && min > 0 && max > 0 && value > 0) {
@@ -1625,7 +1663,14 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
     if (draftDrawing.value) overlayValues.push(getDrawingPriceValues(draftDrawing.value));
 
-    const { min: autoMin, max: autoMax } = getVisiblePriceScale(data, overlayValues, priceScaleMode.value);
+    // Y-axis 縮放計算改為僅參考 K 線本身，
+    // 這樣在指標或繪圖數值偏離較遠時，K 線仍能保持動態放大（Enlarged）並填滿畫面。
+    const { min: autoMin, max: autoMax } = resolveMainChartAutoScale(
+      data,
+      overlayValues,
+      priceScaleMode.value,
+    );
+
     const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : autoMin;
     const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : autoMax;
     const scale = (value) => scaleY(value, min, max, PAD.top, chartHeight, priceScaleMode.value);

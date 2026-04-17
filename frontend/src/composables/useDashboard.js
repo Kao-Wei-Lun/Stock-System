@@ -16,6 +16,7 @@ import {
 } from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeRealtimeQuote } from "../utils/realtimeQuote";
+import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
 import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
@@ -362,6 +363,7 @@ function aggregateOhlcRows(rows, mode) {
   let current = null;
 
   rows.forEach((row) => {
+    if (!isRenderableOhlcRow(row)) return;
     const date = parseChartDate(row.date);
     if (!date) return;
     const bucketStart = getBucketStart(date, mode);
@@ -743,10 +745,12 @@ export function useDashboard() {
 
   const ohlcData = computed(() => {
     const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
-    return filterRowsForDisplayPeriod(
-      aggregateOhlcRows(rawOhlcData.value, displayMode),
-      currentPeriod.value,
-      displayMode,
+    return filterRenderableOhlcRows(
+      filterRowsForDisplayPeriod(
+        aggregateOhlcRows(rawOhlcData.value, displayMode),
+        currentPeriod.value,
+        displayMode,
+      ),
     );
   });
   const {
