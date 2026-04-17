@@ -40,6 +40,7 @@ class SchedulerDependencies:
     store_quote_to_db: Any = None
     fubon_manager: Any = None
     skip_poll_for_ticker: Callable[[str], bool] | None = None
+    archive_fubon_market_snapshot: Any = None
 
 
 async def startup_download(
@@ -117,6 +118,38 @@ async def daily_taiwan_chip_sync_loop(
             )
         except Exception as exc:
             log.warning("Daily Taiwan chip sync failed: %s", exc)
+
+
+async def daily_market_snapshot_sync_loop(
+    archive_snapshot,
+    app_tz: tzinfo,
+    daily_sync_time: time_of_day,
+    logger: logging.Logger | None = None,
+) -> None:
+    log = logger or logging.getLogger(__name__)
+    await asyncio.sleep(20) # Start slightly after latest_sync
+
+    while True:
+        now = datetime.now(app_tz)
+        next_run_date = now.date()
+        next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        if now >= next_run:
+            next_run_date += timedelta(days=1)
+            next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        
+        sleep_seconds = max(60, int((next_run - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+        
+        target_date = datetime.now(app_tz).strftime("%Y-%m-%d")
+        try:
+            for market in ["TSE", "OTC"]:
+                success = await archive_snapshot(market, target_date)
+                if success:
+                    log.info("Fubon market %s snapshot achieved for %s", market, target_date)
+                else:
+                    log.warning("Fubon market %s snapshot skipped or failed for %s", market, target_date)
+        except Exception as exc:
+            log.warning("Daily Fubon market snapshot sync failed: %s", exc)
 
 
 async def daily_latest_sync_loop(
@@ -501,6 +534,17 @@ class BackgroundScheduler:
             )
         else:
             self._log.info("Taiwan chip auto sync skipped (TAIWAN_CHIP_AUTO_SYNC_ENABLED=false).")
+
+        if self._deps.archive_fubon_market_snapshot:
+            self._create_task(
+                "fubon-market-snapshot-sync",
+                daily_market_snapshot_sync_loop(
+                    archive_snapshot=self._deps.archive_fubon_market_snapshot,
+                    app_tz=self._settings.app_tz,
+                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    logger=self._log,
+                ),
+            )
 
         self._create_task(
             "daily-latest-sync",

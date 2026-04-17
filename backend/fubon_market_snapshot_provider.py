@@ -120,11 +120,34 @@ def _normalize_snapshot_payload(payload: Dict[str, Any], market: str) -> Dict[st
 
 
 class FubonMarketSnapshotProvider:
-    def __init__(self, manager, ttl_seconds: int = SNAPSHOT_CACHE_TTL_SECONDS):
+    def __init__(self, manager: Any, ttl_seconds: int = SNAPSHOT_CACHE_TTL_SECONDS, db: Any = None):
         self._manager = manager
         self._ttl_seconds = ttl_seconds
+        self._db = db
         self._cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
         self._locks: Dict[tuple, asyncio.Lock] = {}
+
+    async def archive_daily_snapshot(self, market: str, date_str: str) -> bool:
+        if not self._db:
+            return False
+        snapshot = await self.fetch_snapshot(market, refresh=True)
+        if not snapshot or not snapshot.get("data"):
+            return False
+        
+        sql = """
+            INSERT INTO `fubon_market_snapshots` (`market`, `snapshot_date`, `payload_json`)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE `payload_json`=VALUES(`payload_json`)
+        """
+        import json
+        payload_json = json.dumps(snapshot, ensure_ascii=False)
+        try:
+            await self._db._execute(sql, (market, date_str, payload_json))
+            return True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to archive Fubon snapshot: %s", e)
+            return False
 
     async def fetch_snapshot(self, market: str, *, refresh: bool = False) -> Optional[Dict[str, Any]]:
         normalized_market = _normalize_market(market)

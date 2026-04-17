@@ -630,6 +630,18 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_taiwan_chip_snapshots_ticker` (`ticker`, `snapshot_date`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "fubon_market_snapshots": """
+        CREATE TABLE `fubon_market_snapshots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `market` VARCHAR(32) NOT NULL,
+            `snapshot_date` DATE NOT NULL,
+            `payload_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_fubon_market_snapshots_market_date` (`market`, `snapshot_date`),
+            KEY `idx_fubon_market_snapshots_date` (`snapshot_date`, `market`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
     "screener_presets": """
         CREATE TABLE `screener_presets` (
             `id` BIGINT NOT NULL AUTO_INCREMENT,

@@ -895,5 +895,19 @@ def _datetime_to_iso(value) -> Optional[str]:
         return datetime.combine(value, datetime.min.time()).isoformat()
     return str(value)
 
+def _deserialize_fubon_market_snapshot(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    payload = _json_loads(row.get("payload_json"), {})
+    payload.update(
+        {
+            "id": row.get("id"),
+            "market": row.get("market"),
+            "snapshot_date": _date_to_iso(row.get("snapshot_date")),
+            "created_at": _datetime_to_iso(row.get("created_at")),
+        }
+    )
+    return payload
+
 __all__ = [name for name in globals() if not name.startswith("__")]
 

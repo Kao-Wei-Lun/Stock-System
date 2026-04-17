@@ -33,7 +33,7 @@ fetcher = HybridDataFetcher(_yahoo_fetcher, fubon_manager)
 yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
 fubon_futopt_provider = FubonFutoptProvider(fubon_manager)
-fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager)
+fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager, db=db)
 
 
 async def _resolve_realtime_futopt_contract(ticker: str) -> dict | None:

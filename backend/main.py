@@ -46,6 +46,7 @@ from providers import (
     screener_engine,
     taiwan_chip_provider,
     ws_manager,
+    fubon_market_snapshot_provider,
 )
 from routers import alerts, backtest, intelligence, journal, market_data, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
@@ -225,6 +226,7 @@ background_scheduler = BackgroundScheduler(
         store_quote_to_db=store_realtime_quote,
         fubon_manager=fubon_realtime_pool,
         skip_poll_for_ticker=lambda ticker: fubon_realtime_pool.supports_full_ws_quotes_for_ticker(ticker),
+        archive_fubon_market_snapshot=fubon_market_snapshot_provider.archive_daily_snapshot,
     ),
     logger=log,
 )
