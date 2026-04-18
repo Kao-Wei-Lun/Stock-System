@@ -410,6 +410,33 @@ def test_taiwan_chip_route_returns_404_when_official_data_is_unavailable(client,
     assert "No official Taiwan chip data available" in response.json()["detail"]
 
 
+def test_tradingview_screener_wrapper_route_injects_environment(client, monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        text = "<html><head><title>TV</title></head><body>ok</body></html>"
+
+        def raise_for_status(self):
+            return None
+
+    captured = {}
+
+    def fake_get(url, timeout=0, headers=None):
+        captured["url"] = url
+        captured["timeout"] = timeout
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(main.intelligence.requests, "get", fake_get)
+
+    response = client.get("/api/tradingview/widgets/screener?locale=zh_TW")
+
+    assert response.status_code == 200
+    assert "window.environment='battle';" in response.text
+    assert "self.environment='battle';" in response.text
+    assert captured["url"].endswith("/embed-widget/screener/?locale=zh_TW")
+    assert captured["timeout"] == 10
+
+
 def test_screener_preset_routes(client, intelligence_store):
     create_response = client.post(
         "/api/screener/presets",

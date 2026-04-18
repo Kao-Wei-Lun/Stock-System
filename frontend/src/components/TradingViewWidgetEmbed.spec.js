@@ -33,10 +33,11 @@ describe("TradingViewWidgetEmbed", () => {
 
     expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find(".tv-widget-script-host").exists()).toBe(false);
+    expect(wrapper.find("iframe").exists()).toBe(false);
     expect(wrapper.text()).toContain("未在允許清單");
   });
 
-  it("uses the official embed script directly for screener widgets", () => {
+  it("uses the local screener wrapper iframe for screener widgets", () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-screener.js",
@@ -50,14 +51,16 @@ describe("TradingViewWidgetEmbed", () => {
       },
     });
 
-    const scriptHost = wrapper.find(".tv-widget-script-host");
-    const script = scriptHost.find("script");
+    const frame = wrapper.find("iframe.tv-widget-frame");
+    const frameUrl = new URL(frame.attributes("src"), "http://localhost:5173");
+    const frameConfig = JSON.parse(decodeURIComponent(frameUrl.hash.slice(1)));
 
-    expect(scriptHost.exists()).toBe(true);
-    expect(script.attributes("src")).toBe("https://s3.tradingview.com/external-embedding/embed-widget-screener.js");
-    expect(script.text()).toContain('"locale": "zh_TW"');
-    expect(script.text()).toContain('"market": "taiwan"');
-    expect(script.text()).toContain('"utm_campaign": "screener"');
+    expect(frame.exists()).toBe(true);
+    expect(frameUrl.pathname).toBe("/api/tradingview/widgets/screener");
+    expect(frameUrl.searchParams.get("locale")).toBe("zh_TW");
+    expect(frameConfig.market).toBe("taiwan");
+    expect(frameConfig.utm_campaign).toBe("screener");
+    expect(wrapper.find(".tv-widget-script-host").exists()).toBe(false);
   });
 
   it("rebuilds the embed script when the widget config changes", async () => {
@@ -80,7 +83,7 @@ describe("TradingViewWidgetEmbed", () => {
     expect(updatedScript.text()).toContain('"utm_campaign": "market-overview"');
   });
 
-  it("rebuilds the screener embed script when the widget config changes", async () => {
+  it("rebuilds the screener wrapper url when the widget config changes", async () => {
     const wrapper = mount(TradingViewWidgetEmbed, {
       props: {
         scriptSrc: "https://s3.tradingview.com/external-embedding/embed-widget-screener.js",
@@ -88,18 +91,20 @@ describe("TradingViewWidgetEmbed", () => {
       },
     });
 
-    const originalScript = wrapper.find(".tv-widget-script-host script");
-    const originalText = originalScript.text();
+    const originalFrame = wrapper.find("iframe.tv-widget-frame");
+    const originalSrc = originalFrame.attributes("src");
 
     await wrapper.setProps({
       config: { colorTheme: "light", locale: "zh_TW", market: "america" },
     });
 
-    const updatedScript = wrapper.find(".tv-widget-script-host script");
-    expect(updatedScript.element).not.toBe(originalScript.element);
-    expect(updatedScript.text()).not.toBe(originalText);
-    expect(updatedScript.text()).toContain('"colorTheme": "light"');
-    expect(updatedScript.text()).toContain('"market": "america"');
+    const updatedFrame = wrapper.find("iframe.tv-widget-frame");
+    const updatedUrl = new URL(updatedFrame.attributes("src"), "http://localhost:5173");
+    const updatedConfig = JSON.parse(decodeURIComponent(updatedUrl.hash.slice(1)));
+
+    expect(updatedFrame.attributes("src")).not.toBe(originalSrc);
+    expect(updatedConfig.colorTheme).toBe("light");
+    expect(updatedConfig.market).toBe("america");
   });
 
   it("keeps overview scrolling by disabling widget interaction until requested", async () => {

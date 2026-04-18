@@ -2,9 +2,12 @@
 
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
+import requests
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from data_fetcher import normalize_ticker
 from database import db
@@ -34,6 +37,7 @@ _sync_market_intelligence_snapshot = None
 _fetch_and_store_quote_snapshot = None
 _APP_TZ = ZoneInfo("Asia/Taipei")
 TAIFEX_SPOT_REFERENCE = []
+TRADINGVIEW_SCREENER_WRAPPER_URL = "https://www.tradingview-widget.com/embed-widget/screener/"
 
 router = APIRouter(prefix="/api", tags=["intelligence"])
 
@@ -61,6 +65,25 @@ def _parse_iso_date_param(value: str | None, label: str):
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise HTTPException(400, f"{label} must use YYYY-MM-DD") from exc
+
+
+def _normalize_widget_locale(value: str | None) -> str:
+    raw = str(value or "").strip()
+    return raw if raw and len(raw) <= 16 else "en"
+
+
+def _inject_tradingview_environment(html: str) -> str:
+    injection = (
+        "<script>"
+        "window.environment='battle';"
+        "self.environment='battle';"
+        "</script>"
+    )
+    if injection in html:
+        return html
+    if "</head>" in html:
+        return html.replace("</head>", f"{injection}</head>", 1)
+    return f"{injection}{html}"
 
 
 # ─── Events ──────────────────────────────────────────────────
@@ -210,6 +233,28 @@ async def get_taiwan_chip_detail(
         "detail": snapshot,
         "summary": build_taiwan_chip_summary(snapshot),
     }
+
+
+@router.get("/tradingview/widgets/screener")
+async def get_tradingview_screener_wrapper(
+    locale: str = Query("en"),
+):
+    normalized_locale = _normalize_widget_locale(locale)
+    remote_url = f"{TRADINGVIEW_SCREENER_WRAPPER_URL}?locale={quote_plus(normalized_locale)}"
+    try:
+        response = requests.get(
+            remote_url,
+            timeout=10,
+            headers={"User-Agent": "QuantVision Pro/1.0"},
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(502, "Unable to load TradingView screener wrapper") from exc
+
+    return HTMLResponse(
+        content=_inject_tradingview_environment(response.text),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ─── Screener ────────────────────────────────────────────────

@@ -1,7 +1,18 @@
 <template>
   <div class="tv-widget-shell" :class="{ 'is-interactive': isActuallyInteractive }" @mouseleave="disableInteraction">
     <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
+      <iframe
+        v-if="useScreenerProxyIframe"
+        :key="screenerProxySrc"
+        class="tv-widget-frame"
+        :class="{ interactive: isActuallyInteractive }"
+        :src="screenerProxySrc"
+        title="TradingView widget"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
       <div
+        v-else
         ref="scriptWidgetHost"
         class="tv-widget-script-host tradingview-widget-container"
         :class="{ interactive: isActuallyInteractive }"
@@ -77,12 +88,17 @@ const widgetName = computed(() => {
 });
 
 const scriptAllowed = computed(() => Boolean(widgetName.value));
+const useScreenerProxyIframe = computed(() => widgetName.value === "screener");
 const injectedScriptConfig = computed(() => ({
   ...(props.config ?? {}),
   utm_source: "",
   utm_medium: "widget",
   utm_campaign: widgetName.value,
 }));
+const screenerProxySrc = computed(() => {
+  if (!scriptAllowed.value || !useScreenerProxyIframe.value) return "";
+  return `/api/tradingview/widgets/screener?locale=${encodeURIComponent(props.config?.locale || "en")}#${encodeURIComponent(JSON.stringify(injectedScriptConfig.value))}`;
+});
 
 function clearInjectedScriptWidget() {
   if (!scriptWidgetHost.value) return;
@@ -90,7 +106,7 @@ function clearInjectedScriptWidget() {
 }
 
 function renderInjectedScriptWidget() {
-  if (!scriptAllowed.value || !scriptWidgetHost.value) return;
+  if (!scriptAllowed.value || useScreenerProxyIframe.value || !scriptWidgetHost.value) return;
 
   const host = scriptWidgetHost.value;
   clearInjectedScriptWidget();
@@ -110,7 +126,7 @@ function renderInjectedScriptWidget() {
 }
 
 function syncInjectedScriptWidget() {
-  if (!scriptAllowed.value) {
+  if (!scriptAllowed.value || useScreenerProxyIframe.value) {
     clearInjectedScriptWidget();
     return;
   }
@@ -146,7 +162,7 @@ watch(
 );
 
 watch(
-  () => scriptAllowed.value,
+  () => [scriptAllowed.value, useScreenerProxyIframe.value],
   () => syncInjectedScriptWidget(),
 );
 </script>
@@ -167,6 +183,16 @@ watch(
   min-height: inherit;
 }
 
+.tv-widget-frame {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 260px;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
 .tv-widget-script-host {
   display: block;
   flex: 1 1 auto;
@@ -176,6 +202,7 @@ watch(
   pointer-events: none;
 }
 
+.tv-widget-frame.interactive,
 .tv-widget-script-host.interactive {
   pointer-events: auto;
 }
