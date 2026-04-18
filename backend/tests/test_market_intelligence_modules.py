@@ -413,7 +413,25 @@ def test_taiwan_chip_route_returns_404_when_official_data_is_unavailable(client,
 def test_tradingview_screener_wrapper_route_injects_environment(client, monkeypatch):
     class FakeResponse:
         status_code = 200
-        text = "<html><head><title>TV</title></head><body>ok</body></html>"
+        text = """
+<html>
+  <head><title>TV</title></head>
+  <body>
+    <script>
+      window.initData = window.initData || {};
+      window.initData.snowplowSettings = {
+        collectorId: 'tv_cf',
+        url: 'snowplow-pixel.tradingview.com',
+        params: {
+          appId: 'tradingview',
+          postPath: '/com.tradingview/track',
+        },
+        enabled: true,
+      }
+    </script>
+  </body>
+</html>
+"""
 
         def raise_for_status(self):
             return None
@@ -433,6 +451,8 @@ def test_tradingview_screener_wrapper_route_injects_environment(client, monkeypa
     assert response.status_code == 200
     assert "window.environment='battle';" in response.text
     assert "self.environment='battle';" in response.text
+    assert "enabled: false" in response.text
+    assert "enabled: true" not in response.text
     assert captured["url"].endswith("/embed-widget/screener/?locale=zh_TW")
     assert captured["timeout"] == 10
 

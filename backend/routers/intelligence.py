@@ -1,6 +1,7 @@
 """Market intelligence routes — events, news, macro, fundamentals, chips, screener, taifex."""
 
 import logging
+import re
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
@@ -84,6 +85,26 @@ def _inject_tradingview_environment(html: str) -> str:
     if "</head>" in html:
         return html.replace("</head>", f"{injection}</head>", 1)
     return f"{injection}{html}"
+
+
+def _disable_tradingview_screener_telemetry(html: str) -> str:
+    return re.sub(
+        r"window\.initData\.snowplowSettings\s*=\s*\{.*?enabled:\s*true\s*,?\s*\}",
+        (
+            "window.initData.snowplowSettings = {"
+            "collectorId: 'tv_cf',"
+            "url: 'snowplow-pixel.tradingview.com',"
+            "params: {"
+            "appId: 'tradingview',"
+            "postPath: '/com.tradingview/track',"
+            "},"
+            "enabled: false,"
+            "}"
+        ),
+        html,
+        count=1,
+        flags=re.S,
+    )
 
 
 # ─── Events ──────────────────────────────────────────────────
@@ -252,7 +273,9 @@ async def get_tradingview_screener_wrapper(
         raise HTTPException(502, "Unable to load TradingView screener wrapper") from exc
 
     return HTMLResponse(
-        content=_inject_tradingview_environment(response.text),
+        content=_inject_tradingview_environment(
+            _disable_tradingview_screener_telemetry(response.text),
+        ),
         headers={"Cache-Control": "no-store"},
     )
 
