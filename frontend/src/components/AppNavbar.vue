@@ -91,6 +91,11 @@
         </div>
       </div>
 
+      <div class="fubon-badge" :class="fubonStatusClass" :title="fubonStatusTitle">
+        <span class="fubon-badge-dot"></span>
+        <span>{{ fubonStatusLabel }}</span>
+      </div>
+
       <div class="quote-badge" :class="quoteStatusClass">
         <span class="quote-badge-dot"></span>
         <span>{{ quoteStatusLabel }}</span>
@@ -141,6 +146,7 @@ const props = defineProps({
   currentInterval: { type: String, required: true },
   marketStatus: { type: Object, required: true },
   wsConnected: { type: Boolean, required: true },
+  fubonStatus: { type: String, default: "unconfigured" },
   activeQuote: { type: Object, default: () => ({}) },
 });
 
@@ -176,6 +182,21 @@ const quoteStatusClass = computed(() => ({
   live: props.activeQuote?.is_delayed === false,
   delayed: props.activeQuote?.is_delayed !== false,
 }));
+const fubonStatusLabel = computed(() => ({
+  connected: "富邦即時",
+  connecting: "連線中",
+  error: "連線錯誤",
+  disconnected: "富邦待命",
+  unconfigured: "未設定",
+}[props.fubonStatus] || "未設定"));
+const fubonStatusClass = computed(() => ({
+  connected: props.fubonStatus === "connected",
+  connecting: props.fubonStatus === "connecting",
+  error: props.fubonStatus === "error",
+  disconnected: props.fubonStatus === "disconnected",
+  unconfigured: props.fubonStatus === "unconfigured",
+}));
+const fubonStatusTitle = computed(() => `富邦連線狀態：${fubonStatusLabel.value}`);
 
 function searchResultTag(result) {
   if (result?.asset_class === "futopt") {
@@ -433,6 +454,7 @@ onBeforeUnmount(() => {
 .tf-btns,
 .heatmap-link,
 .market-pills,
+.fubon-badge,
 .quote-badge,
 .review-switch,
 .nav-actions {
@@ -441,6 +463,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.fubon-badge,
 .quote-badge {
   padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -460,6 +483,32 @@ onBeforeUnmount(() => {
   color: #ffd166;
 }
 
+.fubon-badge.connected {
+  border-color: rgba(0, 217, 163, 0.24);
+  color: var(--green);
+}
+
+.fubon-badge.connecting {
+  border-color: rgba(255, 209, 102, 0.18);
+  color: #ffd166;
+}
+
+.fubon-badge.error {
+  border-color: rgba(255, 77, 106, 0.24);
+  color: var(--red);
+}
+
+.fubon-badge.disconnected {
+  border-color: rgba(139, 149, 167, 0.18);
+  color: var(--text3);
+}
+
+.fubon-badge.unconfigured {
+  border-color: rgba(123, 231, 255, 0.24);
+  color: #d7fbff;
+}
+
+.fubon-badge-dot,
 .quote-badge-dot {
   width: 7px;
   height: 7px;

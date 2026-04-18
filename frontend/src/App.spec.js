@@ -1,6 +1,6 @@
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { ref } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const noop = vi.fn();
 
@@ -283,13 +283,29 @@ const dashboardMock = {
   deleteScreenerPreset: noop,
 };
 
+const fubonWorkspaceStatusMock = {
+  fubonStatus: ref("unconfigured"),
+  showFubonOnboardingBanner: ref(false),
+  dismissFubonOnboardingBanner: noop,
+};
+
 vi.mock("./composables/useDashboard", () => ({
   useDashboard: () => dashboardMock,
+}));
+
+vi.mock("./composables/useFubonWorkspaceStatus", () => ({
+  useFubonWorkspaceStatus: () => fubonWorkspaceStatusMock,
 }));
 
 import App from "./App.vue";
 
 describe("App", () => {
+  beforeEach(() => {
+    fubonWorkspaceStatusMock.fubonStatus.value = "unconfigured";
+    fubonWorkspaceStatusMock.showFubonOnboardingBanner.value = false;
+    fubonWorkspaceStatusMock.dismissFubonOnboardingBanner = vi.fn();
+  });
+
   it("creates a dedicated watch group from journal result shortcuts", async () => {
     dashboardMock.userWatchGroups = ref([{ id: 1, name: "警報通知模板 命中池" }]);
     dashboardMock.setLeftTab = vi.fn();
@@ -450,5 +466,64 @@ describe("App", () => {
 
     expect(dashboardMock.setLeftTab).toHaveBeenCalledWith("watch");
     expect(dashboardMock.setActiveWatchGroup).toHaveBeenCalledWith(7);
+  });
+
+  it("shows the onboarding banner when no fubon account is configured", () => {
+    fubonWorkspaceStatusMock.showFubonOnboardingBanner.value = true;
+
+    const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "overview",
+        routeRightTab: "indicators",
+      },
+      global: {
+        stubs: {
+          AppNavbar: true,
+          MarketOverviewWorkspace: true,
+          InstitutionalAnalysisWorkspace: true,
+          SettingsWorkspace: true,
+          ReviewWorkspace: true,
+          ProChartTerminalWorkspace: true,
+          GlobalSearchCommand: true,
+          StatusBar: true,
+          ToastStack: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("尚未設定富邦 API 帳號");
+    expect(wrapper.text()).toContain("前往設定");
+  });
+
+  it("dismisses the onboarding banner from the shell action", async () => {
+    fubonWorkspaceStatusMock.showFubonOnboardingBanner.value = true;
+
+    const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "overview",
+        routeRightTab: "indicators",
+      },
+      global: {
+        stubs: {
+          AppNavbar: true,
+          MarketOverviewWorkspace: true,
+          InstitutionalAnalysisWorkspace: true,
+          SettingsWorkspace: true,
+          ReviewWorkspace: true,
+          ProChartTerminalWorkspace: true,
+          GlobalSearchCommand: true,
+          StatusBar: true,
+          ToastStack: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    await wrapper.get(".app-notice-dismiss").trigger("click");
+
+    expect(fubonWorkspaceStatusMock.dismissFubonOnboardingBanner).toHaveBeenCalledTimes(1);
   });
 });

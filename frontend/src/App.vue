@@ -12,6 +12,7 @@
       :current-interval="currentInterval"
       :market-status="marketStatus"
       :ws-connected="wsConnected"
+      :fubon-status="fubonStatus"
       :active-quote="quote"
       @navigate="handleNavigate"
       @set-review-tab="handleReviewTabChange"
@@ -24,6 +25,22 @@
       @open-alert-modal="openAlertModal"
       @open-command-palette="openCommandPalette"
     />
+
+    <section v-if="showFubonOnboardingBanner && activeWorkspacePage !== 'settings'" class="app-notice-banner">
+      <div class="app-notice-copy">
+        <div class="app-notice-kicker">Setup</div>
+        <strong>尚未設定富邦 API 帳號</strong>
+        <span>先完成帳號設定後，主畫面才會接上即時行情與帳號分流狀態。</span>
+      </div>
+      <div class="app-notice-actions">
+        <button class="app-notice-link" type="button" @click="handleNavigate('settings')">
+          前往設定
+        </button>
+        <button class="app-notice-dismiss" type="button" @click="dismissFubonOnboardingBanner">
+          稍後提醒
+        </button>
+      </div>
+    </section>
 
     <div
       v-if="activeWorkspacePage === 'terminal'"
@@ -338,6 +355,7 @@ import MarketOverviewWorkspace from "./components/workspaces/MarketOverviewWorks
 import ProChartTerminalWorkspace from "./components/workspaces/ProChartTerminalWorkspace.vue";
 import ReviewWorkspace from "./components/workspaces/ReviewWorkspace.vue";
 import { useDashboard } from "./composables/useDashboard";
+import { useFubonWorkspaceStatus } from "./composables/useFubonWorkspaceStatus";
 import { useHotkeys } from "./composables/useHotkeys";
 
 const props = defineProps({
@@ -359,6 +377,11 @@ const applyingRouteState = ref(false);
 const activeWorkspacePage = ref("overview");
 const terminalLeftCollapsed = ref(true);
 const terminalRightCollapsed = ref(true);
+const {
+  fubonStatus,
+  showFubonOnboardingBanner,
+  dismissFubonOnboardingBanner,
+} = useFubonWorkspaceStatus();
 
 const {
   timeframeOptions,
@@ -1164,6 +1187,75 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+.app-notice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(123, 231, 255, 0.14);
+  background:
+    linear-gradient(90deg, rgba(7, 26, 36, 0.96), rgba(11, 20, 31, 0.96)),
+    radial-gradient(circle at left, rgba(123, 231, 255, 0.16), transparent 42%);
+}
+
+.app-notice-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app-notice-kicker {
+  color: var(--text3);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.app-notice-copy strong {
+  color: #f5f7fa;
+  font-size: 13px;
+}
+
+.app-notice-copy span {
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.app-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.app-notice-link,
+.app-notice-dismiss {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text2);
+  cursor: pointer;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+
+.app-notice-link {
+  border-color: rgba(123, 231, 255, 0.26);
+  color: #d7fbff;
+  background: rgba(123, 231, 255, 0.1);
+}
+
+.app-notice-link:hover,
+.app-notice-dismiss:hover {
+  border-color: rgba(123, 231, 255, 0.34);
+  color: #f5f7fa;
+}
+
 .workspace-stage {
   flex: 1;
   min-height: 0;
@@ -1197,5 +1289,17 @@ onBeforeUnmount(() => {
 
 .page-stage-shell {
   overflow: hidden;
+}
+
+@media (max-width: 860px) {
+  .app-notice-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .app-notice-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 </style>

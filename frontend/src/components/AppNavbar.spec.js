@@ -59,6 +59,17 @@ describe("AppNavbar", () => {
     expect(wrapper.text()).toContain("即時");
   });
 
+  it("shows the fubon connection badge when a realtime account is connected", () => {
+    const wrapper = mount(AppNavbar, {
+      props: createProps({
+        fubonStatus: "connected",
+      }),
+    });
+
+    expect(wrapper.find(".fubon-badge").classes()).toContain("connected");
+    expect(wrapper.text()).toContain("富邦即時");
+  });
+
   it("shows futopt search result tags in the navbar dropdown", () => {
     const wrapper = mount(AppNavbar, {
       props: createProps({
