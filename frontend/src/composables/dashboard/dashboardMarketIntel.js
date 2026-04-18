@@ -76,6 +76,19 @@ function resolveTaifexStructuredCommodity(section, futuresCommodity, optionsComm
   return "";
 }
 
+function supportsFundamentalsIntelligence(ticker, isFutoptTicker, normalizeTicker) {
+  const normalized = normalizeTicker?.(ticker);
+  if (!normalized) return false;
+  if (typeof isFutoptTicker === "function" && isFutoptTicker(normalized)) return false;
+  return !normalized.startsWith("^");
+}
+
+function supportsTaiwanChipIntelligence(ticker, isFutoptTicker, normalizeTicker) {
+  const normalized = normalizeTicker?.(ticker);
+  if (!supportsFundamentalsIntelligence(normalized, isFutoptTicker, normalizeTicker)) return false;
+  return normalized.endsWith(".TW") || normalized.endsWith(".TWO");
+}
+
 export function createDashboardMarketIntel({
   storedPrefs,
   currentTicker,
@@ -317,6 +330,16 @@ export function createDashboardMarketIntel({
     const normalizedTicker = normalizeTicker(ticker);
     try {
       const futoptTicker = typeof isFutoptTicker === "function" && isFutoptTicker(normalizedTicker);
+      const fundamentalsSupported = supportsFundamentalsIntelligence(
+        normalizedTicker,
+        isFutoptTicker,
+        normalizeTicker,
+      );
+      const taiwanChipSupported = supportsTaiwanChipIntelligence(
+        normalizedTicker,
+        isFutoptTicker,
+        normalizeTicker,
+      );
       const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse] = futoptTicker
         ? await Promise.all([
           dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
@@ -325,15 +348,19 @@ export function createDashboardMarketIntel({
         : await Promise.all([
           dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
           dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
-          dashboardApi.getFundamentals(normalizedTicker, { refresh: forceRefresh }),
-          dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null),
+          fundamentalsSupported
+            ? dashboardApi.getFundamentals(normalizedTicker, { refresh: forceRefresh })
+            : Promise.resolve(null),
+          taiwanChipSupported
+            ? dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null)
+            : Promise.resolve(null),
         ]);
       tickerEvents.value = Array.isArray(eventsResponse?.items) ? eventsResponse.items : [];
       tickerNews.value = Array.isArray(newsResponse?.items) ? newsResponse.items : [];
-      fundamentalsDetail.value = futoptTicker ? null : (fundamentalsResponse?.detail || null);
-      fundamentalsSummary.value = futoptTicker ? null : (fundamentalsResponse?.summary || null);
-      taiwanChipDetail.value = futoptTicker ? null : (chipsResponse?.detail || null);
-      taiwanChipSummary.value = futoptTicker ? null : (chipsResponse?.summary || null);
+      fundamentalsDetail.value = fundamentalsSupported ? (fundamentalsResponse?.detail || null) : null;
+      fundamentalsSummary.value = fundamentalsSupported ? (fundamentalsResponse?.summary || null) : null;
+      taiwanChipDetail.value = taiwanChipSupported ? (chipsResponse?.detail || null) : null;
+      taiwanChipSummary.value = taiwanChipSupported ? (chipsResponse?.summary || null) : null;
     } catch (error) {
       console.error(error);
       if (forceRefresh) {
