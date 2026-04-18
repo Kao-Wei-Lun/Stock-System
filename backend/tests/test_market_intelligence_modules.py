@@ -410,51 +410,16 @@ def test_taiwan_chip_route_returns_404_when_official_data_is_unavailable(client,
     assert "No official Taiwan chip data available" in response.json()["detail"]
 
 
-def test_tradingview_screener_wrapper_route_injects_environment(client, monkeypatch):
-    class FakeResponse:
-        status_code = 200
-        text = """
-<html>
-  <head><title>TV</title></head>
-  <body>
-    <script>
-      window.initData = window.initData || {};
-      window.initData.snowplowSettings = {
-        collectorId: 'tv_cf',
-        url: 'snowplow-pixel.tradingview.com',
-        params: {
-          appId: 'tradingview',
-          postPath: '/com.tradingview/track',
-        },
-        enabled: true,
-      }
-    </script>
-  </body>
-</html>
-"""
-
-        def raise_for_status(self):
-            return None
-
-    captured = {}
-
-    def fake_get(url, timeout=0, headers=None):
-        captured["url"] = url
-        captured["timeout"] = timeout
-        captured["headers"] = headers
-        return FakeResponse()
-
-    monkeypatch.setattr(main.intelligence.requests, "get", fake_get)
-
+def test_tradingview_screener_wrapper_route_injects_environment(client):
     response = client.get("/api/tradingview/widgets/screener?locale=zh_TW")
 
     assert response.status_code == 200
-    assert "window.environment='battle';" in response.text
-    assert "self.environment='battle';" in response.text
-    assert "enabled: false" in response.text
-    assert "enabled: true" not in response.text
-    assert captured["url"].endswith("/embed-widget/screener/?locale=zh_TW")
-    assert captured["timeout"] == 10
+    assert 'window.environment = "battle";' in response.text
+    assert 'self.environment = "battle";' in response.text
+    assert 'window.locale = "zh_TW";' in response.text
+    assert 'window.initData.snowplowSettings = {' in response.text
+    assert 'enabled: false' in response.text
+    assert 'script.src = "https://s3.tradingview.com/external-embedding/embed-widget-screener.js";' in response.text
 
 
 def test_screener_preset_routes(client, intelligence_store):

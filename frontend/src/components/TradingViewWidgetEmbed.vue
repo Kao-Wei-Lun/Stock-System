@@ -2,21 +2,14 @@
   <div class="tv-widget-shell" :class="{ 'is-interactive': isActuallyInteractive }" @mouseleave="disableInteraction">
     <div v-if="scriptAllowed" class="tv-widget-frame-wrap">
       <iframe
-        v-if="useScreenerProxyIframe"
-        :key="screenerProxySrc"
+        :key="widgetFrameSrc"
         class="tv-widget-frame"
         :class="{ interactive: isActuallyInteractive }"
-        :src="screenerProxySrc"
+        :src="widgetFrameSrc"
         title="TradingView widget"
         loading="lazy"
         referrerpolicy="no-referrer-when-downgrade"
       ></iframe>
-      <div
-        v-else
-        ref="scriptWidgetHost"
-        class="tv-widget-script-host tradingview-widget-container"
-        :class="{ interactive: isActuallyInteractive }"
-      ></div>
       <div v-if="!isActuallyInteractive" class="tv-widget-overlay">
         <div class="tv-widget-overlay-card">
           <strong>頁面捲動優先</strong>
@@ -51,7 +44,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   scriptSrc: { type: String, required: true },
@@ -63,9 +56,9 @@ const props = defineProps({
 const ALLOWED_SCRIPT_HOSTS = new Set(["s3.tradingview.com"]);
 const ALLOWED_SCRIPT_PATH_PREFIX = "/external-embedding/";
 const WIDGET_SCRIPT_PATTERN = /^embed-widget-([a-z0-9-]+)\.js$/;
+const OFFICIAL_WIDGET_BASE_URL = "https://www.tradingview-widget.com/embed-widget";
 
 const interactionEnabled = ref(false);
-const scriptWidgetHost = ref(null);
 
 const isActuallyInteractive = computed(() => props.isFullscreen || interactionEnabled.value);
 
@@ -88,51 +81,21 @@ const widgetName = computed(() => {
 });
 
 const scriptAllowed = computed(() => Boolean(widgetName.value));
-const useScreenerProxyIframe = computed(() => widgetName.value === "screener");
 const injectedScriptConfig = computed(() => ({
   ...(props.config ?? {}),
   utm_source: "",
   utm_medium: "widget",
   utm_campaign: widgetName.value,
 }));
-const screenerProxySrc = computed(() => {
-  if (!scriptAllowed.value || !useScreenerProxyIframe.value) return "";
-  return `/api/tradingview/widgets/screener?locale=${encodeURIComponent(props.config?.locale || "en")}#${encodeURIComponent(JSON.stringify(injectedScriptConfig.value))}`;
-});
-
-function clearInjectedScriptWidget() {
-  if (!scriptWidgetHost.value) return;
-  scriptWidgetHost.value.replaceChildren();
-}
-
-function renderInjectedScriptWidget() {
-  if (!scriptAllowed.value || useScreenerProxyIframe.value || !scriptWidgetHost.value) return;
-
-  const host = scriptWidgetHost.value;
-  clearInjectedScriptWidget();
-
-  const widgetRoot = document.createElement("div");
-  widgetRoot.className = "tradingview-widget-container__widget";
-  widgetRoot.style.width = "100%";
-  widgetRoot.style.height = "100%";
-
-  const script = document.createElement("script");
-  script.type = "text/javascript";
-  script.async = true;
-  script.src = props.scriptSrc;
-  script.text = JSON.stringify(injectedScriptConfig.value, null, 2);
-
-  host.append(widgetRoot, script);
-}
-
-function syncInjectedScriptWidget() {
-  if (!scriptAllowed.value || useScreenerProxyIframe.value) {
-    clearInjectedScriptWidget();
-    return;
+const widgetFrameSrc = computed(() => {
+  if (!scriptAllowed.value) return "";
+  const locale = encodeURIComponent(props.config?.locale || "en");
+  const hashConfig = encodeURIComponent(JSON.stringify(injectedScriptConfig.value));
+  if (widgetName.value === "screener") {
+    return `/api/tradingview/widgets/screener?locale=${locale}#${hashConfig}`;
   }
-
-  renderInjectedScriptWidget();
-}
+  return `${OFFICIAL_WIDGET_BASE_URL}/${widgetName.value}/?locale=${locale}#${hashConfig}`;
+});
 
 function enableInteraction() {
   interactionEnabled.value = true;
@@ -141,30 +104,6 @@ function enableInteraction() {
 function disableInteraction() {
   interactionEnabled.value = false;
 }
-
-onMounted(() => {
-  syncInjectedScriptWidget();
-});
-
-onBeforeUnmount(() => {
-  clearInjectedScriptWidget();
-});
-
-watch(
-  () => props.scriptSrc,
-  () => syncInjectedScriptWidget(),
-);
-
-watch(
-  () => props.config,
-  () => syncInjectedScriptWidget(),
-  { deep: true },
-);
-
-watch(
-  () => [scriptAllowed.value, useScreenerProxyIframe.value],
-  () => syncInjectedScriptWidget(),
-);
 </script>
 
 <style scoped>
@@ -193,17 +132,7 @@ watch(
   pointer-events: none;
 }
 
-.tv-widget-script-host {
-  display: block;
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 260px;
-  background: transparent;
-  pointer-events: none;
-}
-
-.tv-widget-frame.interactive,
-.tv-widget-script-host.interactive {
+.tv-widget-frame.interactive {
   pointer-events: auto;
 }
 

@@ -1,12 +1,10 @@
 """Market intelligence routes — events, news, macro, fundamentals, chips, screener, taifex."""
 
+import json
 import logging
-import re
 from datetime import datetime, timedelta
-from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
-import requests
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -38,7 +36,7 @@ _sync_market_intelligence_snapshot = None
 _fetch_and_store_quote_snapshot = None
 _APP_TZ = ZoneInfo("Asia/Taipei")
 TAIFEX_SPOT_REFERENCE = []
-TRADINGVIEW_SCREENER_WRAPPER_URL = "https://www.tradingview-widget.com/embed-widget/screener/"
+TRADINGVIEW_SCREENER_EMBED_SCRIPT = "https://s3.tradingview.com/external-embedding/embed-widget-screener.js"
 
 router = APIRouter(prefix="/api", tags=["intelligence"])
 
@@ -73,38 +71,87 @@ def _normalize_widget_locale(value: str | None) -> str:
     return raw if raw and len(raw) <= 16 else "en"
 
 
-def _inject_tradingview_environment(html: str) -> str:
-    injection = (
-        "<script>"
-        "window.environment='battle';"
-        "self.environment='battle';"
-        "</script>"
-    )
-    if injection in html:
-        return html
-    if "</head>" in html:
-        return html.replace("</head>", f"{injection}</head>", 1)
-    return f"{injection}{html}"
+def _build_tradingview_screener_wrapper_html(locale: str) -> str:
+    normalized_locale = _normalize_widget_locale(locale)
+    locale_literal = json.dumps(normalized_locale)
+    embed_script_literal = json.dumps(TRADINGVIEW_SCREENER_EMBED_SCRIPT)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TradingView Screener</title>
+  <style>
+    html, body {{
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }}
 
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
 
-def _disable_tradingview_screener_telemetry(html: str) -> str:
-    return re.sub(
-        r"window\.initData\.snowplowSettings\s*=\s*\{.*?enabled:\s*true\s*,?\s*\}",
-        (
-            "window.initData.snowplowSettings = {"
-            "collectorId: 'tv_cf',"
-            "url: 'snowplow-pixel.tradingview.com',"
-            "params: {"
-            "appId: 'tradingview',"
-            "postPath: '/com.tradingview/track',"
-            "},"
-            "enabled: false,"
-            "}"
-        ),
-        html,
-        count=1,
-        flags=re.S,
-    )
+    .tradingview-widget-container,
+    .tradingview-widget-container__widget {{
+      width: 100%;
+      height: 100%;
+    }}
+  </style>
+</head>
+<body>
+  <div id="tv-screener-root" class="tradingview-widget-container">
+    <div class="tradingview-widget-container__widget"></div>
+  </div>
+  <script>
+    window.environment = "battle";
+    self.environment = "battle";
+    window.locale = {locale_literal};
+    window.language = {locale_literal};
+    window.initData = window.initData || {{}};
+    window.initData.snowplowSettings = {{
+      enabled: false,
+    }};
+
+    const fallbackConfig = {{
+      width: "100%",
+      height: "100%",
+      locale: {locale_literal},
+      colorTheme: "dark",
+      defaultColumn: "overview",
+      defaultScreen: "top_gainers",
+      market: "taiwan",
+      showToolbar: true,
+      utm_source: "",
+      utm_medium: "widget",
+      utm_campaign: "screener",
+    }};
+
+    let parsedConfig = {{}};
+    try {{
+      const rawHash = window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : "";
+      parsedConfig = rawHash ? JSON.parse(rawHash) : {{}};
+    }} catch (_error) {{
+      parsedConfig = {{}};
+    }}
+
+    const config = {{
+      ...fallbackConfig,
+      ...parsedConfig,
+      locale: parsedConfig.locale || fallbackConfig.locale,
+    }};
+
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = {embed_script_literal};
+    script.text = JSON.stringify(config, null, 2);
+    document.getElementById("tv-screener-root").appendChild(script);
+  </script>
+</body>
+</html>"""
 
 
 # ─── Events ──────────────────────────────────────────────────
@@ -260,22 +307,8 @@ async def get_taiwan_chip_detail(
 async def get_tradingview_screener_wrapper(
     locale: str = Query("en"),
 ):
-    normalized_locale = _normalize_widget_locale(locale)
-    remote_url = f"{TRADINGVIEW_SCREENER_WRAPPER_URL}?locale={quote_plus(normalized_locale)}"
-    try:
-        response = requests.get(
-            remote_url,
-            timeout=10,
-            headers={"User-Agent": "QuantVision Pro/1.0"},
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(502, "Unable to load TradingView screener wrapper") from exc
-
     return HTMLResponse(
-        content=_inject_tradingview_environment(
-            _disable_tradingview_screener_telemetry(response.text),
-        ),
+        content=_build_tradingview_screener_wrapper_html(locale),
         headers={"Cache-Control": "no-store"},
     )
 
