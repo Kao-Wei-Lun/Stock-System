@@ -201,6 +201,88 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     createBacktestRun(payload) {
       return request("/api/backtests/runs", buildJsonRequest("POST", payload));
     },
+    listAssetAccounts() {
+      return request("/api/assets/accounts");
+    },
+    createAssetAccount(payload) {
+      return request("/api/assets/accounts", buildJsonRequest("POST", payload));
+    },
+    updateAssetAccount(accountId, payload) {
+      return request(`/api/assets/accounts/${accountId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetAccount(accountId) {
+      return request(`/api/assets/accounts/${accountId}`, { method: "DELETE" });
+    },
+    listAssetCashLedger(options = {}) {
+      const params = new URLSearchParams();
+      if (options.account_id != null) params.set("account_id", String(options.account_id));
+      if (options.from) params.set("from", String(options.from));
+      if (options.to) params.set("to", String(options.to));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/cash-ledger${query ? `?${query}` : ""}`);
+    },
+    createAssetCashEntry(payload) {
+      return request("/api/assets/cash-ledger", buildJsonRequest("POST", payload));
+    },
+    updateAssetCashEntry(entryId, payload) {
+      return request(`/api/assets/cash-ledger/${entryId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetCashEntry(entryId) {
+      return request(`/api/assets/cash-ledger/${entryId}`, { method: "DELETE" });
+    },
+    listAssetTrades(options = {}) {
+      const params = new URLSearchParams();
+      if (options.account_id != null) params.set("account_id", String(options.account_id));
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.from) params.set("from", String(options.from));
+      if (options.to) params.set("to", String(options.to));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/trades${query ? `?${query}` : ""}`);
+    },
+    createAssetTrade(payload) {
+      return request("/api/assets/trades", buildJsonRequest("POST", payload));
+    },
+    updateAssetTrade(entryId, payload) {
+      return request(`/api/assets/trades/${entryId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetTrade(entryId) {
+      return request(`/api/assets/trades/${entryId}`, { method: "DELETE" });
+    },
+    getAssetPortfolioCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      if (options.allocation_group_by) params.set("allocation_group_by", String(options.allocation_group_by));
+      const query = params.toString();
+      return request(`/api/assets/portfolio/current${query ? `?${query}` : ""}`);
+    },
+    getAssetSummaryCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      const query = params.toString();
+      return request(`/api/assets/summary/current${query ? `?${query}` : ""}`);
+    },
+    getAssetAllocationCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      if (options.group_by) params.set("group_by", String(options.group_by));
+      const query = params.toString();
+      return request(`/api/assets/allocation/current${query ? `?${query}` : ""}`);
+    },
+    getAssetContributorsCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/contributors/current${query ? `?${query}` : ""}`);
+    },
+    getAssetHoldingsCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      const query = params.toString();
+      return request(`/api/assets/holdings/current${query ? `?${query}` : ""}`);
+    },
     getQuote(ticker) {
       return request(`/api/quote/${encodeURIComponent(ticker)}`);
     },

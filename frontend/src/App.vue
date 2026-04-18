@@ -262,6 +262,22 @@
         :journal-filter-presets="journalFilterPresets"
         :journal-filter-scope="journalFilterScope"
         :journal-filters="journalFilters"
+        :asset-loading="assetLoading"
+        :asset-base-currency="assetBaseCurrency"
+        :asset-summary="assetSummary"
+        :asset-accounts="assetAccounts"
+        :asset-accounts-summary="assetAccountsSummary"
+        :asset-holdings="assetHoldings"
+        :asset-warnings="assetWarnings"
+        :asset-quote-gaps="assetQuoteGaps"
+        :asset-account-allocation="assetAccountAllocation"
+        :asset-market-allocation="assetMarketAllocation"
+        :asset-contributors="assetContributors"
+        :asset-cash-entries="assetCashEntries"
+        :asset-trade-entries="assetTradeEntries"
+        :asset-account-form="assetAccountForm"
+        :asset-cash-form="assetCashForm"
+        :asset-trade-form="assetTradeForm"
         @open-terminal="handleOpenTerminal(currentTicker)"
         @set-right-tab="handleReviewWorkspaceTabChange"
         @update-backtest-field="handleBacktestField"
@@ -284,6 +300,22 @@
         @create-watch-group="handleJournalResultWatchGroup"
         @add-watchlist="handleJournalResultWatchlist"
         @open-alert-modal="openAlertModal($event)"
+        @reload-asset-data="loadAssetTrackingData({ refresh: true, silent: false })"
+        @edit-asset-account="editAssetAccount"
+        @update-asset-account-field="handleAssetAccountField"
+        @update-asset-cash-field="handleAssetCashField"
+        @update-asset-trade-field="handleAssetTradeField"
+        @save-asset-account="saveAssetAccount"
+        @save-asset-cash-entry="saveAssetCashEntry"
+        @save-asset-trade-entry="saveAssetTradeEntry"
+        @reset-asset-account-form="resetAssetAccountForm"
+        @reset-asset-cash-form="resetAssetCashForm"
+        @reset-asset-trade-form="resetAssetTradeForm"
+        @edit-asset-cash-entry="editAssetCashEntry"
+        @edit-asset-trade-entry="editAssetTradeEntry"
+        @delete-asset-account="deleteAssetAccount"
+        @delete-asset-cash-entry="deleteAssetCashEntry"
+        @delete-asset-trade-entry="deleteAssetTradeEntry"
       />
     </div>
 
@@ -498,6 +530,22 @@ const {
   journalFilterPresets,
   journalFilterScope,
   journalFilters,
+  assetLoading,
+  assetAccounts,
+  assetCashEntries,
+  assetTradeEntries,
+  assetBaseCurrency,
+  assetSummary,
+  assetAccountsSummary,
+  assetHoldings,
+  assetWarnings,
+  assetQuoteGaps,
+  assetAccountAllocation,
+  assetMarketAllocation,
+  assetContributors,
+  assetAccountForm,
+  assetCashForm,
+  assetTradeForm,
   institutionalOverlay,
   backendUrl,
   searchSymbols,
@@ -588,6 +636,22 @@ const {
   addJournalAttachment,
   removeJournalAttachment,
   startJournalEntry,
+  loadAssetTrackingData,
+  updateAssetAccountField,
+  updateAssetCashField,
+  updateAssetTradeField,
+  editAssetAccount,
+  editAssetCashEntry,
+  editAssetTradeEntry,
+  resetAssetAccountForm,
+  resetAssetCashForm,
+  resetAssetTradeForm,
+  saveAssetAccount,
+  saveAssetCashEntry,
+  saveAssetTradeEntry,
+  deleteAssetAccount,
+  deleteAssetCashEntry,
+  deleteAssetTradeEntry,
   updateScreenerFilter,
   runScreener,
   saveScreenerPreset,
@@ -615,13 +679,16 @@ function normalizeWorkspacePage(value) {
     return normalized;
   }
   if (["macro", "events", "screener", "db"].includes(normalized)) return "overview";
-  if (["journal", "backtest"].includes(normalized)) return "review";
+  if (["journal", "backtest", "assets"].includes(normalized)) return "review";
   if (["dashboard", "alerts", "chart"].includes(normalized)) return "terminal";
   return "overview";
 }
 
 function normalizeReviewTab(value) {
-  return String(value || "").toLowerCase() === "backtest" ? "backtest" : "journal";
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "backtest") return "backtest";
+  if (normalized === "assets") return "assets";
+  return "journal";
 }
 
 function normalizeDrawerTab(value) {
@@ -857,14 +924,15 @@ function resolveWorkspaceTarget(target) {
   const normalized = String(target || "").toLowerCase();
   if (["macro", "events", "screener", "overview", "db"].includes(normalized)) return "overview";
   if (normalized === "institutional") return "institutional";
-  if (["journal", "backtest", "review"].includes(normalized)) return "review";
+  if (["journal", "backtest", "assets", "review"].includes(normalized)) return "review";
   return "terminal";
 }
 
 async function handleOpenNotificationWorkspace(workspace) {
   const targetPage = resolveWorkspaceTarget(workspace);
   if (targetPage === "review") {
-    await applyWorkspacePage("review", String(workspace || "").toLowerCase() === "backtest" ? "backtest" : "journal");
+    const normalized = String(workspace || "").toLowerCase();
+    await applyWorkspacePage("review", normalized === "backtest" ? "backtest" : normalized === "assets" ? "assets" : "journal");
     return;
   }
   await applyWorkspacePage(targetPage, drawerTab.value);
@@ -992,6 +1060,21 @@ function handleBacktestField(payload) {
 function handleJournalField(payload) {
   if (!payload?.key) return;
   updateJournalField(payload.key, payload.value);
+}
+
+function handleAssetAccountField(payload) {
+  if (!payload?.key) return;
+  updateAssetAccountField(payload.key, payload.value);
+}
+
+function handleAssetCashField(payload) {
+  if (!payload?.key) return;
+  updateAssetCashField(payload.key, payload.value);
+}
+
+function handleAssetTradeField(payload) {
+  if (!payload?.key) return;
+  updateAssetTradeField(payload.key, payload.value);
 }
 
 function handleJournalFilter(payload) {

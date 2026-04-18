@@ -33,7 +33,7 @@
           autocomplete="off"
           @input="$emit('search-change', $event.target.value)"
           @keydown.enter.prevent="$emit('submit-search')"
-        />
+        >
         <button
           class="search-command-badge"
           type="button"
@@ -118,6 +118,14 @@
         >
           系統回測
         </button>
+        <button
+          class="review-switch-btn"
+          :class="{ active: reviewTab === 'assets' }"
+          type="button"
+          @click="$emit('set-review-tab', 'assets')"
+        >
+          資產追蹤
+        </button>
       </div>
 
       <div class="nav-actions">
@@ -173,15 +181,18 @@ const navItems = [
 
 const rootRef = ref(null);
 const searchInputRef = ref(null);
+
 const quoteStatusLabel = computed(() => {
   if (props.activeQuote?.is_delayed === false) return "即時";
   if (props.activeQuote?.quote_type === "delayed_snapshot") return "盤後快照";
   return "快照";
 });
+
 const quoteStatusClass = computed(() => ({
   live: props.activeQuote?.is_delayed === false,
   delayed: props.activeQuote?.is_delayed !== false,
 }));
+
 const fubonStatusLabel = computed(() => ({
   connected: "富邦即時",
   connecting: "連線中",
@@ -189,6 +200,7 @@ const fubonStatusLabel = computed(() => ({
   disconnected: "富邦待命",
   unconfigured: "未設定",
 }[props.fubonStatus] || "未設定"));
+
 const fubonStatusClass = computed(() => ({
   connected: props.fubonStatus === "connected",
   connecting: props.fubonStatus === "connecting",
@@ -196,6 +208,7 @@ const fubonStatusClass = computed(() => ({
   disconnected: props.fubonStatus === "disconnected",
   unconfigured: props.fubonStatus === "unconfigured",
 }));
+
 const fubonStatusTitle = computed(() => `富邦連線狀態：${fubonStatusLabel.value}`);
 
 function searchResultTag(result) {
@@ -362,6 +375,10 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.search-wrap input::placeholder {
+  color: var(--text3);
+}
+
 .search-command-badge {
   flex: 0 0 auto;
   padding: 3px 7px;
@@ -372,14 +389,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
-}
-
-.search-command-badge:hover {
-  border-color: rgba(123, 231, 255, 0.34);
-}
-
-.search-wrap input::placeholder {
-  color: var(--text3);
 }
 
 .search-dropdown {

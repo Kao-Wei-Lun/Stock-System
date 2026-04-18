@@ -2,8 +2,8 @@
   <section class="workspace-page review-page">
     <div class="workspace-hero">
       <div>
-        <div class="workspace-kicker">Journal & Backtest</div>
-        <h1>把盤中的決策痕跡，轉成可回顧、可比較的交易紀律。</h1>
+        <div class="workspace-kicker">Journal, Backtest & Assets</div>
+        <h1>把盤中的決策痕跡，轉成可回顧、可比較，也可量化的資產紀律。</h1>
       </div>
       <div class="workspace-hero-meta">
         <div class="hero-stat">
@@ -32,6 +32,14 @@
         @click="$emit('set-right-tab', 'backtest')"
       >
         系統回測
+      </button>
+      <button
+        class="review-tab"
+        :class="{ active: normalizedTab === 'assets' }"
+        type="button"
+        @click="$emit('set-right-tab', 'assets')"
+      >
+        資產追蹤
       </button>
     </div>
 
@@ -69,7 +77,7 @@
         />
 
         <BacktestPanel
-          v-else
+          v-else-if="normalizedTab === 'backtest'"
           :backtest-form="backtestForm"
           :backtest-result="backtestResult"
           :backtest-loading="backtestLoading"
@@ -87,18 +95,49 @@
           @toggle-backtest-compare="$emit('toggle-backtest-compare', $event)"
           @clear-backtest-compare="$emit('clear-backtest-compare')"
         />
+
+        <AssetTrackingPanel
+          v-else
+          :current-ticker="currentTicker"
+          :asset-loading="assetLoading"
+          :asset-base-currency="assetBaseCurrency"
+          :asset-summary="assetSummary"
+          :asset-accounts="assetAccounts"
+          :asset-accounts-summary="assetAccountsSummary"
+          :asset-holdings="assetHoldings"
+          :asset-warnings="assetWarnings"
+          :asset-quote-gaps="assetQuoteGaps"
+          :asset-account-allocation="assetAccountAllocation"
+          :asset-market-allocation="assetMarketAllocation"
+          :asset-contributors="assetContributors"
+          :asset-cash-entries="assetCashEntries"
+          :asset-trade-entries="assetTradeEntries"
+          :asset-account-form="assetAccountForm"
+          :asset-cash-form="assetCashForm"
+          :asset-trade-form="assetTradeForm"
+          @reload-asset-data="$emit('reload-asset-data')"
+          @edit-asset-account="$emit('edit-asset-account', $event)"
+          @update-asset-account-field="$emit('update-asset-account-field', $event)"
+          @update-asset-cash-field="$emit('update-asset-cash-field', $event)"
+          @update-asset-trade-field="$emit('update-asset-trade-field', $event)"
+          @save-asset-account="$emit('save-asset-account')"
+          @save-asset-cash-entry="$emit('save-asset-cash-entry')"
+          @save-asset-trade-entry="$emit('save-asset-trade-entry')"
+          @reset-asset-account-form="$emit('reset-asset-account-form')"
+          @reset-asset-cash-form="$emit('reset-asset-cash-form')"
+          @reset-asset-trade-form="$emit('reset-asset-trade-form')"
+          @edit-asset-cash-entry="$emit('edit-asset-cash-entry', $event)"
+          @edit-asset-trade-entry="$emit('edit-asset-trade-entry', $event)"
+          @delete-asset-account="$emit('delete-asset-account', $event)"
+          @delete-asset-cash-entry="$emit('delete-asset-cash-entry', $event)"
+          @delete-asset-trade-entry="$emit('delete-asset-trade-entry', $event)"
+        />
       </div>
 
       <aside class="review-side-card">
         <div class="review-side-kicker">Workflow Focus</div>
-        <div class="review-side-title">
-          {{ normalizedTab === "journal" ? "盤後復盤" : "策略驗證" }}
-        </div>
-        <p class="review-side-copy">
-          {{ normalizedTab === "journal"
-            ? "保留完整的交易上下文、情緒與標籤，回顧決策品質與市場情境。"
-            : "把回測結果、權益曲線與歷史比較放在同一頁，快速看出策略是否值得繼續打磨。" }}
-        </p>
+        <div class="review-side-title">{{ reviewSideTitle }}</div>
+        <p class="review-side-copy">{{ reviewSideCopy }}</p>
         <div class="review-side-metric">
           <span>右下 Toast</span>
           <strong>維持全域顯示</strong>
@@ -115,6 +154,7 @@
 <script setup>
 import { computed, ref } from "vue";
 
+import AssetTrackingPanel from "../AssetTrackingPanel.vue";
 import BacktestPanel from "../BacktestPanel.vue";
 import JournalPanel from "../JournalPanel.vue";
 
@@ -134,6 +174,22 @@ const props = defineProps({
   journalFilterPresets: { type: Array, default: () => [] },
   journalFilterScope: { type: String, required: true },
   journalFilters: { type: Object, required: true },
+  assetLoading: { type: Boolean, required: true },
+  assetBaseCurrency: { type: String, default: "TWD" },
+  assetSummary: { type: Object, default: () => ({}) },
+  assetAccounts: { type: Array, default: () => [] },
+  assetAccountsSummary: { type: Array, default: () => [] },
+  assetHoldings: { type: Array, default: () => [] },
+  assetWarnings: { type: Array, default: () => [] },
+  assetQuoteGaps: { type: Array, default: () => [] },
+  assetAccountAllocation: { type: Array, default: () => [] },
+  assetMarketAllocation: { type: Array, default: () => [] },
+  assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
+  assetCashEntries: { type: Array, default: () => [] },
+  assetTradeEntries: { type: Array, default: () => [] },
+  assetAccountForm: { type: Object, required: true },
+  assetCashForm: { type: Object, required: true },
+  assetTradeForm: { type: Object, required: true },
 });
 
 defineEmits([
@@ -159,13 +215,45 @@ defineEmits([
   "create-watch-group",
   "add-watchlist",
   "open-alert-modal",
+  "reload-asset-data",
+  "edit-asset-account",
+  "update-asset-account-field",
+  "update-asset-cash-field",
+  "update-asset-trade-field",
+  "save-asset-account",
+  "save-asset-cash-entry",
+  "save-asset-trade-entry",
+  "reset-asset-account-form",
+  "reset-asset-cash-form",
+  "reset-asset-trade-form",
+  "edit-asset-cash-entry",
+  "edit-asset-trade-entry",
+  "delete-asset-account",
+  "delete-asset-cash-entry",
+  "delete-asset-trade-entry",
 ]);
 
-const normalizedTab = computed(() => (props.rightTab === "backtest" ? "backtest" : "journal"));
+const normalizedTab = computed(() => {
+  if (props.rightTab === "backtest") return "backtest";
+  if (props.rightTab === "assets") return "assets";
+  return "journal";
+});
 const journalPresetName = ref("");
 const journalPresetDescription = ref("");
 const editingJournalPresetId = ref(null);
 const showAllJournalEntries = ref(false);
+
+const reviewSideTitle = computed(() => ({
+  journal: "盤後復盤",
+  backtest: "策略驗證",
+  assets: "資產現值",
+}[normalizedTab.value] || "盤後復盤"));
+
+const reviewSideCopy = computed(() => ({
+  journal: "保留完整的交易上下文、情緒與標籤，回顧決策品質與市場情境。",
+  backtest: "把回測結果、權益曲線與歷史比較放在同一頁，快速看出策略是否值得繼續打磨。",
+  assets: "讓手動輸入的現金與交易流水，立即轉成持倉、市值、已實現與未實現損益，每次補記錄後都能看到總資產如何變化。",
+}[normalizedTab.value] || ""));
 
 function buildSparklinePath(points) {
   if (!Array.isArray(points) || points.length < 2) return "";
@@ -328,7 +416,8 @@ const backtestCompareRows = computed(() => (props.backtestCompareRuns || []).sli
   overflow: hidden;
 }
 
-.review-main-card :deep(.rp-content) {
+.review-main-card :deep(.rp-content),
+.review-main-card :deep(.asset-shell) {
   padding: 18px;
 }
 
@@ -396,7 +485,8 @@ const backtestCompareRows = computed(() => (props.backtestCompareRuns || []).sli
     font-size: 24px;
   }
 
-  .workspace-hero-meta {
+  .workspace-hero-meta,
+  .review-tabs {
     flex-wrap: wrap;
   }
 }

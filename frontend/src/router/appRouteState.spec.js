@@ -32,6 +32,15 @@ describe("appRouteState", () => {
       routeRightTab: "journal",
       routeTicker: "AAPL",
     });
+
+    expect(mapRouteToAppState({
+      name: "assets",
+      params: { ticker: "2330.tw" },
+    })).toEqual({
+      routeWorkspaceTab: "review",
+      routeRightTab: "assets",
+      routeTicker: "2330.TW",
+    });
   });
 
   it("maps settings routes into app state", () => {
@@ -71,6 +80,15 @@ describe("appRouteState", () => {
     })).toEqual({
       name: "settings",
       params: { ticker: "2330.TW" },
+    });
+
+    expect(buildAppRouteLocation({
+      workspaceTab: "review",
+      rightTab: "assets",
+      currentTicker: "nvda",
+    })).toEqual({
+      name: "assets",
+      params: { ticker: "NVDA" },
     });
   });
 });

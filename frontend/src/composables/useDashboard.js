@@ -18,6 +18,7 @@ import { upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeRealtimeQuote } from "../utils/realtimeQuote";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
+import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
 import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
 import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
@@ -560,7 +561,7 @@ export function useDashboard() {
       .filter((series) => (series.data || []).length),
   );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
-  const rightTab = ref(["indicators", "alerts", "backtest", "journal", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
+  const rightTab = ref(["indicators", "alerts", "assets", "backtest", "journal", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
   const workspaceTab = ref(initialWorkspaceTab);
   const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
   const currentName = ref("載入中...");
@@ -831,6 +832,50 @@ export function useDashboard() {
     inferMarketFromTicker,
     getCurrentDateTimeInputValue,
     compareLimit: 3,
+  });
+  const {
+    assetLoading,
+    assetAccounts,
+    assetCashEntries,
+    assetTradeEntries,
+    assetPortfolio,
+    assetBaseCurrency,
+    assetSummary,
+    assetAccountsSummary,
+    assetHoldings,
+    assetWarnings,
+    assetQuoteGaps,
+    assetAccountAllocation,
+    assetMarketAllocation,
+    assetContributors,
+    assetAccountForm,
+    assetCashForm,
+    assetTradeForm,
+    loadAssetTrackingData,
+    updateAssetAccountField,
+    updateAssetCashField,
+    updateAssetTradeField,
+    editAssetAccount,
+    editAssetCashEntry,
+    editAssetTradeEntry,
+    resetAssetAccountForm,
+    resetAssetCashForm,
+    resetAssetTradeForm,
+    saveAssetAccount,
+    saveAssetCashEntry,
+    saveAssetTradeEntry,
+    deleteAssetAccount,
+    deleteAssetCashEntry,
+    deleteAssetTradeEntry,
+  } = createDashboardAssetTracking({
+    dashboardApi,
+    currentTicker,
+    currentName,
+    quote,
+    pushNotification,
+    normalizeTicker,
+    inferMarketFromTicker,
+    getCurrentDateTimeInputValue,
   });
   const indicatorSnapshot = computed(() => buildIndicatorSnapshot(ohlcData.value, indicatorSettings));
   const activeWatchGroup = computed(
@@ -1978,6 +2023,7 @@ export function useDashboard() {
   async function setRightTab(tab) {
     rightTab.value = tab;
     if (tab === "db") await loadDbStats();
+    if (tab === "assets") await loadAssetTrackingData({ refresh: true, silent: false });
     if (tab === "backtest") await loadBacktestHistory({ ticker: currentTicker.value });
     if (tab === "journal") await loadJournalData({ silent: false });
   }
@@ -2518,7 +2564,7 @@ export function useDashboard() {
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
     leftTab.value = preset.leftTab === "market" ? "market" : "watch";
-    rightTab.value = ["indicators", "alerts", "backtest", "journal", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
+    rightTab.value = ["indicators", "alerts", "assets", "backtest", "journal", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
     workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(preset.workspaceTab) ? preset.workspaceTab : "chart";
     compareTickers.value = (preset.compareTickers || [])
       .map((ticker) => normalizeTicker(ticker))
@@ -2771,6 +2817,9 @@ export function useDashboard() {
     if (rightTab.value === "db") {
       await loadDbStats();
     }
+    if (rightTab.value === "assets") {
+      await loadAssetTrackingData({ refresh: true, silent: false });
+    }
     if (workspaceTab.value === "institutional") {
       await loadInstitutionalData();
     }
@@ -2922,6 +2971,23 @@ export function useDashboard() {
     journalFilterPresets,
     journalFilterScope,
     journalFilters,
+    assetLoading,
+    assetAccounts,
+    assetCashEntries,
+    assetTradeEntries,
+    assetPortfolio,
+    assetBaseCurrency,
+    assetSummary,
+    assetAccountsSummary,
+    assetHoldings,
+    assetWarnings,
+    assetQuoteGaps,
+    assetAccountAllocation,
+    assetMarketAllocation,
+    assetContributors,
+    assetAccountForm,
+    assetCashForm,
+    assetTradeForm,
     indicatorSnapshot,
     institutionalOverlay,
     backendUrl,
@@ -3017,6 +3083,22 @@ export function useDashboard() {
     addJournalAttachment: addJournalAttachmentAction,
     removeJournalAttachment: removeJournalAttachmentAction,
     startJournalEntry: startJournalEntryAction,
+    loadAssetTrackingData,
+    updateAssetAccountField,
+    updateAssetCashField,
+    updateAssetTradeField,
+    editAssetAccount,
+    editAssetCashEntry,
+    editAssetTradeEntry,
+    resetAssetAccountForm,
+    resetAssetCashForm,
+    resetAssetTradeForm,
+    saveAssetAccount,
+    saveAssetCashEntry,
+    saveAssetTradeEntry,
+    deleteAssetAccount,
+    deleteAssetCashEntry,
+    deleteAssetTradeEntry,
     updateScreenerFilter,
     runScreener,
     saveScreenerPreset,
