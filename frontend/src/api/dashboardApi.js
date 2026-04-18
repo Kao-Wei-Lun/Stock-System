@@ -258,6 +258,13 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const query = params.toString();
       return request(`/api/tw/chips/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
     },
+    getTaiwanChipHistory(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.days != null) params.set("days", String(options.days));
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/tw/chips/${encodeURIComponent(ticker)}/history${query ? `?${query}` : ""}`);
+    },
     getTaifexStructured(section, options = {}) {
       const params = new URLSearchParams();
       if (options.date) params.set("date", String(options.date));

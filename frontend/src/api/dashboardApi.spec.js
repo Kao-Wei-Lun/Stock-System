@@ -139,6 +139,18 @@ describe("dashboardApi", () => {
     );
   });
 
+  it("builds taiwan chip history query endpoints", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ ticker: "2330.TW", series: [] }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    await api.getTaiwanChipHistory("2330.TW", { days: 20, refresh: true });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:8001/api/tw/chips/2330.TW/history?days=20&refresh=true",
+      {},
+    );
+  });
+
   it("creates persisted backtest runs", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 21, strategy_key: "ma_cross" }));
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });

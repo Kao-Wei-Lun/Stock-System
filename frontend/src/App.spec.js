@@ -73,6 +73,10 @@ const dashboardMock = {
   macroDashboard: { items: [], summary: {}, snapshot_date: null },
   fundamentalsSummary: null,
   taiwanChipSummary: null,
+  taiwanChipHistory: null,
+  taiwanChipRangeDays: 20,
+  taiwanChipHistoryLoading: false,
+  taiwanChipHistoryError: "",
   screenerFilters: {
     market: "ALL",
     search: "",
@@ -215,6 +219,7 @@ const dashboardMock = {
   setInstitutionalFuturesCommodity: noop,
   setInstitutionalOptionsCommodity: noop,
   setInstitutionalHistoryDays: noop,
+  setTaiwanChipRangeDays: noop,
   shiftInstitutionalDate: noop,
   loadTaifexStructuredData: noop,
   updateTaifexStructuredQuery: noop,

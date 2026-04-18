@@ -208,6 +208,10 @@
         :current-name="currentName"
         :taiwan-chip-detail="taiwanChipDetail"
         :taiwan-chip-summary="taiwanChipSummary"
+        :taiwan-chip-history="taiwanChipHistory"
+        :taiwan-chip-range-days="taiwanChipRangeDays"
+        :taiwan-chip-history-loading="taiwanChipHistoryLoading"
+        :taiwan-chip-history-error="taiwanChipHistoryError"
         :taifex-structured-query="{
           section: taifexStructuredSection,
           dateMode: taifexStructuredDateMode,
@@ -228,9 +232,11 @@
         @shift-date="shiftInstitutionalDate"
         @refresh-dashboard="loadInstitutionalData(institutionalDate, true)"
         @refresh-insights="loadInstitutionalInsights(institutionalDate, institutionalFuturesCommodity, institutionalOptionsCommodity, institutionalHistoryDays, true)"
+        @refresh-chip="loadTickerIntelligence(currentTicker, true)"
         @set-futures-commodity="setInstitutionalFuturesCommodity"
         @set-options-commodity="setInstitutionalOptionsCommodity"
         @set-history-days="setInstitutionalHistoryDays"
+        @set-chip-range-days="setTaiwanChipRangeDays"
         @create-alert="openAlertModal($event)"
         @update-taifex-structured-query="updateTaifexStructuredQuery"
         @refresh-taifex-structured="loadTaifexStructuredData"
@@ -451,6 +457,10 @@ const {
   taifexStructuredError,
   taiwanChipDetail,
   taiwanChipSummary,
+  taiwanChipHistory,
+  taiwanChipRangeDays,
+  taiwanChipHistoryLoading,
+  taiwanChipHistoryError,
   calendarEvents,
   tickerEvents,
   tickerNews,
@@ -519,6 +529,7 @@ const {
   setInstitutionalFuturesCommodity,
   setInstitutionalOptionsCommodity,
   setInstitutionalHistoryDays,
+  setTaiwanChipRangeDays,
   shiftInstitutionalDate,
   loadTaifexStructuredData,
   updateTaifexStructuredQuery,

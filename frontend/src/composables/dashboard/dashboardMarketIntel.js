@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 
 export const INSTITUTIONAL_HISTORY_OPTIONS = [10, 20, 30, 60, 90];
+export const TAIWAN_CHIP_RANGE_OPTIONS = [5, 10, 20, 60];
 const TAIFEX_STRUCTURED_SECTIONS = new Set(["meta", "overview", "futures", "options", "call_puts", "cash_summary"]);
 const TAIFEX_STRUCTURED_COMMODITY_SECTIONS = new Set(["futures", "options", "call_puts"]);
 const TAIFEX_STRUCTURED_OPTION_SIDE_SECTIONS = new Set(["call_puts"]);
@@ -106,6 +107,13 @@ export function createDashboardMarketIntel({
   const fundamentalsSummary = ref(null);
   const taiwanChipDetail = ref(null);
   const taiwanChipSummary = ref(null);
+  const taiwanChipHistory = ref(null);
+  const initialTaiwanChipRangeDays = TAIWAN_CHIP_RANGE_OPTIONS.includes(Number(storedPrefs?.taiwanChipRangeDays))
+    ? Number(storedPrefs.taiwanChipRangeDays)
+    : 20;
+  const taiwanChipRangeDays = ref(initialTaiwanChipRangeDays);
+  const taiwanChipHistoryLoading = ref(false);
+  const taiwanChipHistoryError = ref("");
 
   const initialInstitutionalHistoryDays = INSTITUTIONAL_HISTORY_OPTIONS.includes(Number(storedPrefs?.institutionalHistoryDays))
     ? Number(storedPrefs.institutionalHistoryDays)
@@ -326,6 +334,45 @@ export function createDashboardMarketIntel({
     }
   }
 
+  async function loadTaiwanChipHistory(
+    ticker = currentTicker.value,
+    days = taiwanChipRangeDays.value,
+    forceRefresh = false,
+  ) {
+    const normalizedTicker = normalizeTicker(ticker);
+    const taiwanChipSupported = supportsTaiwanChipIntelligence(
+      normalizedTicker,
+      isFutoptTicker,
+      normalizeTicker,
+    );
+    const nextDays = TAIWAN_CHIP_RANGE_OPTIONS.includes(Number(days)) ? Number(days) : 20;
+    taiwanChipRangeDays.value = nextDays;
+
+    if (!taiwanChipSupported) {
+      taiwanChipHistory.value = null;
+      taiwanChipHistoryError.value = "";
+      taiwanChipHistoryLoading.value = false;
+      return null;
+    }
+
+    taiwanChipHistoryLoading.value = true;
+    taiwanChipHistoryError.value = "";
+    try {
+      const response = await dashboardApi.getTaiwanChipHistory(normalizedTicker, {
+        days: nextDays,
+        refresh: forceRefresh,
+      });
+      taiwanChipHistory.value = response || null;
+      return response || null;
+    } catch (error) {
+      taiwanChipHistory.value = null;
+      taiwanChipHistoryError.value = error.message || "無法取得台股籌碼歷史";
+      return null;
+    } finally {
+      taiwanChipHistoryLoading.value = false;
+    }
+  }
+
   async function loadTickerIntelligence(ticker = currentTicker.value, forceRefresh = false) {
     const normalizedTicker = normalizeTicker(ticker);
     try {
@@ -340,7 +387,12 @@ export function createDashboardMarketIntel({
         isFutoptTicker,
         normalizeTicker,
       );
-      const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse] = futoptTicker
+      if (!taiwanChipSupported) {
+        taiwanChipHistory.value = null;
+        taiwanChipHistoryError.value = "";
+        taiwanChipHistoryLoading.value = false;
+      }
+      const [eventsResponse, newsResponse, fundamentalsResponse, chipsResponse, chipHistoryResponse] = futoptTicker
         ? await Promise.all([
           dashboardApi.getTickerEvents(normalizedTicker, { refresh: forceRefresh }),
           dashboardApi.getTickerNews(normalizedTicker, { limit: 10, refresh: forceRefresh }),
@@ -354,13 +406,20 @@ export function createDashboardMarketIntel({
           taiwanChipSupported
             ? dashboardApi.getTaiwanChips(normalizedTicker, { refresh: forceRefresh }).catch(() => null)
             : Promise.resolve(null),
+          taiwanChipSupported
+            ? loadTaiwanChipHistory(normalizedTicker, taiwanChipRangeDays.value, forceRefresh)
+            : Promise.resolve(null),
         ]);
       tickerEvents.value = Array.isArray(eventsResponse?.items) ? eventsResponse.items : [];
       tickerNews.value = Array.isArray(newsResponse?.items) ? newsResponse.items : [];
       fundamentalsDetail.value = fundamentalsSupported ? (fundamentalsResponse?.detail || null) : null;
       fundamentalsSummary.value = fundamentalsSupported ? (fundamentalsResponse?.summary || null) : null;
-      taiwanChipDetail.value = taiwanChipSupported ? (chipsResponse?.detail || null) : null;
-      taiwanChipSummary.value = taiwanChipSupported ? (chipsResponse?.summary || null) : null;
+      taiwanChipDetail.value = taiwanChipSupported
+        ? (chipsResponse?.detail || chipHistoryResponse?.latest?.detail || null)
+        : null;
+      taiwanChipSummary.value = taiwanChipSupported
+        ? (chipsResponse?.summary || chipHistoryResponse?.latest?.summary || null)
+        : null;
     } catch (error) {
       console.error(error);
       if (forceRefresh) {
@@ -491,6 +550,12 @@ export function createDashboardMarketIntel({
     await loadInstitutionalInsights();
   }
 
+  async function setTaiwanChipRangeDays(value) {
+    const nextValue = TAIWAN_CHIP_RANGE_OPTIONS.includes(Number(value)) ? Number(value) : 20;
+    taiwanChipRangeDays.value = nextValue;
+    await loadTaiwanChipHistory(currentTicker.value, nextValue);
+  }
+
   async function shiftInstitutionalDate(days) {
     const base = institutionalDate.value ? new Date(`${institutionalDate.value}T00:00:00`) : new Date();
     base.setDate(base.getDate() + Number(days || 0));
@@ -506,6 +571,10 @@ export function createDashboardMarketIntel({
     fundamentalsSummary,
     taiwanChipDetail,
     taiwanChipSummary,
+    taiwanChipHistory,
+    taiwanChipRangeDays,
+    taiwanChipHistoryLoading,
+    taiwanChipHistoryError,
     institutionalDate,
     institutionalData,
     institutionalLoading,
@@ -533,6 +602,7 @@ export function createDashboardMarketIntel({
     loadEventCalendar,
     loadMacroDashboard,
     loadTickerIntelligence,
+    loadTaiwanChipHistory,
     loadInstitutionalData,
     loadInstitutionalInsights,
     loadTaifexStructuredData,
@@ -541,6 +611,7 @@ export function createDashboardMarketIntel({
     setInstitutionalFuturesCommodity,
     setInstitutionalOptionsCommodity,
     setInstitutionalHistoryDays,
+    setTaiwanChipRangeDays,
     shiftInstitutionalDate,
     updateTaifexStructuredQuery,
     resetTaifexStructuredQuery,

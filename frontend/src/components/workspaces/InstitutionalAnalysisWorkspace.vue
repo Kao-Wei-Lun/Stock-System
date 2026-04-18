@@ -26,6 +26,10 @@
         :current-name="currentName"
         :taiwan-chip-detail="taiwanChipDetail"
         :taiwan-chip-summary="taiwanChipSummary"
+        :taiwan-chip-history="taiwanChipHistory"
+        :taiwan-chip-range-days="taiwanChipRangeDays"
+        :taiwan-chip-history-loading="taiwanChipHistoryLoading"
+        :taiwan-chip-history-error="taiwanChipHistoryError"
         :taifex-structured-query="taifexStructuredQuery"
         :taifex-structured-data="taifexStructuredData"
         :taifex-structured-loading="taifexStructuredLoading"
@@ -34,9 +38,11 @@
         @shift-date="$emit('shift-date', $event)"
         @refresh-dashboard="$emit('refresh-dashboard')"
         @refresh-insights="$emit('refresh-insights')"
+        @refresh-chip="$emit('refresh-chip')"
         @set-futures-commodity="$emit('set-futures-commodity', $event)"
         @set-options-commodity="$emit('set-options-commodity', $event)"
         @set-history-days="$emit('set-history-days', $event)"
+        @set-chip-range-days="$emit('set-chip-range-days', $event)"
         @create-alert="$emit('create-alert', $event)"
         @update-taifex-structured-query="$emit('update-taifex-structured-query', $event)"
         @refresh-taifex-structured="$emit('refresh-taifex-structured')"
@@ -64,6 +70,10 @@ defineProps({
   currentName: { type: String, default: "" },
   taiwanChipDetail: { type: Object, default: null },
   taiwanChipSummary: { type: Object, default: null },
+  taiwanChipHistory: { type: Object, default: null },
+  taiwanChipRangeDays: { type: Number, default: 20 },
+  taiwanChipHistoryLoading: { type: Boolean, default: false },
+  taiwanChipHistoryError: { type: String, default: "" },
   taifexStructuredQuery: { type: Object, default: () => ({}) },
   taifexStructuredData: { type: Object, default: () => ({ section: "futures", count: 0, filters: {}, items: [] }) },
   taifexStructuredLoading: { type: Boolean, default: false },
@@ -76,9 +86,11 @@ defineEmits([
   "shift-date",
   "refresh-dashboard",
   "refresh-insights",
+  "refresh-chip",
   "set-futures-commodity",
   "set-options-commodity",
   "set-history-days",
+  "set-chip-range-days",
   "create-alert",
   "update-taifex-structured-query",
   "refresh-taifex-structured",
