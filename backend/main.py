@@ -323,7 +323,7 @@ app.add_middleware(
     allow_origin_regex=local_dev_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 if FRONTEND_DIST_DIR.exists():
