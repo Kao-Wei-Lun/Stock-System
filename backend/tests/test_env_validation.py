@@ -16,6 +16,7 @@ VALID_ENV = {
     "MYSQL_DATABASE": "quantvision",
     "MYSQL_CHARSET": "utf8mb4",
     "APP_PORT": "8001",
+    "APP_ENCRYPT_KEY": "unit-test-encrypt-key",
     "STARTUP_DOWNLOAD_ENABLED": "false",
     "INSTITUTIONAL_AUTO_SYNC_ENABLED": "true",
     "LATEST_DATA_SYNC_ON_STARTUP": "true",
@@ -44,6 +45,7 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
     assert validated["APP_PORT"] == 8001
     assert validated["FRONTEND_DEV_URL"] == "http://localhost:5173"
     assert validated["DAILY_LATEST_SYNC_TIME"] == "18:10"
+    assert validated["APP_ENCRYPT_KEY"] == "unit-test-encrypt-key"
 
 
 def test_validate_runtime_environment_rejects_placeholder_password(monkeypatch):
@@ -57,6 +59,13 @@ def test_validate_runtime_environment_rejects_invalid_frontend_url(monkeypatch):
     apply_env(monkeypatch, FRONTEND_DEV_URL="localhost:5173")
 
     with pytest.raises(RuntimeError, match="FRONTEND_DEV_URL"):
+        validate_runtime_environment()
+
+
+def test_validate_runtime_environment_requires_encrypt_key(monkeypatch):
+    apply_env(monkeypatch, APP_ENCRYPT_KEY="")
+
+    with pytest.raises(RuntimeError, match="APP_ENCRYPT_KEY"):
         validate_runtime_environment()
 
 

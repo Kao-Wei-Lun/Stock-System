@@ -136,6 +136,16 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     lambda: read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10, env=source),
   )
 
+  encrypt_key = _read_raw_value("APP_ENCRYPT_KEY", None, env=source)
+  if not encrypt_key:
+    errors.append(
+      "Missing required environment variable: APP_ENCRYPT_KEY\n"
+      "  Generate one with: python -c \"from cryptography.fernet import Fernet; "
+      "print(Fernet.generate_key().decode())\""
+    )
+  else:
+    validated["APP_ENCRYPT_KEY"] = encrypt_key
+
   password = _read_raw_value("MYSQL_PASSWORD", None, env=source)
   if not password:
     errors.append("Missing required environment variable: MYSQL_PASSWORD")

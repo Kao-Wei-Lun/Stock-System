@@ -39,8 +39,15 @@ MYSQL_PASSWORD=your_password
 MYSQL_DATABASE=quantvision
 MYSQL_CHARSET=utf8mb4
 APP_PORT=8001
+APP_ENCRYPT_KEY=your_generated_secret
 STARTUP_DOWNLOAD_ENABLED=false
 FRONTEND_DEV_URL=http://localhost:5173
+```
+
+`APP_ENCRYPT_KEY` 用來加密儲存在資料庫中的富邦帳號敏感欄位。可使用以下指令產生：
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 ## 啟動方式
