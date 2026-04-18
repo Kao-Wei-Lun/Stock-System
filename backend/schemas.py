@@ -226,3 +226,81 @@ class ScreenerPresetUpdatePayload(BaseModel):
 
 class ScreenerRunPayload(BaseModel):
     filters: dict = Field(default_factory=dict)
+
+
+class AssetAccountCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    institution: str | None = Field(None, max_length=128)
+    account_type: str = Field("brokerage", min_length=1, max_length=64)
+    base_currency: str = Field("TWD", min_length=1, max_length=16)
+    include_in_total: bool = True
+    sort_order: int = 0
+    notes: str | None = None
+
+
+class AssetAccountUpdatePayload(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    institution: str | None = Field(None, max_length=128)
+    account_type: str | None = Field(None, min_length=1, max_length=64)
+    base_currency: str | None = Field(None, min_length=1, max_length=16)
+    include_in_total: bool | None = None
+    sort_order: int | None = None
+    notes: str | None = None
+
+
+class AssetCashLedgerCreatePayload(BaseModel):
+    account_id: int
+    flow_date: str = Field(..., min_length=10, max_length=64)
+    flow_type: str = Field(..., min_length=1, max_length=32)
+    amount: float
+    currency: str = Field("TWD", min_length=1, max_length=16)
+    fx_rate_to_base: float = 1.0
+    counterparty: str | None = Field(None, max_length=128)
+    note: str | None = None
+
+
+class AssetCashLedgerUpdatePayload(BaseModel):
+    account_id: int | None = None
+    flow_date: str | None = Field(None, min_length=10, max_length=64)
+    flow_type: str | None = Field(None, min_length=1, max_length=32)
+    amount: float | None = None
+    currency: str | None = Field(None, min_length=1, max_length=16)
+    fx_rate_to_base: float | None = None
+    counterparty: str | None = Field(None, max_length=128)
+    note: str | None = None
+
+
+class AssetTradeCreatePayload(BaseModel):
+    account_id: int
+    trade_date: str = Field(..., min_length=10, max_length=64)
+    ticker: str = Field(..., min_length=1, max_length=32)
+    display_name: str | None = Field(None, max_length=255)
+    market: str | None = Field(None, max_length=32)
+    asset_type: str = Field("stock", min_length=1, max_length=32)
+    currency: str = Field("TWD", min_length=1, max_length=16)
+    side: str = Field(..., min_length=1, max_length=16)
+    quantity: float
+    price: float
+    fee_amount: float = 0.0
+    tax_amount: float = 0.0
+    fx_rate_to_base: float = 1.0
+    source: str = Field("manual", min_length=1, max_length=64)
+    note: str | None = None
+
+
+class AssetTradeUpdatePayload(BaseModel):
+    account_id: int | None = None
+    trade_date: str | None = Field(None, min_length=10, max_length=64)
+    ticker: str | None = Field(None, min_length=1, max_length=32)
+    display_name: str | None = Field(None, max_length=255)
+    market: str | None = Field(None, max_length=32)
+    asset_type: str | None = Field(None, min_length=1, max_length=32)
+    currency: str | None = Field(None, min_length=1, max_length=16)
+    side: str | None = Field(None, min_length=1, max_length=16)
+    quantity: float | None = None
+    price: float | None = None
+    fee_amount: float | None = None
+    tax_amount: float | None = None
+    fx_rate_to_base: float | None = None
+    source: str | None = Field(None, min_length=1, max_length=64)
+    note: str | None = None

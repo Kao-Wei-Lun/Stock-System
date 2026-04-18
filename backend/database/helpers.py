@@ -374,6 +374,110 @@ def _deserialize_journal_filter_preset(row: Optional[Dict[str, Any]]) -> Optiona
         "updated_at": _datetime_to_iso(row.get("updated_at")),
     }
 
+def _deserialize_asset_account(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "name": row.get("name"),
+        "institution": row.get("institution"),
+        "account_type": row.get("account_type"),
+        "base_currency": row.get("base_currency") or "TWD",
+        "include_in_total": bool(row.get("include_in_total", True)),
+        "sort_order": int(row.get("sort_order") or 0),
+        "notes": row.get("notes"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_cash_ledger_entry(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "flow_date": _datetime_to_iso(row.get("flow_date")),
+        "flow_type": row.get("flow_type"),
+        "amount": row.get("amount"),
+        "currency": row.get("currency"),
+        "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "counterparty": row.get("counterparty"),
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_trade_entry(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "trade_date": _datetime_to_iso(row.get("trade_date")),
+        "ticker": row.get("ticker"),
+        "display_name": row.get("display_name"),
+        "market": row.get("market"),
+        "asset_type": row.get("asset_type"),
+        "currency": row.get("currency"),
+        "side": row.get("side"),
+        "quantity": row.get("quantity"),
+        "price": row.get("price"),
+        "gross_amount": row.get("gross_amount"),
+        "fee_amount": row.get("fee_amount"),
+        "tax_amount": row.get("tax_amount"),
+        "net_amount": row.get("net_amount"),
+        "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "source": row.get("source"),
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_position_current(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "ticker": row.get("ticker"),
+        "display_name": row.get("display_name"),
+        "market": row.get("market"),
+        "asset_type": row.get("asset_type"),
+        "currency": row.get("currency"),
+        "quantity": row.get("quantity"),
+        "avg_cost": row.get("avg_cost"),
+        "cost_basis": row.get("cost_basis"),
+        "realized_pnl": row.get("realized_pnl"),
+        "trade_count": row.get("trade_count"),
+        "last_trade_at": _datetime_to_iso(row.get("last_trade_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_valuation_current(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "ticker": row.get("ticker"),
+        "quote_source": row.get("quote_source"),
+        "quote_type": row.get("quote_type"),
+        "is_delayed": bool(row.get("is_delayed", True)),
+        "quote_timestamp": _datetime_to_iso(row.get("quote_timestamp")),
+        "last_price": row.get("last_price"),
+        "market_value": row.get("market_value"),
+        "market_value_base": row.get("market_value_base"),
+        "unrealized_pnl": row.get("unrealized_pnl"),
+        "unrealized_pnl_base": row.get("unrealized_pnl_base"),
+        "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -708,6 +812,97 @@ def _normalize_journal_filter_preset_payload(
         "description": _optional_string(source.get("description"), max_length=512),
         "scope": normalized_scope,
         "filters": normalized_filters,
+    }
+
+def _normalize_asset_account_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+    return {
+        "name": _required_string(source.get("name"), "Asset account name is required", max_length=128),
+        "institution": _optional_string(source.get("institution"), max_length=128),
+        "account_type": _optional_string(source.get("account_type"), max_length=64) or "brokerage",
+        "base_currency": (_optional_string(source.get("base_currency"), max_length=16) or "TWD").upper(),
+        "include_in_total": _coerce_bool(source.get("include_in_total"), True),
+        "sort_order": _optional_int(source.get("sort_order")) or 0,
+        "notes": _optional_string(source.get("notes"), max_length=4000),
+    }
+
+def _normalize_asset_cash_ledger_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+    account_id = _optional_int(source.get("account_id"))
+    if account_id is None or account_id <= 0:
+        raise ValueError("Asset cash ledger account_id is required")
+    flow_type = (_required_string(source.get("flow_type"), "Asset cash ledger flow_type is required", max_length=32)).lower()
+    amount = _optional_float(source.get("amount"))
+    if amount is None:
+        raise ValueError("Asset cash ledger amount is required")
+    fx_rate_to_base = _optional_float(source.get("fx_rate_to_base"))
+    if fx_rate_to_base is not None and fx_rate_to_base <= 0:
+        raise ValueError("Asset cash ledger fx_rate_to_base must be greater than 0")
+    return {
+        "account_id": account_id,
+        "flow_date": _required_string(source.get("flow_date"), "Asset cash ledger flow_date is required", max_length=64),
+        "flow_type": flow_type,
+        "amount": amount,
+        "currency": (_optional_string(source.get("currency"), max_length=16) or "TWD").upper(),
+        "fx_rate_to_base": fx_rate_to_base or 1.0,
+        "counterparty": _optional_string(source.get("counterparty"), max_length=128),
+        "note": _optional_string(source.get("note"), max_length=4000),
+    }
+
+def _normalize_asset_trade_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+    account_id = _optional_int(source.get("account_id"))
+    if account_id is None or account_id <= 0:
+        raise ValueError("Asset trade account_id is required")
+    quantity = _optional_float(source.get("quantity"))
+    price = _optional_float(source.get("price"))
+    if quantity is None or quantity <= 0:
+        raise ValueError("Asset trade quantity must be greater than 0")
+    if price is None or price <= 0:
+        raise ValueError("Asset trade price must be greater than 0")
+
+    side = (_required_string(source.get("side"), "Asset trade side is required", max_length=16)).lower()
+    if side not in {"buy", "sell"}:
+        raise ValueError("Asset trade side must be buy or sell")
+
+    fee_amount = _optional_float(source.get("fee_amount")) or 0.0
+    tax_amount = _optional_float(source.get("tax_amount")) or 0.0
+    fx_rate_to_base = _optional_float(source.get("fx_rate_to_base"))
+    if fx_rate_to_base is not None and fx_rate_to_base <= 0:
+        raise ValueError("Asset trade fx_rate_to_base must be greater than 0")
+    gross_amount = quantity * price
+    net_amount = gross_amount + fee_amount + tax_amount if side == "buy" else gross_amount - fee_amount - tax_amount
+
+    return {
+        "account_id": account_id,
+        "trade_date": _required_string(source.get("trade_date"), "Asset trade trade_date is required", max_length=64),
+        "ticker": _required_string(source.get("ticker"), "Asset trade ticker is required", max_length=32).upper(),
+        "display_name": _optional_string(source.get("display_name"), max_length=255),
+        "market": _optional_string(source.get("market"), max_length=32),
+        "asset_type": _optional_string(source.get("asset_type"), max_length=32) or "stock",
+        "currency": (_optional_string(source.get("currency"), max_length=16) or "TWD").upper(),
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "gross_amount": gross_amount,
+        "fee_amount": fee_amount,
+        "tax_amount": tax_amount,
+        "net_amount": net_amount,
+        "fx_rate_to_base": fx_rate_to_base or 1.0,
+        "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "note": _optional_string(source.get("note"), max_length=4000),
     }
 
 def _required_string(value: Any, error_message: str, max_length: Optional[int] = None) -> str:

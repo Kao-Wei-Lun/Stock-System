@@ -48,7 +48,7 @@ from providers import (
     ws_manager,
     fubon_market_snapshot_provider,
 )
-from routers import alerts, backtest, intelligence, journal, market_data, settings, system, watchlist, workspace
+from routers import alerts, assets, backtest, intelligence, journal, market_data, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
@@ -340,6 +340,9 @@ market_data.configure(
     latest_data_sync_period=LATEST_DATA_SYNC_PERIOD,
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
 )
+assets.configure(
+    fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
+)
 
 intelligence.configure(
     sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
@@ -356,6 +359,7 @@ system.configure(
 app.include_router(watchlist.router)
 app.include_router(workspace.router)
 app.include_router(alerts.router)
+app.include_router(assets.router)
 app.include_router(journal.router)
 app.include_router(backtest.router)
 app.include_router(market_data.router)

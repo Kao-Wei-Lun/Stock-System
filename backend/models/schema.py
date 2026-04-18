@@ -673,6 +673,121 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_journal_filter_presets_owner_updated` (`owner_id`, `updated_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "asset_accounts": """
+        CREATE TABLE `asset_accounts` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NOT NULL,
+            `institution` VARCHAR(128) NULL,
+            `account_type` VARCHAR(64) NOT NULL DEFAULT 'brokerage',
+            `base_currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `include_in_total` TINYINT NOT NULL DEFAULT 1,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `notes` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_asset_accounts_owner_name` (`owner_id`, `name`),
+            KEY `idx_asset_accounts_owner_sort` (`owner_id`, `sort_order`, `id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_cash_ledger": """
+        CREATE TABLE `asset_cash_ledger` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `flow_date` DATETIME NOT NULL,
+            `flow_type` VARCHAR(32) NOT NULL,
+            `amount` DOUBLE NOT NULL,
+            `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `fx_rate_to_base` DOUBLE NOT NULL DEFAULT 1,
+            `counterparty` VARCHAR(128) NULL,
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_asset_cash_ledger_owner_date` (`owner_id`, `flow_date`, `id`),
+            KEY `idx_asset_cash_ledger_account_date` (`account_id`, `flow_date`, `id`),
+            CONSTRAINT `fk_asset_cash_ledger_account`
+                FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_trade_ledger": """
+        CREATE TABLE `asset_trade_ledger` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `trade_date` DATETIME NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `display_name` VARCHAR(255) NULL,
+            `market` VARCHAR(32) NULL,
+            `asset_type` VARCHAR(32) NOT NULL DEFAULT 'stock',
+            `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `side` VARCHAR(16) NOT NULL,
+            `quantity` DOUBLE NOT NULL,
+            `price` DOUBLE NOT NULL,
+            `gross_amount` DOUBLE NOT NULL,
+            `fee_amount` DOUBLE NOT NULL DEFAULT 0,
+            `tax_amount` DOUBLE NOT NULL DEFAULT 0,
+            `net_amount` DOUBLE NOT NULL,
+            `fx_rate_to_base` DOUBLE NOT NULL DEFAULT 1,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'manual',
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_asset_trade_ledger_owner_date` (`owner_id`, `trade_date`, `id`),
+            KEY `idx_asset_trade_ledger_account_ticker` (`account_id`, `ticker`, `trade_date`),
+            CONSTRAINT `fk_asset_trade_ledger_account`
+                FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_positions_current": """
+        CREATE TABLE `asset_positions_current` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `display_name` VARCHAR(255) NULL,
+            `market` VARCHAR(32) NULL,
+            `asset_type` VARCHAR(32) NOT NULL DEFAULT 'stock',
+            `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `quantity` DOUBLE NOT NULL DEFAULT 0,
+            `avg_cost` DOUBLE NOT NULL DEFAULT 0,
+            `cost_basis` DOUBLE NOT NULL DEFAULT 0,
+            `realized_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `trade_count` INT NOT NULL DEFAULT 0,
+            `last_trade_at` DATETIME NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_asset_positions_current_owner_account_ticker` (`owner_id`, `account_id`, `ticker`),
+            KEY `idx_asset_positions_current_owner_account` (`owner_id`, `account_id`, `ticker`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_valuations_current": """
+        CREATE TABLE `asset_valuations_current` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `quote_source` VARCHAR(64) NULL,
+            `quote_type` VARCHAR(64) NULL,
+            `is_delayed` TINYINT NOT NULL DEFAULT 1,
+            `quote_timestamp` DATETIME NULL,
+            `last_price` DOUBLE NULL,
+            `market_value` DOUBLE NULL,
+            `market_value_base` DOUBLE NULL,
+            `unrealized_pnl` DOUBLE NULL,
+            `unrealized_pnl_base` DOUBLE NULL,
+            `fx_rate_to_base` DOUBLE NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_asset_valuations_current_owner_account_ticker` (`owner_id`, `account_id`, `ticker`),
+            KEY `idx_asset_valuations_current_owner_account` (`owner_id`, `account_id`, `ticker`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {

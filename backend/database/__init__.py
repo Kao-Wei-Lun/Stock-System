@@ -1,5 +1,6 @@
 from .core import DatabaseCore, DEFAULT_OWNER_ID
 
+from repositories.assets import AssetMixin
 from repositories.alert import AlertMixin
 from repositories.auth import AuthMixin
 from repositories.backtest import BacktestMixin
@@ -14,6 +15,7 @@ from repositories.workspace import WorkspaceMixin
 
 class Database(
     DatabaseCore,
+    AssetMixin,
     AlertMixin,
     AuthMixin,
     BacktestMixin,
