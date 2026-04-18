@@ -478,6 +478,23 @@ def _deserialize_asset_valuation_current(row: Optional[Dict[str, Any]]) -> Optio
         "updated_at": _datetime_to_iso(row.get("updated_at")),
     }
 
+def _deserialize_asset_reconciliation_snapshot(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "snapshot_date": _datetime_to_iso(row.get("snapshot_date")),
+        "cash_actual": row.get("cash_actual"),
+        "cash_system": row.get("cash_system"),
+        "market_value_actual": row.get("market_value_actual"),
+        "market_value_system": row.get("market_value_system"),
+        "positions_payload": _json_loads(row.get("positions_payload_json"), []),
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+    }
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -902,6 +919,43 @@ def _normalize_asset_trade_payload(
         "net_amount": net_amount,
         "fx_rate_to_base": fx_rate_to_base or 1.0,
         "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "note": _optional_string(source.get("note"), max_length=4000),
+    }
+
+def _normalize_asset_reconciliation_snapshot_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    account_id = _optional_int(source.get("account_id"))
+    if account_id is None or account_id <= 0:
+        raise ValueError("Asset reconciliation snapshot account_id is required")
+
+    cash_actual = _optional_float(source.get("cash_actual"))
+    market_value_actual = _optional_float(source.get("market_value_actual"))
+    if cash_actual is None and market_value_actual is None:
+        raise ValueError("Asset reconciliation snapshot requires cash_actual or market_value_actual")
+
+    positions_payload = source.get("positions_payload")
+    if positions_payload is None:
+        positions_payload = (existing or {}).get("positions_payload", [])
+    if not isinstance(positions_payload, (list, dict)):
+        raise ValueError("Asset reconciliation positions_payload must be a list or object")
+
+    return {
+        "account_id": account_id,
+        "snapshot_date": _required_string(
+            source.get("snapshot_date"),
+            "Asset reconciliation snapshot_date is required",
+            max_length=64,
+        ),
+        "cash_actual": cash_actual,
+        "cash_system": _optional_float(source.get("cash_system")),
+        "market_value_actual": market_value_actual,
+        "market_value_system": _optional_float(source.get("market_value_system")),
+        "positions_payload": positions_payload,
         "note": _optional_string(source.get("note"), max_length=4000),
     }
 

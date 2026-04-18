@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from database.core import DEFAULT_OWNER_ID
@@ -7,10 +8,12 @@ from database.helpers import (
     _deserialize_asset_account,
     _deserialize_asset_cash_ledger_entry,
     _deserialize_asset_position_current,
+    _deserialize_asset_reconciliation_snapshot,
     _deserialize_asset_trade_entry,
     _deserialize_asset_valuation_current,
     _normalize_asset_account_payload,
     _normalize_asset_cash_ledger_payload,
+    _normalize_asset_reconciliation_snapshot_payload,
     _normalize_asset_trade_payload,
     _parse_datetime_value,
 )
@@ -396,6 +399,88 @@ class AssetMixin:
         deleted = await self._execute(
             "DELETE FROM `asset_trade_ledger` WHERE `id`=%s AND `owner_id`=%s",
             (entry_id, owner_id),
+        )
+        return bool(deleted)
+
+    async def list_asset_reconciliation_snapshots(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        account_id: int | None = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if account_id is not None:
+            filters.append("`account_id`=%s")
+            params.append(account_id)
+        clean_limit = max(1, min(int(limit or 200), 5000))
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `asset_reconciliation_snapshots`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `snapshot_date` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_asset_reconciliation_snapshot(row) for row in rows]
+
+    async def get_asset_reconciliation_snapshot(
+        self,
+        snapshot_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `asset_reconciliation_snapshots`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (snapshot_id, owner_id),
+        )
+        return _deserialize_asset_reconciliation_snapshot(row)
+
+    async def create_asset_reconciliation_snapshot(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_asset_reconciliation_snapshot_payload(payload)
+        snapshot_id = await self._execute_insert(
+            """
+            INSERT INTO `asset_reconciliation_snapshots`
+                (`owner_id`, `account_id`, `snapshot_date`, `cash_actual`, `cash_system`,
+                 `market_value_actual`, `market_value_system`, `positions_payload_json`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["account_id"],
+                _parse_datetime_value(normalized["snapshot_date"]),
+                normalized["cash_actual"],
+                normalized["cash_system"],
+                normalized["market_value_actual"],
+                normalized["market_value_system"],
+                json.dumps(normalized["positions_payload"], ensure_ascii=False),
+                normalized["note"],
+            ),
+        )
+        snapshot = await self.get_asset_reconciliation_snapshot(snapshot_id, owner_id=owner_id)
+        if not snapshot:
+            raise RuntimeError("Asset reconciliation snapshot was not persisted")
+        return snapshot
+
+    async def delete_asset_reconciliation_snapshot(
+        self,
+        snapshot_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `asset_reconciliation_snapshots` WHERE `id`=%s AND `owner_id`=%s",
+            (snapshot_id, owner_id),
         )
         return bool(deleted)
 

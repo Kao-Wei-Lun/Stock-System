@@ -15,6 +15,7 @@ from schemas import (
     AssetAccountUpdatePayload,
     AssetCashLedgerCreatePayload,
     AssetCashLedgerUpdatePayload,
+    AssetReconciliationCreatePayload,
     AssetTradeCreatePayload,
     AssetTradeUpdatePayload,
 )
@@ -37,7 +38,7 @@ async def _ensure_account_exists(account_id: int) -> Dict[str, Any]:
     return account
 
 
-async def _load_asset_inputs() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+async def _load_asset_inputs() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     accounts = await db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID)
     cash_entries = await db.list_asset_cash_ledger_entries(
         owner_id=DEFAULT_OWNER_ID,
@@ -47,7 +48,11 @@ async def _load_asset_inputs() -> tuple[List[Dict[str, Any]], List[Dict[str, Any
         owner_id=DEFAULT_OWNER_ID,
         limit=_SNAPSHOT_LIMIT,
     )
-    return accounts, cash_entries, trade_entries
+    reconciliation_snapshots = await db.list_asset_reconciliation_snapshots(
+        owner_id=DEFAULT_OWNER_ID,
+        limit=_SNAPSHOT_LIMIT,
+    )
+    return accounts, cash_entries, trade_entries, reconciliation_snapshots
 
 
 async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str, Any] | None:
@@ -69,6 +74,22 @@ async def _persist_snapshot(snapshot: Dict[str, Any]) -> None:
         DEFAULT_OWNER_ID,
         snapshot.get("holdings") or [],
     )
+
+
+def _build_reconciliation_positions_payload(snapshot: Dict[str, Any], account_id: int) -> List[Dict[str, Any]]:
+    return [
+        {
+            "ticker": item.get("ticker"),
+            "display_name": item.get("display_name"),
+            "quantity": item.get("quantity"),
+            "last_price": item.get("last_price"),
+            "market_value_base": item.get("market_value_base"),
+            "quote_timestamp": item.get("quote_timestamp"),
+            "quote_source": item.get("quote_source"),
+        }
+        for item in snapshot.get("holdings") or []
+        if int(item.get("account_id") or 0) == int(account_id)
+    ]
 
 
 def _build_allocation(snapshot: Dict[str, Any], group_by: str) -> Dict[str, Any]:
@@ -118,11 +139,12 @@ def _build_contributors(snapshot: Dict[str, Any], limit: int) -> Dict[str, Any]:
 
 
 async def _build_snapshot(*, refresh: bool = True) -> Dict[str, Any]:
-    accounts, cash_entries, trade_entries = await _load_asset_inputs()
+    accounts, cash_entries, trade_entries, reconciliation_snapshots = await _load_asset_inputs()
     snapshot = await build_asset_portfolio_snapshot(
         accounts,
         cash_entries,
         trade_entries,
+        reconciliation_snapshots=reconciliation_snapshots,
         fetch_quote=(lambda ticker: _fetch_latest_quote(ticker, refresh=refresh)),
     )
     await _persist_snapshot(snapshot)
@@ -302,6 +324,61 @@ async def delete_asset_trade_entry(entry_id: int):
     return {"ok": True, "entry_id": entry_id}
 
 
+@router.get("/reconciliation")
+async def list_asset_reconciliation_snapshots(
+    account_id: int | None = Query(None),
+    limit: int = Query(100, ge=1, le=5000),
+):
+    return {
+        "items": await db.list_asset_reconciliation_snapshots(
+            owner_id=DEFAULT_OWNER_ID,
+            account_id=account_id,
+            limit=limit,
+        )
+    }
+
+
+@router.post("/reconciliation")
+async def create_asset_reconciliation_snapshot(
+    payload: AssetReconciliationCreatePayload,
+    refresh: bool = Query(True),
+):
+    await _ensure_account_exists(payload.account_id)
+    snapshot = await _build_snapshot(refresh=refresh)
+    account_summary = next(
+        (item for item in snapshot.get("accounts") or [] if int(item.get("account_id") or 0) == int(payload.account_id)),
+        None,
+    )
+    if not account_summary:
+        raise HTTPException(400, f"Unable to build system snapshot for asset account {payload.account_id}")
+
+    data = payload.model_dump()
+    if not data.get("positions_payload"):
+        data["positions_payload"] = _build_reconciliation_positions_payload(snapshot, payload.account_id)
+    data["cash_system"] = account_summary.get("cash_total_base")
+    data["market_value_system"] = account_summary.get("market_value_base")
+    try:
+        return await db.create_asset_reconciliation_snapshot(data, owner_id=DEFAULT_OWNER_ID)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/reconciliation/{snapshot_id}")
+async def get_asset_reconciliation_snapshot(snapshot_id: int):
+    snapshot = await db.get_asset_reconciliation_snapshot(snapshot_id, owner_id=DEFAULT_OWNER_ID)
+    if not snapshot:
+        raise HTTPException(404, "Asset reconciliation snapshot not found")
+    return snapshot
+
+
+@router.delete("/reconciliation/{snapshot_id}")
+async def delete_asset_reconciliation_snapshot(snapshot_id: int):
+    deleted = await db.delete_asset_reconciliation_snapshot(snapshot_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Asset reconciliation snapshot not found")
+    return {"ok": True, "snapshot_id": snapshot_id}
+
+
 @router.get("/portfolio/current")
 async def get_asset_portfolio_snapshot(
     refresh: bool = Query(True),
@@ -333,6 +410,7 @@ async def get_asset_summary_current(refresh: bool = Query(True)):
         "warnings": snapshot.get("warnings") or [],
         "quote_gaps": snapshot.get("quote_gaps") or [],
         "accounts": snapshot.get("accounts") or [],
+        "reconciliation": snapshot.get("reconciliation") or {"items": [], "summary": {}},
         "summary": snapshot.get("summary") or {},
     }
 

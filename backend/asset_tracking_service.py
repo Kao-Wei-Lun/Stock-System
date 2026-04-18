@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List
 BASE_CURRENCY = "TWD"
 _POSITIVE_CASH_FLOW_TYPES = {"deposit", "dividend", "interest", "transfer_in"}
 _NEGATIVE_CASH_FLOW_TYPES = {"withdraw", "fee", "tax", "fx_fee", "transfer_out"}
+_RECONCILIATION_DIFF_EPSILON = 0.01
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -276,11 +277,130 @@ def compute_asset_positions(
     }
 
 
+def _build_reconciliation_summary(
+    account_summaries: Dict[int, Dict[str, Any]],
+    reconciliation_snapshots: List[Dict[str, Any]] | None,
+) -> tuple[Dict[str, Any], List[str]]:
+    latest_by_account: Dict[int, Dict[str, Any]] = {}
+    warnings: List[str] = []
+
+    for snapshot in reconciliation_snapshots or []:
+        account_id = _safe_int(snapshot.get("account_id"))
+        if account_id not in account_summaries:
+            warnings.append(
+                f"Reconciliation snapshot {snapshot.get('id')} references unknown account {account_id}."
+            )
+            continue
+        snapshot_dt = _normalize_datetime(snapshot.get("snapshot_date"))
+        previous = latest_by_account.get(account_id)
+        previous_dt = _normalize_datetime(previous.get("snapshot_date")) if previous else None
+        if previous is None or snapshot_dt >= previous_dt:
+            latest_by_account[account_id] = snapshot
+
+    items: List[Dict[str, Any]] = []
+    difference_total_base = 0.0
+    included_difference_total_base = 0.0
+    gap_account_count = 0
+    latest_snapshot_date = None
+
+    for account_id, snapshot in latest_by_account.items():
+        account_summary = account_summaries[account_id]
+        cash_actual = _safe_float(snapshot.get("cash_actual"), None)
+        cash_system = _safe_float(snapshot.get("cash_system"), None)
+        market_value_actual = _safe_float(snapshot.get("market_value_actual"), None)
+        market_value_system = _safe_float(snapshot.get("market_value_system"), None)
+
+        cash_difference = (
+            round(cash_actual - cash_system, 6)
+            if cash_actual is not None and cash_system is not None
+            else None
+        )
+        market_value_difference = (
+            round(market_value_actual - market_value_system, 6)
+            if market_value_actual is not None and market_value_system is not None
+            else None
+        )
+
+        comparable_actual_total = 0.0
+        comparable_system_total = 0.0
+        comparable_parts = 0
+        for actual_value, system_value in (
+            (cash_actual, cash_system),
+            (market_value_actual, market_value_system),
+        ):
+            if actual_value is None or system_value is None:
+                continue
+            comparable_actual_total += actual_value
+            comparable_system_total += system_value
+            comparable_parts += 1
+
+        total_actual = round(comparable_actual_total, 6) if comparable_parts else None
+        total_system = round(comparable_system_total, 6) if comparable_parts else None
+        total_difference = (
+            round(comparable_actual_total - comparable_system_total, 6)
+            if comparable_parts
+            else None
+        )
+        has_gap = bool(total_difference is not None and abs(total_difference) >= _RECONCILIATION_DIFF_EPSILON)
+
+        item = {
+            "snapshot_id": snapshot.get("id"),
+            "account_id": account_id,
+            "account_name": account_summary.get("account_name") or f"Account {account_id}",
+            "include_in_total": bool(account_summary.get("include_in_total", True)),
+            "snapshot_date": snapshot.get("snapshot_date"),
+            "cash_actual": cash_actual,
+            "cash_system": cash_system,
+            "cash_difference": cash_difference,
+            "market_value_actual": market_value_actual,
+            "market_value_system": market_value_system,
+            "market_value_difference": market_value_difference,
+            "total_actual": total_actual,
+            "total_system": total_system,
+            "total_difference": total_difference,
+            "has_gap": has_gap,
+            "note": snapshot.get("note"),
+            "positions_payload": snapshot.get("positions_payload") or [],
+            "created_at": snapshot.get("created_at"),
+        }
+        account_summary["reconciliation"] = item
+        items.append(item)
+
+        if total_difference is not None:
+            difference_total_base += total_difference
+            if item["include_in_total"]:
+                included_difference_total_base += total_difference
+        if has_gap:
+            gap_account_count += 1
+        if latest_snapshot_date is None or _normalize_datetime(item["snapshot_date"]) >= _normalize_datetime(latest_snapshot_date):
+            latest_snapshot_date = item["snapshot_date"]
+
+    items.sort(
+        key=lambda item: (
+            abs(_safe_float(item.get("total_difference"))),
+            _normalize_datetime(item.get("snapshot_date")),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "items": items,
+        "summary": {
+            "account_count": len(items),
+            "gap_account_count": gap_account_count,
+            "difference_total_base": round(difference_total_base, 6),
+            "included_difference_total_base": round(included_difference_total_base, 6),
+            "latest_snapshot_date": latest_snapshot_date,
+        },
+    }, warnings
+
+
 async def build_asset_portfolio_snapshot(
     accounts: List[Dict[str, Any]],
     cash_entries: List[Dict[str, Any]],
     trade_entries: List[Dict[str, Any]],
     *,
+    reconciliation_snapshots: List[Dict[str, Any]] | None = None,
     fetch_quote: Callable[[str], Awaitable[Dict[str, Any] | None]] | None = None,
     base_currency: str = BASE_CURRENCY,
 ) -> Dict[str, Any]:
@@ -401,11 +521,16 @@ async def build_asset_portfolio_snapshot(
         }
         for item in sorted(allocation_base, key=lambda row: row["total_value_base"], reverse=True)
     ]
+    reconciliation, reconciliation_warnings = _build_reconciliation_summary(
+        account_summaries,
+        reconciliation_snapshots,
+    )
+    warnings = list(dict.fromkeys([*(state["warnings"] or []), *reconciliation_warnings]))
 
     return {
         "base_currency": normalized_base_currency,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "warnings": state["warnings"],
+        "warnings": warnings,
         "quote_gaps": quote_gaps,
         "accounts": sorted(
             [
@@ -426,6 +551,7 @@ async def build_asset_portfolio_snapshot(
             "group_by": "account",
             "items": allocation_items,
         },
+        "reconciliation": reconciliation,
         "summary": {
             "cash_total_base": round(cash_total_base, 6),
             "market_value_total_base": round(market_value_total_base, 6),
@@ -436,5 +562,8 @@ async def build_asset_portfolio_snapshot(
             "holding_count": len(valued_positions),
             "account_count": len(account_summaries),
             "quote_gap_count": len(quote_gaps),
+            "reconciliation_account_count": reconciliation["summary"]["account_count"],
+            "reconciliation_gap_count": reconciliation["summary"]["gap_account_count"],
+            "reconciliation_difference_total_base": reconciliation["summary"]["difference_total_base"],
         },
     }

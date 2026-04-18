@@ -788,6 +788,27 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_asset_valuations_current_owner_account` (`owner_id`, `account_id`, `ticker`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "asset_reconciliation_snapshots": """
+        CREATE TABLE `asset_reconciliation_snapshots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `snapshot_date` DATETIME NOT NULL,
+            `cash_actual` DOUBLE NULL,
+            `cash_system` DOUBLE NULL,
+            `market_value_actual` DOUBLE NULL,
+            `market_value_system` DOUBLE NULL,
+            `positions_payload_json` LONGTEXT NULL,
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_asset_reconciliation_snapshots_owner_date` (`owner_id`, `snapshot_date`, `id`),
+            KEY `idx_asset_reconciliation_snapshots_account_date` (`account_id`, `snapshot_date`, `id`),
+            CONSTRAINT `fk_asset_reconciliation_snapshots_account`
+                FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {

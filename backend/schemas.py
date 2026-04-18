@@ -304,3 +304,12 @@ class AssetTradeUpdatePayload(BaseModel):
     fx_rate_to_base: float | None = None
     source: str | None = Field(None, min_length=1, max_length=64)
     note: str | None = None
+
+
+class AssetReconciliationCreatePayload(BaseModel):
+    account_id: int
+    snapshot_date: str = Field(..., min_length=10, max_length=64)
+    cash_actual: float | None = None
+    market_value_actual: float | None = None
+    positions_payload: list[dict] | None = None
+    note: str | None = None

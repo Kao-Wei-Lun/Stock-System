@@ -11,9 +11,11 @@ def asset_store(monkeypatch):
         "next_account_id": 1,
         "next_cash_id": 1,
         "next_trade_id": 1,
+        "next_reconciliation_id": 1,
         "accounts": {},
         "cash_entries": {},
         "trade_entries": {},
+        "reconciliation_entries": {},
         "quotes": {
             "2330.TW": {
                 "ticker": "2330.TW",
@@ -177,6 +179,39 @@ def asset_store(monkeypatch):
     async def delete_asset_trade_entry(entry_id, owner_id=1):
         return store["trade_entries"].pop(entry_id, None) is not None
 
+    async def list_asset_reconciliation_snapshots(owner_id=1, account_id=None, limit=200):
+        items = list(store["reconciliation_entries"].values())
+        if account_id is not None:
+            items = [item for item in items if item["account_id"] == account_id]
+        items.sort(key=lambda item: (item["snapshot_date"], item["id"]), reverse=True)
+        return clone(items[:limit])
+
+    async def get_asset_reconciliation_snapshot(snapshot_id, owner_id=1):
+        item = store["reconciliation_entries"].get(snapshot_id)
+        return clone(item) if item else None
+
+    async def create_asset_reconciliation_snapshot(payload, owner_id=1):
+        snapshot_id = store["next_reconciliation_id"]
+        store["next_reconciliation_id"] += 1
+        item = {
+            "id": snapshot_id,
+            "owner_id": owner_id,
+            "account_id": payload["account_id"],
+            "snapshot_date": payload["snapshot_date"],
+            "cash_actual": payload.get("cash_actual"),
+            "cash_system": payload.get("cash_system"),
+            "market_value_actual": payload.get("market_value_actual"),
+            "market_value_system": payload.get("market_value_system"),
+            "positions_payload": clone(payload.get("positions_payload") or []),
+            "note": payload.get("note"),
+            "created_at": "2026-04-18T08:40:00+00:00",
+        }
+        store["reconciliation_entries"][snapshot_id] = item
+        return clone(item)
+
+    async def delete_asset_reconciliation_snapshot(snapshot_id, owner_id=1):
+        return store["reconciliation_entries"].pop(snapshot_id, None) is not None
+
     async def get_market_quote(ticker):
         return clone(store["quotes"].get(ticker))
 
@@ -201,6 +236,10 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "create_asset_trade_entry", create_asset_trade_entry)
     monkeypatch.setattr(main.db, "update_asset_trade_entry", update_asset_trade_entry)
     monkeypatch.setattr(main.db, "delete_asset_trade_entry", delete_asset_trade_entry)
+    monkeypatch.setattr(main.db, "list_asset_reconciliation_snapshots", list_asset_reconciliation_snapshots)
+    monkeypatch.setattr(main.db, "get_asset_reconciliation_snapshot", get_asset_reconciliation_snapshot)
+    monkeypatch.setattr(main.db, "create_asset_reconciliation_snapshot", create_asset_reconciliation_snapshot)
+    monkeypatch.setattr(main.db, "delete_asset_reconciliation_snapshot", delete_asset_reconciliation_snapshot)
     monkeypatch.setattr(main.db, "get_market_quote", get_market_quote)
     monkeypatch.setattr(main.db, "replace_asset_positions_current", replace_asset_positions_current)
     monkeypatch.setattr(main.db, "replace_asset_valuations_current", replace_asset_valuations_current)
@@ -302,6 +341,34 @@ def test_asset_routes_crud_and_summary_snapshot(client, asset_store):
     contributors_response = client.get("/api/assets/contributors/current?refresh=false&limit=5")
     assert contributors_response.status_code == 200
     assert contributors_response.json()["top_gainers"][0]["ticker"] == "2330.TW"
+
+    reconciliation_response = client.post(
+        "/api/assets/reconciliation?refresh=false",
+        json={
+            "account_id": account["id"],
+            "snapshot_date": "2026-04-18T10:00:00",
+            "cash_actual": 99000,
+            "market_value_actual": 1300,
+            "note": "Broker app close",
+        },
+    )
+    assert reconciliation_response.status_code == 200
+    reconciliation_payload = reconciliation_response.json()
+    assert reconciliation_payload["cash_system"] == 98990
+    assert reconciliation_payload["market_value_system"] == 1200
+    assert reconciliation_payload["positions_payload"][0]["ticker"] == "2330.TW"
+
+    reconciliation_list_response = client.get("/api/assets/reconciliation?limit=5")
+    assert reconciliation_list_response.status_code == 200
+    assert reconciliation_list_response.json()["items"][0]["id"] == reconciliation_payload["id"]
+
+    portfolio_response = client.get("/api/assets/portfolio/current?refresh=false")
+    assert portfolio_response.status_code == 200
+    assert portfolio_response.json()["reconciliation"]["summary"]["gap_account_count"] == 1
+    assert portfolio_response.json()["reconciliation"]["items"][0]["total_difference"] == 110
+
+    delete_reconciliation_response = client.delete(f"/api/assets/reconciliation/{reconciliation_payload['id']}")
+    assert delete_reconciliation_response.status_code == 200
 
     assert len(asset_store["positions_current"]) == 1
     assert len(asset_store["valuations_current"]) == 1

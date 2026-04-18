@@ -60,6 +60,19 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
             "fx_rate_to_base": 1,
         },
     ]
+    reconciliation_snapshots = [
+        {
+            "id": 31,
+            "account_id": 1,
+            "snapshot_date": "2026-04-18T10:00:00",
+            "cash_actual": 99000,
+            "cash_system": 98990,
+            "market_value_actual": 1300,
+            "market_value_system": 1200,
+            "positions_payload": [{"ticker": "2330.TW", "quantity": 10}],
+            "note": "Broker app close",
+        }
+    ]
 
     async def fetch_quote(ticker):
         if ticker == "2330.TW":
@@ -79,6 +92,7 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
             accounts,
             cash_entries,
             trade_entries,
+            reconciliation_snapshots=reconciliation_snapshots,
             fetch_quote=fetch_quote,
         )
     )
@@ -89,8 +103,15 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
     assert snapshot["summary"]["unrealized_total_base"] == 190
     assert snapshot["summary"]["quote_gap_count"] == 0
     assert snapshot["summary"]["account_count"] == 2
+    assert snapshot["summary"]["reconciliation_account_count"] == 1
+    assert snapshot["summary"]["reconciliation_gap_count"] == 1
+    assert snapshot["summary"]["reconciliation_difference_total_base"] == 110
     assert snapshot["holdings"][0]["ticker"] == "2330.TW"
     assert snapshot["holdings"][0]["market_value_base"] == 1200
     assert snapshot["holdings"][0]["unrealized_pnl_base"] == 190
     assert snapshot["allocation"]["items"][0]["key"] == "Main Broker"
     assert snapshot["allocation"]["items"][0]["value_base"] == 100190
+    assert snapshot["reconciliation"]["items"][0]["account_name"] == "Main Broker"
+    assert snapshot["reconciliation"]["items"][0]["cash_difference"] == 10
+    assert snapshot["reconciliation"]["items"][0]["market_value_difference"] == 100
+    assert snapshot["reconciliation"]["items"][0]["total_difference"] == 110
