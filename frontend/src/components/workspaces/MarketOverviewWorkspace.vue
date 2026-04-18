@@ -291,14 +291,15 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { defineAsyncComponent, ref } from "vue";
 
 import EventCenter from "../EventCenter.vue";
 import MacroDashboard from "../MacroDashboard.vue";
 import ScreenerWorkspace from "../ScreenerWorkspace.vue";
 import TradingViewWidgetEmbed from "../TradingViewWidgetEmbed.vue";
 import WatchlistPanel from "../WatchlistPanel.vue";
-import TaiwanHeatmap from "./TaiwanHeatmap.vue";
+
+const TaiwanHeatmap = defineAsyncComponent(() => import("./TaiwanHeatmap.vue"));
 
 const heatmapSectionRef = ref(null);
 const fullscreenWidget = ref(null);

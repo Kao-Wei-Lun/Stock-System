@@ -92,8 +92,8 @@ describe("TaiwanHeatmap", () => {
     expect(option.series[0].data).toHaveLength(1);
     expect(sectorNode.name).toBe("半導體");
     expect(sectorNode.children.map((item) => item.itemStyle.color)).toEqual(["#f23645", "#22ab94"]);
-    expect(option.series[0].levels[1].upperLabel.fontSize).toBe(28);
-    expect(option.series[0].levels[1].itemStyle.gapWidth).toBe(3);
+    expect(option.series[0].levels[1].upperLabel.fontSize).toBe(12);
+    expect(option.series[0].levels[1].itemStyle.gapWidth).toBe(2);
 
     const tooltipHtml = option.tooltip.formatter({ data: sectorNode.children[0] });
     expect(tooltipHtml).toContain("台積電");
@@ -102,7 +102,7 @@ describe("TaiwanHeatmap", () => {
     expect(wrapper.find(".heatmap-loading").exists()).toBe(false);
   });
 
-  it("groups indices for drill-down navigation and emits ticker selection from leaf nodes", async () => {
+  it("uses manual sector drill-down and emits ticker selection from leaf nodes", async () => {
     globalThis.fetch
       .mockImplementationOnce(() =>
         jsonResponse({
@@ -146,11 +146,20 @@ describe("TaiwanHeatmap", () => {
     const [indexSector] = option.series[0].data;
 
     expect(option.series[0].roam).toBe(true);
-    expect(option.series[0].nodeClick).toBe("zoomToNode");
-    expect(option.series[0].breadcrumb.itemStyle.color).toBe("#131722");
-    expect(option.series[0].levels[1].upperLabel.formatter({ name: "大盤指數與 ETF" })).toContain(">");
+    expect(option.series[0].nodeClick).toBe(false);
+    expect(option.series[0].breadcrumb.show).toBe(false);
+    expect(option.series[0].levels[1].upperLabel.formatter({ name: "大盤指數與 ETF" })).toBe("大盤指數與 ETF");
     expect(indexSector.name).toBe("大盤指數與 ETF");
     expect(indexSector.children).toHaveLength(1);
+
+    chart.vm.$emit("click", {
+      data: indexSector,
+      name: "大盤指數與 ETF",
+      treePathInfo: [{}, {}],
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".heatmap-back-btn").exists()).toBe(true);
 
     chart.vm.$emit("click", { data: indexSector.children[0] });
     await flushPromises();

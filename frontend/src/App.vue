@@ -335,6 +335,7 @@
 
 <script setup>
 import {
+  defineAsyncComponent,
   isRef,
   nextTick,
   onBeforeUnmount,
@@ -349,14 +350,15 @@ import GlobalSearchCommand from "./components/GlobalSearchCommand.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import ToastStack from "./components/ToastStack.vue";
-import SettingsWorkspace from "./components/settings/SettingsWorkspace.vue";
-import InstitutionalAnalysisWorkspace from "./components/workspaces/InstitutionalAnalysisWorkspace.vue";
-import MarketOverviewWorkspace from "./components/workspaces/MarketOverviewWorkspace.vue";
-import ProChartTerminalWorkspace from "./components/workspaces/ProChartTerminalWorkspace.vue";
-import ReviewWorkspace from "./components/workspaces/ReviewWorkspace.vue";
 import { useDashboard } from "./composables/useDashboard";
 import { useFubonWorkspaceStatus } from "./composables/useFubonWorkspaceStatus";
 import { useHotkeys } from "./composables/useHotkeys";
+
+const SettingsWorkspace = defineAsyncComponent(() => import("./components/settings/SettingsWorkspace.vue"));
+const InstitutionalAnalysisWorkspace = defineAsyncComponent(() => import("./components/workspaces/InstitutionalAnalysisWorkspace.vue"));
+const MarketOverviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/MarketOverviewWorkspace.vue"));
+const ProChartTerminalWorkspace = defineAsyncComponent(() => import("./components/workspaces/ProChartTerminalWorkspace.vue"));
+const ReviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/ReviewWorkspace.vue"));
 
 const props = defineProps({
   routeWorkspaceTab: { type: String, default: "overview" },
