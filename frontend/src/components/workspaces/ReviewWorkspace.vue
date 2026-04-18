@@ -107,30 +107,37 @@
           :asset-holdings="assetHoldings"
           :asset-warnings="assetWarnings"
           :asset-quote-gaps="assetQuoteGaps"
+          :asset-reconciliation="assetReconciliation"
           :asset-account-allocation="assetAccountAllocation"
           :asset-market-allocation="assetMarketAllocation"
           :asset-contributors="assetContributors"
           :asset-cash-entries="assetCashEntries"
           :asset-trade-entries="assetTradeEntries"
+          :asset-reconciliation-entries="assetReconciliationEntries"
           :asset-account-form="assetAccountForm"
           :asset-cash-form="assetCashForm"
           :asset-trade-form="assetTradeForm"
+          :asset-reconciliation-form="assetReconciliationForm"
           @reload-asset-data="$emit('reload-asset-data')"
           @edit-asset-account="$emit('edit-asset-account', $event)"
           @update-asset-account-field="$emit('update-asset-account-field', $event)"
           @update-asset-cash-field="$emit('update-asset-cash-field', $event)"
           @update-asset-trade-field="$emit('update-asset-trade-field', $event)"
+          @update-asset-reconciliation-field="$emit('update-asset-reconciliation-field', $event)"
           @save-asset-account="$emit('save-asset-account')"
           @save-asset-cash-entry="$emit('save-asset-cash-entry')"
           @save-asset-trade-entry="$emit('save-asset-trade-entry')"
+          @save-asset-reconciliation="$emit('save-asset-reconciliation')"
           @reset-asset-account-form="$emit('reset-asset-account-form')"
           @reset-asset-cash-form="$emit('reset-asset-cash-form')"
           @reset-asset-trade-form="$emit('reset-asset-trade-form')"
+          @reset-asset-reconciliation-form="$emit('reset-asset-reconciliation-form')"
           @edit-asset-cash-entry="$emit('edit-asset-cash-entry', $event)"
           @edit-asset-trade-entry="$emit('edit-asset-trade-entry', $event)"
           @delete-asset-account="$emit('delete-asset-account', $event)"
           @delete-asset-cash-entry="$emit('delete-asset-cash-entry', $event)"
           @delete-asset-trade-entry="$emit('delete-asset-trade-entry', $event)"
+          @delete-asset-reconciliation="$emit('delete-asset-reconciliation', $event)"
         />
       </div>
 
@@ -182,14 +189,17 @@ const props = defineProps({
   assetHoldings: { type: Array, default: () => [] },
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
+  assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
   assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
   assetCashEntries: { type: Array, default: () => [] },
   assetTradeEntries: { type: Array, default: () => [] },
+  assetReconciliationEntries: { type: Array, default: () => [] },
   assetAccountForm: { type: Object, required: true },
   assetCashForm: { type: Object, required: true },
   assetTradeForm: { type: Object, required: true },
+  assetReconciliationForm: { type: Object, required: true },
 });
 
 defineEmits([
@@ -220,17 +230,21 @@ defineEmits([
   "update-asset-account-field",
   "update-asset-cash-field",
   "update-asset-trade-field",
+  "update-asset-reconciliation-field",
   "save-asset-account",
   "save-asset-cash-entry",
   "save-asset-trade-entry",
+  "save-asset-reconciliation",
   "reset-asset-account-form",
   "reset-asset-cash-form",
   "reset-asset-trade-form",
+  "reset-asset-reconciliation-form",
   "edit-asset-cash-entry",
   "edit-asset-trade-entry",
   "delete-asset-account",
   "delete-asset-cash-entry",
   "delete-asset-trade-entry",
+  "delete-asset-reconciliation",
 ]);
 
 const normalizedTab = computed(() => {

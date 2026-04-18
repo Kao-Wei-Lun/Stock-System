@@ -26,6 +26,7 @@ export function createDashboardAssetTracking({
   const assetAccounts = ref([]);
   const assetCashEntries = ref([]);
   const assetTradeEntries = ref([]);
+  const assetReconciliationEntries = ref([]);
   const assetPortfolio = ref(null);
 
   const assetAccountForm = reactive({
@@ -67,6 +68,13 @@ export function createDashboardAssetTracking({
     source: "manual",
     note: "",
   });
+  const assetReconciliationForm = reactive({
+    account_id: "",
+    snapshot_date: getCurrentDateTimeInputValue(),
+    cash_actual: "",
+    market_value_actual: "",
+    note: "",
+  });
 
   const assetBaseCurrency = computed(() => assetPortfolio.value?.base_currency || "TWD");
   const assetSummary = computed(() => assetPortfolio.value?.summary || {});
@@ -74,6 +82,7 @@ export function createDashboardAssetTracking({
   const assetHoldings = computed(() => assetPortfolio.value?.holdings || []);
   const assetWarnings = computed(() => assetPortfolio.value?.warnings || []);
   const assetQuoteGaps = computed(() => assetPortfolio.value?.quote_gaps || []);
+  const assetReconciliation = computed(() => assetPortfolio.value?.reconciliation || { items: [], summary: {} });
   const assetAccountAllocation = computed(() => assetPortfolio.value?.allocation?.items || []);
   const assetMarketAllocation = computed(() => {
     const grouped = new Map();
@@ -122,6 +131,9 @@ export function createDashboardAssetTracking({
         assetTradeForm.currency = getAccountBaseCurrency(primaryAccountId);
       }
     }
+    if (primaryAccountId && !assetReconciliationForm.account_id) {
+      assetReconciliationForm.account_id = primaryAccountId;
+    }
   }
 
   function resetAssetAccountForm() {
@@ -169,18 +181,29 @@ export function createDashboardAssetTracking({
     assetTradeForm.note = "";
   }
 
+  function resetAssetReconciliationForm() {
+    const primaryAccountId = getPrimaryAccountId();
+    assetReconciliationForm.account_id = primaryAccountId;
+    assetReconciliationForm.snapshot_date = getCurrentDateTimeInputValue();
+    assetReconciliationForm.cash_actual = "";
+    assetReconciliationForm.market_value_actual = "";
+    assetReconciliationForm.note = "";
+  }
+
   async function loadAssetTrackingData({ refresh = true, silent = true } = {}) {
     assetLoading.value = !silent;
     try {
-      const [accountsResponse, cashResponse, tradesResponse, portfolioResponse] = await Promise.all([
+      const [accountsResponse, cashResponse, tradesResponse, reconciliationResponse, portfolioResponse] = await Promise.all([
         dashboardApi.listAssetAccounts(),
         dashboardApi.listAssetCashLedger({ limit: 12 }),
         dashboardApi.listAssetTrades({ limit: 12 }),
+        dashboardApi.listAssetReconciliation({ limit: 12 }),
         dashboardApi.getAssetPortfolioCurrent({ refresh, allocation_group_by: "account" }),
       ]);
       assetAccounts.value = normalizeAssetAccounts(accountsResponse?.items);
       assetCashEntries.value = normalizeAssetEntries(cashResponse);
       assetTradeEntries.value = normalizeAssetEntries(tradesResponse);
+      assetReconciliationEntries.value = normalizeAssetEntries(reconciliationResponse);
       assetPortfolio.value = portfolioResponse || null;
       ensureAssetFormAccountDefaults();
     } catch (error) {
@@ -253,6 +276,19 @@ export function createDashboardAssetTracking({
       return;
     }
     assetTradeForm[key] = value;
+  }
+
+  function updateAssetReconciliationField(key, value) {
+    if (!Object.prototype.hasOwnProperty.call(assetReconciliationForm, key)) return;
+    if (["cash_actual", "market_value_actual"].includes(key)) {
+      assetReconciliationForm[key] = value === "" ? "" : Number(value);
+      return;
+    }
+    if (key === "account_id") {
+      assetReconciliationForm.account_id = value === "" ? "" : Number(value);
+      return;
+    }
+    assetReconciliationForm[key] = value;
   }
 
   function editAssetAccount(record) {
@@ -447,11 +483,58 @@ export function createDashboardAssetTracking({
     }
   }
 
+  async function saveAssetReconciliation() {
+    try {
+      if (!assetReconciliationForm.account_id) {
+        throw new Error("è«‹å…ˆé¸æ“‡å¸³æˆ¶");
+      }
+      if (assetReconciliationForm.cash_actual === "" && assetReconciliationForm.market_value_actual === "") {
+        throw new Error("è«‹è‡³å°‘è¼¸å…¥ç¾é‡‘æˆ–æŒå€‰å¸‚å€¼");
+      }
+      const payload = {
+        account_id: Number(assetReconciliationForm.account_id),
+        snapshot_date: assetReconciliationForm.snapshot_date,
+        note: String(assetReconciliationForm.note || "").trim() || null,
+      };
+      if (assetReconciliationForm.cash_actual !== "") {
+        payload.cash_actual = Number(assetReconciliationForm.cash_actual);
+      }
+      if (assetReconciliationForm.market_value_actual !== "") {
+        payload.market_value_actual = Number(assetReconciliationForm.market_value_actual);
+      }
+      await dashboardApi.createAssetReconciliation(payload, { refresh: true });
+      await loadAssetTrackingData({ refresh: true, silent: false });
+      resetAssetReconciliationForm();
+      pushNotification({
+        icon: "ðŸ§¾",
+        title: "å°å¸³å¿«ç…§å·²è¨˜éŒ„",
+        msg: `å¸³æˆ¶ #${payload.account_id}`,
+        type: "success",
+      });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "âš ï¸", title: "å°å¸³å¿«ç…§å„²å­˜å¤±æ•—", msg: error.message || "è«‹ç¨å¾Œå†è©¦", type: "error" });
+    }
+  }
+
+  async function deleteAssetReconciliation(snapshotId) {
+    if (!snapshotId) return;
+    try {
+      await dashboardApi.deleteAssetReconciliation(snapshotId);
+      await loadAssetTrackingData({ refresh: false, silent: false });
+      pushNotification({ icon: "ðŸ—‘", title: "å°å¸³å¿«ç…§å·²åˆªé™¤", msg: String(snapshotId), type: "success" });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "âš ï¸", title: "å°å¸³å¿«ç…§åˆªé™¤å¤±æ•—", msg: error.message || "è«‹ç¨å¾Œå†è©¦", type: "error" });
+    }
+  }
+
   return {
     assetLoading,
     assetAccounts,
     assetCashEntries,
     assetTradeEntries,
+    assetReconciliationEntries,
     assetPortfolio,
     assetBaseCurrency,
     assetSummary,
@@ -459,27 +542,33 @@ export function createDashboardAssetTracking({
     assetHoldings,
     assetWarnings,
     assetQuoteGaps,
+    assetReconciliation,
     assetAccountAllocation,
     assetMarketAllocation,
     assetContributors,
     assetAccountForm,
     assetCashForm,
     assetTradeForm,
+    assetReconciliationForm,
     loadAssetTrackingData,
     updateAssetAccountField,
     updateAssetCashField,
     updateAssetTradeField,
+    updateAssetReconciliationField,
     editAssetAccount,
     editAssetCashEntry,
     editAssetTradeEntry,
     resetAssetAccountForm,
     resetAssetCashForm,
     resetAssetTradeForm,
+    resetAssetReconciliationForm,
     saveAssetAccount,
     saveAssetCashEntry,
     saveAssetTradeEntry,
+    saveAssetReconciliation,
     deleteAssetAccount,
     deleteAssetCashEntry,
     deleteAssetTradeEntry,
+    deleteAssetReconciliation,
   };
 }

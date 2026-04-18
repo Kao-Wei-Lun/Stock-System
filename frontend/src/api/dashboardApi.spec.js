@@ -185,13 +185,17 @@ describe("dashboardApi", () => {
     globalThis.fetch
       .mockImplementationOnce(() => jsonResponse({ items: [] }))
       .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
       .mockImplementationOnce(() => jsonResponse({ base_currency: "TWD", summary: {} }))
       .mockImplementationOnce(() => jsonResponse({ id: 4, name: "Main Broker" }))
-      .mockImplementationOnce(() => jsonResponse({ id: 9, ticker: "2330.TW" }));
+      .mockImplementationOnce(() => jsonResponse({ id: 9, ticker: "2330.TW" }))
+      .mockImplementationOnce(() => jsonResponse({ id: 11, account_id: 4 }))
+      .mockImplementationOnce(() => jsonResponse({ ok: true, snapshot_id: 11 }));
     const api = createDashboardApi();
 
     await api.listAssetTrades({ ticker: "2330.TW", limit: 12 });
     await api.listAssetCashLedger({ account_id: 3, from: "2026-04-01", to: "2026-04-18", limit: 20 });
+    await api.listAssetReconciliation({ account_id: 4, limit: 8 });
     await api.getAssetPortfolioCurrent({ refresh: true, allocation_group_by: "account" });
     await api.createAssetAccount({ name: "Main Broker", base_currency: "TWD" });
     await api.createAssetTrade({
@@ -202,16 +206,23 @@ describe("dashboardApi", () => {
       quantity: 1,
       price: 900,
     });
+    await api.createAssetReconciliation({
+      account_id: 4,
+      snapshot_date: "2026-04-18T15:00:00",
+      cash_actual: 99000,
+    }, { refresh: false });
+    await api.deleteAssetReconciliation(11);
 
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/assets/trades?ticker=2330.TW&limit=12", {});
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/assets/cash-ledger?account_id=3&from=2026-04-01&to=2026-04-18&limit=20", {});
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/assets/portfolio/current?refresh=true&allocation_group_by=account", {});
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, "/api/assets/accounts", {
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/assets/reconciliation?account_id=4&limit=8", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, "/api/assets/portfolio/current?refresh=true&allocation_group_by=account", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(5, "/api/assets/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Main Broker", base_currency: "TWD" }),
     });
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(5, "/api/assets/trades", {
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(6, "/api/assets/trades", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -222,6 +233,18 @@ describe("dashboardApi", () => {
         quantity: 1,
         price: 900,
       }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(7, "/api/assets/reconciliation?refresh=false", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: 4,
+        snapshot_date: "2026-04-18T15:00:00",
+        cash_actual: 99000,
+      }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(8, "/api/assets/reconciliation/11", {
+      method: "DELETE",
     });
   });
 

@@ -270,14 +270,17 @@
         :asset-holdings="assetHoldings"
         :asset-warnings="assetWarnings"
         :asset-quote-gaps="assetQuoteGaps"
+        :asset-reconciliation="assetReconciliation"
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
         :asset-contributors="assetContributors"
         :asset-cash-entries="assetCashEntries"
         :asset-trade-entries="assetTradeEntries"
+        :asset-reconciliation-entries="assetReconciliationEntries"
         :asset-account-form="assetAccountForm"
         :asset-cash-form="assetCashForm"
         :asset-trade-form="assetTradeForm"
+        :asset-reconciliation-form="assetReconciliationForm"
         @open-terminal="handleOpenTerminal(currentTicker)"
         @set-right-tab="handleReviewWorkspaceTabChange"
         @update-backtest-field="handleBacktestField"
@@ -305,17 +308,21 @@
         @update-asset-account-field="handleAssetAccountField"
         @update-asset-cash-field="handleAssetCashField"
         @update-asset-trade-field="handleAssetTradeField"
+        @update-asset-reconciliation-field="handleAssetReconciliationField"
         @save-asset-account="saveAssetAccount"
         @save-asset-cash-entry="saveAssetCashEntry"
         @save-asset-trade-entry="saveAssetTradeEntry"
+        @save-asset-reconciliation="saveAssetReconciliation"
         @reset-asset-account-form="resetAssetAccountForm"
         @reset-asset-cash-form="resetAssetCashForm"
         @reset-asset-trade-form="resetAssetTradeForm"
+        @reset-asset-reconciliation-form="resetAssetReconciliationForm"
         @edit-asset-cash-entry="editAssetCashEntry"
         @edit-asset-trade-entry="editAssetTradeEntry"
         @delete-asset-account="deleteAssetAccount"
         @delete-asset-cash-entry="deleteAssetCashEntry"
         @delete-asset-trade-entry="deleteAssetTradeEntry"
+        @delete-asset-reconciliation="deleteAssetReconciliation"
       />
     </div>
 
@@ -534,18 +541,21 @@ const {
   assetAccounts,
   assetCashEntries,
   assetTradeEntries,
+  assetReconciliationEntries,
   assetBaseCurrency,
   assetSummary,
   assetAccountsSummary,
   assetHoldings,
   assetWarnings,
   assetQuoteGaps,
+  assetReconciliation,
   assetAccountAllocation,
   assetMarketAllocation,
   assetContributors,
   assetAccountForm,
   assetCashForm,
   assetTradeForm,
+  assetReconciliationForm,
   institutionalOverlay,
   backendUrl,
   searchSymbols,
@@ -640,18 +650,22 @@ const {
   updateAssetAccountField,
   updateAssetCashField,
   updateAssetTradeField,
+  updateAssetReconciliationField,
   editAssetAccount,
   editAssetCashEntry,
   editAssetTradeEntry,
   resetAssetAccountForm,
   resetAssetCashForm,
   resetAssetTradeForm,
+  resetAssetReconciliationForm,
   saveAssetAccount,
   saveAssetCashEntry,
   saveAssetTradeEntry,
+  saveAssetReconciliation,
   deleteAssetAccount,
   deleteAssetCashEntry,
   deleteAssetTradeEntry,
+  deleteAssetReconciliation,
   updateScreenerFilter,
   runScreener,
   saveScreenerPreset,
@@ -1075,6 +1089,11 @@ function handleAssetCashField(payload) {
 function handleAssetTradeField(payload) {
   if (!payload?.key) return;
   updateAssetTradeField(payload.key, payload.value);
+}
+
+function handleAssetReconciliationField(payload) {
+  if (!payload?.key) return;
+  updateAssetReconciliationField(payload.key, payload.value);
 }
 
 function handleJournalFilter(payload) {

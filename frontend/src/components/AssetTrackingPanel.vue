@@ -12,12 +12,15 @@
       </button>
     </div>
 
-    <div v-if="assetWarnings.length || assetQuoteGaps.length" class="asset-warning-stack">
+    <div v-if="assetWarnings.length || assetQuoteGaps.length || reconciliationGapItems.length" class="asset-warning-stack">
       <div v-for="warning in assetWarnings" :key="warning" class="asset-warning-card">
         {{ warning }}
       </div>
       <div v-for="gap in assetQuoteGaps" :key="`${gap.account_id}-${gap.ticker}`" class="asset-warning-card">
         {{ gap.ticker }} 暫時抓不到最新報價，目前未納入未實現損益。
+      </div>
+      <div v-for="item in reconciliationGapItems" :key="`reco-${item.account_id}-${item.snapshot_id}`" class="asset-warning-card">
+        Reconciliation gap for {{ item.account_name }}: {{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}
       </div>
     </div>
 
@@ -25,6 +28,16 @@
       <article v-for="card in summaryCards" :key="card.key" class="asset-summary-card">
         <span>{{ card.label }}</span>
         <strong :class="card.tone">{{ card.value }}</strong>
+      </article>
+      <article class="asset-summary-card">
+        <span>å°å¸³å·®ç•°</span>
+        <strong :class="Number(reconciliationSummary.difference_total_base || 0) >= 0 ? 'up' : 'dn'">
+          {{ formatSignedCurrency(reconciliationSummary.difference_total_base, assetBaseCurrency) }}
+        </strong>
+      </article>
+      <article class="asset-summary-card">
+        <span>å¾…è¤‡æŸ¥å¸³æˆ¶</span>
+        <strong class="neutral">{{ reconciliationSummary.gap_account_count || 0 }}</strong>
       </article>
     </div>
 
@@ -215,6 +228,84 @@
       </div>
     </section>
 
+    <div class="asset-form-grid">
+      <section class="asset-card">
+        <div class="asset-card-head">
+          <div class="asset-card-title">å°å¸³å¿«ç…§</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-reconciliation-form')">æ¸…ç©º</button>
+        </div>
+        <div class="bt-row">
+          <div class="bt-label">å¸³æˆ¶</div>
+          <select class="bt-sel" :value="assetReconciliationForm.account_id" @change="$emit('update-asset-reconciliation-field', { key: 'account_id', value: $event.target.value })">
+            <option value="">è«‹é¸æ“‡å¸³æˆ¶</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">æ—¥æœŸ</div><input class="bt-inp" type="datetime-local" :value="assetReconciliationForm.snapshot_date" @input="$emit('update-asset-reconciliation-field', { key: 'snapshot_date', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">å¯¦éš›ç¾é‡‘</div><input class="bt-inp" type="number" :value="assetReconciliationForm.cash_actual" @input="$emit('update-asset-reconciliation-field', { key: 'cash_actual', value: $event.target.value })" placeholder="æ‰‹å‹•å°å¸³ç¾é‡‘"></div>
+        <div class="bt-row"><div class="bt-label">å¯¦éš›å¸‚å€¼</div><input class="bt-inp" type="number" :value="assetReconciliationForm.market_value_actual" @input="$emit('update-asset-reconciliation-field', { key: 'market_value_actual', value: $event.target.value })" placeholder="æ‰‹å‹•å°å¸³æŒå€‰å¸‚å€¼"></div>
+        <div class="journal-text-row">
+          <div class="bt-label">å‚™è¨»</div>
+          <textarea class="journal-textarea" :value="assetReconciliationForm.note" @input="$emit('update-asset-reconciliation-field', { key: 'note', value: $event.target.value })"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="run-btn" type="button" @click="$emit('save-asset-reconciliation')">è¨˜éŒ„å°å¸³</button>
+        </div>
+
+        <div class="asset-subsection">
+          <div class="asset-card-title">æœ€è¿‘å°å¸³</div>
+          <div v-if="assetReconciliationEntries.length" class="asset-list">
+            <div v-for="entry in assetReconciliationEntries" :key="entry.id" class="asset-list-item static">
+              <div>
+                <strong>{{ resolveAccountName(entry.account_id) }}</strong>
+                <div class="bt-trade-sub">{{ formatDateTime(entry.snapshot_date) }}</div>
+              </div>
+              <div class="asset-list-metrics">
+                <span>{{ reconciliationEntryLabel(entry) }}</span>
+                <button class="asset-inline-btn danger" type="button" @click="$emit('delete-asset-reconciliation', entry.id)">åˆªé™¤</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="bt-history-empty">å°šç„¡å°å¸³å¿«ç…§ã€‚</div>
+        </div>
+      </section>
+
+      <section class="asset-card">
+        <div class="asset-card-title">å°å¸³æ‘˜è¦</div>
+        <div v-if="reconciliationItems.length" class="asset-list">
+          <div v-for="item in reconciliationItems" :key="item.snapshot_id" class="asset-list-item static">
+            <div>
+              <strong>{{ item.account_name }}</strong>
+              <div class="bt-trade-sub">{{ formatDateTime(item.snapshot_date) }}</div>
+            </div>
+            <div class="asset-list-metrics">
+              <span :class="item.has_gap ? reconciliationTone(item.total_difference) : 'neutral'">{{ reconciliationTotalLabel(item) }}</span>
+              <small>{{ item.note || (item.has_gap ? "éœ€è¤‡æŸ¥" : "å·²å°é½Š") }}</small>
+            </div>
+          </div>
+        </div>
+        <div v-else class="bt-history-empty">å°šç„¡å°å¸³æ‘˜è¦ã€‚</div>
+
+        <div class="asset-subsection">
+          <div class="asset-card-title">å·®ç•°åˆé …</div>
+          <div v-if="reconciliationItems.length" class="asset-list">
+            <div v-for="item in reconciliationItems" :key="`details-${item.snapshot_id}`" class="asset-list-item static">
+              <div>
+                <strong>{{ item.account_name }}</strong>
+                <div class="bt-trade-sub">
+                  Cash {{ formatSignedCurrency(item.cash_difference, assetBaseCurrency) }} Â· MV {{ formatSignedCurrency(item.market_value_difference, assetBaseCurrency) }}
+                </div>
+              </div>
+              <div class="asset-list-metrics">
+                <span>{{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="bt-history-empty">å°šç„¡å·®ç•°è³‡æ–™ã€‚</div>
+        </div>
+      </section>
+    </div>
+
     <div class="asset-analytics-grid">
       <section class="asset-card">
         <div class="asset-card-title">帳戶配置</div>
@@ -326,14 +417,17 @@ const props = defineProps({
   assetHoldings: { type: Array, default: () => [] },
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
+  assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
   assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
   assetCashEntries: { type: Array, default: () => [] },
   assetTradeEntries: { type: Array, default: () => [] },
+  assetReconciliationEntries: { type: Array, default: () => [] },
   assetAccountForm: { type: Object, required: true },
   assetCashForm: { type: Object, required: true },
   assetTradeForm: { type: Object, required: true },
+  assetReconciliationForm: { type: Object, required: true },
 });
 
 const emit = defineEmits([
@@ -342,18 +436,26 @@ const emit = defineEmits([
   "update-asset-account-field",
   "update-asset-cash-field",
   "update-asset-trade-field",
+  "update-asset-reconciliation-field",
   "save-asset-account",
   "save-asset-cash-entry",
   "save-asset-trade-entry",
+  "save-asset-reconciliation",
   "reset-asset-account-form",
   "reset-asset-cash-form",
   "reset-asset-trade-form",
+  "reset-asset-reconciliation-form",
   "edit-asset-cash-entry",
   "edit-asset-trade-entry",
   "delete-asset-account",
   "delete-asset-cash-entry",
   "delete-asset-trade-entry",
+  "delete-asset-reconciliation",
 ]);
+
+const reconciliationSummary = computed(() => props.assetReconciliation?.summary || {});
+const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
+const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
 
 const cashFlowTypes = [
   { value: "deposit", label: "入金" },
@@ -443,6 +545,26 @@ function contributorLabel(item) {
   return `${item.ticker} · ${formatSignedCurrency(item.unrealized_pnl_base, props.assetBaseCurrency)}`;
 }
 
+function reconciliationEntryLabel(entry) {
+  const parts = [];
+  if (entry?.cash_actual != null) {
+    parts.push(`Cash ${formatCurrency(entry.cash_actual)}`);
+  }
+  if (entry?.market_value_actual != null) {
+    parts.push(`MV ${formatCurrency(entry.market_value_actual)}`);
+  }
+  return parts.join(" | ") || "Snapshot";
+}
+
+function reconciliationTotalLabel(item) {
+  if (item?.total_difference == null) return "No diff";
+  return formatSignedCurrency(item.total_difference, props.assetBaseCurrency);
+}
+
+function reconciliationTone(value) {
+  return Number(value || 0) >= 0 ? "up" : "dn";
+}
+
 function holdingWeight(holding) {
   const total = Number(props.assetSummary.total_asset_value_base || 0);
   const marketValue = Number(holding?.market_value_base || 0);
@@ -499,7 +621,7 @@ function holdingWeight(holding) {
 }
 
 .asset-summary-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .asset-form-grid {
@@ -558,6 +680,11 @@ function holdingWeight(holding) {
   color: var(--text2);
   cursor: pointer;
   font-size: 10px;
+}
+
+.asset-inline-btn.danger {
+  background: rgba(255, 77, 106, 0.12);
+  color: #ffb3c2;
 }
 
 .asset-checkbox {
@@ -684,7 +811,7 @@ function holdingWeight(holding) {
 
 @media (max-width: 1320px) {
   .asset-summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .asset-trade-grid {

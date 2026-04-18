@@ -250,6 +250,22 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     deleteAssetTrade(entryId) {
       return request(`/api/assets/trades/${entryId}`, { method: "DELETE" });
     },
+    listAssetReconciliation(options = {}) {
+      const params = new URLSearchParams();
+      if (options.account_id != null) params.set("account_id", String(options.account_id));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/reconciliation${query ? `?${query}` : ""}`);
+    },
+    createAssetReconciliation(payload, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      const query = params.toString();
+      return request(`/api/assets/reconciliation${query ? `?${query}` : ""}`, buildJsonRequest("POST", payload));
+    },
+    deleteAssetReconciliation(snapshotId) {
+      return request(`/api/assets/reconciliation/${snapshotId}`, { method: "DELETE" });
+    },
     getAssetPortfolioCurrent(options = {}) {
       const params = new URLSearchParams();
       if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
