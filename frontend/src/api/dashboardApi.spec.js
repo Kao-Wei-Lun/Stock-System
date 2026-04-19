@@ -248,6 +248,49 @@ describe("dashboardApi", () => {
     });
   });
 
+  it("builds advanced asset tracking endpoints", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ range: "1y", summary: {} }))
+      .mockImplementationOnce(() => jsonResponse({ items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ dry_run: true, items: [] }))
+      .mockImplementationOnce(() => jsonResponse({ summary: { entry_count: 0 } }))
+      .mockImplementationOnce(() => jsonResponse({ generated_at: "2026-04-19T00:00:00+00:00" }));
+    const api = createDashboardApi();
+
+    await api.listAssetPriceOverrides({ ticker: "AAPL", limit: 10 });
+    await api.listAssetFxRates({ from: "2026-04-01", to: "2026-04-19", from_currency: "USD", to_currency: "TWD", limit: 30 });
+    await api.listAssetAdjustments({ account_id: 4, ticker: "AAPL", limit: 20 });
+    await api.getAssetPerformance({ range: "1y", refresh: false });
+    await api.getAssetAlertsCurrent({ refresh: true, performance_range: "90d" });
+    await api.importAssetTradesCsv({ csv_text: "trade_date,ticker\\n2026-04-18,AAPL", dry_run: true });
+    await api.previewAssetJournalImport({ account_id: 4, limit: 20 });
+    await api.recomputeAssetTracking({ refresh: true, performance_range: "1y" });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/assets/price-overrides?ticker=AAPL&limit=10", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/assets/fx-rates?from=2026-04-01&to=2026-04-19&from_currency=USD&to_currency=TWD&limit=30", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/assets/adjustments?account_id=4&ticker=AAPL&limit=20", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, "/api/assets/performance?range=1y&refresh=false", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(5, "/api/assets/alerts/current?refresh=true&performance_range=90d", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(6, "/api/assets/import/trades-csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csv_text: "trade_date,ticker\\n2026-04-18,AAPL", dry_run: true }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(7, "/api/assets/journal-import/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: 4, limit: 20 }),
+    });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(8, "/api/assets/recompute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh: true, performance_range: "1y" }),
+    });
+  });
+
   it("creates journal trades with JSON payloads", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 11, ticker: "AAPL" }));
     const api = createDashboardApi();

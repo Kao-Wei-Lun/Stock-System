@@ -4,24 +4,54 @@
       <div>
         <div class="bt-section-title">資產追蹤</div>
         <div class="asset-toolbar-copy">
-          以手動帳戶、現金事件與台美股交易為來源，自動推導目前資產現值與損益。
+          以手動帳戶、現金事件、交易流水、價格覆蓋與調整事件為來源，自動重建資產現值、績效與風險提醒。
+        </div>
+        <div v-if="assetLastRecompute?.generated_at" class="asset-toolbar-meta">
+          最近重算：{{ formatDateTime(assetLastRecompute.generated_at) }}
         </div>
       </div>
-      <button class="hero-action" type="button" :disabled="assetLoading" @click="$emit('reload-asset-data')">
-        {{ assetLoading ? "重算中..." : "重新估值" }}
-      </button>
+      <div class="asset-toolbar-actions">
+        <button class="sync-btn" type="button" :disabled="assetLoading" @click="$emit('reload-asset-data')">
+          {{ assetLoading ? "載入中..." : "重新估值" }}
+        </button>
+        <button class="hero-action" type="button" :disabled="assetLoading" @click="$emit('recompute-asset-tracking')">
+          {{ assetLoading ? "重算中..." : "批次重算" }}
+        </button>
+      </div>
     </div>
 
-    <div v-if="assetWarnings.length || assetQuoteGaps.length || reconciliationGapItems.length" class="asset-warning-stack">
+    <div v-if="assetWarnings.length || assetQuoteGaps.length || assetAlerts.length || reconciliationGapItems.length" class="asset-warning-stack">
       <div v-for="warning in assetWarnings" :key="warning" class="asset-warning-card">
         {{ warning }}
       </div>
       <div v-for="gap in assetQuoteGaps" :key="`${gap.account_id}-${gap.ticker}`" class="asset-warning-card">
-        {{ gap.ticker }} 暫時抓不到最新報價，目前未納入未實現損益。
+        {{ gap.ticker }} 暫時抓不到最新報價，目前未納入估值；可補手動價格覆蓋。
       </div>
       <div v-for="item in reconciliationGapItems" :key="`reco-${item.account_id}-${item.snapshot_id}`" class="asset-warning-card">
-        Reconciliation gap for {{ item.account_name }}: {{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}
+        {{ item.account_name }} 對帳差異 {{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}
       </div>
+      <div
+        v-for="alert in assetAlerts"
+        :key="`${alert.code}-${alert.title}`"
+        class="asset-warning-card"
+        :class="alert.level === 'info' ? 'info' : 'warning'"
+      >
+        <strong>{{ alert.title }}</strong>
+        <span>{{ alert.message }}</span>
+      </div>
+    </div>
+
+    <div class="asset-range-row">
+      <button
+        v-for="item in performanceRangeOptions"
+        :key="item.value"
+        class="asset-range-btn"
+        :class="{ active: assetPerformanceRange === item.value }"
+        type="button"
+        @click="$emit('set-asset-performance-range', item.value)"
+      >
+        {{ item.label }}
+      </button>
     </div>
 
     <div class="asset-summary-grid">
@@ -29,17 +59,84 @@
         <span>{{ card.label }}</span>
         <strong :class="card.tone">{{ card.value }}</strong>
       </article>
-      <article class="asset-summary-card">
-        <span>å°å¸³å·®ç•°</span>
-        <strong :class="Number(reconciliationSummary.difference_total_base || 0) >= 0 ? 'up' : 'dn'">
-          {{ formatSignedCurrency(reconciliationSummary.difference_total_base, assetBaseCurrency) }}
-        </strong>
-      </article>
-      <article class="asset-summary-card">
-        <span>å¾…è¤‡æŸ¥å¸³æˆ¶</span>
-        <strong class="neutral">{{ reconciliationSummary.gap_account_count || 0 }}</strong>
-      </article>
     </div>
+
+    <section class="asset-card asset-card-wide">
+      <div class="asset-card-head">
+        <div>
+          <div class="asset-card-title">績效概覽</div>
+          <div class="bt-trade-sub">
+            {{ assetPerformanceSeries.length }} 個觀察點 · 最新日期 {{ assetPerformanceSummary.latest_snapshot_date || "—" }}
+          </div>
+        </div>
+        <div class="asset-list-metrics">
+          <span>{{ formatSignedCurrency(assetPerformanceSummary.true_performance_base, assetBaseCurrency) }}</span>
+          <small>真實績效</small>
+        </div>
+      </div>
+      <div class="asset-performance-grid">
+        <div class="asset-curve-card">
+          <div class="asset-curve-metrics">
+            <div class="asset-mini-block">
+              <span>區間起點</span>
+              <strong>{{ formatCurrency(assetPerformanceSummary.start_value_base) }}</strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>區間終點</span>
+              <strong>{{ formatCurrency(assetPerformanceSummary.end_value_base) }}</strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>期間淨流入</span>
+              <strong>{{ formatSignedCurrency(assetPerformanceSummary.net_flow_base, assetBaseCurrency) }}</strong>
+            </div>
+          </div>
+          <div class="asset-sparkline-shell">
+            <svg viewBox="0 0 320 120" class="asset-sparkline">
+              <path v-if="performanceSparklinePath" :d="performanceSparklinePath" class="asset-sparkline-line" />
+            </svg>
+          </div>
+        </div>
+        <div class="asset-side-analytics">
+          <div class="asset-mini-block">
+            <span>已實現 / 未實現</span>
+            <strong>{{ realizedVsUnrealizedLabel }}</strong>
+          </div>
+          <div class="asset-mini-block">
+            <span>高水位</span>
+            <strong>{{ formatCurrency(assetPerformanceSummary.high_water_mark_base) }}</strong>
+          </div>
+          <div class="asset-mini-block">
+            <span>最大回撤</span>
+            <strong :class="Number(assetPerformanceSummary.max_drawdown_pct || 0) >= 0 ? 'neutral' : 'dn'">
+              {{ formatPercent(assetPerformanceSummary.max_drawdown_pct) }}
+            </strong>
+          </div>
+          <div class="asset-mini-block">
+            <span>提醒數</span>
+            <strong>{{ assetAlerts.length }}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="asset-subsection">
+        <div class="asset-card-head">
+          <div class="asset-card-title">月度熱力圖</div>
+          <div class="bt-trade-sub">依期間真實績效計算</div>
+        </div>
+        <div v-if="assetMonthlyHeatmap.length" class="asset-heatmap-grid">
+          <div
+            v-for="item in assetMonthlyHeatmap"
+            :key="item.month"
+            class="asset-heatmap-cell"
+            :class="heatmapTone(item.return_pct)"
+          >
+            <strong>{{ item.month }}</strong>
+            <span>{{ formatPercent(item.return_pct) }}</span>
+          </div>
+        </div>
+        <div v-else class="bt-history-empty">目前沒有足夠的歷史資料可繪製熱力圖。</div>
+      </div>
+    </section>
 
     <div class="asset-form-grid">
       <section class="asset-card">
@@ -228,32 +325,31 @@
       </div>
     </section>
 
-    <div class="asset-form-grid">
+    <div class="asset-form-grid asset-form-grid-3">
       <section class="asset-card">
         <div class="asset-card-head">
-          <div class="asset-card-title">å°å¸³å¿«ç…§</div>
-          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-reconciliation-form')">æ¸…ç©º</button>
+          <div class="asset-card-title">對帳快照</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-reconciliation-form')">清空</button>
         </div>
         <div class="bt-row">
-          <div class="bt-label">å¸³æˆ¶</div>
+          <div class="bt-label">帳戶</div>
           <select class="bt-sel" :value="assetReconciliationForm.account_id" @change="$emit('update-asset-reconciliation-field', { key: 'account_id', value: $event.target.value })">
-            <option value="">è«‹é¸æ“‡å¸³æˆ¶</option>
+            <option value="">請選擇帳戶</option>
             <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
           </select>
         </div>
-        <div class="bt-row"><div class="bt-label">æ—¥æœŸ</div><input class="bt-inp" type="datetime-local" :value="assetReconciliationForm.snapshot_date" @input="$emit('update-asset-reconciliation-field', { key: 'snapshot_date', value: $event.target.value })"></div>
-        <div class="bt-row"><div class="bt-label">å¯¦éš›ç¾é‡‘</div><input class="bt-inp" type="number" :value="assetReconciliationForm.cash_actual" @input="$emit('update-asset-reconciliation-field', { key: 'cash_actual', value: $event.target.value })" placeholder="æ‰‹å‹•å°å¸³ç¾é‡‘"></div>
-        <div class="bt-row"><div class="bt-label">å¯¦éš›å¸‚å€¼</div><input class="bt-inp" type="number" :value="assetReconciliationForm.market_value_actual" @input="$emit('update-asset-reconciliation-field', { key: 'market_value_actual', value: $event.target.value })" placeholder="æ‰‹å‹•å°å¸³æŒå€‰å¸‚å€¼"></div>
+        <div class="bt-row"><div class="bt-label">日期</div><input class="bt-inp" type="datetime-local" :value="assetReconciliationForm.snapshot_date" @input="$emit('update-asset-reconciliation-field', { key: 'snapshot_date', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">實際現金</div><input class="bt-inp" type="number" :value="assetReconciliationForm.cash_actual" @input="$emit('update-asset-reconciliation-field', { key: 'cash_actual', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">實際市值</div><input class="bt-inp" type="number" :value="assetReconciliationForm.market_value_actual" @input="$emit('update-asset-reconciliation-field', { key: 'market_value_actual', value: $event.target.value })"></div>
         <div class="journal-text-row">
-          <div class="bt-label">å‚™è¨»</div>
+          <div class="bt-label">備註</div>
           <textarea class="journal-textarea" :value="assetReconciliationForm.note" @input="$emit('update-asset-reconciliation-field', { key: 'note', value: $event.target.value })"></textarea>
         </div>
         <div class="asset-action-row">
-          <button class="run-btn" type="button" @click="$emit('save-asset-reconciliation')">è¨˜éŒ„å°å¸³</button>
+          <button class="run-btn" type="button" @click="$emit('save-asset-reconciliation')">記錄對帳</button>
         </div>
-
         <div class="asset-subsection">
-          <div class="asset-card-title">æœ€è¿‘å°å¸³</div>
+          <div class="asset-card-title">最近對帳</div>
           <div v-if="assetReconciliationEntries.length" class="asset-list">
             <div v-for="entry in assetReconciliationEntries" :key="entry.id" class="asset-list-item static">
               <div>
@@ -262,49 +358,262 @@
               </div>
               <div class="asset-list-metrics">
                 <span>{{ reconciliationEntryLabel(entry) }}</span>
-                <button class="asset-inline-btn danger" type="button" @click="$emit('delete-asset-reconciliation', entry.id)">åˆªé™¤</button>
+                <button class="asset-inline-btn danger" type="button" @click="$emit('delete-asset-reconciliation', entry.id)">刪除</button>
               </div>
             </div>
           </div>
-          <div v-else class="bt-history-empty">å°šç„¡å°å¸³å¿«ç…§ã€‚</div>
+          <div v-else class="bt-history-empty">尚無對帳快照。</div>
         </div>
       </section>
 
       <section class="asset-card">
-        <div class="asset-card-title">å°å¸³æ‘˜è¦</div>
-        <div v-if="reconciliationItems.length" class="asset-list">
-          <div v-for="item in reconciliationItems" :key="item.snapshot_id" class="asset-list-item static">
-            <div>
-              <strong>{{ item.account_name }}</strong>
-              <div class="bt-trade-sub">{{ formatDateTime(item.snapshot_date) }}</div>
-            </div>
-            <div class="asset-list-metrics">
-              <span :class="item.has_gap ? reconciliationTone(item.total_difference) : 'neutral'">{{ reconciliationTotalLabel(item) }}</span>
-              <small>{{ item.note || (item.has_gap ? "éœ€è¤‡æŸ¥" : "å·²å°é½Š") }}</small>
-            </div>
-          </div>
+        <div class="asset-card-head">
+          <div class="asset-card-title">手動價格覆蓋</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-price-override-form')">清空</button>
         </div>
-        <div v-else class="bt-history-empty">å°šç„¡å°å¸³æ‘˜è¦ã€‚</div>
-
+        <div class="bt-row">
+          <div class="bt-label">帳戶</div>
+          <select class="bt-sel" :value="assetPriceOverrideForm.account_id" @change="$emit('update-asset-price-override-field', { key: 'account_id', value: $event.target.value })">
+            <option value="">全域套用</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">Ticker</div><input class="bt-inp" :value="assetPriceOverrideForm.ticker" @input="$emit('update-asset-price-override-field', { key: 'ticker', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">生效時間</div><input class="bt-inp" type="datetime-local" :value="assetPriceOverrideForm.effective_at" @input="$emit('update-asset-price-override-field', { key: 'effective_at', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">價格</div><input class="bt-inp" type="number" step="0.0001" :value="assetPriceOverrideForm.price" @input="$emit('update-asset-price-override-field', { key: 'price', value: $event.target.value })"></div>
+        <div class="bt-row">
+          <div class="bt-label">幣別</div>
+          <select class="bt-sel" :value="assetPriceOverrideForm.currency" @change="$emit('update-asset-price-override-field', { key: 'currency', value: $event.target.value })">
+            <option value="TWD">TWD</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">換算匯率</div><input class="bt-inp" type="number" step="0.0001" :value="assetPriceOverrideForm.fx_rate_to_base" @input="$emit('update-asset-price-override-field', { key: 'fx_rate_to_base', value: $event.target.value })"></div>
+        <label class="asset-checkbox">
+          <input type="checkbox" :checked="assetPriceOverrideForm.force_override" @change="$emit('update-asset-price-override-field', { key: 'force_override', value: $event.target.checked })">
+          <span>強制覆蓋即時報價</span>
+        </label>
+        <div class="journal-text-row">
+          <div class="bt-label">備註</div>
+          <textarea class="journal-textarea" :value="assetPriceOverrideForm.note" @input="$emit('update-asset-price-override-field', { key: 'note', value: $event.target.value })"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="run-btn" type="button" @click="$emit('save-asset-price-override')">{{ assetPriceOverrideForm.id ? "更新覆蓋" : "建立覆蓋" }}</button>
+          <button v-if="assetPriceOverrideForm.id" class="sync-btn" type="button" @click="$emit('delete-asset-price-override', assetPriceOverrideForm.id)">刪除</button>
+        </div>
         <div class="asset-subsection">
-          <div class="asset-card-title">å·®ç•°åˆé …</div>
-          <div v-if="reconciliationItems.length" class="asset-list">
-            <div v-for="item in reconciliationItems" :key="`details-${item.snapshot_id}`" class="asset-list-item static">
+          <div class="asset-card-title">最近價格覆蓋</div>
+          <div v-if="assetPriceOverrides.length" class="asset-list">
+            <button v-for="item in assetPriceOverrides" :key="item.id" type="button" class="asset-list-item" @click="$emit('edit-asset-price-override', item)">
               <div>
-                <strong>{{ item.account_name }}</strong>
-                <div class="bt-trade-sub">
-                  Cash {{ formatSignedCurrency(item.cash_difference, assetBaseCurrency) }} Â· MV {{ formatSignedCurrency(item.market_value_difference, assetBaseCurrency) }}
-                </div>
+                <strong>{{ item.ticker }}</strong>
+                <div class="bt-trade-sub">{{ item.account_id ? resolveAccountName(item.account_id) : "全域" }} · {{ formatDateTime(item.effective_at) }}</div>
               </div>
               <div class="asset-list-metrics">
-                <span>{{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}</span>
+                <span>{{ formatCurrency(item.price, item.currency) }}</span>
+                <small>{{ item.force_override ? "強制" : "備援" }}</small>
               </div>
-            </div>
+            </button>
           </div>
-          <div v-else class="bt-history-empty">å°šç„¡å·®ç•°è³‡æ–™ã€‚</div>
+          <div v-else class="bt-history-empty">尚無價格覆蓋。</div>
+        </div>
+      </section>
+
+      <section class="asset-card">
+        <div class="asset-card-head">
+          <div class="asset-card-title">FX 匯率</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-fx-rate-form')">清空</button>
+        </div>
+        <div class="bt-row"><div class="bt-label">日期</div><input class="bt-inp" type="date" :value="assetFxRateForm.snapshot_date" @input="$emit('update-asset-fx-rate-field', { key: 'snapshot_date', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">From</div><input class="bt-inp" :value="assetFxRateForm.from_currency" @input="$emit('update-asset-fx-rate-field', { key: 'from_currency', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">To</div><input class="bt-inp" :value="assetFxRateForm.to_currency" @input="$emit('update-asset-fx-rate-field', { key: 'to_currency', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">Rate</div><input class="bt-inp" type="number" step="0.0001" :value="assetFxRateForm.rate" @input="$emit('update-asset-fx-rate-field', { key: 'rate', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">來源</div><input class="bt-inp" :value="assetFxRateForm.source" @input="$emit('update-asset-fx-rate-field', { key: 'source', value: $event.target.value })"></div>
+        <div class="journal-text-row">
+          <div class="bt-label">備註</div>
+          <textarea class="journal-textarea" :value="assetFxRateForm.note" @input="$emit('update-asset-fx-rate-field', { key: 'note', value: $event.target.value })"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="run-btn" type="button" @click="$emit('save-asset-fx-rate')">{{ assetFxRateForm.id ? "更新匯率" : "建立匯率" }}</button>
+          <button v-if="assetFxRateForm.id" class="sync-btn" type="button" @click="$emit('delete-asset-fx-rate', assetFxRateForm.id)">刪除</button>
+        </div>
+        <div class="asset-subsection">
+          <div class="asset-card-title">最近匯率</div>
+          <div v-if="assetFxRates.length" class="asset-list">
+            <button v-for="item in assetFxRates" :key="item.id" type="button" class="asset-list-item" @click="$emit('edit-asset-fx-rate', item)">
+              <div>
+                <strong>{{ item.from_currency }}/{{ item.to_currency }}</strong>
+                <div class="bt-trade-sub">{{ item.snapshot_date }}</div>
+              </div>
+              <div class="asset-list-metrics">
+                <span>{{ formatNumber(item.rate, 4) }}</span>
+                <small>{{ item.source || "manual" }}</small>
+              </div>
+            </button>
+          </div>
+          <div v-else class="bt-history-empty">尚無 FX 設定。</div>
         </div>
       </section>
     </div>
+
+    <div class="asset-form-grid asset-form-grid-3">
+      <section class="asset-card">
+        <div class="asset-card-head">
+          <div class="asset-card-title">調整事件</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-adjustment-form')">清空</button>
+        </div>
+        <div class="bt-row">
+          <div class="bt-label">帳戶</div>
+          <select class="bt-sel" :value="assetAdjustmentForm.account_id" @change="$emit('update-asset-adjustment-field', { key: 'account_id', value: $event.target.value })">
+            <option value="">請選擇帳戶</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">日期</div><input class="bt-inp" type="datetime-local" :value="assetAdjustmentForm.event_date" @input="$emit('update-asset-adjustment-field', { key: 'event_date', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">Ticker</div><input class="bt-inp" :value="assetAdjustmentForm.ticker" @input="$emit('update-asset-adjustment-field', { key: 'ticker', value: $event.target.value })"></div>
+        <div class="bt-row">
+          <div class="bt-label">事件類型</div>
+          <select class="bt-sel" :value="assetAdjustmentForm.event_type" @change="$emit('update-asset-adjustment-field', { key: 'event_type', value: $event.target.value })">
+            <option value="adjustment">一般調整</option>
+            <option value="split">股票分割</option>
+            <option value="symbol_change">代號變更</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">數量調整</div><input class="bt-inp" type="number" step="0.0001" :value="assetAdjustmentForm.quantity_delta" @input="$emit('update-asset-adjustment-field', { key: 'quantity_delta', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">成本調整</div><input class="bt-inp" type="number" step="0.0001" :value="assetAdjustmentForm.cost_basis_delta" @input="$emit('update-asset-adjustment-field', { key: 'cost_basis_delta', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">現金調整</div><input class="bt-inp" type="number" step="0.0001" :value="assetAdjustmentForm.cash_delta" @input="$emit('update-asset-adjustment-field', { key: 'cash_delta', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">Split Ratio</div><input class="bt-inp" type="number" step="0.0001" :value="assetAdjustmentForm.split_ratio" @input="$emit('update-asset-adjustment-field', { key: 'split_ratio', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">新 Ticker</div><input class="bt-inp" :value="assetAdjustmentForm.target_ticker" @input="$emit('update-asset-adjustment-field', { key: 'target_ticker', value: $event.target.value })"></div>
+        <div class="journal-text-row">
+          <div class="bt-label">備註</div>
+          <textarea class="journal-textarea" :value="assetAdjustmentForm.note" @input="$emit('update-asset-adjustment-field', { key: 'note', value: $event.target.value })"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="run-btn" type="button" @click="$emit('save-asset-adjustment')">{{ assetAdjustmentForm.id ? "更新事件" : "建立事件" }}</button>
+          <button v-if="assetAdjustmentForm.id" class="sync-btn" type="button" @click="$emit('delete-asset-adjustment', assetAdjustmentForm.id)">刪除</button>
+        </div>
+        <div class="asset-subsection">
+          <div class="asset-card-title">最近調整</div>
+          <div v-if="assetAdjustments.length" class="asset-list">
+            <button v-for="item in assetAdjustments" :key="item.id" type="button" class="asset-list-item" @click="$emit('edit-asset-adjustment', item)">
+              <div>
+                <strong>{{ item.ticker }} · {{ item.event_type }}</strong>
+                <div class="bt-trade-sub">{{ resolveAccountName(item.account_id) }} · {{ formatDateTime(item.event_date) }}</div>
+              </div>
+              <div class="asset-list-metrics">
+                <span>{{ adjustmentLabel(item) }}</span>
+                <small>編輯</small>
+              </div>
+            </button>
+          </div>
+          <div v-else class="bt-history-empty">尚無調整事件。</div>
+        </div>
+      </section>
+
+      <section class="asset-card">
+        <div class="asset-card-head">
+          <div class="asset-card-title">交易 CSV 匯入</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-import-forms')">清空</button>
+        </div>
+        <div class="bt-row">
+          <div class="bt-label">預設帳戶</div>
+          <select class="bt-sel" :value="assetTradeImportForm.default_account_id" @change="$emit('update-asset-trade-import-field', { key: 'default_account_id', value: $event.target.value })">
+            <option value="">需在 CSV 內指定</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="journal-text-row">
+          <div class="bt-label">CSV</div>
+          <textarea class="journal-textarea asset-import-textarea" :value="assetTradeImportForm.csv_text" @input="$emit('update-asset-trade-import-field', { key: 'csv_text', value: $event.target.value })" placeholder="trade_date,ticker,side,quantity,price"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="sync-btn" type="button" @click="$emit('import-asset-trades-csv', { dryRun: true })">預覽</button>
+          <button class="run-btn" type="button" @click="$emit('import-asset-trades-csv', { dryRun: false })">正式匯入</button>
+        </div>
+        <div class="asset-subsection">
+          <div class="asset-card-title">結果</div>
+          <div v-if="assetTradeImportResult" class="asset-result-box">
+            <strong>{{ importSummaryLabel(assetTradeImportResult) }}</strong>
+            <div class="bt-trade-sub">錯誤 {{ assetTradeImportResult?.summary?.error_count || 0 }} 筆</div>
+          </div>
+          <div v-else class="bt-history-empty">先貼上 CSV 後預覽。</div>
+        </div>
+      </section>
+
+      <section class="asset-card">
+        <div class="asset-card-head">
+          <div class="asset-card-title">現金 CSV 匯入</div>
+          <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-import-forms')">清空</button>
+        </div>
+        <div class="bt-row">
+          <div class="bt-label">預設帳戶</div>
+          <select class="bt-sel" :value="assetCashImportForm.default_account_id" @change="$emit('update-asset-cash-import-field', { key: 'default_account_id', value: $event.target.value })">
+            <option value="">需在 CSV 內指定</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="journal-text-row">
+          <div class="bt-label">CSV</div>
+          <textarea class="journal-textarea asset-import-textarea" :value="assetCashImportForm.csv_text" @input="$emit('update-asset-cash-import-field', { key: 'csv_text', value: $event.target.value })" placeholder="flow_date,flow_type,amount,currency"></textarea>
+        </div>
+        <div class="asset-action-row">
+          <button class="sync-btn" type="button" @click="$emit('import-asset-cash-csv', { dryRun: true })">預覽</button>
+          <button class="run-btn" type="button" @click="$emit('import-asset-cash-csv', { dryRun: false })">正式匯入</button>
+        </div>
+        <div class="asset-subsection">
+          <div class="asset-card-title">結果</div>
+          <div v-if="assetCashImportResult" class="asset-result-box">
+            <strong>{{ importSummaryLabel(assetCashImportResult) }}</strong>
+            <div class="bt-trade-sub">錯誤 {{ assetCashImportResult?.summary?.error_count || 0 }} 筆</div>
+          </div>
+          <div v-else class="bt-history-empty">先貼上 CSV 後預覽。</div>
+        </div>
+      </section>
+    </div>
+
+    <section class="asset-card asset-card-wide">
+      <div class="asset-card-head">
+        <div>
+          <div class="asset-card-title">Journal 匯入</div>
+          <div class="bt-trade-sub">將交易日誌中的 long 交易轉成資產流水。</div>
+        </div>
+        <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-journal-import-form')">清空</button>
+      </div>
+      <div class="asset-journal-grid">
+        <div class="bt-row">
+          <div class="bt-label">目標帳戶</div>
+          <select class="bt-sel" :value="assetJournalImportForm.account_id" @change="$emit('update-asset-journal-import-field', { key: 'account_id', value: $event.target.value })">
+            <option value="">請選擇帳戶</option>
+            <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <div class="bt-row"><div class="bt-label">Ticker</div><input class="bt-inp" :value="assetJournalImportForm.ticker" @input="$emit('update-asset-journal-import-field', { key: 'ticker', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">市場</div><input class="bt-inp" :value="assetJournalImportForm.market" @input="$emit('update-asset-journal-import-field', { key: 'market', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">策略</div><input class="bt-inp" :value="assetJournalImportForm.strategy_code" @input="$emit('update-asset-journal-import-field', { key: 'strategy_code', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">Tag</div><input class="bt-inp" :value="assetJournalImportForm.tag" @input="$emit('update-asset-journal-import-field', { key: 'tag', value: $event.target.value })"></div>
+        <div class="bt-row"><div class="bt-label">搜尋</div><input class="bt-inp" :value="assetJournalImportForm.search" @input="$emit('update-asset-journal-import-field', { key: 'search', value: $event.target.value })"></div>
+      </div>
+      <div class="asset-action-row">
+        <button class="sync-btn" type="button" @click="$emit('preview-asset-journal-import')">預覽</button>
+        <button class="run-btn" type="button" @click="$emit('import-asset-journal')">正式匯入</button>
+      </div>
+      <div class="asset-subsection">
+        <div class="asset-card-title">預覽結果</div>
+        <div v-if="assetJournalImportPreview?.items?.length" class="asset-list">
+          <div v-for="item in assetJournalImportPreview.items" :key="item.entry_id" class="asset-list-item static">
+            <div>
+              <strong>{{ item.ticker || `#${item.entry_id}` }}</strong>
+              <div class="bt-trade-sub">{{ formatDateTime(item.entry_time) }} → {{ formatDateTime(item.exit_time) }}</div>
+            </div>
+            <div class="asset-list-metrics">
+              <span :class="item.importable ? 'up' : 'neutral'">{{ item.importable ? "可匯入" : item.reason || "略過" }}</span>
+              <small>{{ item.payloads?.length || 0 }} legs</small>
+            </div>
+          </div>
+        </div>
+        <div v-else class="bt-history-empty">先建立預覽。</div>
+      </div>
+    </section>
 
     <div class="asset-analytics-grid">
       <section class="asset-card">
@@ -390,6 +699,7 @@
               <td>
                 <span>{{ holding.last_price == null ? "—" : formatNumber(holding.last_price, 2) }}</span>
                 <small v-if="holding.is_delayed" class="asset-badge delayed">Delayed</small>
+                <small v-if="holding.manual_price_override_id" class="asset-badge manual">Manual</small>
               </td>
               <td>{{ formatCurrency(holding.market_value_base) }}</td>
               <td :class="Number(holding.unrealized_pnl_base || 0) >= 0 ? 'up' : 'dn'">{{ formatSignedCurrency(holding.unrealized_pnl_base, assetBaseCurrency) }}</td>
@@ -410,6 +720,7 @@ import { computed } from "vue";
 const props = defineProps({
   currentTicker: { type: String, required: true },
   assetLoading: { type: Boolean, required: true },
+  assetPerformanceRange: { type: String, default: "1y" },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
   assetAccounts: { type: Array, default: () => [] },
@@ -418,6 +729,18 @@ const props = defineProps({
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
   assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
+  assetPriceOverrides: { type: Array, default: () => [] },
+  assetFxRates: { type: Array, default: () => [] },
+  assetAdjustments: { type: Array, default: () => [] },
+  assetPerformanceSummary: { type: Object, default: () => ({}) },
+  assetPerformanceSeries: { type: Array, default: () => [] },
+  assetMonthlyHeatmap: { type: Array, default: () => [] },
+  assetRealizedVsUnrealized: { type: Array, default: () => [] },
+  assetAlerts: { type: Array, default: () => [] },
+  assetTradeImportResult: { type: Object, default: null },
+  assetCashImportResult: { type: Object, default: null },
+  assetJournalImportPreview: { type: Object, default: null },
+  assetLastRecompute: { type: Object, default: null },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
   assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
@@ -428,34 +751,71 @@ const props = defineProps({
   assetCashForm: { type: Object, required: true },
   assetTradeForm: { type: Object, required: true },
   assetReconciliationForm: { type: Object, required: true },
+  assetPriceOverrideForm: { type: Object, required: true },
+  assetFxRateForm: { type: Object, required: true },
+  assetAdjustmentForm: { type: Object, required: true },
+  assetTradeImportForm: { type: Object, required: true },
+  assetCashImportForm: { type: Object, required: true },
+  assetJournalImportForm: { type: Object, required: true },
 });
 
 const emit = defineEmits([
   "reload-asset-data",
+  "recompute-asset-tracking",
+  "set-asset-performance-range",
   "edit-asset-account",
   "update-asset-account-field",
   "update-asset-cash-field",
   "update-asset-trade-field",
   "update-asset-reconciliation-field",
+  "update-asset-price-override-field",
+  "update-asset-fx-rate-field",
+  "update-asset-adjustment-field",
+  "update-asset-trade-import-field",
+  "update-asset-cash-import-field",
+  "update-asset-journal-import-field",
   "save-asset-account",
   "save-asset-cash-entry",
   "save-asset-trade-entry",
   "save-asset-reconciliation",
+  "save-asset-price-override",
+  "save-asset-fx-rate",
+  "save-asset-adjustment",
+  "import-asset-trades-csv",
+  "import-asset-cash-csv",
+  "preview-asset-journal-import",
+  "import-asset-journal",
   "reset-asset-account-form",
   "reset-asset-cash-form",
   "reset-asset-trade-form",
   "reset-asset-reconciliation-form",
+  "reset-asset-price-override-form",
+  "reset-asset-fx-rate-form",
+  "reset-asset-adjustment-form",
+  "reset-asset-import-forms",
+  "reset-asset-journal-import-form",
   "edit-asset-cash-entry",
   "edit-asset-trade-entry",
+  "edit-asset-price-override",
+  "edit-asset-fx-rate",
+  "edit-asset-adjustment",
   "delete-asset-account",
   "delete-asset-cash-entry",
   "delete-asset-trade-entry",
   "delete-asset-reconciliation",
+  "delete-asset-price-override",
+  "delete-asset-fx-rate",
+  "delete-asset-adjustment",
 ]);
 
-const reconciliationSummary = computed(() => props.assetReconciliation?.summary || {});
-const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
-const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
+const performanceRangeOptions = [
+  { value: "30d", label: "30D" },
+  { value: "90d", label: "90D" },
+  { value: "180d", label: "180D" },
+  { value: "1y", label: "1Y" },
+  { value: "ytd", label: "YTD" },
+  { value: "all", label: "ALL" },
+];
 
 const cashFlowTypes = [
   { value: "deposit", label: "入金" },
@@ -470,14 +830,46 @@ const cashFlowTypes = [
   { value: "adjustment", label: "調整" },
 ];
 
+const reconciliationSummary = computed(() => props.assetReconciliation?.summary || {});
+const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
+const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
+
 const summaryCards = computed(() => [
   { key: "total", label: "總資產現值", value: formatCurrency(props.assetSummary.total_asset_value_base), tone: "neutral" },
+  { key: "true", label: "區間真實績效", value: formatSignedCurrency(props.assetPerformanceSummary.true_performance_base, props.assetBaseCurrency), tone: Number(props.assetPerformanceSummary.true_performance_base || 0) >= 0 ? "up" : "dn" },
+  { key: "return", label: "區間報酬率", value: formatPercent(props.assetPerformanceSummary.true_return_pct), tone: Number(props.assetPerformanceSummary.true_return_pct || 0) >= 0 ? "up" : "dn" },
+  { key: "drawdown", label: "最大回撤", value: formatPercent(props.assetPerformanceSummary.max_drawdown_pct), tone: Number(props.assetPerformanceSummary.max_drawdown_pct || 0) >= 0 ? "neutral" : "dn" },
   { key: "cash", label: "現金總額", value: formatCurrency(props.assetSummary.cash_total_base), tone: "neutral" },
   { key: "market", label: "持倉市值", value: formatCurrency(props.assetSummary.market_value_total_base), tone: "neutral" },
   { key: "unrealized", label: "未實現損益", value: formatSignedCurrency(props.assetSummary.unrealized_total_base, props.assetBaseCurrency), tone: Number(props.assetSummary.unrealized_total_base || 0) >= 0 ? "up" : "dn" },
   { key: "realized", label: "已實現損益", value: formatSignedCurrency(props.assetSummary.realized_total_base, props.assetBaseCurrency), tone: Number(props.assetSummary.realized_total_base || 0) >= 0 ? "up" : "dn" },
-  { key: "positions", label: "持倉檔數", value: String(props.assetSummary.holding_count || 0), tone: "neutral" },
 ]);
+
+const performanceSparklinePath = computed(() => {
+  const points = props.assetPerformanceSeries || [];
+  if (points.length < 2) return "";
+  const values = points
+    .map((item) => Number(item?.total_asset_value_base ?? 0))
+    .filter((value) => Number.isFinite(value));
+  if (values.length < 2) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const width = 320;
+  const height = 120;
+  const xStep = width / Math.max(values.length - 1, 1);
+  return values.map((value, index) => {
+    const x = Number((index * xStep).toFixed(2));
+    const ratio = max === min ? 0.5 : (value - min) / (max - min);
+    const y = Number((height - ratio * (height - 20) - 10).toFixed(2));
+    return `${index === 0 ? "M" : "L"}${x} ${y}`;
+  }).join(" ");
+});
+
+const realizedVsUnrealizedLabel = computed(() => {
+  const realized = formatSignedCurrency(props.assetPerformanceSummary.realized_end_base, props.assetBaseCurrency);
+  const unrealized = formatSignedCurrency(props.assetPerformanceSummary.unrealized_end_base, props.assetBaseCurrency);
+  return `${realized} / ${unrealized}`;
+});
 
 function formatNumber(value, digits = 2) {
   const numeric = Number(value);
@@ -547,22 +939,34 @@ function contributorLabel(item) {
 
 function reconciliationEntryLabel(entry) {
   const parts = [];
-  if (entry?.cash_actual != null) {
-    parts.push(`Cash ${formatCurrency(entry.cash_actual)}`);
-  }
-  if (entry?.market_value_actual != null) {
-    parts.push(`MV ${formatCurrency(entry.market_value_actual)}`);
-  }
+  if (entry?.cash_actual != null) parts.push(`Cash ${formatCurrency(entry.cash_actual)}`);
+  if (entry?.market_value_actual != null) parts.push(`MV ${formatCurrency(entry.market_value_actual)}`);
   return parts.join(" | ") || "Snapshot";
 }
 
-function reconciliationTotalLabel(item) {
-  if (item?.total_difference == null) return "No diff";
-  return formatSignedCurrency(item.total_difference, props.assetBaseCurrency);
+function adjustmentLabel(item) {
+  if (item?.event_type === "split") return `x${formatNumber(item.split_ratio, 4)}`;
+  if (item?.event_type === "symbol_change") return `→ ${item.target_ticker || "new"}`;
+  return [
+    item?.quantity_delta != null && item?.quantity_delta !== "" ? `Qty ${formatNumber(item.quantity_delta, 4)}` : null,
+    item?.cost_basis_delta != null && item?.cost_basis_delta !== "" ? `Cost ${formatSignedCurrency(item.cost_basis_delta, props.assetBaseCurrency)}` : null,
+  ].filter(Boolean).join(" · ") || "Manual";
 }
 
-function reconciliationTone(value) {
-  return Number(value || 0) >= 0 ? "up" : "dn";
+function importSummaryLabel(result) {
+  const summary = result?.summary || {};
+  if (summary.created_count != null) return `成功匯入 ${summary.created_count} / ${summary.row_count || summary.created_count} 筆`;
+  return `預覽 ${summary.row_count || 0} 筆`;
+}
+
+function heatmapTone(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "neutral";
+  if (numeric >= 5) return "strong-up";
+  if (numeric > 0) return "up";
+  if (numeric <= -5) return "strong-dn";
+  if (numeric < 0) return "dn";
+  return "neutral";
 }
 
 function holdingWeight(holding) {
@@ -584,14 +988,16 @@ function holdingWeight(holding) {
 .asset-card-head,
 .asset-action-row,
 .asset-list-item,
-.asset-mini-block {
+.asset-mini-block,
+.asset-toolbar-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.asset-toolbar-copy {
+.asset-toolbar-copy,
+.asset-toolbar-meta {
   margin-top: 6px;
   color: var(--text2);
   font-size: 12px;
@@ -604,6 +1010,8 @@ function holdingWeight(holding) {
 }
 
 .asset-warning-card {
+  display: grid;
+  gap: 4px;
   padding: 10px 12px;
   border: 1px solid rgba(255, 209, 102, 0.22);
   border-radius: 12px;
@@ -613,11 +1021,41 @@ function holdingWeight(holding) {
   line-height: 1.6;
 }
 
+.asset-warning-card.info {
+  border-color: rgba(0, 212, 255, 0.2);
+  background: rgba(0, 212, 255, 0.08);
+  color: #9cefff;
+}
+
+.asset-range-row,
 .asset-summary-grid,
 .asset-form-grid,
-.asset-analytics-grid {
+.asset-analytics-grid,
+.asset-performance-grid,
+.asset-journal-grid {
   display: grid;
   gap: 12px;
+}
+
+.asset-range-row {
+  grid-template-columns: repeat(6, minmax(0, auto));
+  justify-content: start;
+}
+
+.asset-range-btn {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.asset-range-btn.active {
+  border-color: rgba(0, 217, 163, 0.24);
+  background: rgba(0, 217, 163, 0.12);
+  color: #c6fff0;
 }
 
 .asset-summary-grid {
@@ -628,7 +1066,19 @@ function holdingWeight(holding) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.asset-form-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .asset-analytics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.asset-performance-grid {
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+}
+
+.asset-journal-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -797,6 +1247,106 @@ function holdingWeight(holding) {
   color: #ffe1a0;
 }
 
+.asset-badge.manual {
+  background: rgba(0, 212, 255, 0.12);
+  color: #9cefff;
+}
+
+.asset-curve-card {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: rgba(8, 14, 24, 0.6);
+  padding: 14px;
+}
+
+.asset-curve-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.asset-side-analytics {
+  display: grid;
+  gap: 10px;
+}
+
+.asset-sparkline-shell {
+  margin-top: 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0, 217, 163, 0.06), rgba(0, 212, 255, 0.02));
+}
+
+.asset-sparkline {
+  width: 100%;
+  height: 140px;
+  display: block;
+}
+
+.asset-sparkline-line {
+  fill: none;
+  stroke: #00d9a3;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.asset-heatmap-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.asset-heatmap-cell {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.asset-heatmap-cell strong,
+.asset-heatmap-cell span {
+  display: block;
+}
+
+.asset-heatmap-cell strong {
+  font-size: 11px;
+}
+
+.asset-heatmap-cell span {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.asset-heatmap-cell.up {
+  background: rgba(0, 217, 163, 0.12);
+}
+
+.asset-heatmap-cell.strong-up {
+  background: rgba(0, 217, 163, 0.22);
+}
+
+.asset-heatmap-cell.dn {
+  background: rgba(255, 77, 106, 0.1);
+}
+
+.asset-heatmap-cell.strong-dn {
+  background: rgba(255, 77, 106, 0.2);
+}
+
+.asset-import-textarea {
+  min-height: 150px;
+}
+
+.asset-result-box {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .up {
   color: var(--green);
 }
@@ -817,18 +1367,37 @@ function holdingWeight(holding) {
   .asset-trade-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .asset-form-grid-3,
+  .asset-journal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1120px) {
   .asset-form-grid,
-  .asset-analytics-grid {
+  .asset-form-grid-3,
+  .asset-analytics-grid,
+  .asset-performance-grid,
+  .asset-journal-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 720px) {
   .asset-summary-grid,
-  .asset-trade-grid {
+  .asset-trade-grid,
+  .asset-range-row {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-toolbar,
+  .asset-toolbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .asset-curve-metrics {
     grid-template-columns: 1fr;
   }
 }

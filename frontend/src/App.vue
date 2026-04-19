@@ -263,6 +263,7 @@
         :journal-filter-scope="journalFilterScope"
         :journal-filters="journalFilters"
         :asset-loading="assetLoading"
+        :asset-performance-range="assetPerformanceRange"
         :asset-base-currency="assetBaseCurrency"
         :asset-summary="assetSummary"
         :asset-accounts="assetAccounts"
@@ -271,6 +272,18 @@
         :asset-warnings="assetWarnings"
         :asset-quote-gaps="assetQuoteGaps"
         :asset-reconciliation="assetReconciliation"
+        :asset-price-overrides="assetPriceOverrides"
+        :asset-fx-rates="assetFxRates"
+        :asset-adjustments="assetAdjustments"
+        :asset-performance-summary="assetPerformanceSummary"
+        :asset-performance-series="assetPerformanceSeries"
+        :asset-monthly-heatmap="assetMonthlyHeatmap"
+        :asset-realized-vs-unrealized="assetRealizedVsUnrealized"
+        :asset-alerts="assetAlerts"
+        :asset-trade-import-result="assetTradeImportResult"
+        :asset-cash-import-result="assetCashImportResult"
+        :asset-journal-import-preview="assetJournalImportPreview"
+        :asset-last-recompute="assetLastRecompute"
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
         :asset-contributors="assetContributors"
@@ -281,6 +294,12 @@
         :asset-cash-form="assetCashForm"
         :asset-trade-form="assetTradeForm"
         :asset-reconciliation-form="assetReconciliationForm"
+        :asset-price-override-form="assetPriceOverrideForm"
+        :asset-fx-rate-form="assetFxRateForm"
+        :asset-adjustment-form="assetAdjustmentForm"
+        :asset-trade-import-form="assetTradeImportForm"
+        :asset-cash-import-form="assetCashImportForm"
+        :asset-journal-import-form="assetJournalImportForm"
         @open-terminal="handleOpenTerminal(currentTicker)"
         @set-right-tab="handleReviewWorkspaceTabChange"
         @update-backtest-field="handleBacktestField"
@@ -309,20 +328,46 @@
         @update-asset-cash-field="handleAssetCashField"
         @update-asset-trade-field="handleAssetTradeField"
         @update-asset-reconciliation-field="handleAssetReconciliationField"
+        @set-asset-performance-range="setAssetPerformanceRange"
+        @update-asset-price-override-field="handleAssetPriceOverrideField"
+        @update-asset-fx-rate-field="handleAssetFxRateField"
+        @update-asset-adjustment-field="handleAssetAdjustmentField"
+        @update-asset-trade-import-field="handleAssetTradeImportField"
+        @update-asset-cash-import-field="handleAssetCashImportField"
+        @update-asset-journal-import-field="handleAssetJournalImportField"
         @save-asset-account="saveAssetAccount"
         @save-asset-cash-entry="saveAssetCashEntry"
         @save-asset-trade-entry="saveAssetTradeEntry"
         @save-asset-reconciliation="saveAssetReconciliation"
+        @save-asset-price-override="saveAssetPriceOverride"
+        @save-asset-fx-rate="saveAssetFxRate"
+        @save-asset-adjustment="saveAssetAdjustment"
+        @import-asset-trades-csv="importAssetTradesCsv($event || {})"
+        @import-asset-cash-csv="importAssetCashCsv($event || {})"
+        @preview-asset-journal-import="previewAssetJournalImport"
+        @import-asset-journal="importAssetJournalEntries"
+        @recompute-asset-tracking="recomputeAssetTracking"
         @reset-asset-account-form="resetAssetAccountForm"
         @reset-asset-cash-form="resetAssetCashForm"
         @reset-asset-trade-form="resetAssetTradeForm"
         @reset-asset-reconciliation-form="resetAssetReconciliationForm"
+        @reset-asset-price-override-form="resetAssetPriceOverrideForm"
+        @reset-asset-fx-rate-form="resetAssetFxRateForm"
+        @reset-asset-adjustment-form="resetAssetAdjustmentForm"
+        @reset-asset-import-forms="resetAssetImportForms"
+        @reset-asset-journal-import-form="resetAssetJournalImportForm"
         @edit-asset-cash-entry="editAssetCashEntry"
         @edit-asset-trade-entry="editAssetTradeEntry"
+        @edit-asset-price-override="editAssetPriceOverride"
+        @edit-asset-fx-rate="editAssetFxRate"
+        @edit-asset-adjustment="editAssetAdjustment"
         @delete-asset-account="deleteAssetAccount"
         @delete-asset-cash-entry="deleteAssetCashEntry"
         @delete-asset-trade-entry="deleteAssetTradeEntry"
         @delete-asset-reconciliation="deleteAssetReconciliation"
+        @delete-asset-price-override="deleteAssetPriceOverride"
+        @delete-asset-fx-rate="deleteAssetFxRate"
+        @delete-asset-adjustment="deleteAssetAdjustment"
       />
     </div>
 
@@ -538,10 +583,20 @@ const {
   journalFilterScope,
   journalFilters,
   assetLoading,
+  assetPerformanceRange,
   assetAccounts,
   assetCashEntries,
   assetTradeEntries,
   assetReconciliationEntries,
+  assetPriceOverrides,
+  assetFxRates,
+  assetAdjustments,
+  assetPerformance,
+  assetAlerts,
+  assetTradeImportResult,
+  assetCashImportResult,
+  assetJournalImportPreview,
+  assetLastRecompute,
   assetBaseCurrency,
   assetSummary,
   assetAccountsSummary,
@@ -552,10 +607,20 @@ const {
   assetAccountAllocation,
   assetMarketAllocation,
   assetContributors,
+  assetPerformanceSummary,
+  assetPerformanceSeries,
+  assetMonthlyHeatmap,
+  assetRealizedVsUnrealized,
   assetAccountForm,
   assetCashForm,
   assetTradeForm,
   assetReconciliationForm,
+  assetPriceOverrideForm,
+  assetFxRateForm,
+  assetAdjustmentForm,
+  assetTradeImportForm,
+  assetCashImportForm,
+  assetJournalImportForm,
   institutionalOverlay,
   backendUrl,
   searchSymbols,
@@ -647,25 +712,52 @@ const {
   removeJournalAttachment,
   startJournalEntry,
   loadAssetTrackingData,
+  loadAssetPerformance,
+  setAssetPerformanceRange,
   updateAssetAccountField,
   updateAssetCashField,
   updateAssetTradeField,
   updateAssetReconciliationField,
+  updateAssetPriceOverrideField,
+  updateAssetFxRateField,
+  updateAssetAdjustmentField,
+  updateAssetTradeImportField,
+  updateAssetCashImportField,
+  updateAssetJournalImportField,
   editAssetAccount,
   editAssetCashEntry,
   editAssetTradeEntry,
+  editAssetPriceOverride,
+  editAssetFxRate,
+  editAssetAdjustment,
   resetAssetAccountForm,
   resetAssetCashForm,
   resetAssetTradeForm,
   resetAssetReconciliationForm,
+  resetAssetPriceOverrideForm,
+  resetAssetFxRateForm,
+  resetAssetAdjustmentForm,
+  resetAssetImportForms,
+  resetAssetJournalImportForm,
   saveAssetAccount,
   saveAssetCashEntry,
   saveAssetTradeEntry,
   saveAssetReconciliation,
+  saveAssetPriceOverride,
+  saveAssetFxRate,
+  saveAssetAdjustment,
   deleteAssetAccount,
   deleteAssetCashEntry,
   deleteAssetTradeEntry,
   deleteAssetReconciliation,
+  deleteAssetPriceOverride,
+  deleteAssetFxRate,
+  deleteAssetAdjustment,
+  importAssetTradesCsv,
+  importAssetCashCsv,
+  previewAssetJournalImport,
+  importAssetJournalEntries,
+  recomputeAssetTracking,
   updateScreenerFilter,
   runScreener,
   saveScreenerPreset,
@@ -1094,6 +1186,36 @@ function handleAssetTradeField(payload) {
 function handleAssetReconciliationField(payload) {
   if (!payload?.key) return;
   updateAssetReconciliationField(payload.key, payload.value);
+}
+
+function handleAssetPriceOverrideField(payload) {
+  if (!payload?.key) return;
+  updateAssetPriceOverrideField(payload.key, payload.value);
+}
+
+function handleAssetFxRateField(payload) {
+  if (!payload?.key) return;
+  updateAssetFxRateField(payload.key, payload.value);
+}
+
+function handleAssetAdjustmentField(payload) {
+  if (!payload?.key) return;
+  updateAssetAdjustmentField(payload.key, payload.value);
+}
+
+function handleAssetTradeImportField(payload) {
+  if (!payload?.key) return;
+  updateAssetTradeImportField(payload.key, payload.value);
+}
+
+function handleAssetCashImportField(payload) {
+  if (!payload?.key) return;
+  updateAssetCashImportField(payload.key, payload.value);
+}
+
+function handleAssetJournalImportField(payload) {
+  if (!payload?.key) return;
+  updateAssetJournalImportField(payload.key, payload.value);
 }
 
 function handleJournalFilter(payload) {

@@ -266,6 +266,90 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     deleteAssetReconciliation(snapshotId) {
       return request(`/api/assets/reconciliation/${snapshotId}`, { method: "DELETE" });
     },
+    listAssetPriceOverrides(options = {}) {
+      const params = new URLSearchParams();
+      if (options.account_id != null) params.set("account_id", String(options.account_id));
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/price-overrides${query ? `?${query}` : ""}`);
+    },
+    createAssetPriceOverride(payload) {
+      return request("/api/assets/price-overrides", buildJsonRequest("POST", payload));
+    },
+    updateAssetPriceOverride(overrideId, payload) {
+      return request(`/api/assets/price-overrides/${overrideId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetPriceOverride(overrideId) {
+      return request(`/api/assets/price-overrides/${overrideId}`, { method: "DELETE" });
+    },
+    listAssetFxRates(options = {}) {
+      const params = new URLSearchParams();
+      if (options.from) params.set("from", String(options.from));
+      if (options.to) params.set("to", String(options.to));
+      if (options.from_currency) params.set("from_currency", String(options.from_currency));
+      if (options.to_currency) params.set("to_currency", String(options.to_currency));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/fx-rates${query ? `?${query}` : ""}`);
+    },
+    createAssetFxRate(payload) {
+      return request("/api/assets/fx-rates", buildJsonRequest("POST", payload));
+    },
+    updateAssetFxRate(fxRateId, payload) {
+      return request(`/api/assets/fx-rates/${fxRateId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetFxRate(fxRateId) {
+      return request(`/api/assets/fx-rates/${fxRateId}`, { method: "DELETE" });
+    },
+    listAssetAdjustments(options = {}) {
+      const params = new URLSearchParams();
+      if (options.account_id != null) params.set("account_id", String(options.account_id));
+      if (options.ticker) params.set("ticker", String(options.ticker));
+      if (options.from) params.set("from", String(options.from));
+      if (options.to) params.set("to", String(options.to));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      const query = params.toString();
+      return request(`/api/assets/adjustments${query ? `?${query}` : ""}`);
+    },
+    createAssetAdjustment(payload) {
+      return request("/api/assets/adjustments", buildJsonRequest("POST", payload));
+    },
+    updateAssetAdjustment(adjustmentId, payload) {
+      return request(`/api/assets/adjustments/${adjustmentId}`, buildJsonRequest("PATCH", payload));
+    },
+    deleteAssetAdjustment(adjustmentId) {
+      return request(`/api/assets/adjustments/${adjustmentId}`, { method: "DELETE" });
+    },
+    importAssetTradesCsv(payload) {
+      return request("/api/assets/import/trades-csv", buildJsonRequest("POST", payload));
+    },
+    importAssetCashCsv(payload) {
+      return request("/api/assets/import/cash-csv", buildJsonRequest("POST", payload));
+    },
+    previewAssetJournalImport(payload) {
+      return request("/api/assets/journal-import/preview", buildJsonRequest("POST", payload));
+    },
+    importAssetJournal(payload) {
+      return request("/api/assets/journal-import", buildJsonRequest("POST", payload));
+    },
+    recomputeAssetTracking(payload) {
+      return request("/api/assets/recompute", buildJsonRequest("POST", payload));
+    },
+    getAssetAlertsCurrent(options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      if (options.performance_range) params.set("performance_range", String(options.performance_range));
+      const query = params.toString();
+      return request(`/api/assets/alerts/current${query ? `?${query}` : ""}`);
+    },
+    getAssetPerformance(options = {}) {
+      const params = new URLSearchParams();
+      if (options.range) params.set("range", String(options.range));
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      const query = params.toString();
+      return request(`/api/assets/performance${query ? `?${query}` : ""}`);
+    },
     getAssetPortfolioCurrent(options = {}) {
       const params = new URLSearchParams();
       if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
