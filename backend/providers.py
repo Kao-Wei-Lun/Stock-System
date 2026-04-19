@@ -21,6 +21,7 @@ from fubon_quote_provider import FubonQuoteProvider, HybridQuoteProvider
 from external_notifications import ExternalNotificationDispatcher
 from fubon_provider import FubonSDKManager
 from fundamentals_provider import FundamentalsProvider
+from fx_rate_provider import TaifexDailyFxRateProvider
 from market_intelligence import MacroSnapshotProvider, MarketEventProvider, NewsProvider
 from quote_provider import YahooFinanceQuoteProvider
 from screener_engine import ScreenerEngine
@@ -53,6 +54,7 @@ macro_snapshot_provider = MacroSnapshotProvider(fetcher)
 fundamentals_provider = FundamentalsProvider()
 taiwan_chip_provider = TaiwanChipProvider(fetcher)
 screener_engine = ScreenerEngine()
+latest_public_fx_provider = TaifexDailyFxRateProvider()
 ws_manager = ConnectionManager()
 
 

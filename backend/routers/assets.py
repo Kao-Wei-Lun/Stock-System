@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 from collections import defaultdict
@@ -39,12 +40,14 @@ from schemas import (
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
 _fetch_and_store_quote_snapshot = None
+_latest_public_fx_provider = None
 _SNAPSHOT_LIMIT = 5000
 
 
-def configure(*, fetch_and_store_quote_snapshot) -> None:
-    global _fetch_and_store_quote_snapshot
+def configure(*, fetch_and_store_quote_snapshot, latest_public_fx_provider=None) -> None:
+    global _fetch_and_store_quote_snapshot, _latest_public_fx_provider
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
+    _latest_public_fx_provider = latest_public_fx_provider
 
 
 async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | None:
@@ -56,7 +59,60 @@ async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | Non
     return account
 
 
-async def _load_asset_inputs() -> tuple[
+def _is_public_auto_fx_source(source: str | None) -> bool:
+    normalized = str(source or "").strip().lower()
+    return normalized in {"taifex_daily_reference", "public_auto"}
+
+
+async def _sync_latest_public_fx_rates() -> List[Dict[str, Any]]:
+    if _latest_public_fx_provider is None:
+        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+
+    try:
+        payload = await asyncio.to_thread(_latest_public_fx_provider.fetch_latest_rates)
+    except Exception:  # noqa: BLE001 - keep asset snapshot resilient to public FX fetch issues
+        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+
+    snapshot_date = payload.get("snapshot_date")
+    candidate_rates = payload.get("rates") or []
+    if not snapshot_date or not candidate_rates:
+        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+
+    existing_rows = await db.list_asset_fx_rates(
+        owner_id=DEFAULT_OWNER_ID,
+        date_from=snapshot_date,
+        date_to=snapshot_date,
+        limit=_SNAPSHOT_LIMIT,
+    )
+    existing_map = {
+        (str(item.get("from_currency") or "").upper(), str(item.get("to_currency") or "").upper()): item
+        for item in existing_rows
+    }
+
+    for item in candidate_rates:
+        from_currency = str(item.get("from_currency") or "").strip().upper()
+        to_currency = str(item.get("to_currency") or "").strip().upper()
+        if not from_currency or not to_currency:
+            continue
+        existing = existing_map.get((from_currency, to_currency))
+        if existing and not _is_public_auto_fx_source(existing.get("source")):
+            continue
+        await db.create_asset_fx_rate(
+            {
+                "snapshot_date": snapshot_date,
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "rate": item.get("rate"),
+                "source": item.get("source") or payload.get("source") or "public_auto",
+                "note": item.get("note"),
+            },
+            owner_id=DEFAULT_OWNER_ID,
+        )
+
+    return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+
+
+async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
     List[Dict[str, Any]],
@@ -70,7 +126,7 @@ async def _load_asset_inputs() -> tuple[
     trade_entries = await db.list_asset_trade_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
     adjustment_entries = await db.list_asset_position_adjustments(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
     price_overrides = await db.list_asset_price_overrides(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    fx_rates = await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+    fx_rates = await _sync_latest_public_fx_rates() if refresh_public_fx else await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
     reconciliation_snapshots = await db.list_asset_reconciliation_snapshots(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
     return (
         accounts,
@@ -164,7 +220,7 @@ async def _build_snapshot(*, refresh: bool = True) -> Dict[str, Any]:
         price_overrides,
         fx_rates,
         reconciliation_snapshots,
-    ) = await _load_asset_inputs()
+    ) = await _load_asset_inputs(refresh_public_fx=refresh)
     snapshot = await build_asset_portfolio_snapshot(
         accounts,
         cash_entries,
@@ -211,7 +267,7 @@ async def _build_performance(range_name: str, *, refresh: bool = True) -> Dict[s
         price_overrides,
         fx_rates,
         _,
-    ) = await _load_asset_inputs()
+    ) = await _load_asset_inputs(refresh_public_fx=refresh)
     start_at = _resolve_performance_start(range_name)
     report = await build_asset_performance_report(
         accounts,
@@ -786,7 +842,10 @@ async def list_asset_fx_rates(
     from_currency: str | None = Query(None),
     to_currency: str | None = Query(None),
     limit: int = Query(365, ge=1, le=5000),
+    refresh_public: bool = Query(False),
 ):
+    if refresh_public:
+        await _sync_latest_public_fx_rates()
     return {
         "items": await db.list_asset_fx_rates(
             owner_id=DEFAULT_OWNER_ID,

@@ -39,6 +39,7 @@ from providers import (
     fubon_manager,
     fubon_realtime_pool,
     fundamentals_provider,
+    latest_public_fx_provider,
     macro_snapshot_provider,
     market_event_provider,
     news_provider,
@@ -342,6 +343,7 @@ market_data.configure(
 )
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
+    latest_public_fx_provider=latest_public_fx_provider,
 )
 
 intelligence.configure(

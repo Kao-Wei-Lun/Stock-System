@@ -449,6 +449,7 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "replace_asset_positions_current", replace_asset_positions_current)
     monkeypatch.setattr(main.db, "replace_asset_valuations_current", replace_asset_valuations_current)
     monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", None)
+    monkeypatch.setattr(main.assets, "_latest_public_fx_provider", None)
 
     return store
 
@@ -595,6 +596,103 @@ def test_asset_routes_validate_unknown_account(client, asset_store):
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_asset_routes_refresh_use_latest_quote_and_public_fx(client, asset_store, monkeypatch):
+    account_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "US Broker",
+            "institution": "Manual",
+            "account_type": "brokerage",
+            "base_currency": "USD",
+            "include_in_total": True,
+        },
+    )
+    assert account_response.status_code == 200
+    account = account_response.json()
+
+    cash_response = client.post(
+        "/api/assets/cash-ledger",
+        json={
+            "account_id": account["id"],
+            "flow_date": "2026-04-01T09:00:00",
+            "flow_type": "deposit",
+            "amount": 1000,
+            "currency": "USD",
+            "fx_rate_to_base": 30,
+        },
+    )
+    assert cash_response.status_code == 200
+
+    trade_response = client.post(
+        "/api/assets/trades",
+        json={
+            "account_id": account["id"],
+            "trade_date": "2026-04-02T09:30:00",
+            "ticker": "AAPL",
+            "display_name": "Apple",
+            "market": "US",
+            "asset_type": "stock",
+            "currency": "USD",
+            "side": "buy",
+            "quantity": 2,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 30,
+        },
+    )
+    assert trade_response.status_code == 200
+
+    async def fake_fetch_and_store_quote_snapshot(ticker):
+        if ticker != "AAPL":
+            return None
+        return {
+            "ticker": "AAPL",
+            "source": "unit-test-live",
+            "quote_type": "snapshot",
+            "is_delayed": False,
+            "currency": "USD",
+            "price": 150,
+            "quote_timestamp": "2026-04-19T09:00:00+00:00",
+        }
+
+    class FakeFxProvider:
+        def fetch_latest_rates(self):
+            return {
+                "snapshot_date": "2026-04-19",
+                "source": "taifex_daily_reference",
+                "rates": [
+                    {
+                        "from_currency": "USD",
+                        "to_currency": "TWD",
+                        "rate": 32.5,
+                        "source": "taifex_daily_reference",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", fake_fetch_and_store_quote_snapshot)
+    monkeypatch.setattr(main.assets, "_latest_public_fx_provider", FakeFxProvider())
+
+    portfolio_response = client.get("/api/assets/portfolio/current?refresh=true")
+    assert portfolio_response.status_code == 200
+    portfolio_payload = portfolio_response.json()
+
+    assert portfolio_payload["summary"]["cash_total_base"] == 26000
+    assert portfolio_payload["summary"]["market_value_total_base"] == 9750
+    assert portfolio_payload["summary"]["total_asset_value_base"] == 35750
+    assert portfolio_payload["holdings"][0]["ticker"] == "AAPL"
+    assert portfolio_payload["holdings"][0]["last_price"] == 150
+    assert portfolio_payload["holdings"][0]["quote_source"] == "unit-test-live"
+    assert portfolio_payload["holdings"][0]["fx_rate_to_base"] == 32.5
+
+    synced_rates = list(asset_store["fx_rates"].values())
+    assert len(synced_rates) == 1
+    assert synced_rates[0]["snapshot_date"] == "2026-04-19"
+    assert synced_rates[0]["rate"] == 32.5
+    assert synced_rates[0]["source"] == "taifex_daily_reference"
 
 
 def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):

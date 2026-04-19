@@ -167,23 +167,26 @@ def _currency_fx_map(
 ) -> Dict[str, float]:
     normalized_base = _normalize_currency(base_currency)
     max_dt = datetime.max.replace(tzinfo=timezone.utc)
-    fx_map: Dict[str, tuple[datetime, float]] = {
-        normalized_base: (max_dt, 1.0),
+    fx_map: Dict[str, tuple[int, datetime, float]] = {
+        normalized_base: (99, max_dt, 1.0),
     }
+
+    def update_rate(currency: str, row_dt: datetime, rate: float, *, priority: int) -> None:
+        previous = fx_map.get(currency)
+        if previous is None or priority > previous[0] or (priority == previous[0] and row_dt >= previous[1]):
+            fx_map[currency] = (priority, row_dt, rate)
 
     def collect_ledger(rows: Iterable[Dict[str, Any]], dt_key: str) -> None:
         for row in rows:
             currency = _normalize_currency(row.get("currency"), normalized_base)
             if currency == normalized_base:
-                fx_map[currency] = (max_dt, 1.0)
+                fx_map[currency] = (99, max_dt, 1.0)
                 continue
             fx_rate = _safe_float(row.get("fx_rate_to_base"), 0.0) or 0.0
             if fx_rate <= 0:
                 continue
             row_dt = _normalize_datetime(row.get(dt_key))
-            previous = fx_map.get(currency)
-            if previous is None or row_dt >= previous[0]:
-                fx_map[currency] = (row_dt, fx_rate)
+            update_rate(currency, row_dt, fx_rate, priority=1)
 
     def collect_fx(rows: Iterable[Dict[str, Any]]) -> None:
         for row in rows:
@@ -204,17 +207,17 @@ def _currency_fx_map(
                 continue
 
             if currency == normalized_base:
-                fx_map[currency] = (max_dt, 1.0)
+                fx_map[currency] = (99, max_dt, 1.0)
                 continue
 
-            previous = fx_map.get(currency)
-            if previous is None or row_dt >= previous[0]:
-                fx_map[currency] = (row_dt, mapped_rate)
+            # Explicit FX snapshots are the valuation source of truth and should
+            # override transaction-level fallback rates when both are present.
+            update_rate(currency, row_dt, mapped_rate, priority=2)
 
     collect_ledger(cash_entries, "flow_date")
     collect_ledger(trade_entries, "trade_date")
     collect_fx(fx_rate_entries or [])
-    return {key: value for key, (_, value) in fx_map.items()}
+    return {key: value for key, (_, __, value) in fx_map.items()}
 
 
 def _resolve_fx_rate(currency: str, fx_map: Dict[str, float], base_currency: str) -> float:

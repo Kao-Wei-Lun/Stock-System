@@ -234,6 +234,88 @@ def test_build_asset_portfolio_snapshot_applies_manual_override_fx_rates_and_spl
     assert snapshot["holdings"][0]["manual_price_override_id"] == 41
 
 
+def test_build_asset_portfolio_snapshot_prefers_latest_fx_snapshots_for_current_valuation():
+    accounts = [
+        {
+            "id": 1,
+            "name": "US Broker",
+            "account_type": "brokerage",
+            "base_currency": "USD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+    cash_entries = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "flow_date": "2026-04-01T09:00:00",
+            "flow_type": "deposit",
+            "amount": 1000,
+            "currency": "USD",
+            "fx_rate_to_base": 30,
+        }
+    ]
+    trade_entries = [
+        {
+            "id": 11,
+            "account_id": 1,
+            "trade_date": "2026-04-02T10:00:00",
+            "ticker": "AAPL",
+            "display_name": "Apple",
+            "market": "US",
+            "asset_type": "stock",
+            "currency": "USD",
+            "side": "buy",
+            "quantity": 2,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 30,
+        }
+    ]
+    fx_rate_entries = [
+        {
+            "id": 31,
+            "snapshot_date": "2026-04-19",
+            "from_currency": "USD",
+            "to_currency": "TWD",
+            "rate": 32.5,
+            "source": "taifex_daily_reference",
+        }
+    ]
+
+    async def fetch_quote(ticker):
+        if ticker == "AAPL":
+            return {
+                "ticker": ticker,
+                "source": "unit-test-live",
+                "quote_type": "snapshot",
+                "is_delayed": False,
+                "currency": "USD",
+                "price": 150,
+                "quote_timestamp": "2026-04-19T09:00:00+00:00",
+            }
+        return None
+
+    snapshot = asyncio.run(
+        build_asset_portfolio_snapshot(
+            accounts,
+            cash_entries,
+            trade_entries,
+            fx_rate_entries=fx_rate_entries,
+            fetch_quote=fetch_quote,
+        )
+    )
+
+    assert snapshot["summary"]["cash_total_base"] == 26000
+    assert snapshot["summary"]["market_value_total_base"] == 9750
+    assert snapshot["summary"]["total_asset_value_base"] == 35750
+    assert snapshot["holdings"][0]["fx_rate_to_base"] == 32.5
+    assert snapshot["holdings"][0]["cost_basis_base"] == 6500
+    assert snapshot["holdings"][0]["unrealized_pnl_base"] == 3250
+
+
 def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correctly():
     accounts = [
         {
