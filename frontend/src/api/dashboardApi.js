@@ -290,6 +290,7 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       if (options.from_currency) params.set("from_currency", String(options.from_currency));
       if (options.to_currency) params.set("to_currency", String(options.to_currency));
       if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.refresh_public != null) params.set("refresh_public", options.refresh_public ? "true" : "false");
       const query = params.toString();
       return request(`/api/assets/fx-rates${query ? `?${query}` : ""}`);
     },

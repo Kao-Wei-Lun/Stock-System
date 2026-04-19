@@ -261,7 +261,14 @@ describe("dashboardApi", () => {
     const api = createDashboardApi();
 
     await api.listAssetPriceOverrides({ ticker: "AAPL", limit: 10 });
-    await api.listAssetFxRates({ from: "2026-04-01", to: "2026-04-19", from_currency: "USD", to_currency: "TWD", limit: 30 });
+    await api.listAssetFxRates({
+      from: "2026-04-01",
+      to: "2026-04-19",
+      from_currency: "USD",
+      to_currency: "TWD",
+      limit: 30,
+      refresh_public: true,
+    });
     await api.listAssetAdjustments({ account_id: 4, ticker: "AAPL", limit: 20 });
     await api.getAssetPerformance({ range: "1y", refresh: false });
     await api.getAssetAlertsCurrent({ refresh: true, performance_range: "90d" });
@@ -270,7 +277,11 @@ describe("dashboardApi", () => {
     await api.recomputeAssetTracking({ refresh: true, performance_range: "1y" });
 
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/assets/price-overrides?ticker=AAPL&limit=10", {});
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/assets/fx-rates?from=2026-04-01&to=2026-04-19&from_currency=USD&to_currency=TWD&limit=30", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/assets/fx-rates?from=2026-04-01&to=2026-04-19&from_currency=USD&to_currency=TWD&limit=30&refresh_public=true",
+      {},
+    );
     expect(globalThis.fetch).toHaveBeenNthCalledWith(3, "/api/assets/adjustments?account_id=4&ticker=AAPL&limit=20", {});
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, "/api/assets/performance?range=1y&refresh=false", {});
     expect(globalThis.fetch).toHaveBeenNthCalledWith(5, "/api/assets/alerts/current?refresh=true&performance_range=90d", {});

@@ -371,7 +371,7 @@ export function createDashboardAssetTracking({
         dashboardApi.listAssetTrades({ limit: 12 }),
         dashboardApi.listAssetReconciliation({ limit: 12 }),
         dashboardApi.listAssetPriceOverrides({ limit: 12 }),
-        dashboardApi.listAssetFxRates({ limit: 12 }),
+        dashboardApi.listAssetFxRates({ limit: 12, refresh_public: refresh }),
         dashboardApi.listAssetAdjustments({ limit: 12 }),
         dashboardApi.getAssetPortfolioCurrent({ refresh, allocation_group_by: "account" }),
       ]);
