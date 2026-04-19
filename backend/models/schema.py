@@ -809,6 +809,73 @@ CREATE_TABLE_STATEMENTS = {
                 ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "asset_price_overrides": """
+        CREATE TABLE `asset_price_overrides` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `effective_at` DATETIME NOT NULL,
+            `price` DOUBLE NOT NULL,
+            `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `fx_rate_to_base` DOUBLE NULL,
+            `force_override` TINYINT NOT NULL DEFAULT 0,
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_asset_price_overrides_owner_ticker_date` (`owner_id`, `ticker`, `effective_at`, `id`),
+            KEY `idx_asset_price_overrides_account_ticker_date` (`account_id`, `ticker`, `effective_at`, `id`),
+            CONSTRAINT `fk_asset_price_overrides_account`
+                FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_fx_rates_daily": """
+        CREATE TABLE `asset_fx_rates_daily` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `snapshot_date` DATE NOT NULL,
+            `from_currency` VARCHAR(16) NOT NULL,
+            `to_currency` VARCHAR(16) NOT NULL,
+            `rate` DOUBLE NOT NULL,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'manual',
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_asset_fx_rates_daily_owner_pair_date` (`owner_id`, `snapshot_date`, `from_currency`, `to_currency`),
+            KEY `idx_asset_fx_rates_daily_owner_date` (`owner_id`, `snapshot_date`, `id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "asset_position_adjustments": """
+        CREATE TABLE `asset_position_adjustments` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `event_date` DATETIME NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `event_type` VARCHAR(32) NOT NULL DEFAULT 'adjustment',
+            `quantity_delta` DOUBLE NULL,
+            `cost_basis_delta` DOUBLE NULL,
+            `cash_delta` DOUBLE NULL,
+            `currency` VARCHAR(16) NULL,
+            `split_ratio` DOUBLE NULL,
+            `target_ticker` VARCHAR(32) NULL,
+            `target_display_name` VARCHAR(255) NULL,
+            `target_market` VARCHAR(32) NULL,
+            `target_asset_type` VARCHAR(32) NULL,
+            `note` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_asset_position_adjustments_owner_date` (`owner_id`, `event_date`, `id`),
+            KEY `idx_asset_position_adjustments_account_ticker_date` (`account_id`, `ticker`, `event_date`, `id`),
+            CONSTRAINT `fk_asset_position_adjustments_account`
+                FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
+                ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {

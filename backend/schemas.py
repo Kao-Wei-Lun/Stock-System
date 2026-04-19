@@ -313,3 +313,98 @@ class AssetReconciliationCreatePayload(BaseModel):
     market_value_actual: float | None = None
     positions_payload: list[dict] | None = None
     note: str | None = None
+
+
+class AssetPriceOverrideCreatePayload(BaseModel):
+    account_id: int | None = None
+    ticker: str = Field(..., min_length=1, max_length=32)
+    effective_at: str = Field(..., min_length=10, max_length=64)
+    price: float = Field(..., gt=0)
+    currency: str = Field("TWD", min_length=1, max_length=16)
+    fx_rate_to_base: float | None = Field(None, gt=0)
+    force_override: bool = False
+    note: str | None = None
+
+
+class AssetPriceOverrideUpdatePayload(BaseModel):
+    account_id: int | None = None
+    ticker: str | None = Field(None, min_length=1, max_length=32)
+    effective_at: str | None = Field(None, min_length=10, max_length=64)
+    price: float | None = Field(None, gt=0)
+    currency: str | None = Field(None, min_length=1, max_length=16)
+    fx_rate_to_base: float | None = Field(None, gt=0)
+    force_override: bool | None = None
+    note: str | None = None
+
+
+class AssetFxRateCreatePayload(BaseModel):
+    snapshot_date: str = Field(..., min_length=10, max_length=32)
+    from_currency: str = Field(..., min_length=1, max_length=16)
+    to_currency: str = Field(..., min_length=1, max_length=16)
+    rate: float = Field(..., gt=0)
+    source: str = Field("manual", min_length=1, max_length=64)
+    note: str | None = None
+
+
+class AssetFxRateUpdatePayload(BaseModel):
+    snapshot_date: str | None = Field(None, min_length=10, max_length=32)
+    from_currency: str | None = Field(None, min_length=1, max_length=16)
+    to_currency: str | None = Field(None, min_length=1, max_length=16)
+    rate: float | None = Field(None, gt=0)
+    source: str | None = Field(None, min_length=1, max_length=64)
+    note: str | None = None
+
+
+class AssetPositionAdjustmentCreatePayload(BaseModel):
+    account_id: int
+    event_date: str = Field(..., min_length=10, max_length=64)
+    ticker: str = Field(..., min_length=1, max_length=32)
+    event_type: str = Field("adjustment", min_length=1, max_length=32)
+    quantity_delta: float | None = None
+    cost_basis_delta: float | None = None
+    cash_delta: float | None = None
+    currency: str | None = Field(None, max_length=16)
+    split_ratio: float | None = Field(None, gt=0)
+    target_ticker: str | None = Field(None, max_length=32)
+    target_display_name: str | None = Field(None, max_length=255)
+    target_market: str | None = Field(None, max_length=32)
+    target_asset_type: str | None = Field(None, max_length=32)
+    note: str | None = None
+
+
+class AssetPositionAdjustmentUpdatePayload(BaseModel):
+    account_id: int | None = None
+    event_date: str | None = Field(None, min_length=10, max_length=64)
+    ticker: str | None = Field(None, min_length=1, max_length=32)
+    event_type: str | None = Field(None, min_length=1, max_length=32)
+    quantity_delta: float | None = None
+    cost_basis_delta: float | None = None
+    cash_delta: float | None = None
+    currency: str | None = Field(None, max_length=16)
+    split_ratio: float | None = Field(None, gt=0)
+    target_ticker: str | None = Field(None, max_length=32)
+    target_display_name: str | None = Field(None, max_length=255)
+    target_market: str | None = Field(None, max_length=32)
+    target_asset_type: str | None = Field(None, max_length=32)
+    note: str | None = None
+
+
+class AssetCsvImportPayload(BaseModel):
+    csv_text: str = Field(..., min_length=1)
+    default_account_id: int | None = None
+    dry_run: bool = False
+
+
+class AssetJournalImportPayload(BaseModel):
+    account_id: int
+    ticker: str | None = Field(None, max_length=32)
+    market: str | None = Field(None, max_length=32)
+    strategy_code: str | None = Field(None, max_length=64)
+    tag: str | None = Field(None, max_length=128)
+    search: str | None = Field(None, max_length=128)
+    limit: int = Field(50, ge=1, le=200)
+
+
+class AssetRecomputePayload(BaseModel):
+    refresh: bool = True
+    performance_range: str = Field("1y", min_length=2, max_length=16)

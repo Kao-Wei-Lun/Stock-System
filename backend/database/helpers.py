@@ -495,6 +495,64 @@ def _deserialize_asset_reconciliation_snapshot(row: Optional[Dict[str, Any]]) ->
         "created_at": _datetime_to_iso(row.get("created_at")),
     }
 
+def _deserialize_asset_price_override(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "ticker": row.get("ticker"),
+        "effective_at": _datetime_to_iso(row.get("effective_at")),
+        "price": row.get("price"),
+        "currency": row.get("currency") or "TWD",
+        "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "force_override": bool(row.get("force_override", False)),
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_fx_rate(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "snapshot_date": _date_to_iso(row.get("snapshot_date")),
+        "from_currency": row.get("from_currency") or "USD",
+        "to_currency": row.get("to_currency") or "TWD",
+        "rate": row.get("rate"),
+        "source": row.get("source") or "manual",
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
+def _deserialize_asset_position_adjustment(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "owner_id": row.get("owner_id"),
+        "account_id": row.get("account_id"),
+        "event_date": _datetime_to_iso(row.get("event_date")),
+        "ticker": row.get("ticker"),
+        "event_type": row.get("event_type") or "adjustment",
+        "quantity_delta": row.get("quantity_delta"),
+        "cost_basis_delta": row.get("cost_basis_delta"),
+        "cash_delta": row.get("cash_delta"),
+        "currency": row.get("currency"),
+        "split_ratio": row.get("split_ratio"),
+        "target_ticker": row.get("target_ticker"),
+        "target_display_name": row.get("target_display_name"),
+        "target_market": row.get("target_market"),
+        "target_asset_type": row.get("target_asset_type"),
+        "note": row.get("note"),
+        "created_at": _datetime_to_iso(row.get("created_at")),
+        "updated_at": _datetime_to_iso(row.get("updated_at")),
+    }
+
 def _normalize_workspace_payload(
     payload: Optional[Dict[str, Any]],
     existing: Optional[Dict[str, Any]] = None,
@@ -956,6 +1014,102 @@ def _normalize_asset_reconciliation_snapshot_payload(
         "market_value_actual": market_value_actual,
         "market_value_system": _optional_float(source.get("market_value_system")),
         "positions_payload": positions_payload,
+        "note": _optional_string(source.get("note"), max_length=4000),
+    }
+
+def _normalize_asset_price_override_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    account_id = _optional_int(source.get("account_id"))
+    if account_id is not None and account_id <= 0:
+        raise ValueError("Asset price override account_id must be greater than 0")
+
+    price = _optional_float(source.get("price"))
+    if price is None or price <= 0:
+        raise ValueError("Asset price override price must be greater than 0")
+
+    fx_rate_to_base = _optional_float(source.get("fx_rate_to_base"))
+    if fx_rate_to_base is not None and fx_rate_to_base <= 0:
+        raise ValueError("Asset price override fx_rate_to_base must be greater than 0")
+
+    return {
+        "account_id": account_id,
+        "ticker": _required_string(source.get("ticker"), "Asset price override ticker is required", max_length=32).upper(),
+        "effective_at": _required_string(source.get("effective_at"), "Asset price override effective_at is required", max_length=64),
+        "price": price,
+        "currency": (_optional_string(source.get("currency"), max_length=16) or "TWD").upper(),
+        "fx_rate_to_base": fx_rate_to_base,
+        "force_override": _coerce_bool(source.get("force_override"), False),
+        "note": _optional_string(source.get("note"), max_length=4000),
+    }
+
+def _normalize_asset_fx_rate_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    rate = _optional_float(source.get("rate"))
+    if rate is None or rate <= 0:
+        raise ValueError("Asset FX rate must be greater than 0")
+
+    return {
+        "snapshot_date": _required_date_string(source.get("snapshot_date"), "Asset FX rate snapshot_date is required"),
+        "from_currency": (_required_string(source.get("from_currency"), "Asset FX rate from_currency is required", max_length=16)).upper(),
+        "to_currency": (_required_string(source.get("to_currency"), "Asset FX rate to_currency is required", max_length=16)).upper(),
+        "rate": rate,
+        "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "note": _optional_string(source.get("note"), max_length=4000),
+    }
+
+def _normalize_asset_position_adjustment_payload(
+    payload: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source = dict(existing or {})
+    source.update(payload or {})
+
+    account_id = _optional_int(source.get("account_id"))
+    if account_id is None or account_id <= 0:
+        raise ValueError("Asset position adjustment account_id is required")
+
+    event_type = (_optional_string(source.get("event_type"), max_length=32) or "adjustment").lower()
+    if event_type not in {"adjustment", "split", "symbol_change"}:
+        raise ValueError("Asset position adjustment event_type must be adjustment, split, or symbol_change")
+
+    quantity_delta = _optional_float(source.get("quantity_delta"))
+    cost_basis_delta = _optional_float(source.get("cost_basis_delta"))
+    cash_delta = _optional_float(source.get("cash_delta"))
+    split_ratio = _optional_float(source.get("split_ratio"))
+    if split_ratio is not None and split_ratio <= 0:
+        raise ValueError("Asset position adjustment split_ratio must be greater than 0")
+    if event_type == "split" and (split_ratio is None or split_ratio <= 0):
+        raise ValueError("Asset split adjustment requires split_ratio")
+    target_ticker = _optional_string(source.get("target_ticker"), max_length=32)
+    if event_type == "symbol_change" and not target_ticker:
+        raise ValueError("Asset symbol_change adjustment requires target_ticker")
+    if event_type == "adjustment" and quantity_delta is None and cost_basis_delta is None and cash_delta is None:
+        raise ValueError("Asset adjustment requires quantity_delta, cost_basis_delta, or cash_delta")
+
+    return {
+        "account_id": account_id,
+        "event_date": _required_string(source.get("event_date"), "Asset position adjustment event_date is required", max_length=64),
+        "ticker": _required_string(source.get("ticker"), "Asset position adjustment ticker is required", max_length=32).upper(),
+        "event_type": event_type,
+        "quantity_delta": quantity_delta,
+        "cost_basis_delta": cost_basis_delta,
+        "cash_delta": cash_delta,
+        "currency": (_optional_string(source.get("currency"), max_length=16) or "").upper() or None,
+        "split_ratio": split_ratio,
+        "target_ticker": target_ticker.upper() if target_ticker else None,
+        "target_display_name": _optional_string(source.get("target_display_name"), max_length=255),
+        "target_market": _optional_string(source.get("target_market"), max_length=32),
+        "target_asset_type": _optional_string(source.get("target_asset_type"), max_length=32),
         "note": _optional_string(source.get("note"), max_length=4000),
     }
 

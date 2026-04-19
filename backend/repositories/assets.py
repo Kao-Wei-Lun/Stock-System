@@ -7,12 +7,18 @@ from database.core import DEFAULT_OWNER_ID
 from database.helpers import (
     _deserialize_asset_account,
     _deserialize_asset_cash_ledger_entry,
+    _deserialize_asset_fx_rate,
     _deserialize_asset_position_current,
+    _deserialize_asset_position_adjustment,
+    _deserialize_asset_price_override,
     _deserialize_asset_reconciliation_snapshot,
     _deserialize_asset_trade_entry,
     _deserialize_asset_valuation_current,
     _normalize_asset_account_payload,
     _normalize_asset_cash_ledger_payload,
+    _normalize_asset_fx_rate_payload,
+    _normalize_asset_position_adjustment_payload,
+    _normalize_asset_price_override_payload,
     _normalize_asset_reconciliation_snapshot_payload,
     _normalize_asset_trade_payload,
     _parse_datetime_value,
@@ -481,6 +487,433 @@ class AssetMixin:
         deleted = await self._execute(
             "DELETE FROM `asset_reconciliation_snapshots` WHERE `id`=%s AND `owner_id`=%s",
             (snapshot_id, owner_id),
+        )
+        return bool(deleted)
+
+    async def list_asset_price_overrides(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        account_id: int | None = None,
+        ticker: str | None = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if account_id is not None:
+            filters.append("`account_id`=%s")
+            params.append(account_id)
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(str(ticker).strip().upper())
+        clean_limit = max(1, min(int(limit or 200), 5000))
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `asset_price_overrides`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `effective_at` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_asset_price_override(row) for row in rows]
+
+    async def get_asset_price_override(
+        self,
+        override_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `asset_price_overrides`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (override_id, owner_id),
+        )
+        return _deserialize_asset_price_override(row)
+
+    async def create_asset_price_override(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_asset_price_override_payload(payload)
+        override_id = await self._execute_insert(
+            """
+            INSERT INTO `asset_price_overrides`
+                (`owner_id`, `account_id`, `ticker`, `effective_at`, `price`, `currency`,
+                 `fx_rate_to_base`, `force_override`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["account_id"],
+                normalized["ticker"],
+                _parse_datetime_value(normalized["effective_at"]),
+                normalized["price"],
+                normalized["currency"],
+                normalized["fx_rate_to_base"],
+                1 if normalized["force_override"] else 0,
+                normalized["note"],
+            ),
+        )
+        override = await self.get_asset_price_override(override_id, owner_id=owner_id)
+        if not override:
+            raise RuntimeError("Asset price override was not persisted")
+        return override
+
+    async def update_asset_price_override(
+        self,
+        override_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_asset_price_override(override_id, owner_id=owner_id)
+        if not existing:
+            return None
+        normalized = _normalize_asset_price_override_payload(payload, existing=existing)
+        updated = await self._execute(
+            """
+            UPDATE `asset_price_overrides`
+            SET `account_id`=%s,
+                `ticker`=%s,
+                `effective_at`=%s,
+                `price`=%s,
+                `currency`=%s,
+                `fx_rate_to_base`=%s,
+                `force_override`=%s,
+                `note`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["account_id"],
+                normalized["ticker"],
+                _parse_datetime_value(normalized["effective_at"]),
+                normalized["price"],
+                normalized["currency"],
+                normalized["fx_rate_to_base"],
+                1 if normalized["force_override"] else 0,
+                normalized["note"],
+                override_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_asset_price_override(override_id, owner_id=owner_id)
+
+    async def delete_asset_price_override(
+        self,
+        override_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `asset_price_overrides` WHERE `id`=%s AND `owner_id`=%s",
+            (override_id, owner_id),
+        )
+        return bool(deleted)
+
+    async def list_asset_fx_rates(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        from_currency: str | None = None,
+        to_currency: str | None = None,
+        limit: int = 365,
+    ) -> List[Dict[str, Any]]:
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if date_from:
+            filters.append("`snapshot_date` >= %s")
+            params.append(date_from)
+        if date_to:
+            filters.append("`snapshot_date` <= %s")
+            params.append(date_to)
+        if from_currency:
+            filters.append("`from_currency`=%s")
+            params.append(str(from_currency).strip().upper())
+        if to_currency:
+            filters.append("`to_currency`=%s")
+            params.append(str(to_currency).strip().upper())
+        clean_limit = max(1, min(int(limit or 365), 5000))
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `asset_fx_rates_daily`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `snapshot_date` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_asset_fx_rate(row) for row in rows]
+
+    async def get_asset_fx_rate(
+        self,
+        fx_rate_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `asset_fx_rates_daily`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (fx_rate_id, owner_id),
+        )
+        return _deserialize_asset_fx_rate(row)
+
+    async def create_asset_fx_rate(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_asset_fx_rate_payload(payload)
+        fx_rate_id = await self._execute_insert(
+            """
+            INSERT INTO `asset_fx_rates_daily`
+                (`owner_id`, `snapshot_date`, `from_currency`, `to_currency`, `rate`, `source`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                `rate`=VALUES(`rate`),
+                `source`=VALUES(`source`),
+                `note`=VALUES(`note`)
+            """,
+            (
+                owner_id,
+                normalized["snapshot_date"],
+                normalized["from_currency"],
+                normalized["to_currency"],
+                normalized["rate"],
+                normalized["source"],
+                normalized["note"],
+            ),
+        )
+        if not fx_rate_id:
+            row = await self._fetchone(
+                """
+                SELECT *
+                FROM `asset_fx_rates_daily`
+                WHERE `owner_id`=%s AND `snapshot_date`=%s
+                  AND `from_currency`=%s AND `to_currency`=%s
+                LIMIT 1
+                """,
+                (
+                    owner_id,
+                    normalized["snapshot_date"],
+                    normalized["from_currency"],
+                    normalized["to_currency"],
+                ),
+            )
+            return _deserialize_asset_fx_rate(row)
+        fx_rate = await self.get_asset_fx_rate(fx_rate_id, owner_id=owner_id)
+        if not fx_rate:
+            raise RuntimeError("Asset FX rate was not persisted")
+        return fx_rate
+
+    async def update_asset_fx_rate(
+        self,
+        fx_rate_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_asset_fx_rate(fx_rate_id, owner_id=owner_id)
+        if not existing:
+            return None
+        normalized = _normalize_asset_fx_rate_payload(payload, existing=existing)
+        updated = await self._execute(
+            """
+            UPDATE `asset_fx_rates_daily`
+            SET `snapshot_date`=%s,
+                `from_currency`=%s,
+                `to_currency`=%s,
+                `rate`=%s,
+                `source`=%s,
+                `note`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["snapshot_date"],
+                normalized["from_currency"],
+                normalized["to_currency"],
+                normalized["rate"],
+                normalized["source"],
+                normalized["note"],
+                fx_rate_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_asset_fx_rate(fx_rate_id, owner_id=owner_id)
+
+    async def delete_asset_fx_rate(
+        self,
+        fx_rate_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `asset_fx_rates_daily` WHERE `id`=%s AND `owner_id`=%s",
+            (fx_rate_id, owner_id),
+        )
+        return bool(deleted)
+
+    async def list_asset_position_adjustments(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        account_id: int | None = None,
+        ticker: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        filters = ["`owner_id`=%s"]
+        params: List[Any] = [owner_id]
+        if account_id is not None:
+            filters.append("`account_id`=%s")
+            params.append(account_id)
+        if ticker:
+            filters.append("`ticker`=%s")
+            params.append(str(ticker).strip().upper())
+        if date_from:
+            filters.append("`event_date` >= %s")
+            params.append(_parse_datetime_value(date_from))
+        if date_to:
+            filters.append("`event_date` <= %s")
+            params.append(_parse_datetime_value(date_to))
+        clean_limit = max(1, min(int(limit or 200), 5000))
+        rows = await self._fetchall(
+            f"""
+            SELECT *
+            FROM `asset_position_adjustments`
+            WHERE {' AND '.join(filters)}
+            ORDER BY `event_date` DESC, `id` DESC
+            LIMIT %s
+            """,
+            tuple(params + [clean_limit]),
+        )
+        return [_deserialize_asset_position_adjustment(row) for row in rows]
+
+    async def get_asset_position_adjustment(
+        self,
+        adjustment_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            """
+            SELECT *
+            FROM `asset_position_adjustments`
+            WHERE `id`=%s AND `owner_id`=%s
+            LIMIT 1
+            """,
+            (adjustment_id, owner_id),
+        )
+        return _deserialize_asset_position_adjustment(row)
+
+    async def create_asset_position_adjustment(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        normalized = _normalize_asset_position_adjustment_payload(payload)
+        adjustment_id = await self._execute_insert(
+            """
+            INSERT INTO `asset_position_adjustments`
+                (`owner_id`, `account_id`, `event_date`, `ticker`, `event_type`, `quantity_delta`,
+                 `cost_basis_delta`, `cash_delta`, `currency`, `split_ratio`, `target_ticker`,
+                 `target_display_name`, `target_market`, `target_asset_type`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                normalized["account_id"],
+                _parse_datetime_value(normalized["event_date"]),
+                normalized["ticker"],
+                normalized["event_type"],
+                normalized["quantity_delta"],
+                normalized["cost_basis_delta"],
+                normalized["cash_delta"],
+                normalized["currency"],
+                normalized["split_ratio"],
+                normalized["target_ticker"],
+                normalized["target_display_name"],
+                normalized["target_market"],
+                normalized["target_asset_type"],
+                normalized["note"],
+            ),
+        )
+        adjustment = await self.get_asset_position_adjustment(adjustment_id, owner_id=owner_id)
+        if not adjustment:
+            raise RuntimeError("Asset position adjustment was not persisted")
+        return adjustment
+
+    async def update_asset_position_adjustment(
+        self,
+        adjustment_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        existing = await self.get_asset_position_adjustment(adjustment_id, owner_id=owner_id)
+        if not existing:
+            return None
+        normalized = _normalize_asset_position_adjustment_payload(payload, existing=existing)
+        updated = await self._execute(
+            """
+            UPDATE `asset_position_adjustments`
+            SET `account_id`=%s,
+                `event_date`=%s,
+                `ticker`=%s,
+                `event_type`=%s,
+                `quantity_delta`=%s,
+                `cost_basis_delta`=%s,
+                `cash_delta`=%s,
+                `currency`=%s,
+                `split_ratio`=%s,
+                `target_ticker`=%s,
+                `target_display_name`=%s,
+                `target_market`=%s,
+                `target_asset_type`=%s,
+                `note`=%s
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                normalized["account_id"],
+                _parse_datetime_value(normalized["event_date"]),
+                normalized["ticker"],
+                normalized["event_type"],
+                normalized["quantity_delta"],
+                normalized["cost_basis_delta"],
+                normalized["cash_delta"],
+                normalized["currency"],
+                normalized["split_ratio"],
+                normalized["target_ticker"],
+                normalized["target_display_name"],
+                normalized["target_market"],
+                normalized["target_asset_type"],
+                normalized["note"],
+                adjustment_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_asset_position_adjustment(adjustment_id, owner_id=owner_id)
+
+    async def delete_asset_position_adjustment(
+        self,
+        adjustment_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> bool:
+        deleted = await self._execute(
+            "DELETE FROM `asset_position_adjustments` WHERE `id`=%s AND `owner_id`=%s",
+            (adjustment_id, owner_id),
         )
         return bool(deleted)
 

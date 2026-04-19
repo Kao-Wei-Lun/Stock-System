@@ -12,10 +12,18 @@ def asset_store(monkeypatch):
         "next_cash_id": 1,
         "next_trade_id": 1,
         "next_reconciliation_id": 1,
+        "next_price_override_id": 1,
+        "next_fx_rate_id": 1,
+        "next_adjustment_id": 1,
         "accounts": {},
         "cash_entries": {},
         "trade_entries": {},
         "reconciliation_entries": {},
+        "price_overrides": {},
+        "fx_rates": {},
+        "adjustments": {},
+        "price_histories": {},
+        "journal_entries": [],
         "quotes": {
             "2330.TW": {
                 "ticker": "2330.TW",
@@ -91,15 +99,17 @@ def asset_store(monkeypatch):
     async def create_asset_cash_ledger_entry(payload, owner_id=1):
         entry_id = store["next_cash_id"]
         store["next_cash_id"] += 1
+        amount = float(payload["amount"])
+        fx_rate_to_base = float(payload.get("fx_rate_to_base") or 1)
         item = {
             "id": entry_id,
             "owner_id": owner_id,
             "account_id": payload["account_id"],
             "flow_date": payload["flow_date"],
             "flow_type": payload["flow_type"],
-            "amount": payload["amount"],
+            "amount": amount,
             "currency": payload.get("currency") or "TWD",
-            "fx_rate_to_base": payload.get("fx_rate_to_base") or 1,
+            "fx_rate_to_base": fx_rate_to_base,
             "counterparty": payload.get("counterparty"),
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:20:00+00:00",
@@ -139,9 +149,12 @@ def asset_store(monkeypatch):
     async def create_asset_trade_entry(payload, owner_id=1):
         entry_id = store["next_trade_id"]
         store["next_trade_id"] += 1
-        gross_amount = payload.get("gross_amount") or payload["quantity"] * payload["price"]
-        fee_amount = payload.get("fee_amount") or 0
-        tax_amount = payload.get("tax_amount") or 0
+        quantity = float(payload["quantity"])
+        price = float(payload["price"])
+        gross_amount = float(payload["gross_amount"]) if payload.get("gross_amount") not in (None, "") else quantity * price
+        fee_amount = float(payload.get("fee_amount") or 0)
+        tax_amount = float(payload.get("tax_amount") or 0)
+        fx_rate_to_base = float(payload.get("fx_rate_to_base") or 1)
         item = {
             "id": entry_id,
             "owner_id": owner_id,
@@ -153,13 +166,13 @@ def asset_store(monkeypatch):
             "asset_type": payload.get("asset_type") or "stock",
             "currency": payload.get("currency") or "TWD",
             "side": payload["side"],
-            "quantity": payload["quantity"],
-            "price": payload["price"],
+            "quantity": quantity,
+            "price": price,
             "gross_amount": gross_amount,
             "fee_amount": fee_amount,
             "tax_amount": tax_amount,
-            "net_amount": payload.get("net_amount") or (gross_amount + fee_amount + tax_amount),
-            "fx_rate_to_base": payload.get("fx_rate_to_base") or 1,
+            "net_amount": float(payload["net_amount"]) if payload.get("net_amount") not in (None, "") else (gross_amount + fee_amount + tax_amount),
+            "fx_rate_to_base": fx_rate_to_base,
             "source": payload.get("source") or "manual",
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:30:00+00:00",
@@ -212,6 +225,181 @@ def asset_store(monkeypatch):
     async def delete_asset_reconciliation_snapshot(snapshot_id, owner_id=1):
         return store["reconciliation_entries"].pop(snapshot_id, None) is not None
 
+    async def list_asset_price_overrides(owner_id=1, account_id=None, ticker=None, limit=200):
+        items = list(store["price_overrides"].values())
+        if account_id is not None:
+            items = [item for item in items if item["account_id"] == account_id]
+        if ticker:
+            items = [item for item in items if item["ticker"] == ticker]
+        items.sort(key=lambda item: (item["effective_at"], item["id"]), reverse=True)
+        return clone(items[:limit])
+
+    async def get_asset_price_override(override_id, owner_id=1):
+        item = store["price_overrides"].get(override_id)
+        return clone(item) if item else None
+
+    async def create_asset_price_override(payload, owner_id=1):
+        override_id = store["next_price_override_id"]
+        store["next_price_override_id"] += 1
+        item = {
+            "id": override_id,
+            "owner_id": owner_id,
+            "account_id": payload.get("account_id"),
+            "ticker": payload["ticker"],
+            "effective_at": payload["effective_at"],
+            "price": payload["price"],
+            "currency": payload.get("currency") or "TWD",
+            "fx_rate_to_base": payload.get("fx_rate_to_base"),
+            "force_override": bool(payload.get("force_override", False)),
+            "note": payload.get("note"),
+            "created_at": "2026-04-18T08:42:00+00:00",
+            "updated_at": "2026-04-18T08:42:00+00:00",
+        }
+        store["price_overrides"][override_id] = item
+        return clone(item)
+
+    async def update_asset_price_override(override_id, payload, owner_id=1):
+        existing = store["price_overrides"].get(override_id)
+        if not existing:
+            return None
+        existing.update(payload)
+        existing["updated_at"] = "2026-04-18T08:43:00+00:00"
+        return clone(existing)
+
+    async def delete_asset_price_override(override_id, owner_id=1):
+        return store["price_overrides"].pop(override_id, None) is not None
+
+    async def list_asset_fx_rates(owner_id=1, date_from=None, date_to=None, from_currency=None, to_currency=None, limit=365):
+        items = list(store["fx_rates"].values())
+        if date_from:
+            items = [item for item in items if item["snapshot_date"] >= date_from]
+        if date_to:
+            items = [item for item in items if item["snapshot_date"] <= date_to]
+        if from_currency:
+            items = [item for item in items if item["from_currency"] == from_currency]
+        if to_currency:
+            items = [item for item in items if item["to_currency"] == to_currency]
+        items.sort(key=lambda item: (item["snapshot_date"], item["id"]), reverse=True)
+        return clone(items[:limit])
+
+    async def get_asset_fx_rate(fx_rate_id, owner_id=1):
+        item = store["fx_rates"].get(fx_rate_id)
+        return clone(item) if item else None
+
+    async def create_asset_fx_rate(payload, owner_id=1):
+        fx_rate_id = store["next_fx_rate_id"]
+        store["next_fx_rate_id"] += 1
+        item = {
+            "id": fx_rate_id,
+            "owner_id": owner_id,
+            "snapshot_date": payload["snapshot_date"],
+            "from_currency": payload["from_currency"],
+            "to_currency": payload["to_currency"],
+            "rate": payload["rate"],
+            "source": payload.get("source") or "manual",
+            "note": payload.get("note"),
+            "created_at": "2026-04-18T08:44:00+00:00",
+            "updated_at": "2026-04-18T08:44:00+00:00",
+        }
+        store["fx_rates"][fx_rate_id] = item
+        return clone(item)
+
+    async def update_asset_fx_rate(fx_rate_id, payload, owner_id=1):
+        existing = store["fx_rates"].get(fx_rate_id)
+        if not existing:
+            return None
+        existing.update(payload)
+        existing["updated_at"] = "2026-04-18T08:45:00+00:00"
+        return clone(existing)
+
+    async def delete_asset_fx_rate(fx_rate_id, owner_id=1):
+        return store["fx_rates"].pop(fx_rate_id, None) is not None
+
+    async def list_asset_position_adjustments(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200):
+        items = list(store["adjustments"].values())
+        if account_id is not None:
+            items = [item for item in items if item["account_id"] == account_id]
+        if ticker:
+            items = [item for item in items if item["ticker"] == ticker]
+        if date_from:
+            items = [item for item in items if item["event_date"] >= date_from]
+        if date_to:
+            items = [item for item in items if item["event_date"] <= date_to]
+        items.sort(key=lambda item: (item["event_date"], item["id"]), reverse=True)
+        return clone(items[:limit])
+
+    async def get_asset_position_adjustment(adjustment_id, owner_id=1):
+        item = store["adjustments"].get(adjustment_id)
+        return clone(item) if item else None
+
+    async def create_asset_position_adjustment(payload, owner_id=1):
+        adjustment_id = store["next_adjustment_id"]
+        store["next_adjustment_id"] += 1
+        item = {
+            "id": adjustment_id,
+            "owner_id": owner_id,
+            "account_id": payload["account_id"],
+            "event_date": payload["event_date"],
+            "ticker": payload["ticker"],
+            "event_type": payload.get("event_type") or "adjustment",
+            "quantity_delta": payload.get("quantity_delta"),
+            "cost_basis_delta": payload.get("cost_basis_delta"),
+            "cash_delta": payload.get("cash_delta"),
+            "currency": payload.get("currency"),
+            "split_ratio": payload.get("split_ratio"),
+            "target_ticker": payload.get("target_ticker"),
+            "target_display_name": payload.get("target_display_name"),
+            "target_market": payload.get("target_market"),
+            "target_asset_type": payload.get("target_asset_type"),
+            "note": payload.get("note"),
+            "created_at": "2026-04-18T08:46:00+00:00",
+            "updated_at": "2026-04-18T08:46:00+00:00",
+        }
+        store["adjustments"][adjustment_id] = item
+        return clone(item)
+
+    async def update_asset_position_adjustment(adjustment_id, payload, owner_id=1):
+        existing = store["adjustments"].get(adjustment_id)
+        if not existing:
+            return None
+        existing.update(payload)
+        existing["updated_at"] = "2026-04-18T08:47:00+00:00"
+        return clone(existing)
+
+    async def delete_asset_position_adjustment(adjustment_id, owner_id=1):
+        return store["adjustments"].pop(adjustment_id, None) is not None
+
+    async def get_ohlcv_range(ticker, start_date, end_date, interval="1d"):
+        items = list(store["price_histories"].get(ticker, []))
+        filtered = [
+            item
+            for item in items
+            if (not start_date or str(item.get("date") or "") >= str(start_date))
+            and (not end_date or str(item.get("date") or "") <= str(end_date))
+        ]
+        return clone(filtered)
+
+    async def list_trade_journal_entries(owner_id=1, ticker=None, market=None, strategy_code=None, tag=None, search=None, limit=50):
+        items = list(store["journal_entries"])
+        if ticker:
+            items = [item for item in items if item.get("ticker") == ticker]
+        if market:
+            items = [item for item in items if item.get("market") == market]
+        if strategy_code:
+            items = [item for item in items if item.get("strategy_code") == strategy_code]
+        if tag:
+            items = [item for item in items if tag in (item.get("tags") or [])]
+        if search:
+            needle = str(search).lower()
+            items = [
+                item
+                for item in items
+                if needle in str(item.get("ticker") or "").lower()
+                or needle in str(item.get("note") or "").lower()
+            ]
+        items.sort(key=lambda item: (item.get("entry_time") or "", item.get("id") or 0), reverse=True)
+        return clone(items[:limit])
+
     async def get_market_quote(ticker):
         return clone(store["quotes"].get(ticker))
 
@@ -240,6 +428,23 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "get_asset_reconciliation_snapshot", get_asset_reconciliation_snapshot)
     monkeypatch.setattr(main.db, "create_asset_reconciliation_snapshot", create_asset_reconciliation_snapshot)
     monkeypatch.setattr(main.db, "delete_asset_reconciliation_snapshot", delete_asset_reconciliation_snapshot)
+    monkeypatch.setattr(main.db, "list_asset_price_overrides", list_asset_price_overrides)
+    monkeypatch.setattr(main.db, "get_asset_price_override", get_asset_price_override)
+    monkeypatch.setattr(main.db, "create_asset_price_override", create_asset_price_override)
+    monkeypatch.setattr(main.db, "update_asset_price_override", update_asset_price_override)
+    monkeypatch.setattr(main.db, "delete_asset_price_override", delete_asset_price_override)
+    monkeypatch.setattr(main.db, "list_asset_fx_rates", list_asset_fx_rates)
+    monkeypatch.setattr(main.db, "get_asset_fx_rate", get_asset_fx_rate)
+    monkeypatch.setattr(main.db, "create_asset_fx_rate", create_asset_fx_rate)
+    monkeypatch.setattr(main.db, "update_asset_fx_rate", update_asset_fx_rate)
+    monkeypatch.setattr(main.db, "delete_asset_fx_rate", delete_asset_fx_rate)
+    monkeypatch.setattr(main.db, "list_asset_position_adjustments", list_asset_position_adjustments)
+    monkeypatch.setattr(main.db, "get_asset_position_adjustment", get_asset_position_adjustment)
+    monkeypatch.setattr(main.db, "create_asset_position_adjustment", create_asset_position_adjustment)
+    monkeypatch.setattr(main.db, "update_asset_position_adjustment", update_asset_position_adjustment)
+    monkeypatch.setattr(main.db, "delete_asset_position_adjustment", delete_asset_position_adjustment)
+    monkeypatch.setattr(main.db, "get_ohlcv_range", get_ohlcv_range)
+    monkeypatch.setattr(main.db, "list_trade_journal_entries", list_trade_journal_entries)
     monkeypatch.setattr(main.db, "get_market_quote", get_market_quote)
     monkeypatch.setattr(main.db, "replace_asset_positions_current", replace_asset_positions_current)
     monkeypatch.setattr(main.db, "replace_asset_valuations_current", replace_asset_valuations_current)
@@ -390,3 +595,285 @@ def test_asset_routes_validate_unknown_account(client, asset_store):
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
+    account_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Main Broker",
+            "institution": "Manual",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+        },
+    )
+    assert account_response.status_code == 200
+    account = account_response.json()
+
+    asset_store["price_histories"]["2330.TW"] = [
+        {"date": "2026-04-01", "close": 100, "source": "unit-test"},
+        {"date": "2026-04-10", "close": 110, "source": "unit-test"},
+    ]
+    asset_store["quotes"]["2330.TW"]["price"] = 70
+    asset_store["quotes"]["2330.TW"]["is_delayed"] = False
+    asset_store["quotes"]["2330.TW"]["quote_type"] = "snapshot"
+
+    cash_response = client.post(
+        "/api/assets/cash-ledger",
+        json={
+            "account_id": account["id"],
+            "flow_date": "2026-04-01T09:00:00",
+            "flow_type": "deposit",
+            "amount": 100000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+        },
+    )
+    assert cash_response.status_code == 200
+
+    buy_response = client.post(
+        "/api/assets/trades",
+        json={
+            "account_id": account["id"],
+            "trade_date": "2026-04-01T10:00:00",
+            "ticker": "2330",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "buy",
+            "quantity": 900,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+        },
+    )
+    assert buy_response.status_code == 200
+
+    sell_response = client.post(
+        "/api/assets/trades",
+        json={
+            "account_id": account["id"],
+            "trade_date": "2026-04-10T10:00:00",
+            "ticker": "2330",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "sell",
+            "quantity": 300,
+            "price": 110,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+        },
+    )
+    assert sell_response.status_code == 200
+
+    price_override_response = client.post(
+        "/api/assets/price-overrides",
+        json={
+            "account_id": account["id"],
+            "ticker": "2330",
+            "effective_at": "2026-04-18T09:00:00",
+            "price": 70,
+            "currency": "TWD",
+            "force_override": True,
+            "note": "Manual close",
+        },
+    )
+    assert price_override_response.status_code == 200
+    override_payload = price_override_response.json()
+    assert override_payload["ticker"] == "2330.TW"
+
+    fx_rate_response = client.post(
+        "/api/assets/fx-rates",
+        json={
+            "snapshot_date": "2026-04-19",
+            "from_currency": "USD",
+            "to_currency": "TWD",
+            "rate": 32,
+            "source": "manual",
+            "note": "Daily spot",
+        },
+    )
+    assert fx_rate_response.status_code == 200
+    fx_rate_payload = fx_rate_response.json()
+
+    performance_response = client.get("/api/assets/performance?range=30d&refresh=false")
+    assert performance_response.status_code == 200
+    performance_payload = performance_response.json()
+    assert performance_payload["summary"]["true_performance_base"] == -15000
+    assert performance_payload["summary"]["realized_end_base"] == 3000
+    assert performance_payload["summary"]["unrealized_end_base"] == -18000
+    assert performance_payload["summary"]["net_flow_base"] == 100000
+
+    portfolio_response = client.get("/api/assets/portfolio/current?refresh=false")
+    assert portfolio_response.status_code == 200
+    portfolio_payload = portfolio_response.json()
+    assert portfolio_payload["summary"]["manual_override_count"] == 1
+    assert portfolio_payload["summary"]["total_asset_value_base"] == 85000
+    assert portfolio_payload["holdings"][0]["manual_price_override_id"] == override_payload["id"]
+
+    alerts_response = client.get("/api/assets/alerts/current?refresh=false&performance_range=30d")
+    assert alerts_response.status_code == 200
+    alert_codes = {item["code"] for item in alerts_response.json()["items"]}
+    assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes
+
+    recompute_response = client.post(
+        "/api/assets/recompute",
+        json={"refresh": False, "performance_range": "30d"},
+    )
+    assert recompute_response.status_code == 200
+    assert recompute_response.json()["performance_summary"]["true_performance_base"] == -15000
+
+    adjustment_response = client.post(
+        "/api/assets/adjustments",
+        json={
+            "account_id": account["id"],
+            "event_date": "2026-04-19T12:00:00",
+            "ticker": "ABC",
+            "event_type": "adjustment",
+            "quantity_delta": 2,
+            "cost_basis_delta": 200,
+            "currency": "TWD",
+            "note": "Manual carry-in",
+        },
+    )
+    assert adjustment_response.status_code == 200
+    adjustment_payload = adjustment_response.json()
+
+    adjustments_list_response = client.get("/api/assets/adjustments?ticker=ABC")
+    assert adjustments_list_response.status_code == 200
+    assert adjustments_list_response.json()["items"][0]["ticker"] == "ABC"
+
+    update_fx_response = client.patch(
+        f"/api/assets/fx-rates/{fx_rate_payload['id']}",
+        json={"rate": 31.8, "note": "Adjusted"},
+    )
+    assert update_fx_response.status_code == 200
+    assert update_fx_response.json()["rate"] == 31.8
+
+    delete_adjustment_response = client.delete(f"/api/assets/adjustments/{adjustment_payload['id']}")
+    assert delete_adjustment_response.status_code == 200
+    delete_fx_response = client.delete(f"/api/assets/fx-rates/{fx_rate_payload['id']}")
+    assert delete_fx_response.status_code == 200
+    delete_override_response = client.delete(f"/api/assets/price-overrides/{override_payload['id']}")
+    assert delete_override_response.status_code == 200
+
+
+def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_store):
+    account_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Import Account",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+        },
+    )
+    assert account_response.status_code == 200
+    account = account_response.json()
+
+    trades_csv = "\n".join(
+        [
+            "trade_date,ticker,market,currency,side,quantity,price,fee_amount,tax_amount",
+            "2026-04-01T09:00:00,AAPL,US,USD,buy,5,100,1,0",
+        ]
+    )
+    dry_run_trades_response = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": trades_csv, "default_account_id": account["id"], "dry_run": True},
+    )
+    assert dry_run_trades_response.status_code == 200
+    assert dry_run_trades_response.json()["summary"]["row_count"] == 1
+
+    import_trades_response = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": trades_csv, "default_account_id": account["id"], "dry_run": False},
+    )
+    assert import_trades_response.status_code == 200
+    imported_trades_payload = import_trades_response.json()
+    assert imported_trades_payload["summary"]["created_count"] == 1
+    assert imported_trades_payload["items"][0]["ticker"] == "AAPL"
+
+    cash_csv = "\n".join(
+        [
+            "flow_date,flow_type,amount,currency,counterparty",
+            "2026-04-01T08:00:00,deposit,5000,TWD,Bank",
+        ]
+    )
+    dry_run_cash_response = client.post(
+        "/api/assets/import/cash-csv",
+        json={"csv_text": cash_csv, "default_account_id": account["id"], "dry_run": True},
+    )
+    assert dry_run_cash_response.status_code == 200
+    assert dry_run_cash_response.json()["summary"]["row_count"] == 1
+
+    import_cash_response = client.post(
+        "/api/assets/import/cash-csv",
+        json={"csv_text": cash_csv, "default_account_id": account["id"], "dry_run": False},
+    )
+    assert import_cash_response.status_code == 200
+    assert import_cash_response.json()["summary"]["created_count"] == 1
+
+    asset_store["journal_entries"] = [
+        {
+            "id": 501,
+            "ticker": "MSFT",
+            "market": "US",
+            "direction": "long",
+            "entry_time": "2026-04-02T09:30:00",
+            "exit_time": "2026-04-04T09:30:00",
+            "entry_price": 100,
+            "exit_price": 105,
+            "size": 5,
+            "strategy_code": "swing",
+            "tags": ["growth"],
+            "note": "Long setup",
+        },
+        {
+            "id": 502,
+            "ticker": "TSLA",
+            "market": "US",
+            "direction": "short",
+            "entry_time": "2026-04-03T09:30:00",
+            "entry_price": 200,
+            "size": 2,
+            "strategy_code": "fade",
+            "tags": ["short"],
+            "note": "Short setup",
+        },
+    ]
+
+    preview_response = client.post(
+        "/api/assets/journal-import/preview",
+        json={"account_id": account["id"], "limit": 10},
+    )
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.json()
+    assert preview_payload["summary"]["entry_count"] == 2
+    assert preview_payload["summary"]["importable_count"] == 1
+    assert preview_payload["items"][0]["importable"] is False
+    assert preview_payload["items"][1]["importable"] is True
+    assert len(preview_payload["items"][1]["payloads"]) == 2
+
+    import_journal_response = client.post(
+        "/api/assets/journal-import",
+        json={"account_id": account["id"], "limit": 10},
+    )
+    assert import_journal_response.status_code == 200
+    import_journal_payload = import_journal_response.json()
+    assert import_journal_payload["summary"]["created_count"] == 2
+    assert import_journal_payload["summary"]["error_count"] == 0
+
+    preview_after_response = client.post(
+        "/api/assets/journal-import/preview",
+        json={"account_id": account["id"], "limit": 10},
+    )
+    assert preview_after_response.status_code == 200
+    preview_after_payload = preview_after_response.json()
+    assert preview_after_payload["summary"]["importable_count"] == 0
+    assert preview_after_payload["summary"]["skipped_count"] == 2
