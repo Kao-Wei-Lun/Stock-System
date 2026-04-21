@@ -49,7 +49,8 @@
           :asset-cash-entries="assetCashEntries"
           :asset-trade-entries="assetTradeEntries"
           @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
-          @open-tab="activeTab = $event"
+          @open-tab="openTab"
+          @focus-holdings="focusHoldings"
         />
 
         <AssetHoldingsFlowsPanel
@@ -59,7 +60,9 @@
           :asset-holdings="assetHoldings"
           :asset-cash-entries="assetCashEntries"
           :asset-trade-entries="assetTradeEntries"
-          @open-tab="activeTab = $event"
+          :asset-filter="holdingsFilter"
+          @open-tab="openTab"
+          @clear-filter="resetHoldingsFilter"
         />
 
         <AssetTrackingPanel
@@ -280,6 +283,12 @@ defineEmits([
 ]);
 
 const activeTab = ref("overview");
+const holdingsFilter = ref({
+  accountKey: "",
+  marketKey: "",
+  ticker: "",
+  month: "",
+});
 
 const assetIssueCount = computed(() => {
   const reconciliationItems = props.assetReconciliation?.items || [];
@@ -298,6 +307,29 @@ const sideCopy = computed(() => ({
   holdings: "把帳戶摘要、目前持倉與最近流水集中在同一頁，方便追查資產來源。",
   maintenance: "所有手動輸入、匯入、對帳與例外修正都收在這一層，避免干擾日常查看。",
 }[activeTab.value] || ""));
+
+function openTab(tab) {
+  activeTab.value = tab;
+}
+
+function resetHoldingsFilter() {
+  holdingsFilter.value = {
+    accountKey: "",
+    marketKey: "",
+    ticker: "",
+    month: "",
+  };
+}
+
+function focusHoldings(filter = {}) {
+  holdingsFilter.value = {
+    accountKey: filter.accountKey || "",
+    marketKey: filter.marketKey || "",
+    ticker: filter.ticker || "",
+    month: filter.month || "",
+  };
+  activeTab.value = "holdings";
+}
 </script>
 
 <style scoped>
