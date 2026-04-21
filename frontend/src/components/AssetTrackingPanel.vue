@@ -41,6 +41,7 @@
       </div>
     </div>
 
+    <template v-if="!isMaintenanceMode">
     <div class="asset-range-row">
       <button
         v-for="item in performanceRangeOptions"
@@ -137,6 +138,7 @@
         <div v-else class="bt-history-empty">目前沒有足夠的歷史資料可繪製熱力圖。</div>
       </div>
     </section>
+    </template>
 
     <div class="asset-form-grid">
       <section class="asset-card">
@@ -615,6 +617,7 @@
       </div>
     </section>
 
+    <template v-if="!isMaintenanceMode">
     <div class="asset-analytics-grid">
       <section class="asset-card">
         <div class="asset-card-title">帳戶配置</div>
@@ -711,6 +714,7 @@
       </div>
       <div v-else class="bt-history-empty">尚無持倉，先新增現金與交易事件。</div>
     </section>
+    </template>
   </div>
 </template>
 
@@ -720,6 +724,7 @@ import { computed } from "vue";
 const props = defineProps({
   currentTicker: { type: String, required: true },
   assetLoading: { type: Boolean, required: true },
+  panelMode: { type: String, default: "full" },
   assetPerformanceRange: { type: String, default: "1y" },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
@@ -833,6 +838,7 @@ const cashFlowTypes = [
 const reconciliationSummary = computed(() => props.assetReconciliation?.summary || {});
 const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
 const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
+const isMaintenanceMode = computed(() => props.panelMode === "maintenance");
 
 const summaryCards = computed(() => [
   { key: "total", label: "總資產現值", value: formatCurrency(props.assetSummary.total_asset_value_base), tone: "neutral" },
@@ -977,7 +983,7 @@ function holdingWeight(holding) {
 }
 </script>
 
-<style scoped>
+<style>
 .asset-shell {
   display: flex;
   flex-direction: column;

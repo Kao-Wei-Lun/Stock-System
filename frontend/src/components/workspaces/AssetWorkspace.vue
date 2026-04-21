@@ -16,9 +16,55 @@
       </div>
     </div>
 
+    <div class="asset-tabs">
+      <button class="asset-tab" :class="{ active: activeTab === 'overview' }" type="button" @click="activeTab = 'overview'">
+        總覽
+      </button>
+      <button class="asset-tab" :class="{ active: activeTab === 'holdings' }" type="button" @click="activeTab = 'holdings'">
+        持倉與流水
+      </button>
+      <button class="asset-tab" :class="{ active: activeTab === 'maintenance' }" type="button" @click="activeTab = 'maintenance'">
+        資料維護
+      </button>
+    </div>
+
     <div class="asset-stage">
       <div class="asset-main-card">
+        <AssetOverviewPanel
+          v-if="activeTab === 'overview'"
+          :asset-performance-range="assetPerformanceRange"
+          :asset-base-currency="assetBaseCurrency"
+          :asset-summary="assetSummary"
+          :asset-warnings="assetWarnings"
+          :asset-quote-gaps="assetQuoteGaps"
+          :asset-reconciliation="assetReconciliation"
+          :asset-performance-summary="assetPerformanceSummary"
+          :asset-performance-series="assetPerformanceSeries"
+          :asset-monthly-heatmap="assetMonthlyHeatmap"
+          :asset-alerts="assetAlerts"
+          :asset-account-allocation="assetAccountAllocation"
+          :asset-market-allocation="assetMarketAllocation"
+          :asset-contributors="assetContributors"
+          :asset-holdings="assetHoldings"
+          :asset-cash-entries="assetCashEntries"
+          :asset-trade-entries="assetTradeEntries"
+          @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
+          @open-tab="activeTab = $event"
+        />
+
+        <AssetHoldingsFlowsPanel
+          v-else-if="activeTab === 'holdings'"
+          :asset-base-currency="assetBaseCurrency"
+          :asset-accounts-summary="assetAccountsSummary"
+          :asset-holdings="assetHoldings"
+          :asset-cash-entries="assetCashEntries"
+          :asset-trade-entries="assetTradeEntries"
+          @open-tab="activeTab = $event"
+        />
+
         <AssetTrackingPanel
+          v-else
+          panel-mode="maintenance"
           :current-ticker="currentTicker"
           :asset-loading="assetLoading"
           :asset-performance-range="assetPerformanceRange"
@@ -109,9 +155,9 @@
 
       <aside class="asset-side-card">
         <div class="asset-side-kicker">Daily Focus</div>
-        <div class="asset-side-title">個人資產</div>
+        <div class="asset-side-title">{{ sideTitle }}</div>
         <p class="asset-side-copy">
-          把資產現值、持倉估值、現金流與資料維護集中到獨立工作區，避免和復盤流程混在一起。
+          {{ sideCopy }}
         </p>
         <div class="asset-side-metric">
           <span>基準幣別</span>
@@ -135,8 +181,10 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
+import AssetHoldingsFlowsPanel from "../assets/AssetHoldingsFlowsPanel.vue";
+import AssetOverviewPanel from "../assets/AssetOverviewPanel.vue";
 import AssetTrackingPanel from "../AssetTrackingPanel.vue";
 
 const props = defineProps({
@@ -231,11 +279,25 @@ defineEmits([
   "delete-asset-adjustment",
 ]);
 
+const activeTab = ref("overview");
+
 const assetIssueCount = computed(() => {
   const reconciliationItems = props.assetReconciliation?.items || [];
   const gapCount = reconciliationItems.filter((item) => item?.has_gap).length;
   return props.assetWarnings.length + props.assetQuoteGaps.length + props.assetAlerts.length + gapCount;
 });
+
+const sideTitle = computed(() => ({
+  overview: "資產總覽",
+  holdings: "持倉與流水",
+  maintenance: "資料維護",
+}[activeTab.value] || "個人資產"));
+
+const sideCopy = computed(() => ({
+  overview: "先看資產變化、績效與主要風險，再決定要不要深入查看明細。",
+  holdings: "把帳戶摘要、目前持倉與最近流水集中在同一頁，方便追查資產來源。",
+  maintenance: "所有手動輸入、匯入、對帳與例外修正都收在這一層，避免干擾日常查看。",
+}[activeTab.value] || ""));
 </script>
 
 <style scoped>
@@ -325,6 +387,27 @@ const assetIssueCount = computed(() => {
   align-items: start;
 }
 
+.asset-tabs {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+}
+
+.asset-tab {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(219, 229, 240, 0.82);
+  cursor: pointer;
+}
+
+.asset-tab.active {
+  border-color: rgba(147, 232, 193, 0.44);
+  background: rgba(93, 211, 158, 0.14);
+  color: #f5fffa;
+}
+
 .asset-main-card,
 .asset-side-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -400,7 +483,9 @@ const assetIssueCount = computed(() => {
     font-size: 24px;
   }
 
+  .asset-tabs,
   .workspace-hero-meta {
+    flex-wrap: wrap;
     align-items: stretch;
   }
 }
