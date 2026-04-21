@@ -417,6 +417,22 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
     assert report["summary"]["realized_end_base"] == 3000
     assert report["summary"]["unrealized_end_base"] == -18000
     assert report["summary"]["max_drawdown_pct"] == -22.0183
+    assert report["summary"]["flow_breakdown"] == {
+        "deposit_base": 0.0,
+        "withdraw_base": 0.0,
+        "dividend_interest_base": 0.0,
+        "fee_tax_base": 0.0,
+        "transfer_in_base": 0.0,
+        "transfer_out_base": 0.0,
+        "other_flow_base": 0.0,
+        "net_flow_base": 0.0,
+    }
+    assert report["summary"]["performance_breakdown"] == {
+        "realized_change_base": 3000.0,
+        "unrealized_change_base": -18000.0,
+        "other_change_base": 0.0,
+        "total_change_base": -15000.0,
+    }
     assert report["monthly_heatmap"] == [
         {
             "month": "2026-04",
@@ -428,5 +444,12 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
         "date": "2026-04-18",
         "realized_total_base": 3000.0,
         "unrealized_total_base": -18000.0,
+    }
+    assert report["series"][-1]["flow_breakdown"]["deposit_base"] == 0.0
+    assert report["series"][-1]["performance_breakdown"] == {
+        "realized_change_base": 3000.0,
+        "unrealized_change_base": -18000.0,
+        "other_change_base": 0.0,
+        "total_change_base": -15000.0,
     }
     assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes

@@ -807,6 +807,9 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert performance_payload["summary"]["realized_end_base"] == 3000
     assert performance_payload["summary"]["unrealized_end_base"] == -18000
     assert performance_payload["summary"]["net_flow_base"] == 100000
+    assert performance_payload["summary"]["flow_breakdown"]["deposit_base"] == 100000
+    assert performance_payload["summary"]["performance_breakdown"]["realized_change_base"] == 3000
+    assert performance_payload["summary"]["performance_breakdown"]["unrealized_change_base"] == -18000
 
     portfolio_response = client.get("/api/assets/portfolio/current?refresh=false")
     assert portfolio_response.status_code == 200

@@ -922,6 +922,75 @@ def _external_cash_flow_base(
     return total
 
 
+def _cash_flow_breakdown_base(
+    cash_entries: Sequence[Dict[str, Any]],
+    account_lookup: Dict[int, Dict[str, Any]],
+    included_account_ids: set[int],
+    base_currency: str,
+    *,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+) -> Dict[str, float]:
+    totals = {
+        "deposit_base": 0.0,
+        "withdraw_base": 0.0,
+        "dividend_interest_base": 0.0,
+        "fee_tax_base": 0.0,
+        "transfer_in_base": 0.0,
+        "transfer_out_base": 0.0,
+        "other_flow_base": 0.0,
+        "net_flow_base": 0.0,
+    }
+    normalized_base = _normalize_currency(base_currency)
+    for entry in cash_entries:
+        account_id = _safe_int(entry.get("account_id"))
+        if account_id not in included_account_ids or account_id not in account_lookup:
+            continue
+        flow_dt = _normalize_datetime(entry.get("flow_date"))
+        if start_dt and flow_dt <= start_dt:
+            continue
+        if end_dt and flow_dt > end_dt:
+            continue
+        currency = _normalize_currency(entry.get("currency"), account_lookup[account_id].get("base_currency") or normalized_base)
+        rate = _safe_float(entry.get("fx_rate_to_base"), None)
+        if currency == normalized_base:
+            rate = 1.0
+        if not rate or rate <= 0:
+            rate = 1.0 if currency == normalized_base else 0.0
+        if rate <= 0:
+            continue
+
+        flow_type = str(entry.get("flow_type") or "").strip().lower()
+        amount_base = abs(_safe_float(entry.get("amount"), 0.0) or 0.0) * rate
+        signed_base = _cash_flow_signed_amount(entry) * rate
+
+        if flow_type == "deposit":
+            totals["deposit_base"] += amount_base
+        elif flow_type == "withdraw":
+            totals["withdraw_base"] += amount_base
+        elif flow_type in {"dividend", "interest"}:
+            totals["dividend_interest_base"] += amount_base
+        elif flow_type in {"fee", "tax", "fx_fee"}:
+            totals["fee_tax_base"] += amount_base
+        elif flow_type == "transfer_in":
+            totals["transfer_in_base"] += amount_base
+        elif flow_type == "transfer_out":
+            totals["transfer_out_base"] += amount_base
+        else:
+            totals["other_flow_base"] += signed_base
+
+    totals["net_flow_base"] = (
+        totals["deposit_base"]
+        - totals["withdraw_base"]
+        + totals["dividend_interest_base"]
+        - totals["fee_tax_base"]
+        + totals["transfer_in_base"]
+        - totals["transfer_out_base"]
+        + totals["other_flow_base"]
+    )
+    return {key: round(value, 6) for key, value in totals.items()}
+
+
 async def build_asset_performance_report(
     accounts: List[Dict[str, Any]],
     cash_entries: List[Dict[str, Any]],
@@ -1093,6 +1162,14 @@ async def build_asset_performance_report(
             start_dt=baseline_start_dt,
             end_dt=as_of,
         )
+        flow_breakdown = _cash_flow_breakdown_base(
+            all_cash_entries,
+            account_lookup,
+            included_account_ids,
+            state["base_currency"],
+            start_dt=baseline_start_dt,
+            end_dt=as_of,
+        )
 
         point = {
             "date": point_date.isoformat(),
@@ -1102,6 +1179,7 @@ async def build_asset_performance_report(
             "realized_total_base": round(realized_total_base, 6),
             "unrealized_total_base": round(unrealized_total_base, 6),
             "net_flow_base": round(cumulative_net_flow_base, 6),
+            "flow_breakdown": flow_breakdown,
             "quote_gap_count": len(quote_gaps),
         }
         series.append(point)
@@ -1125,6 +1203,24 @@ async def build_asset_performance_report(
                 "high_water_mark_base": 0.0,
                 "max_drawdown_pct": 0.0,
                 "point_count": 0,
+                "realized_end_base": 0.0,
+                "unrealized_end_base": 0.0,
+                "flow_breakdown": {
+                    "deposit_base": 0.0,
+                    "withdraw_base": 0.0,
+                    "dividend_interest_base": 0.0,
+                    "fee_tax_base": 0.0,
+                    "transfer_in_base": 0.0,
+                    "transfer_out_base": 0.0,
+                    "other_flow_base": 0.0,
+                    "net_flow_base": 0.0,
+                },
+                "performance_breakdown": {
+                    "realized_change_base": 0.0,
+                    "unrealized_change_base": 0.0,
+                    "other_change_base": 0.0,
+                    "total_change_base": 0.0,
+                },
             },
             "series": [],
             "monthly_heatmap": [],
@@ -1132,6 +1228,8 @@ async def build_asset_performance_report(
         }
 
     start_value_base = _safe_float(series[0].get("total_asset_value_base"), 0.0) or 0.0
+    start_realized_total_base = _safe_float(series[0].get("realized_total_base"), 0.0) or 0.0
+    start_unrealized_total_base = _safe_float(series[0].get("unrealized_total_base"), 0.0) or 0.0
     high_water_mark = 0.0
     max_drawdown_pct = 0.0
     for point in series:
@@ -1146,6 +1244,15 @@ async def build_asset_performance_report(
             total - start_value_base - (_safe_float(point.get("net_flow_base"), 0.0) or 0.0),
             6,
         )
+        realized_change_base = (_safe_float(point.get("realized_total_base"), 0.0) or 0.0) - start_realized_total_base
+        unrealized_change_base = (_safe_float(point.get("unrealized_total_base"), 0.0) or 0.0) - start_unrealized_total_base
+        other_change_base = (_safe_float(point.get("true_performance_base"), 0.0) or 0.0) - realized_change_base - unrealized_change_base
+        point["performance_breakdown"] = {
+            "realized_change_base": round(realized_change_base, 6),
+            "unrealized_change_base": round(unrealized_change_base, 6),
+            "other_change_base": round(other_change_base, 6),
+            "total_change_base": round(_safe_float(point.get("true_performance_base"), 0.0) or 0.0, 6),
+        }
         max_drawdown_pct = min(max_drawdown_pct, drawdown_pct)
 
     end_point = series[-1]
@@ -1200,6 +1307,22 @@ async def build_asset_performance_report(
             "point_count": len(series),
             "realized_end_base": round(_safe_float(end_point.get("realized_total_base"), 0.0) or 0.0, 6),
             "unrealized_end_base": round(_safe_float(end_point.get("unrealized_total_base"), 0.0) or 0.0, 6),
+            "flow_breakdown": end_point.get("flow_breakdown") or {
+                "deposit_base": 0.0,
+                "withdraw_base": 0.0,
+                "dividend_interest_base": 0.0,
+                "fee_tax_base": 0.0,
+                "transfer_in_base": 0.0,
+                "transfer_out_base": 0.0,
+                "other_flow_base": 0.0,
+                "net_flow_base": 0.0,
+            },
+            "performance_breakdown": end_point.get("performance_breakdown") or {
+                "realized_change_base": 0.0,
+                "unrealized_change_base": 0.0,
+                "other_change_base": 0.0,
+                "total_change_base": 0.0,
+            },
         },
         "series": series,
         "monthly_heatmap": monthly_heatmap,
