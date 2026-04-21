@@ -68,74 +68,143 @@
         <div class="asset-card-title">目前持倉</div>
         <div class="bt-trade-sub">{{ filteredHoldings.length }} 檔 · 依市值排序</div>
       </div>
-      <div v-if="filteredHoldings.length" class="asset-table-wrap">
-        <table class="asset-table">
-          <thead>
-            <tr>
-              <th>標的</th>
-              <th>帳戶</th>
-              <th>市場</th>
-              <th>數量</th>
-              <th>均價</th>
-              <th>最新價</th>
-              <th>市值</th>
-              <th>未實現</th>
-              <th>已實現</th>
-              <th>權重</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="holding in filteredHoldings" :key="`${holding.account_id}-${holding.ticker}`">
-              <td>
-                <div class="asset-table-main">
-                  <strong>{{ holding.ticker }}</strong>
-                  <small>{{ holding.display_name || holding.ticker }}</small>
+      <div v-if="filteredHoldings.length" class="asset-holdings-detail-layout">
+        <div class="asset-table-wrap">
+          <table class="asset-table">
+            <thead>
+              <tr>
+                <th>標的</th>
+                <th>帳戶</th>
+                <th>市場</th>
+                <th>數量</th>
+                <th>均價</th>
+                <th>最新價</th>
+                <th>市值</th>
+                <th>未實現</th>
+                <th>已實現</th>
+                <th>權重</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="holding in filteredHoldings"
+                :key="holdingKey(holding)"
+                class="asset-holding-row"
+                :class="{ 'is-active': selectedHoldingKey === holdingKey(holding) }"
+                @click="selectHolding(holding)"
+              >
+                <td>
+                  <div class="asset-table-main">
+                    <strong>{{ holding.ticker }}</strong>
+                    <small>{{ holding.display_name || holding.ticker }}</small>
+                  </div>
+                </td>
+                <td>{{ holding.account_name }}</td>
+                <td>{{ holding.market || "—" }}</td>
+                <td>{{ formatNumber(holding.quantity, 4) }}</td>
+                <td>{{ formatNumber(holding.avg_cost, 2) }}</td>
+                <td>
+                  <span>{{ holding.last_price == null ? "—" : formatNumber(holding.last_price, 2) }}</span>
+                  <small v-if="holding.is_delayed" class="asset-badge delayed">Delayed</small>
+                  <small v-if="holding.manual_price_override_id" class="asset-badge manual">Manual</small>
+                </td>
+                <td>{{ formatCurrency(holding.market_value_base) }}</td>
+                <td :class="Number(holding.unrealized_pnl_base || 0) >= 0 ? 'up' : 'dn'">{{ formatSignedCurrency(holding.unrealized_pnl_base, assetBaseCurrency) }}</td>
+                <td :class="Number(holding.realized_pnl_base || 0) >= 0 ? 'up' : 'dn'">{{ formatSignedCurrency(holding.realized_pnl_base, assetBaseCurrency) }}</td>
+                <td>{{ holdingWeight(holding) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <aside v-if="selectedHolding" class="asset-card asset-holding-drawer">
+          <div class="asset-card-head">
+            <div>
+              <div class="asset-card-title">焦點持倉</div>
+              <div class="bt-trade-sub">{{ selectedHolding.account_name }} · {{ selectedHolding.market || "—" }}</div>
+            </div>
+            <div class="asset-list-metrics">
+              <span>{{ selectedHolding.ticker }}</span>
+              <small>{{ selectedHolding.display_name || selectedHolding.ticker }}</small>
+            </div>
+          </div>
+          <div class="asset-holding-drawer-grid">
+            <div class="asset-mini-block">
+              <span>數量</span>
+              <strong>{{ formatNumber(selectedHolding.quantity, 4) }}</strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>平均成本</span>
+              <strong>{{ formatNumber(selectedHolding.avg_cost, 2) }}</strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>最新市值</span>
+              <strong>{{ formatCurrency(selectedHolding.market_value_base) }}</strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>未實現損益</span>
+              <strong :class="Number(selectedHolding.unrealized_pnl_base || 0) >= 0 ? 'up' : 'dn'">
+                {{ formatSignedCurrency(selectedHolding.unrealized_pnl_base, assetBaseCurrency) }}
+              </strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>已實現損益</span>
+              <strong :class="Number(selectedHolding.realized_pnl_base || 0) >= 0 ? 'up' : 'dn'">
+                {{ formatSignedCurrency(selectedHolding.realized_pnl_base, assetBaseCurrency) }}
+              </strong>
+            </div>
+            <div class="asset-mini-block">
+              <span>最新價格</span>
+              <strong>{{ selectedHolding.last_price == null ? "—" : formatNumber(selectedHolding.last_price, 2) }}</strong>
+            </div>
+          </div>
+          <div class="asset-subsection">
+            <div class="asset-card-head">
+              <div class="asset-card-title">最近相關交易</div>
+              <div class="bt-trade-sub">{{ selectedHoldingTrades.length }} 筆</div>
+            </div>
+            <div v-if="selectedHoldingTrades.length" class="asset-list">
+              <div v-for="entry in selectedHoldingTrades.slice(0, 5)" :key="entry.id" class="asset-list-item static">
+                <div>
+                  <strong>{{ tradeSideLabel(entry.side) }}</strong>
+                  <div class="bt-trade-sub">{{ formatDateTime(entry.trade_date) }}</div>
                 </div>
-              </td>
-              <td>{{ holding.account_name }}</td>
-              <td>{{ holding.market || "—" }}</td>
-              <td>{{ formatNumber(holding.quantity, 4) }}</td>
-              <td>{{ formatNumber(holding.avg_cost, 2) }}</td>
-              <td>
-                <span>{{ holding.last_price == null ? "—" : formatNumber(holding.last_price, 2) }}</span>
-                <small v-if="holding.is_delayed" class="asset-badge delayed">Delayed</small>
-                <small v-if="holding.manual_price_override_id" class="asset-badge manual">Manual</small>
-              </td>
-              <td>{{ formatCurrency(holding.market_value_base) }}</td>
-              <td :class="Number(holding.unrealized_pnl_base || 0) >= 0 ? 'up' : 'dn'">{{ formatSignedCurrency(holding.unrealized_pnl_base, assetBaseCurrency) }}</td>
-              <td :class="Number(holding.realized_pnl_base || 0) >= 0 ? 'up' : 'dn'">{{ formatSignedCurrency(holding.realized_pnl_base, assetBaseCurrency) }}</td>
-              <td>{{ holdingWeight(holding) }}</td>
-            </tr>
-          </tbody>
-        </table>
+                <div class="asset-list-metrics">
+                  <span>{{ formatNumber(entry.quantity, 4) }} @ {{ formatNumber(entry.price, 2) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="bt-history-empty">目前沒有這檔標的的交易記錄。</div>
+          </div>
+        </aside>
       </div>
       <div v-else class="bt-history-empty">目前篩選條件下沒有持倉。</div>
     </section>
 
     <section class="asset-card asset-card-wide">
       <div class="asset-card-head">
-        <div class="asset-card-title">最近交易</div>
-        <div class="bt-trade-sub">{{ filteredTradeEntries.length }} 筆記錄</div>
+        <div class="asset-card-title">流水時間軸</div>
+        <div class="bt-trade-sub">{{ flowTimelineItems.length }} 筆事件</div>
       </div>
-      <div v-if="filteredTradeEntries.length" class="asset-list">
-        <div v-for="entry in filteredTradeEntries.slice(0, 12)" :key="entry.id" class="asset-list-item static">
+      <div v-if="flowTimelineItems.length" class="asset-list">
+        <div v-for="entry in flowTimelineItems" :key="entry.key" class="asset-list-item static">
           <div>
-            <strong>{{ entry.ticker }} · {{ tradeSideLabel(entry.side) }}</strong>
-            <div class="bt-trade-sub">{{ resolveAccountName(entry.account_id) }} · {{ formatDateTime(entry.trade_date) }}</div>
+            <strong>{{ entry.title }}</strong>
+            <div class="bt-trade-sub">{{ entry.meta }}</div>
           </div>
           <div class="asset-list-metrics">
-            <span>{{ formatNumber(entry.quantity, 4) }} @ {{ formatNumber(entry.price, 2) }}</span>
-            <small>{{ entry.market || "—" }}</small>
+            <span>{{ entry.value }}</span>
+            <small>{{ entry.kind }}</small>
           </div>
         </div>
       </div>
-      <div v-else class="bt-history-empty">目前篩選條件下沒有交易事件。</div>
+      <div v-else class="bt-history-empty">目前篩選條件下沒有流水事件。</div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps({
   assetBaseCurrency: { type: String, default: "TWD" },
@@ -196,6 +265,48 @@ const filteredTradeEntries = computed(() => (
 ));
 
 const totalHoldingsValue = computed(() => filteredHoldings.value.reduce((sum, item) => sum + Number(item?.market_value_base || 0), 0));
+const selectedHoldingKey = ref("");
+
+watch(
+  filteredHoldings,
+  (items) => {
+    const nextKey = items[0] ? holdingKey(items[0]) : "";
+    if (!items.some((item) => holdingKey(item) === selectedHoldingKey.value)) {
+      selectedHoldingKey.value = nextKey;
+    }
+  },
+  { immediate: true },
+);
+
+const selectedHolding = computed(() => filteredHoldings.value.find((item) => holdingKey(item) === selectedHoldingKey.value) || null);
+const selectedHoldingTrades = computed(() => (
+  filteredTradeEntries.value.filter((entry) => (
+    selectedHolding.value
+    && String(entry?.ticker || "").trim().toUpperCase() === String(selectedHolding.value?.ticker || "").trim().toUpperCase()
+    && String(resolveAccountName(entry?.account_id)) === String(selectedHolding.value?.account_name || "")
+  ))
+));
+const flowTimelineItems = computed(() => {
+  const trades = filteredTradeEntries.value.map((entry) => ({
+    key: `trade-${entry.id}`,
+    title: `${entry.ticker} · ${tradeSideLabel(entry.side)}`,
+    meta: `${resolveAccountName(entry.account_id)} · ${formatDateTime(entry.trade_date)}`,
+    value: `${formatNumber(entry.quantity, 4)} @ ${formatNumber(entry.price, 2)}`,
+    kind: `交易 · ${entry.market || "—"}`,
+    timestamp: new Date(entry.trade_date || 0).getTime(),
+  }));
+  const cash = filteredCashEntries.value.map((entry) => ({
+    key: `cash-${entry.id}`,
+    title: flowTypeLabel(entry.flow_type),
+    meta: `${resolveAccountName(entry.account_id)} · ${formatDateTime(entry.flow_date)}`,
+    value: formatSignedCurrency(entry.amount, entry.currency, entry.flow_type),
+    kind: "現金",
+    timestamp: new Date(entry.flow_date || 0).getTime(),
+  }));
+  return [...trades, ...cash]
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, 20);
+});
 
 function matchesHolding(holding) {
   if (normalizedFilter.value.accountKey && String(holding?.account_name || "").trim() !== normalizedFilter.value.accountKey) {
@@ -238,6 +349,14 @@ function matchesTradeEntry(entry) {
 
 function resolveAccountName(accountId) {
   return props.assetAccountsSummary.find((item) => String(item.account_id) === String(accountId))?.account_name || `帳戶 #${accountId}`;
+}
+
+function holdingKey(holding) {
+  return `${holding?.account_id}-${holding?.ticker}`;
+}
+
+function selectHolding(holding) {
+  selectedHoldingKey.value = holdingKey(holding);
 }
 
 function holdingWeight(holding) {
@@ -367,10 +486,38 @@ function cashTone(flowType) {
   margin-bottom: 18px;
 }
 
+.asset-holdings-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.asset-holding-row {
+  cursor: pointer;
+}
+
+.asset-holding-row.is-active {
+  background: rgba(123, 231, 255, 0.08);
+}
+
+.asset-holding-drawer {
+  position: sticky;
+  top: 18px;
+}
+
+.asset-holding-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 @media (max-width: 960px) {
   .asset-holdings-head,
   .asset-holdings-head-actions,
-  .asset-preview-grid {
+  .asset-preview-grid,
+  .asset-holdings-detail-layout,
+  .asset-holding-drawer-grid {
     display: grid;
     grid-template-columns: 1fr;
   }

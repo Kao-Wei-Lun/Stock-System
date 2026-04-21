@@ -6,7 +6,7 @@
         :key="warning"
         class="asset-warning-card asset-warning-action"
         type="button"
-        @click="$emit('open-tab', 'maintenance')"
+        @click="$emit('focus-maintenance', 'reconciliation')"
       >
         {{ warning }}
       </button>
@@ -15,7 +15,7 @@
         :key="`${gap.account_id}-${gap.ticker}`"
         class="asset-warning-card asset-warning-action"
         type="button"
-        @click="$emit('open-tab', 'maintenance')"
+        @click="$emit('focus-maintenance', 'price-overrides')"
       >
         {{ gap.ticker }} 暫時抓不到最新報價，目前未納入估值；可到資料維護補手動價格覆蓋。
       </button>
@@ -24,7 +24,7 @@
         :key="`reco-${item.account_id}-${item.snapshot_id}`"
         class="asset-warning-card asset-warning-action"
         type="button"
-        @click="$emit('open-tab', 'maintenance')"
+        @click="$emit('focus-maintenance', 'reconciliation')"
       >
         {{ item.account_name }} 對帳差異 {{ formatSignedCurrency(item.total_difference, assetBaseCurrency) }}
       </button>
@@ -34,7 +34,7 @@
         class="asset-warning-card asset-warning-action"
         :class="alert.level === 'info' ? 'info' : 'warning'"
         type="button"
-        @click="$emit('open-tab', 'maintenance')"
+        @click="$emit('focus-maintenance', 'reconciliation')"
       >
         <strong>{{ alert.title }}</strong>
         <span>{{ alert.message }}</span>
@@ -394,6 +394,7 @@ const emit = defineEmits([
   "set-asset-performance-range",
   "open-tab",
   "focus-holdings",
+  "focus-maintenance",
 ]);
 
 const performanceRangeOptions = [

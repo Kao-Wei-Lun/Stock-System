@@ -51,6 +51,7 @@
           @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
           @open-tab="openTab"
           @focus-holdings="focusHoldings"
+          @focus-maintenance="focusMaintenance"
         />
 
         <AssetHoldingsFlowsPanel
@@ -65,8 +66,22 @@
           @clear-filter="resetHoldingsFilter"
         />
 
-        <AssetTrackingPanel
-          v-else
+        <div v-else class="asset-maintenance-shell">
+          <aside class="asset-maintenance-nav">
+            <div class="asset-maintenance-nav-kicker">Maintenance</div>
+            <button
+              v-for="section in maintenanceNavSections"
+              :key="section.key"
+              class="asset-maintenance-nav-btn"
+              type="button"
+              @click="scrollMaintenanceSection(section.key)"
+            >
+              {{ section.label }}
+            </button>
+          </aside>
+
+          <div ref="maintenanceContentRef" class="asset-maintenance-content">
+            <AssetTrackingPanel
           panel-mode="maintenance"
           :current-ticker="currentTicker"
           :asset-loading="assetLoading"
@@ -154,6 +169,8 @@
           @delete-asset-fx-rate="$emit('delete-asset-fx-rate', $event)"
           @delete-asset-adjustment="$emit('delete-asset-adjustment', $event)"
         />
+          </div>
+        </div>
       </div>
 
       <aside class="asset-side-card">
@@ -184,7 +201,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 
 import AssetHoldingsFlowsPanel from "../assets/AssetHoldingsFlowsPanel.vue";
 import AssetOverviewPanel from "../assets/AssetOverviewPanel.vue";
@@ -289,6 +306,17 @@ const holdingsFilter = ref({
   ticker: "",
   month: "",
 });
+const maintenanceContentRef = ref(null);
+const maintenanceNavSections = [
+  { key: "accounts", label: "帳戶管理" },
+  { key: "cash", label: "現金事件" },
+  { key: "trades", label: "交易事件" },
+  { key: "reconciliation", label: "對帳快照" },
+  { key: "price-overrides", label: "價格覆蓋" },
+  { key: "fx-rates", label: "FX 匯率" },
+  { key: "adjustments", label: "持倉調整" },
+  { key: "imports", label: "匯入工具" },
+];
 
 const assetIssueCount = computed(() => {
   const reconciliationItems = props.assetReconciliation?.items || [];
@@ -329,6 +357,32 @@ function focusHoldings(filter = {}) {
     month: filter.month || "",
   };
   activeTab.value = "holdings";
+}
+
+function scrollMaintenanceSection(sectionKey) {
+  const sectionIndexByKey = {
+    accounts: 0,
+    cash: 1,
+    trades: 2,
+    reconciliation: 3,
+    "price-overrides": 4,
+    "fx-rates": 5,
+    adjustments: 6,
+    imports: 7,
+  };
+  const cards = maintenanceContentRef.value?.querySelectorAll?.(".asset-card");
+  const target = cards?.[sectionIndexByKey[sectionKey]];
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+async function focusMaintenance(sectionKey = "") {
+  activeTab.value = "maintenance";
+  await nextTick();
+  if (sectionKey) {
+    scrollMaintenanceSection(sectionKey);
+  }
 }
 </script>
 
@@ -453,6 +507,48 @@ function focusHoldings(filter = {}) {
   border-radius: 20px;
 }
 
+.asset-maintenance-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+}
+
+.asset-maintenance-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(12, 22, 34, 0.92), rgba(7, 14, 22, 0.92));
+}
+
+.asset-maintenance-nav-kicker {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(147, 232, 193, 0.74);
+  margin-bottom: 4px;
+}
+
+.asset-maintenance-nav-btn {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(219, 229, 240, 0.82);
+  text-align: left;
+  cursor: pointer;
+}
+
+.asset-maintenance-nav-btn:hover {
+  border-color: rgba(147, 232, 193, 0.26);
+  background: rgba(93, 211, 158, 0.08);
+}
+
+.asset-maintenance-content {
+  min-width: 0;
+}
+
 .asset-side-card {
   padding: 18px;
   position: sticky;
@@ -502,6 +598,15 @@ function focusHoldings(filter = {}) {
 
   .asset-side-card {
     position: static;
+  }
+
+  .asset-maintenance-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-maintenance-nav {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 }
 

@@ -144,6 +144,12 @@ function mountWorkspace() {
               <button data-testid="overview-to-holdings" @click="$emit('open-tab', 'holdings')">
                 to holdings
               </button>
+              <button data-testid="overview-focus-holdings" @click="$emit('focus-holdings', { ticker: 'AAPL' })">
+                focus holdings
+              </button>
+              <button data-testid="overview-focus-maintenance" @click="$emit('focus-maintenance', 'reconciliation')">
+                focus maintenance
+              </button>
             </div>
           `,
         },
@@ -192,6 +198,17 @@ describe("AssetWorkspace", () => {
     expect(wrapper.find(".holdings-panel-stub").exists()).toBe(true);
 
     await wrapper.get('[data-testid="holdings-to-maintenance"]').trigger("click");
+    expect(wrapper.find(".maintenance-panel-stub").exists()).toBe(true);
+  });
+
+  it("routes overview drilldowns into holdings and maintenance tabs", async () => {
+    const wrapper = mountWorkspace();
+
+    await wrapper.get('[data-testid="overview-focus-holdings"]').trigger("click");
+    expect(wrapper.find(".holdings-panel-stub").exists()).toBe(true);
+
+    await wrapper.findAll(".asset-tab")[0].trigger("click");
+    await wrapper.get('[data-testid="overview-focus-maintenance"]').trigger("click");
     expect(wrapper.find(".maintenance-panel-stub").exists()).toBe(true);
   });
 });
