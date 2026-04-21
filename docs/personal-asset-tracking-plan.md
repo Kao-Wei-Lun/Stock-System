@@ -739,16 +739,29 @@ POST /api/assets/import/cash-csv
 
 ### 13.1 入口位置
 
-第一版仍建議先放在 `Review` 工作區下，新增第三個分頁：
+本次調整後，`個人資產` 不再放在 `Review` 工作區下，而是獨立成一個主功能入口。
 
-- `交易日誌`
-- `系統回測`
-- `資產追蹤`
+建議主導覽改為：
+
+- `總覽`
+- `終端`
+- `籌碼`
+- `復盤`
+- `個人資產`
+- `設定`
 
 理由：
 
-- 與復盤 / 紀律 / 績效檢查脈絡一致
-- 能降低第一版導覽改動成本
+- 資產追蹤的使用情境已經超出「盤後復盤」範圍
+- 後續規劃中，資產模組本身就會包含 `總覽 / 持倉與流水 / 資料維護` 三層頁面
+- 若仍放在 `Review` 內，資訊架構會持續被 `日誌 / 回測` 的脈絡綁住
+- 獨立後更符合「日常資產儀表板」的產品定位，也更利於後續圖表化重構
+
+資產模組內部再維持自己的次頁籤：
+
+- `總覽`
+- `持倉與流水`
+- `資料維護`
 
 ### 13.2 頁面主要區塊
 
@@ -998,4 +1011,4 @@ POST /api/assets/import/cash-csv
 - `docs/asset-tracking-api-spec.md`
 - `docs/asset-tracking-reconciliation-flow.md`
 - `docs/asset-tracking-phase-task-checklist.md`
-
+- `docs/asset-tracking-ui-redesign-plan.md`
