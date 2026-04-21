@@ -223,6 +223,15 @@
           </select>
         </div>
         <div class="bt-row"><div class="bt-label">換算匯率</div><input class="bt-inp" type="number" step="0.0001" :value="assetCashForm.fx_rate_to_base" @input="$emit('update-asset-cash-field', { key: 'fx_rate_to_base', value: $event.target.value })"></div>
+        <label class="asset-checkbox">
+          <input
+            data-testid="asset-cash-initial-balance"
+            type="checkbox"
+            :checked="assetCashForm.is_initial_balance"
+            @change="$emit('update-asset-cash-field', { key: 'is_initial_balance', value: $event.target.checked })"
+          >
+          <span>視為期初現金，不列入後續入金</span>
+        </label>
         <div class="bt-row"><div class="bt-label">對象</div><input class="bt-inp" :value="assetCashForm.counterparty" @input="$emit('update-asset-cash-field', { key: 'counterparty', value: $event.target.value })" placeholder="銀行 / 券商 / 公司"></div>
         <div class="journal-text-row">
           <div class="bt-label">備註</div>
@@ -243,7 +252,7 @@
               </div>
               <div class="asset-list-metrics">
                 <span :class="cashTone(entry.flow_type)">{{ formatSignedCurrency(entry.amount, entry.currency, entry.flow_type) }}</span>
-                <small>編輯</small>
+                <small>{{ entry.is_initial_balance ? "期初基線 · 編輯" : "編輯" }}</small>
               </div>
             </button>
           </div>
@@ -299,6 +308,15 @@
         <div class="bt-row"><div class="bt-label">稅費</div><input class="bt-inp" type="number" step="0.0001" :value="assetTradeForm.tax_amount" @input="$emit('update-asset-trade-field', { key: 'tax_amount', value: $event.target.value })"></div>
         <div class="bt-row"><div class="bt-label">換算匯率</div><input class="bt-inp" type="number" step="0.0001" :value="assetTradeForm.fx_rate_to_base" @input="$emit('update-asset-trade-field', { key: 'fx_rate_to_base', value: $event.target.value })"></div>
       </div>
+      <label class="asset-checkbox">
+        <input
+          data-testid="asset-trade-initial-balance"
+          type="checkbox"
+          :checked="assetTradeForm.is_initial_balance"
+          @change="$emit('update-asset-trade-field', { key: 'is_initial_balance', value: $event.target.checked })"
+        >
+        <span>視為期初持倉基線，以成本作為起始部位</span>
+      </label>
       <div class="journal-text-row">
         <div class="bt-label">備註</div>
         <textarea class="journal-textarea" :value="assetTradeForm.note" @input="$emit('update-asset-trade-field', { key: 'note', value: $event.target.value })"></textarea>
@@ -319,7 +337,7 @@
             </div>
             <div class="asset-list-metrics">
               <span>{{ formatNumber(entry.quantity, 4) }} @ {{ formatNumber(entry.price, 2) }}</span>
-              <small>編輯</small>
+              <small>{{ entry.is_initial_balance ? "期初基線 · 編輯" : "編輯" }}</small>
             </div>
           </button>
         </div>

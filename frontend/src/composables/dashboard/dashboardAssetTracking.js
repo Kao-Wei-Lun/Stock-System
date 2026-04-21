@@ -65,6 +65,7 @@ export function createDashboardAssetTracking({
     amount: "",
     currency: "TWD",
     fx_rate_to_base: 1,
+    is_initial_balance: false,
     counterparty: "",
     note: "",
   });
@@ -83,6 +84,7 @@ export function createDashboardAssetTracking({
     fee_amount: 0,
     tax_amount: 0,
     fx_rate_to_base: inferMarketFromTicker(currentTicker.value) === "US" ? 32 : 1,
+    is_initial_balance: false,
     source: "manual",
     note: "",
   });
@@ -246,6 +248,7 @@ export function createDashboardAssetTracking({
     assetCashForm.amount = "";
     assetCashForm.currency = getAccountBaseCurrency(primaryAccountId);
     assetCashForm.fx_rate_to_base = assetCashForm.currency === "USD" ? 32 : 1;
+    assetCashForm.is_initial_balance = false;
     assetCashForm.counterparty = "";
     assetCashForm.note = "";
   }
@@ -267,6 +270,7 @@ export function createDashboardAssetTracking({
     assetTradeForm.fee_amount = 0;
     assetTradeForm.tax_amount = 0;
     assetTradeForm.fx_rate_to_base = inferredMarket === "US" ? 32 : 1;
+    assetTradeForm.is_initial_balance = false;
     assetTradeForm.source = "manual";
     assetTradeForm.note = "";
   }
@@ -411,6 +415,10 @@ export function createDashboardAssetTracking({
 
   function updateAssetCashField(key, value) {
     if (!Object.prototype.hasOwnProperty.call(assetCashForm, key)) return;
+    if (key === "is_initial_balance") {
+      assetCashForm.is_initial_balance = Boolean(value);
+      return;
+    }
     if (["amount", "fx_rate_to_base"].includes(key)) {
       assetCashForm[key] = coerceNumber(value);
       return;
@@ -425,6 +433,10 @@ export function createDashboardAssetTracking({
 
   function updateAssetTradeField(key, value) {
     if (!Object.prototype.hasOwnProperty.call(assetTradeForm, key)) return;
+    if (key === "is_initial_balance") {
+      assetTradeForm.is_initial_balance = Boolean(value);
+      return;
+    }
     if (["quantity", "price", "fee_amount", "tax_amount", "fx_rate_to_base"].includes(key)) {
       assetTradeForm[key] = coerceNumber(value);
       return;
@@ -565,6 +577,7 @@ export function createDashboardAssetTracking({
     assetCashForm.amount = record.amount ?? "";
     assetCashForm.currency = record.currency || "TWD";
     assetCashForm.fx_rate_to_base = record.fx_rate_to_base ?? 1;
+    assetCashForm.is_initial_balance = Boolean(record.is_initial_balance);
     assetCashForm.counterparty = record.counterparty || "";
     assetCashForm.note = record.note || "";
   }
@@ -585,6 +598,7 @@ export function createDashboardAssetTracking({
     assetTradeForm.fee_amount = record.fee_amount ?? 0;
     assetTradeForm.tax_amount = record.tax_amount ?? 0;
     assetTradeForm.fx_rate_to_base = record.fx_rate_to_base ?? 1;
+    assetTradeForm.is_initial_balance = Boolean(record.is_initial_balance);
     assetTradeForm.source = record.source || "manual";
     assetTradeForm.note = record.note || "";
   }
@@ -681,6 +695,7 @@ export function createDashboardAssetTracking({
         amount: Number(assetCashForm.amount),
         currency: assetCashForm.currency,
         fx_rate_to_base: Number(assetCashForm.fx_rate_to_base || 1),
+        is_initial_balance: Boolean(assetCashForm.is_initial_balance),
         counterparty: String(assetCashForm.counterparty || "").trim() || null,
         note: String(assetCashForm.note || "").trim() || null,
       };
@@ -728,6 +743,7 @@ export function createDashboardAssetTracking({
         fee_amount: Number(assetTradeForm.fee_amount || 0),
         tax_amount: Number(assetTradeForm.tax_amount || 0),
         fx_rate_to_base: Number(assetTradeForm.fx_rate_to_base || 1),
+        is_initial_balance: Boolean(assetTradeForm.is_initial_balance),
         source: assetTradeForm.source || "manual",
         note: String(assetTradeForm.note || "").trim() || null,
       };
