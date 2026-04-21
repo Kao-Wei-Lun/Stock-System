@@ -1,5 +1,5 @@
 <template>
-  <AppShellRouteView workspace-tab="review" right-tab="assets" />
+  <AppShellRouteView workspace-tab="assets" right-tab="assets" />
 </template>
 
 <script setup>

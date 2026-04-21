@@ -245,23 +245,9 @@
 
       <SettingsWorkspace v-else-if="activeWorkspacePage === 'settings'" />
 
-      <ReviewWorkspace
-        v-else
-        :right-tab="reviewTab"
+      <AssetWorkspace
+        v-else-if="activeWorkspacePage === 'assets'"
         :current-ticker="currentTicker"
-        :backtest-form="backtestForm"
-        :backtest-result="backtestResult"
-        :backtest-history="backtestHistory"
-        :backtest-compare-ids="backtestCompareIds"
-        :backtest-compare-runs="backtestCompareRuns"
-        :backtest-loading="backtestLoading"
-        :journal-form="journalForm"
-        :journal-entries="journalEntries"
-        :journal-stats="journalStats"
-        :journal-loading="journalLoading"
-        :journal-filter-presets="journalFilterPresets"
-        :journal-filter-scope="journalFilterScope"
-        :journal-filters="journalFilters"
         :asset-loading="assetLoading"
         :asset-performance-range="assetPerformanceRange"
         :asset-base-currency="assetBaseCurrency"
@@ -301,27 +287,6 @@
         :asset-cash-import-form="assetCashImportForm"
         :asset-journal-import-form="assetJournalImportForm"
         @open-terminal="handleOpenTerminal(currentTicker)"
-        @set-right-tab="handleReviewWorkspaceTabChange"
-        @update-backtest-field="handleBacktestField"
-        @run-backtest="runBacktest"
-        @load-backtest="selectBacktestRun"
-        @toggle-backtest-compare="toggleBacktestCompare"
-        @clear-backtest-compare="clearBacktestCompare"
-        @update-journal-field="handleJournalField"
-        @update-journal-filter="handleJournalFilter"
-        @apply-journal-filter-preset="handleJournalFilterPreset"
-        @save-journal-filter-preset="saveJournalFilterPreset"
-        @load-journal-filter-preset="loadJournalFilterPreset"
-        @delete-journal-filter-preset="deleteJournalFilterPreset"
-        @save-journal-entry="saveJournalEntry"
-        @delete-journal-entry="deleteJournalEntry"
-        @select-journal-entry="selectJournalEntry"
-        @reset-journal-form="resetJournalForm"
-        @add-journal-attachment="addJournalAttachment"
-        @remove-journal-attachment="removeJournalAttachment"
-        @create-watch-group="handleJournalResultWatchGroup"
-        @add-watchlist="handleJournalResultWatchlist"
-        @open-alert-modal="openAlertModal($event)"
         @reload-asset-data="loadAssetTrackingData({ refresh: true, silent: false })"
         @edit-asset-account="editAssetAccount"
         @update-asset-account-field="handleAssetAccountField"
@@ -368,6 +333,47 @@
         @delete-asset-price-override="deleteAssetPriceOverride"
         @delete-asset-fx-rate="deleteAssetFxRate"
         @delete-asset-adjustment="deleteAssetAdjustment"
+      />
+
+      <ReviewWorkspace
+        v-else
+        :right-tab="reviewTab"
+        :current-ticker="currentTicker"
+        :backtest-form="backtestForm"
+        :backtest-result="backtestResult"
+        :backtest-history="backtestHistory"
+        :backtest-compare-ids="backtestCompareIds"
+        :backtest-compare-runs="backtestCompareRuns"
+        :backtest-loading="backtestLoading"
+        :journal-form="journalForm"
+        :journal-entries="journalEntries"
+        :journal-stats="journalStats"
+        :journal-loading="journalLoading"
+        :journal-filter-presets="journalFilterPresets"
+        :journal-filter-scope="journalFilterScope"
+        :journal-filters="journalFilters"
+        @open-terminal="handleOpenTerminal(currentTicker)"
+        @set-right-tab="handleReviewWorkspaceTabChange"
+        @update-backtest-field="handleBacktestField"
+        @run-backtest="runBacktest"
+        @load-backtest="selectBacktestRun"
+        @toggle-backtest-compare="toggleBacktestCompare"
+        @clear-backtest-compare="clearBacktestCompare"
+        @update-journal-field="handleJournalField"
+        @update-journal-filter="handleJournalFilter"
+        @apply-journal-filter-preset="handleJournalFilterPreset"
+        @save-journal-filter-preset="saveJournalFilterPreset"
+        @load-journal-filter-preset="loadJournalFilterPreset"
+        @delete-journal-filter-preset="deleteJournalFilterPreset"
+        @save-journal-entry="saveJournalEntry"
+        @delete-journal-entry="deleteJournalEntry"
+        @select-journal-entry="selectJournalEntry"
+        @reset-journal-form="resetJournalForm"
+        @add-journal-attachment="addJournalAttachment"
+        @remove-journal-attachment="removeJournalAttachment"
+        @create-watch-group="handleJournalResultWatchGroup"
+        @add-watchlist="handleJournalResultWatchlist"
+        @open-alert-modal="openAlertModal($event)"
       />
     </div>
 
@@ -448,6 +454,7 @@ const SettingsWorkspace = defineAsyncComponent(() => import("./components/settin
 const InstitutionalAnalysisWorkspace = defineAsyncComponent(() => import("./components/workspaces/InstitutionalAnalysisWorkspace.vue"));
 const MarketOverviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/MarketOverviewWorkspace.vue"));
 const ProChartTerminalWorkspace = defineAsyncComponent(() => import("./components/workspaces/ProChartTerminalWorkspace.vue"));
+const AssetWorkspace = defineAsyncComponent(() => import("./components/workspaces/AssetWorkspace.vue"));
 const ReviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/ReviewWorkspace.vue"));
 
 const props = defineProps({
@@ -781,11 +788,12 @@ const drawerTab = ref("alerts");
 
 function normalizeWorkspacePage(value) {
   const normalized = String(value || "").toLowerCase();
-  if (["overview", "terminal", "institutional", "review", "settings"].includes(normalized)) {
+  if (["overview", "terminal", "institutional", "review", "assets", "settings"].includes(normalized)) {
     return normalized;
   }
   if (["macro", "events", "screener", "db"].includes(normalized)) return "overview";
-  if (["journal", "backtest", "assets"].includes(normalized)) return "review";
+  if (["journal", "backtest", "review"].includes(normalized)) return "review";
+  if (normalized === "assets") return "assets";
   if (["dashboard", "alerts", "chart"].includes(normalized)) return "terminal";
   return "overview";
 }
@@ -793,7 +801,6 @@ function normalizeWorkspacePage(value) {
 function normalizeReviewTab(value) {
   const normalized = String(value || "").toLowerCase();
   if (normalized === "backtest") return "backtest";
-  if (normalized === "assets") return "assets";
   return "journal";
 }
 
@@ -851,6 +858,15 @@ async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
     return;
   }
 
+  if (page === "assets") {
+    if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
+      await closeTerminalFullscreenIfNeeded();
+    }
+    await setWorkspaceTab("chart");
+    await setRightTab("assets");
+    return;
+  }
+
   if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
     await closeTerminalFullscreenIfNeeded();
   }
@@ -905,7 +921,7 @@ watch(
     if (!routeStateReady.value || applyingRouteState.value) return;
     emit("route-change", {
       workspaceTab: workspacePage,
-      rightTab: workspacePage === "review" ? nextReviewTab : nextDrawerTab,
+      rightTab: workspacePage === "review" ? nextReviewTab : workspacePage === "assets" ? "assets" : nextDrawerTab,
       currentTicker: nextTicker,
     });
   },
@@ -967,7 +983,7 @@ async function toggleTerminalRight() {
 
 async function handleNavigate(page) {
   const nextPage = normalizeWorkspacePage(page);
-  await applyWorkspacePage(nextPage, nextPage === "review" ? reviewTab.value : drawerTab.value);
+  await applyWorkspacePage(nextPage, nextPage === "review" ? reviewTab.value : nextPage === "assets" ? "assets" : drawerTab.value);
 }
 
 async function handleReviewTabChange(tab) {
@@ -1030,7 +1046,8 @@ function resolveWorkspaceTarget(target) {
   const normalized = String(target || "").toLowerCase();
   if (["macro", "events", "screener", "overview", "db"].includes(normalized)) return "overview";
   if (normalized === "institutional") return "institutional";
-  if (["journal", "backtest", "assets", "review"].includes(normalized)) return "review";
+  if (normalized === "assets") return "assets";
+  if (["journal", "backtest", "review"].includes(normalized)) return "review";
   return "terminal";
 }
 
@@ -1038,7 +1055,11 @@ async function handleOpenNotificationWorkspace(workspace) {
   const targetPage = resolveWorkspaceTarget(workspace);
   if (targetPage === "review") {
     const normalized = String(workspace || "").toLowerCase();
-    await applyWorkspacePage("review", normalized === "backtest" ? "backtest" : normalized === "assets" ? "assets" : "journal");
+    await applyWorkspacePage("review", normalized === "backtest" ? "backtest" : "journal");
+    return;
+  }
+  if (targetPage === "assets") {
+    await applyWorkspacePage("assets", "assets");
     return;
   }
   await applyWorkspacePage(targetPage, drawerTab.value);

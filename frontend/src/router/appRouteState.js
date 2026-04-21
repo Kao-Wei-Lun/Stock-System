@@ -1,6 +1,6 @@
 const OVERVIEW_ROUTE_NAMES = new Set(["overview", "macro", "events", "screener", "db"]);
 const TERMINAL_ROUTE_NAMES = new Set(["terminal", "dashboard", "alerts"]);
-const REVIEW_ROUTE_NAMES = new Set(["journal", "backtest", "assets"]);
+const REVIEW_ROUTE_NAMES = new Set(["journal", "backtest"]);
 
 function normalizeTickerParam(ticker) {
   return String(ticker || "").trim().toUpperCase();
@@ -34,10 +34,18 @@ export function mapRouteToAppState(route = {}) {
     };
   }
 
+  if (name === "assets") {
+    return {
+      routeWorkspaceTab: "assets",
+      routeRightTab: "assets",
+      routeTicker,
+    };
+  }
+
   if (REVIEW_ROUTE_NAMES.has(name)) {
     return {
       routeWorkspaceTab: "review",
-      routeRightTab: name === "backtest" ? "backtest" : name === "assets" ? "assets" : "journal",
+      routeRightTab: name === "backtest" ? "backtest" : "journal",
       routeTicker,
     };
   }
@@ -69,9 +77,16 @@ export function buildAppRouteLocation({ workspaceTab, rightTab, currentTicker } 
     };
   }
 
+  if (normalizedWorkspace === "assets") {
+    return {
+      name: "assets",
+      params,
+    };
+  }
+
   if (normalizedWorkspace === "review") {
     return {
-      name: normalizedRightTab === "backtest" ? "backtest" : normalizedRightTab === "assets" ? "assets" : "journal",
+      name: normalizedRightTab === "backtest" ? "backtest" : "journal",
       params,
     };
   }

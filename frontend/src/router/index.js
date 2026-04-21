@@ -44,9 +44,13 @@ const routes = [
     component: BacktestView,
   },
   {
-    path: "/review/assets/:ticker?",
+    path: "/assets/:ticker?",
     name: "assets",
     component: AssetsView,
+  },
+  {
+    path: "/review/assets/:ticker?",
+    redirect: redirectWithTicker("assets"),
   },
   {
     path: "/settings/:ticker?",

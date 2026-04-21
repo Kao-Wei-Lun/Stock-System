@@ -14,7 +14,7 @@ describe("appRouteState", () => {
     });
   });
 
-  it("maps overview and review routes into app state", () => {
+  it("maps overview, review, and assets routes into app state", () => {
     expect(mapRouteToAppState({
       name: "events",
       params: { ticker: "nvda" },
@@ -37,7 +37,7 @@ describe("appRouteState", () => {
       name: "assets",
       params: { ticker: "2330.tw" },
     })).toEqual({
-      routeWorkspaceTab: "review",
+      routeWorkspaceTab: "assets",
       routeRightTab: "assets",
       routeTicker: "2330.TW",
     });
@@ -83,7 +83,7 @@ describe("appRouteState", () => {
     });
 
     expect(buildAppRouteLocation({
-      workspaceTab: "review",
+      workspaceTab: "assets",
       rightTab: "assets",
       currentTicker: "nvda",
     })).toEqual({
