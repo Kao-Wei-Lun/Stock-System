@@ -348,6 +348,7 @@ import { use, graphic } from "echarts/core";
 import { BarChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
 import {
   DataZoomComponent,
+  GraphicComponent,
   GridComponent,
   LegendComponent,
   TooltipComponent,
@@ -363,6 +364,7 @@ use([
   PieChart,
   CanvasRenderer,
   DataZoomComponent,
+  GraphicComponent,
   GridComponent,
   LegendComponent,
   TooltipComponent,
@@ -736,7 +738,7 @@ const waterfallChartOption = computed(() => {
         return `<div class="asset-tooltip-title">${point.label}</div><div>${point.signedLabel}</div>`;
       },
     },
-    grid: { top: 18, right: 12, bottom: 22, left: 16, containLabel: true },
+    grid: { top: 28, right: 24, bottom: 28, left: 42 },
     xAxis: {
       type: "category",
       data: steps.map((item) => item.label),
@@ -892,7 +894,7 @@ const contributorChartOption = computed(() => ({
       return `<div class="asset-tooltip-title">${point.ticker || ""}</div><div>${formatSignedCurrency(point.value, props.assetBaseCurrency)}</div>`;
     },
   },
-  grid: { top: 10, right: 12, bottom: 12, left: 54, containLabel: true },
+  grid: { top: 14, right: 96, bottom: 20, left: 68 },
   xAxis: {
     type: "value",
     axisLabel: {
@@ -1197,7 +1199,9 @@ function tradeSideLabel(value) {
 .asset-warning-action,
 .asset-summary-action,
 .asset-donut-legend-item {
-  border: 0;
+  appearance: none;
+  font: inherit;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 }
@@ -1296,6 +1300,7 @@ function tradeSideLabel(value) {
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   background: rgba(8, 14, 24, 0.66);
   color: var(--text1);
