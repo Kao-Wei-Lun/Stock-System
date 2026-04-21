@@ -183,8 +183,8 @@ class AssetMixin:
             """
             INSERT INTO `asset_cash_ledger`
                 (`owner_id`, `account_id`, `flow_date`, `flow_type`, `amount`, `currency`,
-                 `fx_rate_to_base`, `counterparty`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `fx_rate_to_base`, `is_initial_balance`, `counterparty`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -194,6 +194,7 @@ class AssetMixin:
                 normalized["amount"],
                 normalized["currency"],
                 normalized["fx_rate_to_base"],
+                normalized["is_initial_balance"],
                 normalized["counterparty"],
                 normalized["note"],
             ),
@@ -222,6 +223,7 @@ class AssetMixin:
                 `amount`=%s,
                 `currency`=%s,
                 `fx_rate_to_base`=%s,
+                `is_initial_balance`=%s,
                 `counterparty`=%s,
                 `note`=%s
             WHERE `id`=%s AND `owner_id`=%s
@@ -233,6 +235,7 @@ class AssetMixin:
                 normalized["amount"],
                 normalized["currency"],
                 normalized["fx_rate_to_base"],
+                normalized["is_initial_balance"],
                 normalized["counterparty"],
                 normalized["note"],
                 entry_id,
@@ -314,8 +317,9 @@ class AssetMixin:
             INSERT INTO `asset_trade_ledger`
                 (`owner_id`, `account_id`, `trade_date`, `ticker`, `display_name`, `market`,
                  `asset_type`, `currency`, `side`, `quantity`, `price`, `gross_amount`,
-                 `fee_amount`, `tax_amount`, `net_amount`, `fx_rate_to_base`, `source`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `fee_amount`, `tax_amount`, `net_amount`, `fx_rate_to_base`,
+                 `is_initial_balance`, `source`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -334,6 +338,7 @@ class AssetMixin:
                 normalized["tax_amount"],
                 normalized["net_amount"],
                 normalized["fx_rate_to_base"],
+                normalized["is_initial_balance"],
                 normalized["source"],
                 normalized["note"],
             ),
@@ -371,6 +376,7 @@ class AssetMixin:
                 `tax_amount`=%s,
                 `net_amount`=%s,
                 `fx_rate_to_base`=%s,
+                `is_initial_balance`=%s,
                 `source`=%s,
                 `note`=%s
             WHERE `id`=%s AND `owner_id`=%s
@@ -391,6 +397,7 @@ class AssetMixin:
                 normalized["tax_amount"],
                 normalized["net_amount"],
                 normalized["fx_rate_to_base"],
+                normalized["is_initial_balance"],
                 normalized["source"],
                 normalized["note"],
                 entry_id,

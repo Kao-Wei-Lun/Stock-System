@@ -453,3 +453,94 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
         "total_change_base": -15000.0,
     }
     assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes
+
+
+def test_build_asset_performance_report_treats_initial_balances_as_baseline():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+    cash_entries = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "flow_date": "2026-04-10T09:00:00",
+            "flow_type": "deposit",
+            "amount": 10000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+            "is_initial_balance": True,
+        }
+    ]
+    trade_entries = [
+        {
+            "id": 11,
+            "account_id": 1,
+            "trade_date": "2026-04-10T10:00:00",
+            "ticker": "2330.TW",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "buy",
+            "quantity": 100,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+            "is_initial_balance": True,
+        }
+    ]
+
+    async def get_price_history(ticker, start_date, end_date):
+        assert ticker == "2330.TW"
+        return [
+            {"date": "2026-04-10", "close": 100, "source": "unit-test"},
+            {"date": "2026-04-18", "close": 110, "source": "unit-test"},
+        ]
+
+    report = asyncio.run(
+        build_asset_performance_report(
+            accounts,
+            cash_entries,
+            trade_entries,
+            start_at="2026-04-01T00:00:00",
+            end_at="2026-04-18T23:59:59",
+            get_price_history=get_price_history,
+        )
+    )
+
+    assert report["summary"]["start_value_base"] == 10000
+    assert report["summary"]["end_value_base"] == 11000
+    assert report["summary"]["net_flow_base"] == 0
+    assert report["summary"]["true_performance_base"] == 1000
+    assert report["summary"]["true_return_pct"] == 10
+    assert report["summary"]["flow_breakdown"] == {
+        "deposit_base": 0.0,
+        "withdraw_base": 0.0,
+        "dividend_interest_base": 0.0,
+        "fee_tax_base": 0.0,
+        "transfer_in_base": 0.0,
+        "transfer_out_base": 0.0,
+        "other_flow_base": 0.0,
+        "net_flow_base": 0.0,
+    }
+    assert report["series"][0]["date"] == "2026-04-10"
+    assert report["series"][0]["total_asset_value_base"] == 10000
+    assert report["series"][-1]["date"] == "2026-04-18"
+    assert report["series"][-1]["total_asset_value_base"] == 11000
+    assert report["series"][-1]["true_performance_base"] == 1000
+    assert report["series"][-1]["flow_breakdown"]["deposit_base"] == 0.0
+    assert report["monthly_heatmap"] == [
+        {
+            "month": "2026-04",
+            "true_performance_base": 1000.0,
+            "return_pct": 10.0,
+        }
+    ]

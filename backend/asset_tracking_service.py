@@ -97,6 +97,12 @@ def _cash_flow_signed_amount(entry: Dict[str, Any]) -> float:
     return amount
 
 
+def _is_initial_balance_entry(entry: Dict[str, Any] | None) -> bool:
+    if not entry:
+        return False
+    return bool(entry.get("is_initial_balance", False))
+
+
 def _normalize_position_key(account_id: int, ticker: str) -> tuple[int, str]:
     return account_id, str(ticker or "").strip().upper()
 
@@ -904,6 +910,8 @@ def _external_cash_flow_base(
     total = 0.0
     normalized_base = _normalize_currency(base_currency)
     for entry in cash_entries:
+        if _is_initial_balance_entry(entry):
+            continue
         account_id = _safe_int(entry.get("account_id"))
         if account_id not in included_account_ids or account_id not in account_lookup:
             continue
@@ -943,6 +951,8 @@ def _cash_flow_breakdown_base(
     }
     normalized_base = _normalize_currency(base_currency)
     for entry in cash_entries:
+        if _is_initial_balance_entry(entry):
+            continue
         account_id = _safe_int(entry.get("account_id"))
         if account_id not in included_account_ids or account_id not in account_lookup:
             continue
@@ -991,6 +1001,31 @@ def _cash_flow_breakdown_base(
     return {key: round(value, 6) for key, value in totals.items()}
 
 
+def _latest_initial_balance_datetime(
+    cash_entries: Sequence[Dict[str, Any]],
+    trade_entries: Sequence[Dict[str, Any]],
+    included_account_ids: set[int],
+) -> datetime | None:
+    latest_dt: datetime | None = None
+    for entry in cash_entries:
+        if not _is_initial_balance_entry(entry):
+            continue
+        if _safe_int(entry.get("account_id")) not in included_account_ids:
+            continue
+        flow_dt = _normalize_datetime(entry.get("flow_date"))
+        if latest_dt is None or flow_dt > latest_dt:
+            latest_dt = flow_dt
+    for entry in trade_entries:
+        if not _is_initial_balance_entry(entry):
+            continue
+        if _safe_int(entry.get("account_id")) not in included_account_ids:
+            continue
+        trade_dt = _normalize_datetime(entry.get("trade_date"))
+        if latest_dt is None or trade_dt > latest_dt:
+            latest_dt = trade_dt
+    return latest_dt
+
+
 async def build_asset_performance_report(
     accounts: List[Dict[str, Any]],
     cash_entries: List[Dict[str, Any]],
@@ -1005,16 +1040,31 @@ async def build_asset_performance_report(
     fetch_quote: Callable[[str], Awaitable[Dict[str, Any] | None]] | None = None,
     base_currency: str = BASE_CURRENCY,
 ) -> Dict[str, Any]:
-    start_dt = _normalize_datetime(start_at)
+    requested_start_dt = _normalize_datetime(start_at)
     end_dt = _normalize_datetime(end_at) if end_at else datetime.now(timezone.utc)
-    if end_dt < start_dt:
-        start_dt, end_dt = end_dt, start_dt
-    baseline_start_dt = _end_of_day(start_dt.date())
+    if end_dt < requested_start_dt:
+        requested_start_dt, end_dt = end_dt, requested_start_dt
 
     all_trade_entries = _filter_rows_as_of(trade_entries or [], "trade_date", end_dt)
     all_cash_entries = _filter_rows_as_of(cash_entries or [], "flow_date", end_dt)
     all_adjustment_entries = _filter_rows_as_of(adjustment_entries or [], "event_date", end_dt)
     all_fx_rate_entries = [row for row in (fx_rate_entries or []) if _normalize_date(row.get("snapshot_date")) <= end_dt.date()]
+
+    account_lookup = {account["id"]: account for account in accounts or [] if account.get("id") is not None}
+    included_account_ids = {
+        int(account["id"])
+        for account in accounts or []
+        if account.get("id") is not None and bool(account.get("include_in_total", True))
+    }
+    initial_balance_anchor_dt = _latest_initial_balance_datetime(
+        all_cash_entries,
+        all_trade_entries,
+        included_account_ids,
+    )
+    start_dt = requested_start_dt
+    if initial_balance_anchor_dt and initial_balance_anchor_dt > start_dt:
+        start_dt = initial_balance_anchor_dt
+    baseline_start_dt = _end_of_day(start_dt.date())
 
     tickers = sorted(
         {
@@ -1075,13 +1125,6 @@ async def build_asset_performance_report(
             if start_dt.date() <= _normalize_date(row.get("date")) <= end_dt.date()
         )
     sorted_point_dates = sorted(point_dates)
-
-    account_lookup = {account["id"]: account for account in accounts or [] if account.get("id") is not None}
-    included_account_ids = {
-        int(account["id"])
-        for account in accounts or []
-        if account.get("id") is not None and bool(account.get("include_in_total", True))
-    }
 
     series: List[Dict[str, Any]] = []
     end_warnings: List[str] = []

@@ -403,6 +403,7 @@ def _deserialize_asset_cash_ledger_entry(row: Optional[Dict[str, Any]]) -> Optio
         "amount": row.get("amount"),
         "currency": row.get("currency"),
         "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "is_initial_balance": bool(row.get("is_initial_balance", False)),
         "counterparty": row.get("counterparty"),
         "note": row.get("note"),
         "created_at": _datetime_to_iso(row.get("created_at")),
@@ -430,6 +431,7 @@ def _deserialize_asset_trade_entry(row: Optional[Dict[str, Any]]) -> Optional[Di
         "tax_amount": row.get("tax_amount"),
         "net_amount": row.get("net_amount"),
         "fx_rate_to_base": row.get("fx_rate_to_base"),
+        "is_initial_balance": bool(row.get("is_initial_balance", False)),
         "source": row.get("source"),
         "note": row.get("note"),
         "created_at": _datetime_to_iso(row.get("created_at")),
@@ -928,6 +930,7 @@ def _normalize_asset_cash_ledger_payload(
         "amount": amount,
         "currency": (_optional_string(source.get("currency"), max_length=16) or "TWD").upper(),
         "fx_rate_to_base": fx_rate_to_base or 1.0,
+        "is_initial_balance": _coerce_bool(source.get("is_initial_balance"), False),
         "counterparty": _optional_string(source.get("counterparty"), max_length=128),
         "note": _optional_string(source.get("note"), max_length=4000),
     }
@@ -976,6 +979,7 @@ def _normalize_asset_trade_payload(
         "tax_amount": tax_amount,
         "net_amount": net_amount,
         "fx_rate_to_base": fx_rate_to_base or 1.0,
+        "is_initial_balance": _coerce_bool(source.get("is_initial_balance"), False),
         "source": _optional_string(source.get("source"), max_length=64) or "manual",
         "note": _optional_string(source.get("note"), max_length=4000),
     }

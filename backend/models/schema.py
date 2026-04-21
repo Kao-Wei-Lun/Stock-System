@@ -701,6 +701,7 @@ CREATE_TABLE_STATEMENTS = {
             `amount` DOUBLE NOT NULL,
             `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
             `fx_rate_to_base` DOUBLE NOT NULL DEFAULT 1,
+            `is_initial_balance` TINYINT NOT NULL DEFAULT 0,
             `counterparty` VARCHAR(128) NULL,
             `note` TEXT NULL,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -732,6 +733,7 @@ CREATE_TABLE_STATEMENTS = {
             `tax_amount` DOUBLE NOT NULL DEFAULT 0,
             `net_amount` DOUBLE NOT NULL,
             `fx_rate_to_base` DOUBLE NOT NULL DEFAULT 1,
+            `is_initial_balance` TINYINT NOT NULL DEFAULT 0,
             `source` VARCHAR(64) NOT NULL DEFAULT 'manual',
             `note` TEXT NULL,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -963,6 +965,18 @@ REQUIRED_COLUMN_MIGRATIONS = {
         "dealer_net_buy_sell": """
             ALTER TABLE `taiwan_chip_snapshots`
             ADD COLUMN `dealer_net_buy_sell` BIGINT NULL AFTER `investment_trust_net_buy_sell`
+        """,
+    },
+    "asset_cash_ledger": {
+        "is_initial_balance": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD COLUMN `is_initial_balance` TINYINT NOT NULL DEFAULT 0 AFTER `fx_rate_to_base`
+        """,
+    },
+    "asset_trade_ledger": {
+        "is_initial_balance": """
+            ALTER TABLE `asset_trade_ledger`
+            ADD COLUMN `is_initial_balance` TINYINT NOT NULL DEFAULT 0 AFTER `fx_rate_to_base`
         """,
     },
 }

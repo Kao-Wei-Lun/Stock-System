@@ -110,6 +110,7 @@ def asset_store(monkeypatch):
             "amount": amount,
             "currency": payload.get("currency") or "TWD",
             "fx_rate_to_base": fx_rate_to_base,
+            "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "counterparty": payload.get("counterparty"),
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:20:00+00:00",
@@ -173,6 +174,7 @@ def asset_store(monkeypatch):
             "tax_amount": tax_amount,
             "net_amount": float(payload["net_amount"]) if payload.get("net_amount") not in (None, "") else (gross_amount + fee_amount + tax_amount),
             "fx_rate_to_base": fx_rate_to_base,
+            "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "source": payload.get("source") or "manual",
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:30:00+00:00",
@@ -596,6 +598,76 @@ def test_asset_routes_validate_unknown_account(client, asset_store):
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_asset_routes_support_initial_balance_baseline_entries(client, asset_store):
+    account_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Main Broker",
+            "institution": "Manual",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+        },
+    )
+    assert account_response.status_code == 200
+    account = account_response.json()
+
+    asset_store["price_histories"]["2330.TW"] = [
+        {"date": "2026-04-10", "close": 100, "source": "unit-test"},
+        {"date": "2026-04-18", "close": 110, "source": "unit-test"},
+    ]
+    asset_store["quotes"]["2330.TW"]["price"] = 110
+    asset_store["quotes"]["2330.TW"]["is_delayed"] = False
+
+    cash_response = client.post(
+        "/api/assets/cash-ledger",
+        json={
+            "account_id": account["id"],
+            "flow_date": "2026-04-10T09:00:00",
+            "flow_type": "deposit",
+            "amount": 10000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+            "is_initial_balance": True,
+        },
+    )
+    assert cash_response.status_code == 200
+    assert cash_response.json()["is_initial_balance"] is True
+
+    trade_response = client.post(
+        "/api/assets/trades",
+        json={
+            "account_id": account["id"],
+            "trade_date": "2026-04-10T10:00:00",
+            "ticker": "2330",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "buy",
+            "quantity": 100,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+            "is_initial_balance": True,
+        },
+    )
+    assert trade_response.status_code == 200
+    assert trade_response.json()["is_initial_balance"] is True
+
+    performance_response = client.get("/api/assets/performance?range=1y&refresh=false")
+    assert performance_response.status_code == 200
+    performance_payload = performance_response.json()
+
+    assert performance_payload["summary"]["start_value_base"] == 10000
+    assert performance_payload["summary"]["end_value_base"] == 11000
+    assert performance_payload["summary"]["net_flow_base"] == 0
+    assert performance_payload["summary"]["true_performance_base"] == 1000
+    assert performance_payload["summary"]["flow_breakdown"]["deposit_base"] == 0
+    assert performance_payload["series"][0]["date"] == "2026-04-10"
 
 
 def test_asset_routes_refresh_use_latest_quote_and_public_fx(client, asset_store, monkeypatch):

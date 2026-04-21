@@ -255,6 +255,7 @@ class AssetCashLedgerCreatePayload(BaseModel):
     amount: float
     currency: str = Field("TWD", min_length=1, max_length=16)
     fx_rate_to_base: float = 1.0
+    is_initial_balance: bool = False
     counterparty: str | None = Field(None, max_length=128)
     note: str | None = None
 
@@ -266,6 +267,7 @@ class AssetCashLedgerUpdatePayload(BaseModel):
     amount: float | None = None
     currency: str | None = Field(None, min_length=1, max_length=16)
     fx_rate_to_base: float | None = None
+    is_initial_balance: bool | None = None
     counterparty: str | None = Field(None, max_length=128)
     note: str | None = None
 
@@ -284,6 +286,7 @@ class AssetTradeCreatePayload(BaseModel):
     fee_amount: float = 0.0
     tax_amount: float = 0.0
     fx_rate_to_base: float = 1.0
+    is_initial_balance: bool = False
     source: str = Field("manual", min_length=1, max_length=64)
     note: str | None = None
 
@@ -302,6 +305,7 @@ class AssetTradeUpdatePayload(BaseModel):
     fee_amount: float | None = None
     tax_amount: float | None = None
     fx_rate_to_base: float | None = None
+    is_initial_balance: bool | None = None
     source: str | None = Field(None, min_length=1, max_length=64)
     note: str | None = None
 

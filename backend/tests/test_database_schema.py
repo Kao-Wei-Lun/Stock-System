@@ -64,6 +64,22 @@ def test_build_schema_plan_adds_missing_tables_and_columns():
     assert any("CREATE TABLE `asset_price_overrides`" in statement for statement in plan)
     assert any("CREATE TABLE `asset_fx_rates_daily`" in statement for statement in plan)
     assert any("CREATE TABLE `asset_position_adjustments`" in statement for statement in plan)
+    assert any(
+        (
+            "CREATE TABLE `asset_cash_ledger`" in statement
+            or "ALTER TABLE `asset_cash_ledger`" in statement
+        )
+        and "`is_initial_balance`" in statement
+        for statement in plan
+    )
+    assert any(
+        (
+            "CREATE TABLE `asset_trade_ledger`" in statement
+            or "ALTER TABLE `asset_trade_ledger`" in statement
+        )
+        and "`is_initial_balance`" in statement
+        for statement in plan
+    )
     assert any("ALTER TABLE `ohlcv`" in statement and "`source`" in statement for statement in plan)
     assert any("ALTER TABLE `ohlcv`" in statement and "idx_ohlcv_ticker_date_lookup" in statement for statement in plan)
     assert any("ALTER TABLE `watchlist_groups`" in statement and "`owner_id`" in statement for statement in plan)
