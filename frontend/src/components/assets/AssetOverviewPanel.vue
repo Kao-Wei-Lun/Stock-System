@@ -107,7 +107,7 @@
               <strong>{{ selectedSnapshotLabel }}</strong>
             </div>
           </div>
-          <v-chart
+          <DeferredVChart
             class="asset-chart asset-chart-performance"
             :option="performanceChartOption"
             autoresize
@@ -318,7 +318,7 @@
           </div>
 
           <div v-show="changeBreakdownView === 'waterfall'" class="asset-chart-shell asset-chart-shell-waterfall">
-            <v-chart class="asset-chart asset-chart-waterfall" :option="waterfallChartOption" autoresize />
+            <DeferredVChart class="asset-chart asset-chart-waterfall" :option="waterfallChartOption" autoresize />
           </div>
         </div>
         <div v-else class="bt-history-empty">缺少起訖點資料，暫時無法拆解資產變化。</div>
@@ -336,7 +336,7 @@
           </div>
         </div>
         <div v-if="monthlyHeatmapReady" class="asset-chart-shell">
-          <v-chart
+          <DeferredVChart
             class="asset-chart asset-chart-heatmap"
             :option="monthlyHeatmapOption"
             autoresize
@@ -360,7 +360,7 @@
           </div>
         </div>
         <div v-if="assetAccountAllocation.length" class="asset-donut-card">
-          <v-chart
+          <DeferredVChart
             class="asset-chart asset-chart-donut"
             :option="accountAllocationChartOption"
             autoresize
@@ -395,7 +395,7 @@
           </div>
         </div>
         <div v-if="assetMarketAllocation.length" class="asset-donut-card">
-          <v-chart
+          <DeferredVChart
             class="asset-chart asset-chart-donut"
             :option="marketAllocationChartOption"
             autoresize
@@ -430,7 +430,7 @@
           </div>
         </div>
         <div v-if="contributorRows.length" class="asset-chart-shell">
-          <v-chart
+          <DeferredVChart
             class="asset-chart asset-chart-contributors"
             :option="contributorChartOption"
             autoresize
@@ -512,7 +512,8 @@ import {
   VisualMapComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import VChart, { THEME_KEY } from "vue-echarts";
+import { THEME_KEY } from "vue-echarts";
+import DeferredVChart from "../DeferredVChart.vue";
 
 use([
   BarChart,

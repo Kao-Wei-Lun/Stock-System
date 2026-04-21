@@ -19,7 +19,28 @@ vi.mock("vue-echarts", () => ({
   },
 }));
 
+vi.mock("../DeferredVChart.vue", () => ({
+  default: {
+    name: "DeferredVChart",
+    props: {
+      option: {
+        type: Object,
+        required: true,
+      },
+      autoresize: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    template: "<div class='deferred-v-chart-stub'></div>",
+  },
+}));
+
 import AssetOverviewPanel from "./AssetOverviewPanel.vue";
+
+function findCharts(wrapper) {
+  return wrapper.findAllComponents({ name: "DeferredVChart" });
+}
 
 function buildProps() {
   return {
@@ -176,13 +197,13 @@ describe("AssetOverviewPanel", () => {
       props: buildProps(),
     });
 
-    const charts = wrapper.findAllComponents({ name: "VChart" });
+    const charts = findCharts(wrapper);
     expect(charts[0].props("option").series[0].name).toBe("總資產");
 
     const cashCard = wrapper.findAll(".asset-summary-action").find((item) => item.text().includes("現金總額"));
     await cashCard.trigger("click");
 
-    expect(wrapper.findAllComponents({ name: "VChart" })[0].props("option").series[0].name).toBe("現金");
+    expect(findCharts(wrapper)[0].props("option").series[0].name).toBe("現金");
   });
 
   it("emits holdings drilldown from interactive charts", async () => {
@@ -190,7 +211,7 @@ describe("AssetOverviewPanel", () => {
       props: buildProps(),
     });
 
-    const charts = wrapper.findAllComponents({ name: "VChart" });
+    const charts = findCharts(wrapper);
 
     expect(charts[2].props("option").series[0].data).toHaveLength(12);
 
@@ -232,7 +253,7 @@ describe("AssetOverviewPanel", () => {
       props,
     });
 
-    const charts = wrapper.findAllComponents({ name: "VChart" });
+    const charts = findCharts(wrapper);
     expect(charts[1].props("option").xAxis.data).toEqual(["淨流入", "真實績效", "期末"]);
   });
 });
