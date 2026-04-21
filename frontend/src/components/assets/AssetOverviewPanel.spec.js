@@ -128,7 +128,9 @@ describe("AssetOverviewPanel", () => {
 
     const charts = wrapper.findAllComponents({ name: "VChart" });
 
-    charts[2].vm.$emit("click", { data: [3, 0, 6.8, "2026-04", 12000] });
+    expect(charts[2].props("option").series[0].data).toHaveLength(12);
+
+    charts[2].vm.$emit("click", { data: { month: "2026-04", hasData: true } });
     charts[3].vm.$emit("click", { data: { name: "Broker A" } });
     charts[5].vm.$emit("click", { data: { ticker: "AAPL" } });
 
@@ -137,5 +139,34 @@ describe("AssetOverviewPanel", () => {
       [{ accountKey: "Broker A", marketKey: "", ticker: "", month: "" }],
       [{ accountKey: "", marketKey: "", ticker: "AAPL", month: "" }],
     ]);
+  });
+
+  it("shows a story-first breakdown and keeps the waterfall view available", async () => {
+    const wrapper = mount(AssetOverviewPanel, {
+      props: buildProps(),
+    });
+
+    const story = wrapper.get('[data-testid="asset-change-story"]');
+    const waterfallShell = wrapper.get(".asset-chart-shell-waterfall");
+
+    expect(story.isVisible()).toBe(true);
+    expect(story.text()).toContain("主要是投資報酬在推高資產");
+    expect(waterfallShell.attributes("style")).toContain("display: none");
+
+    await wrapper.get('[data-testid="asset-change-view-waterfall"]').trigger("click");
+
+    expect(waterfallShell.attributes("style") || "").not.toContain("display: none");
+  });
+
+  it("drops a meaningless zero start step from the waterfall chart", () => {
+    const props = buildProps();
+    props.assetPerformanceSummary.start_value_base = 0;
+
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    const charts = wrapper.findAllComponents({ name: "VChart" });
+    expect(charts[1].props("option").xAxis.data).toEqual(["淨流入", "真實績效", "期末"]);
   });
 });

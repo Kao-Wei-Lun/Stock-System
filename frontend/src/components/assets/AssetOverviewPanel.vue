@@ -153,16 +153,109 @@
       <section class="asset-card">
         <div class="asset-card-head">
           <div>
-            <div class="asset-card-title">變化拆解</div>
-            <div class="bt-trade-sub">以區間起點、淨流入與真實績效拆開資產變化</div>
+            <div class="asset-card-title">本期資產怎麼變</div>
+            <div class="bt-trade-sub">先用故事講清楚，再視需要切到進階瀑布圖</div>
           </div>
-          <div class="asset-list-metrics">
-            <span>{{ formatCurrency(selectedPoint.total_asset_value_base) }}</span>
-            <small>期末資產</small>
+          <div class="asset-change-head">
+            <div class="asset-list-metrics">
+              <span>{{ formatCurrency(changeBreakdown.endValue) }}</span>
+              <small>{{ selectedSnapshotLabel }} 焦點</small>
+            </div>
+            <div class="asset-chart-mode-row">
+              <button
+                class="asset-inline-btn"
+                :class="{ active: changeBreakdownView === 'story' }"
+                data-testid="asset-change-view-story"
+                type="button"
+                @click="setChangeBreakdownView('story')"
+              >
+                摘要
+              </button>
+              <button
+                class="asset-inline-btn"
+                :class="{ active: changeBreakdownView === 'waterfall' }"
+                data-testid="asset-change-view-waterfall"
+                type="button"
+                @click="setChangeBreakdownView('waterfall')"
+              >
+                瀑布圖
+              </button>
+            </div>
           </div>
         </div>
-        <div v-if="waterfallChartReady" class="asset-chart-shell">
-          <v-chart class="asset-chart asset-chart-waterfall" :option="waterfallChartOption" autoresize />
+        <div v-if="waterfallChartReady">
+          <div v-show="changeBreakdownView === 'story'" class="asset-change-story" data-testid="asset-change-story">
+            <div class="asset-change-hero">
+              <span class="asset-change-eyebrow">{{ changeBreakdownEyebrow }}</span>
+              <strong>{{ changeBreakdownLead }}</strong>
+              <p>{{ changeBreakdownDetail }}</p>
+            </div>
+
+            <div class="asset-change-step-grid">
+              <article
+                v-for="step in changeBreakdownSteps"
+                :key="step.key"
+                class="asset-change-step"
+                :class="step.tone"
+              >
+                <span class="asset-change-step-label">{{ step.label }}</span>
+                <strong>{{ step.value }}</strong>
+                <small>{{ step.helper }}</small>
+              </article>
+            </div>
+
+            <div class="asset-change-equation" aria-label="asset-change-equation">
+              <span>{{ formatCurrency(changeBreakdown.startValue) }}</span>
+              <b>+</b>
+              <span :class="changeBreakdown.netFlow >= 0 ? 'up' : 'dn'">
+                {{ formatSignedCurrency(changeBreakdown.netFlow, assetBaseCurrency) }}
+              </span>
+              <b>+</b>
+              <span :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+                {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
+              </span>
+              <b>=</b>
+              <strong>{{ formatCurrency(changeBreakdown.endValue) }}</strong>
+            </div>
+
+            <div class="asset-change-insight-grid">
+              <article class="asset-change-insight-card">
+                <header>
+                  <span>本金基礎</span>
+                  <strong>{{ formatCurrency(changeBreakdown.capitalBase) }}</strong>
+                </header>
+                <p>{{ changeFundingDescription }}</p>
+                <div class="asset-change-pill-row">
+                  <span class="asset-change-pill neutral">期初 {{ formatCurrency(changeBreakdown.startValue) }}</span>
+                  <span class="asset-change-pill" :class="changeBreakdown.netFlow >= 0 ? 'warm' : 'risk'">
+                    {{ changeBreakdown.netFlow >= 0 ? "新增投入" : "淨流出" }}
+                    {{ formatSignedCurrency(changeBreakdown.netFlow, assetBaseCurrency) }}
+                  </span>
+                </div>
+              </article>
+
+              <article class="asset-change-insight-card">
+                <header>
+                  <span>投資結果</span>
+                  <strong :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+                    {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
+                  </strong>
+                </header>
+                <p>{{ changePerformanceDescription }}</p>
+                <div class="asset-change-pill-row">
+                  <span class="asset-change-pill accent">期末 {{ formatCurrency(changeBreakdown.endValue) }}</span>
+                  <span class="asset-change-pill" :class="changeBreakdown.performance >= 0 ? 'success' : 'risk'">
+                    {{ changeBreakdown.performance >= 0 ? "報酬貢獻" : "損失影響" }}
+                    {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
+                  </span>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div v-show="changeBreakdownView === 'waterfall'" class="asset-chart-shell asset-chart-shell-waterfall">
+            <v-chart class="asset-chart asset-chart-waterfall" :option="waterfallChartOption" autoresize />
+          </div>
         </div>
         <div v-else class="bt-history-empty">缺少起訖點資料，暫時無法拆解資產變化。</div>
       </section>
@@ -418,6 +511,7 @@ const performanceModeOptions = [
 const palette = ["#7be7ff", "#6ef0a7", "#ffcf78", "#ff7f9d", "#8d92ff", "#73b8ff", "#9ef7d6"];
 
 const activeChartMode = ref("total_asset_value_base");
+const changeBreakdownView = ref("story");
 const selectedDate = ref("");
 const selectedMonth = ref("");
 
@@ -493,6 +587,130 @@ const selectedPoint = computed(() => (
 
 const selectedSnapshotLabel = computed(() => formatDateLabel(selectedPoint.value.date));
 const selectedMonthLabel = computed(() => formatMonthLabel(selectedMonth.value));
+const changeBreakdown = computed(() => {
+  const startValue = Number(props.assetPerformanceSummary.start_value_base || 0);
+  const netFlow = Number(selectedPoint.value.net_flow_base || 0);
+  const performance = Number(selectedPoint.value.true_performance_base || 0);
+  const endValue = Number(selectedPoint.value.total_asset_value_base || 0);
+  return {
+    startValue,
+    netFlow,
+    performance,
+    endValue,
+    capitalBase: startValue + netFlow,
+  };
+});
+const changeBreakdownEyebrow = computed(() => dominantDriverLabel(
+  changeBreakdown.value.netFlow,
+  changeBreakdown.value.performance,
+));
+const changeBreakdownLead = computed(() => createChangeBreakdownLead(
+  changeBreakdown.value,
+  selectedSnapshotLabel.value,
+));
+const changeBreakdownDetail = computed(() => createChangeBreakdownDetail(
+  changeBreakdown.value,
+  selectedSnapshotLabel.value,
+));
+const changeBreakdownSteps = computed(() => [
+  {
+    key: "start",
+    label: "區間起點",
+    value: formatCurrency(changeBreakdown.value.startValue),
+    helper: "本次比較的起始快照",
+    tone: "neutral",
+  },
+  {
+    key: "flow",
+    label: changeBreakdown.value.netFlow >= 0 ? "期間淨投入" : "期間淨流出",
+    value: formatSignedCurrency(changeBreakdown.value.netFlow, props.assetBaseCurrency),
+    helper: changeBreakdown.value.netFlow >= 0
+      ? "你實際補進來的資金"
+      : "這段期間領回或轉出的資金",
+    tone: changeBreakdown.value.netFlow >= 0 ? "up" : "dn",
+  },
+  {
+    key: "performance",
+    label: "投資損益",
+    value: formatSignedCurrency(changeBreakdown.value.performance, props.assetBaseCurrency),
+    helper: changeBreakdown.value.performance >= 0
+      ? "扣除資金流後，資產自己長出來的部分"
+      : "扣除資金流後，資產自己縮水的部分",
+    tone: changeBreakdown.value.performance >= 0 ? "up" : "dn",
+  },
+  {
+    key: "end",
+    label: "目前資產",
+    value: formatCurrency(changeBreakdown.value.endValue),
+    helper: `${selectedSnapshotLabel.value} 焦點`,
+    tone: "accent",
+  },
+]);
+const changeFundingDescription = computed(() => {
+  const { capitalBase, netFlow } = changeBreakdown.value;
+  if (Math.abs(netFlow) < 0.01) {
+    return `這段期間幾乎沒有新增資金流，現在可運用的本金大致維持在 ${formatCurrency(capitalBase)}。`;
+  }
+  if (netFlow > 0) {
+    return `你在這段期間額外投入 ${formatCurrency(Math.abs(netFlow))}，讓本金基礎提高到 ${formatCurrency(capitalBase)}。`;
+  }
+  return `你在這段期間淨流出 ${formatCurrency(Math.abs(netFlow))}，所以可運用本金降到 ${formatCurrency(capitalBase)}。`;
+});
+const changePerformanceDescription = computed(() => {
+  const { performance, capitalBase, endValue } = changeBreakdown.value;
+  if (Math.abs(performance) < 0.01) {
+    return `扣掉資金流之後，資產本身幾乎沒有明顯變化，期末大致落在 ${formatCurrency(endValue)}。`;
+  }
+  if (performance > 0) {
+    return `資產在本金基礎 ${formatCurrency(capitalBase)} 之上，又靠投資表現多長出 ${formatCurrency(Math.abs(performance))}。`;
+  }
+  return `投資虧損吃掉了 ${formatCurrency(Math.abs(performance))}，所以期末資產低於本金基礎 ${formatCurrency(capitalBase)}。`;
+});
+const heatmapYears = computed(() => (
+  Array.from(new Set((props.assetMonthlyHeatmap || []).map((item) => String(item.month || "").slice(0, 4))))
+    .filter(Boolean)
+    .sort((left, right) => Number(right) - Number(left))
+));
+const heatmapEntriesByMonth = computed(() => {
+  const lookup = new Map();
+  (props.assetMonthlyHeatmap || []).forEach((item) => {
+    const month = String(item?.month || "");
+    if (!month) return;
+    lookup.set(month, {
+      month,
+      return_pct: Number(item?.return_pct || 0),
+      true_performance_base: Number(item?.true_performance_base || 0),
+    });
+  });
+  return lookup;
+});
+const monthlyHeatmapCells = computed(() => (
+  heatmapYears.value.flatMap((year, yearIndex) => (
+    Array.from({ length: 12 }, (_, monthIndex) => {
+      const month = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+      const entry = heatmapEntriesByMonth.value.get(month);
+      const hasData = Boolean(entry);
+      const isSelected = month === selectedMonth.value;
+      return {
+        value: [monthIndex, yearIndex, hasData ? entry.return_pct : 0],
+        month,
+        return_pct: hasData ? entry.return_pct : null,
+        performance: hasData ? entry.true_performance_base : null,
+        hasData,
+        itemStyle: hasData
+          ? {
+            borderColor: isSelected ? "#f5fbff" : "rgba(7, 17, 27, 0.92)",
+            borderWidth: isSelected ? 3 : 2,
+          }
+          : {
+            color: "rgba(40, 46, 60, 0.72)",
+            borderColor: isSelected ? "#8792a8" : "rgba(24, 31, 44, 0.92)",
+            borderWidth: isSelected ? 2 : 1,
+          },
+      };
+    })
+  ))
+));
 
 const performanceChartReady = computed(() => performanceRows.value.length >= 2);
 const waterfallChartReady = computed(() => performanceRows.value.length >= 1);
@@ -723,6 +941,7 @@ const waterfallChartOption = computed(() => {
   const netFlow = Number(selectedPoint.value.net_flow_base || 0);
   const performance = Number(selectedPoint.value.true_performance_base || 0);
   const steps = buildWaterfallSteps(startValue, netFlow, performance, endValue);
+  const bounds = resolveWaterfallBounds(steps);
   return {
     animation: false,
     backgroundColor: "transparent",
@@ -747,6 +966,8 @@ const waterfallChartOption = computed(() => {
     },
     yAxis: {
       type: "value",
+      min: bounds.min,
+      max: bounds.max,
       axisLine: { show: false },
       axisLabel: {
         color: "rgba(219, 229, 240, 0.66)",
@@ -786,9 +1007,6 @@ const waterfallChartOption = computed(() => {
 
 const monthlyHeatmapOption = computed(() => {
   const monthNames = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
-  const years = Array.from(new Set((props.assetMonthlyHeatmap || []).map((item) => String(item.month || "").slice(0, 4))))
-    .filter(Boolean)
-    .sort();
   return {
     animation: false,
     backgroundColor: "transparent",
@@ -798,11 +1016,17 @@ const monthlyHeatmapOption = computed(() => {
       borderColor: "rgba(123, 231, 255, 0.18)",
       textStyle: { color: "#e7f3ff" },
       formatter(params) {
-        const [, , pct, month, performance] = params?.data || [];
+        const month = params?.data?.month || "";
+        if (!params?.data?.hasData) {
+          return [
+            `<div class="asset-tooltip-title">${formatMonthLabel(month)}</div>`,
+            "<div>目前沒有該月份的績效資料</div>",
+          ].join("");
+        }
         return [
           `<div class="asset-tooltip-title">${formatMonthLabel(month)}</div>`,
-          `<div>真實報酬：${formatPercent(pct)}</div>`,
-          `<div>績效金額：${formatSignedCurrency(performance, props.assetBaseCurrency)}</div>`,
+          `<div>真實報酬：${formatPercent(params.data.return_pct)}</div>`,
+          `<div>績效金額：${formatSignedCurrency(params.data.performance, props.assetBaseCurrency)}</div>`,
         ].join("");
       },
     },
@@ -816,7 +1040,8 @@ const monthlyHeatmapOption = computed(() => {
     },
     yAxis: {
       type: "category",
-      data: years,
+      data: heatmapYears.value,
+      inverse: true,
       splitArea: { show: true },
       axisLine: { lineStyle: { color: "rgba(255, 255, 255, 0.12)" } },
       axisLabel: { color: "rgba(219, 229, 240, 0.68)" },
@@ -836,26 +1061,11 @@ const monthlyHeatmapOption = computed(() => {
     series: [
       {
         type: "heatmap",
-        data: (props.assetMonthlyHeatmap || []).map((item) => {
-          const monthLabel = String(item.month || "");
-          const monthIndex = Number(monthLabel.slice(5, 7)) - 1;
-          const yearIndex = years.indexOf(monthLabel.slice(0, 4));
-          return [
-            monthIndex,
-            yearIndex,
-            Number(item.return_pct || 0),
-            monthLabel,
-            Number(item.true_performance_base || 0),
-          ];
-        }),
+        data: monthlyHeatmapCells.value,
         label: {
           show: true,
           color: "#f5fbff",
-          formatter: ({ data }) => `${Number(data?.[2] || 0).toFixed(1)}%`,
-        },
-        itemStyle: {
-          borderColor: "rgba(7, 17, 27, 0.92)",
-          borderWidth: 2,
+          formatter: ({ data }) => (data?.hasData ? `${Number(data.return_pct || 0).toFixed(1)}%` : ""),
         },
         emphasis: {
           itemStyle: {
@@ -935,6 +1145,10 @@ function setActiveChartMode(mode) {
   activeChartMode.value = mode;
 }
 
+function setChangeBreakdownView(view) {
+  changeBreakdownView.value = view === "waterfall" ? "waterfall" : "story";
+}
+
 function focusHoldings(filter = {}) {
   emit("focus-holdings", {
     accountKey: filter.accountKey || "",
@@ -952,10 +1166,12 @@ function handlePerformanceChartClick(params) {
 }
 
 function handleHeatmapClick(params) {
-  const month = params?.data?.[3];
+  const month = params?.data?.month;
   if (!month) return;
   selectedMonth.value = month;
-  focusHoldings({ month });
+  if (params?.data?.hasData) {
+    focusHoldings({ month });
+  }
 }
 
 function handleAccountAllocationClick(params) {
@@ -1042,20 +1258,23 @@ function buildDonutChartOption(items, title, subtitle) {
 
 function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
   const steps = [];
-  steps.push({
-    label: "期初",
-    base: 0,
-    value: Math.max(startValue, 0),
-    color: "#7be7ff",
-    signedLabel: formatCurrency(startValue),
-    shortLabel: formatCompactNumber(startValue),
-  });
+  if (Math.abs(startValue) >= 0.01) {
+    steps.push({
+      label: "期初",
+      base: 0,
+      value: Math.abs(startValue),
+      color: "#7be7ff",
+      signedLabel: formatCurrency(startValue),
+      shortLabel: formatCompactNumber(startValue),
+    });
+  }
 
   let running = startValue;
   [
     { label: "淨流入", value: netFlow, positiveColor: "#ffcf78", negativeColor: "#ff7f9d" },
     { label: "真實績效", value: performance, positiveColor: "#6ef0a7", negativeColor: "#ff5f7e" },
   ].forEach((item) => {
+    if (Math.abs(item.value) < 0.01) return;
     const next = running + item.value;
     steps.push({
       label: item.label,
@@ -1077,6 +1296,58 @@ function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
     shortLabel: formatCompactNumber(endValue),
   });
   return steps;
+}
+
+function dominantDriverLabel(netFlow, performance) {
+  const flowAbs = Math.abs(Number(netFlow || 0));
+  const performanceAbs = Math.abs(Number(performance || 0));
+  if (flowAbs < 0.01 && performanceAbs < 0.01) return "這段期間幾乎沒有明顯變化";
+  if (flowAbs >= performanceAbs) {
+    return Number(netFlow || 0) >= 0 ? "主要是新增投入把資產撐大" : "主要是資金流出在拉低資產";
+  }
+  return Number(performance || 0) >= 0 ? "主要是投資報酬在推高資產" : "主要是投資虧損在拖累資產";
+}
+
+function createChangeBreakdownLead({ netFlow, performance, endValue }, snapshotLabel) {
+  const label = snapshotLabel && snapshotLabel !== "—" ? `${snapshotLabel} 為止` : "目前為止";
+  if (Math.abs(netFlow) < 0.01 && Math.abs(performance) < 0.01) {
+    return `${label}，總資產大致維持在 ${formatCurrency(endValue)}，沒有特別明顯的變化來源。`;
+  }
+  if (Math.abs(netFlow) >= Math.abs(performance)) {
+    if (netFlow >= 0) {
+      return `${label}，資產成長主要來自新增投入 ${formatCurrency(Math.abs(netFlow))}。`;
+    }
+    return `${label}，雖然有 ${formatCurrency(Math.abs(netFlow))} 的淨流出，資產仍維持在 ${formatCurrency(endValue)}。`;
+  }
+  if (performance >= 0) {
+    return `${label}，資產變化主要來自投資損益增加 ${formatCurrency(Math.abs(performance))}。`;
+  }
+  return `${label}，資產變化主要受投資損失 ${formatCurrency(Math.abs(performance))} 影響。`;
+}
+
+function createChangeBreakdownDetail({ startValue, netFlow, performance, endValue }, snapshotLabel) {
+  const label = snapshotLabel && snapshotLabel !== "—" ? snapshotLabel : "目前焦點";
+  return [
+    `以 ${formatCurrency(startValue)} 起步，`,
+    netFlow >= 0
+      ? `期間新增投入 ${formatCurrency(Math.abs(netFlow))}`
+      : `期間淨流出 ${formatCurrency(Math.abs(netFlow))}`,
+    `，投資損益 ${formatSignedCurrency(performance, props.assetBaseCurrency)}，`,
+    `最後來到 ${label} 的 ${formatCurrency(endValue)}。`,
+  ].join("");
+}
+
+function resolveWaterfallBounds(steps) {
+  if (!steps.length) return { min: 0, max: 100 };
+  const tops = steps.map((item) => Number(item.base || 0) + Number(item.value || 0));
+  const bottoms = steps.map((item) => Number(item.base || 0));
+  const minValue = Math.min(0, ...tops, ...bottoms);
+  const maxValue = Math.max(0, ...tops, ...bottoms);
+  const span = Math.max(maxValue - minValue, 1);
+  return {
+    min: Number((minValue - span * 0.06).toFixed(2)),
+    max: Number((maxValue + span * 0.1).toFixed(2)),
+  };
 }
 
 function paletteColorFor(items, key) {
@@ -1235,6 +1506,14 @@ function tradeSideLabel(value) {
   gap: 8px;
 }
 
+.asset-change-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
+}
+
 .asset-inline-btn.active {
   background: rgba(123, 231, 255, 0.14);
   color: #f5fbff;
@@ -1251,6 +1530,205 @@ function tradeSideLabel(value) {
 
 .asset-chart-shell {
   margin-top: 12px;
+}
+
+.asset-change-story {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.asset-change-hero {
+  padding: 16px 18px;
+  border: 1px solid rgba(123, 231, 255, 0.12);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(123, 231, 255, 0.12), transparent 42%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+}
+
+.asset-change-eyebrow {
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(123, 231, 255, 0.12);
+  color: rgba(226, 244, 255, 0.88);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.asset-change-hero strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #f5fbff;
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.asset-change-hero p {
+  margin: 0;
+  color: rgba(219, 229, 240, 0.7);
+  line-height: 1.6;
+}
+
+.asset-change-step-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.asset-change-step {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(10, 16, 26, 0.82);
+}
+
+.asset-change-step.up {
+  border-color: rgba(110, 240, 167, 0.18);
+}
+
+.asset-change-step.dn {
+  border-color: rgba(255, 95, 126, 0.22);
+}
+
+.asset-change-step.accent {
+  border-color: rgba(141, 146, 255, 0.28);
+}
+
+.asset-change-step-label {
+  color: rgba(219, 229, 240, 0.66);
+  font-size: 11px;
+}
+
+.asset-change-step strong {
+  color: #f5fbff;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.asset-change-step.up strong {
+  color: #6ef0a7;
+}
+
+.asset-change-step.dn strong {
+  color: #ff7f9d;
+}
+
+.asset-change-step.accent strong {
+  color: #b3b6ff;
+}
+
+.asset-change-step small {
+  color: rgba(219, 229, 240, 0.56);
+  line-height: 1.5;
+}
+
+.asset-change-equation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  background: rgba(9, 15, 24, 0.78);
+  color: rgba(219, 229, 240, 0.84);
+}
+
+.asset-change-equation b {
+  color: rgba(219, 229, 240, 0.4);
+  font-size: 14px;
+}
+
+.asset-change-equation strong {
+  color: #f5fbff;
+}
+
+.asset-change-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asset-change-insight-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(8, 14, 22, 0.7);
+}
+
+.asset-change-insight-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-change-insight-card header span {
+  color: rgba(219, 229, 240, 0.66);
+  font-size: 11px;
+}
+
+.asset-change-insight-card header strong {
+  color: #f5fbff;
+  font-size: 18px;
+}
+
+.asset-change-insight-card p {
+  margin: 0;
+  color: rgba(219, 229, 240, 0.7);
+  line-height: 1.6;
+}
+
+.asset-change-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.asset-change-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(230, 241, 250, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.asset-change-pill.neutral {
+  border-color: rgba(123, 231, 255, 0.16);
+  background: rgba(123, 231, 255, 0.08);
+}
+
+.asset-change-pill.warm {
+  border-color: rgba(255, 207, 120, 0.18);
+  background: rgba(255, 207, 120, 0.1);
+}
+
+.asset-change-pill.success {
+  border-color: rgba(110, 240, 167, 0.2);
+  background: rgba(110, 240, 167, 0.1);
+}
+
+.asset-change-pill.risk {
+  border-color: rgba(255, 95, 126, 0.22);
+  background: rgba(255, 95, 126, 0.1);
+}
+
+.asset-change-pill.accent {
+  border-color: rgba(141, 146, 255, 0.22);
+  background: rgba(141, 146, 255, 0.1);
 }
 
 .asset-chart {
@@ -1336,6 +1814,8 @@ function tradeSideLabel(value) {
 }
 
 @media (max-width: 1180px) {
+  .asset-change-step-grid,
+  .asset-change-insight-grid,
   .asset-overview-secondary-grid,
   .asset-preview-grid,
   .asset-side-analytics-chart {
