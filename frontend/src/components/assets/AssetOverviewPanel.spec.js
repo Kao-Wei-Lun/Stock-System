@@ -41,6 +41,22 @@ function buildProps() {
       max_drawdown_pct: -3.2,
       point_count: 3,
       realized_end_base: 6000,
+      flow_breakdown: {
+        deposit_base: 12000,
+        withdraw_base: 0,
+        dividend_interest_base: 0,
+        fee_tax_base: 0,
+        transfer_in_base: 0,
+        transfer_out_base: 0,
+        other_flow_base: 0,
+        net_flow_base: 12000,
+      },
+      performance_breakdown: {
+        realized_change_base: 6000,
+        unrealized_change_base: 12000,
+        other_change_base: 0,
+        total_change_base: 18000,
+      },
     },
     assetPerformanceSeries: [
       {
@@ -53,6 +69,22 @@ function buildProps() {
         realized_total_base: 0,
         unrealized_total_base: 0,
         drawdown_pct: 0,
+        flow_breakdown: {
+          deposit_base: 0,
+          withdraw_base: 0,
+          dividend_interest_base: 0,
+          fee_tax_base: 0,
+          transfer_in_base: 0,
+          transfer_out_base: 0,
+          other_flow_base: 0,
+          net_flow_base: 0,
+        },
+        performance_breakdown: {
+          realized_change_base: 0,
+          unrealized_change_base: 0,
+          other_change_base: 0,
+          total_change_base: 0,
+        },
       },
       {
         date: "2026-04-02",
@@ -64,6 +96,22 @@ function buildProps() {
         realized_total_base: 2000,
         unrealized_total_base: 5000,
         drawdown_pct: -1,
+        flow_breakdown: {
+          deposit_base: 5000,
+          withdraw_base: 0,
+          dividend_interest_base: 0,
+          fee_tax_base: 0,
+          transfer_in_base: 0,
+          transfer_out_base: 0,
+          other_flow_base: 0,
+          net_flow_base: 5000,
+        },
+        performance_breakdown: {
+          realized_change_base: 2000,
+          unrealized_change_base: 5000,
+          other_change_base: 0,
+          total_change_base: 7000,
+        },
       },
       {
         date: "2026-04-03",
@@ -75,6 +123,22 @@ function buildProps() {
         realized_total_base: 6000,
         unrealized_total_base: 12000,
         drawdown_pct: -3.2,
+        flow_breakdown: {
+          deposit_base: 12000,
+          withdraw_base: 0,
+          dividend_interest_base: 0,
+          fee_tax_base: 0,
+          transfer_in_base: 0,
+          transfer_out_base: 0,
+          other_flow_base: 0,
+          net_flow_base: 12000,
+        },
+        performance_breakdown: {
+          realized_change_base: 6000,
+          unrealized_change_base: 12000,
+          other_change_base: 0,
+          total_change_base: 18000,
+        },
       },
     ],
     assetMonthlyHeatmap: [
@@ -151,6 +215,8 @@ describe("AssetOverviewPanel", () => {
 
     expect(story.isVisible()).toBe(true);
     expect(story.text()).toContain("主要是投資報酬在推高資產");
+    expect(story.text()).toContain("資金流拆解");
+    expect(story.text()).toContain("已實現損益");
     expect(waterfallShell.attributes("style")).toContain("display: none");
 
     await wrapper.get('[data-testid="asset-change-view-waterfall"]').trigger("click");

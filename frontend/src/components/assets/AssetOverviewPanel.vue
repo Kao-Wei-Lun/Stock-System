@@ -218,10 +218,74 @@
               <strong>{{ formatCurrency(changeBreakdown.endValue) }}</strong>
             </div>
 
+            <div class="asset-change-source-grid">
+              <article class="asset-change-source-card">
+                <header>
+                  <div>
+                    <span class="asset-change-source-kicker">資金流拆解</span>
+                    <strong>{{ formatSignedCurrency(selectedFlowBreakdown.net_flow_base, assetBaseCurrency) }}</strong>
+                  </div>
+                  <small>加總後形成目前的淨流入</small>
+                </header>
+                <div class="asset-breakdown-list">
+                  <div
+                    v-for="row in fundingBreakdownRows"
+                    :key="row.key"
+                    class="asset-breakdown-row"
+                  >
+                    <div class="asset-breakdown-row-head">
+                      <span>{{ row.label }}</span>
+                      <strong :class="row.tone">{{ formatSignedCurrency(row.amount, assetBaseCurrency) }}</strong>
+                    </div>
+                    <div class="asset-breakdown-bar-track">
+                      <div
+                        class="asset-breakdown-bar-fill"
+                        :class="row.tone"
+                        :style="{ width: `${resolveBreakdownShare(row.amount, fundingBreakdownMax)}%` }"
+                      ></div>
+                    </div>
+                    <small>{{ row.helper }}</small>
+                  </div>
+                </div>
+              </article>
+
+              <article class="asset-change-source-card">
+                <header>
+                  <div>
+                    <span class="asset-change-source-kicker">損益來源</span>
+                    <strong :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+                      {{ formatSignedCurrency(selectedPerformanceBreakdown.total_change_base, assetBaseCurrency) }}
+                    </strong>
+                  </div>
+                  <small>扣除資金流後，資產自己變動的來源</small>
+                </header>
+                <div class="asset-breakdown-list">
+                  <div
+                    v-for="row in performanceBreakdownRows"
+                    :key="row.key"
+                    class="asset-breakdown-row"
+                  >
+                    <div class="asset-breakdown-row-head">
+                      <span>{{ row.label }}</span>
+                      <strong :class="row.tone">{{ formatSignedCurrency(row.amount, assetBaseCurrency) }}</strong>
+                    </div>
+                    <div class="asset-breakdown-bar-track">
+                      <div
+                        class="asset-breakdown-bar-fill"
+                        :class="row.tone"
+                        :style="{ width: `${resolveBreakdownShare(row.amount, performanceBreakdownMax)}%` }"
+                      ></div>
+                    </div>
+                    <small>{{ row.helper }}</small>
+                  </div>
+                </div>
+              </article>
+            </div>
+
             <div class="asset-change-insight-grid">
               <article class="asset-change-insight-card">
                 <header>
-                  <span>本金基礎</span>
+                  <span>資金流後基礎</span>
                   <strong>{{ formatCurrency(changeBreakdown.capitalBase) }}</strong>
                 </header>
                 <p>{{ changeFundingDescription }}</p>
@@ -509,6 +573,22 @@ const performanceModeOptions = [
 ];
 
 const palette = ["#7be7ff", "#6ef0a7", "#ffcf78", "#ff7f9d", "#8d92ff", "#73b8ff", "#9ef7d6"];
+const emptyFlowBreakdown = Object.freeze({
+  deposit_base: 0,
+  withdraw_base: 0,
+  dividend_interest_base: 0,
+  fee_tax_base: 0,
+  transfer_in_base: 0,
+  transfer_out_base: 0,
+  other_flow_base: 0,
+  net_flow_base: 0,
+});
+const emptyPerformanceBreakdown = Object.freeze({
+  realized_change_base: 0,
+  unrealized_change_base: 0,
+  other_change_base: 0,
+  total_change_base: 0,
+});
 
 const activeChartMode = ref("total_asset_value_base");
 const changeBreakdownView = ref("story");
@@ -538,6 +618,8 @@ const performanceRows = computed(() => (
       unrealized_total_base: Number(item?.unrealized_total_base || 0),
       drawdown_pct: Number(item?.drawdown_pct || 0),
       quote_gap_count: Number(item?.quote_gap_count || 0),
+      flow_breakdown: normalizeFlowBreakdown(item?.flow_breakdown),
+      performance_breakdown: normalizePerformanceBreakdown(item?.performance_breakdown),
     }))
     .filter((item) => item.date)
 ));
@@ -582,15 +664,27 @@ const selectedPoint = computed(() => (
     unrealized_total_base: 0,
     drawdown_pct: 0,
     quote_gap_count: 0,
+    flow_breakdown: emptyFlowBreakdown,
+    performance_breakdown: emptyPerformanceBreakdown,
   }
 ));
 
 const selectedSnapshotLabel = computed(() => formatDateLabel(selectedPoint.value.date));
 const selectedMonthLabel = computed(() => formatMonthLabel(selectedMonth.value));
+const selectedFlowBreakdown = computed(() => normalizeFlowBreakdown(
+  selectedPoint.value.flow_breakdown || props.assetPerformanceSummary.flow_breakdown,
+));
+const selectedPerformanceBreakdown = computed(() => normalizePerformanceBreakdown(
+  selectedPoint.value.performance_breakdown || props.assetPerformanceSummary.performance_breakdown,
+));
 const changeBreakdown = computed(() => {
   const startValue = Number(props.assetPerformanceSummary.start_value_base || 0);
-  const netFlow = Number(selectedPoint.value.net_flow_base || 0);
-  const performance = Number(selectedPoint.value.true_performance_base || 0);
+  const netFlow = Number(selectedFlowBreakdown.value.net_flow_base || selectedPoint.value.net_flow_base || 0);
+  const performance = Number(
+    selectedPerformanceBreakdown.value.total_change_base
+    || selectedPoint.value.true_performance_base
+    || 0,
+  );
   const endValue = Number(selectedPoint.value.total_asset_value_base || 0);
   return {
     startValue,
@@ -600,6 +694,90 @@ const changeBreakdown = computed(() => {
     capitalBase: startValue + netFlow,
   };
 });
+const fundingBreakdownRows = computed(() => {
+  const flow = selectedFlowBreakdown.value;
+  const transferNet = Number(flow.transfer_in_base || 0) - Number(flow.transfer_out_base || 0);
+  const rows = [
+    {
+      key: "deposit",
+      label: "入金",
+      amount: Number(flow.deposit_base || 0),
+      helper: "你主動補進來的資金",
+      tone: "up",
+    },
+    {
+      key: "withdraw",
+      label: "出金",
+      amount: -Number(flow.withdraw_base || 0),
+      helper: "提領或移出資產池的資金",
+      tone: "dn",
+    },
+    {
+      key: "dividend",
+      label: "股利 / 利息",
+      amount: Number(flow.dividend_interest_base || 0),
+      helper: "資產自己產生的現金流",
+      tone: "up",
+    },
+    {
+      key: "fees",
+      label: "費用 / 稅 / 匯費",
+      amount: -Number(flow.fee_tax_base || 0),
+      helper: "交易與匯兌成本",
+      tone: "dn",
+    },
+  ];
+  if (Math.abs(transferNet) >= 0.01 || Number(flow.transfer_in_base || 0) || Number(flow.transfer_out_base || 0)) {
+    rows.push({
+      key: "transfer",
+      label: "帳戶轉撥",
+      amount: transferNet,
+      helper: `轉入 ${formatCurrency(flow.transfer_in_base)} / 轉出 ${formatCurrency(flow.transfer_out_base)}`,
+      tone: transferNet >= 0 ? "neutral" : "dn",
+    });
+  }
+  if (Math.abs(Number(flow.other_flow_base || 0)) >= 0.01) {
+    rows.push({
+      key: "other",
+      label: "其他現金事件",
+      amount: Number(flow.other_flow_base || 0),
+      helper: "尚未歸類的現金流",
+      tone: Number(flow.other_flow_base || 0) >= 0 ? "neutral" : "dn",
+    });
+  }
+  return rows;
+});
+const performanceBreakdownRows = computed(() => {
+  const breakdown = selectedPerformanceBreakdown.value;
+  const rows = [
+    {
+      key: "realized",
+      label: "已實現損益",
+      amount: Number(breakdown.realized_change_base || 0),
+      helper: "已賣出或結束部位累積的結果",
+      tone: Number(breakdown.realized_change_base || 0) >= 0 ? "up" : "dn",
+    },
+    {
+      key: "unrealized",
+      label: "未實現損益",
+      amount: Number(breakdown.unrealized_change_base || 0),
+      helper: "目前仍持有部位的估值變化",
+      tone: Number(breakdown.unrealized_change_base || 0) >= 0 ? "up" : "dn",
+    },
+  ];
+  if (Math.abs(Number(breakdown.other_change_base || 0)) >= 0.01) {
+    rows.push({
+      key: "other",
+      label: "其他差異",
+      amount: Number(breakdown.other_change_base || 0),
+      helper: "尚未被已實現 / 未實現涵蓋的變化",
+      tone: Number(breakdown.other_change_base || 0) >= 0 ? "neutral" : "dn",
+    });
+  }
+  return rows;
+});
+const fundingBreakdownMax = computed(() => resolveBreakdownMax(fundingBreakdownRows.value));
+const performanceBreakdownMax = computed(() => resolveBreakdownMax(performanceBreakdownRows.value));
 const changeBreakdownEyebrow = computed(() => dominantDriverLabel(
   changeBreakdown.value.netFlow,
   changeBreakdown.value.performance,
@@ -649,12 +827,12 @@ const changeBreakdownSteps = computed(() => [
 const changeFundingDescription = computed(() => {
   const { capitalBase, netFlow } = changeBreakdown.value;
   if (Math.abs(netFlow) < 0.01) {
-    return `這段期間幾乎沒有新增資金流，現在可運用的本金大致維持在 ${formatCurrency(capitalBase)}。`;
+    return `這段期間幾乎沒有明顯的現金流變化，資產基礎大致維持在 ${formatCurrency(capitalBase)}。`;
   }
   if (netFlow > 0) {
-    return `你在這段期間額外投入 ${formatCurrency(Math.abs(netFlow))}，讓本金基礎提高到 ${formatCurrency(capitalBase)}。`;
+    return `把入金、股利、費用與帳戶轉撥一起算進來後，資金流為淨流入 ${formatCurrency(Math.abs(netFlow))}，讓資產基礎提高到 ${formatCurrency(capitalBase)}。`;
   }
-  return `你在這段期間淨流出 ${formatCurrency(Math.abs(netFlow))}，所以可運用本金降到 ${formatCurrency(capitalBase)}。`;
+  return `把所有現金事件一起算後，這段期間淨流出 ${formatCurrency(Math.abs(netFlow))}，所以資產基礎降到 ${formatCurrency(capitalBase)}。`;
 });
 const changePerformanceDescription = computed(() => {
   const { performance, capitalBase, endValue } = changeBreakdown.value;
@@ -1141,6 +1319,28 @@ const contributorChartOption = computed(() => ({
   ],
 }));
 
+function normalizeFlowBreakdown(value) {
+  return {
+    deposit_base: Number(value?.deposit_base || 0),
+    withdraw_base: Number(value?.withdraw_base || 0),
+    dividend_interest_base: Number(value?.dividend_interest_base || 0),
+    fee_tax_base: Number(value?.fee_tax_base || 0),
+    transfer_in_base: Number(value?.transfer_in_base || 0),
+    transfer_out_base: Number(value?.transfer_out_base || 0),
+    other_flow_base: Number(value?.other_flow_base || 0),
+    net_flow_base: Number(value?.net_flow_base || 0),
+  };
+}
+
+function normalizePerformanceBreakdown(value) {
+  return {
+    realized_change_base: Number(value?.realized_change_base || 0),
+    unrealized_change_base: Number(value?.unrealized_change_base || 0),
+    other_change_base: Number(value?.other_change_base || 0),
+    total_change_base: Number(value?.total_change_base || 0),
+  };
+}
+
 function setActiveChartMode(mode) {
   activeChartMode.value = mode;
 }
@@ -1348,6 +1548,16 @@ function resolveWaterfallBounds(steps) {
     min: Number((minValue - span * 0.06).toFixed(2)),
     max: Number((maxValue + span * 0.1).toFixed(2)),
   };
+}
+
+function resolveBreakdownMax(rows) {
+  return Math.max(...(rows || []).map((item) => Math.abs(Number(item.amount || 0))), 1);
+}
+
+function resolveBreakdownShare(value, maxAbs) {
+  const current = Math.abs(Number(value || 0));
+  const denominator = Math.max(Number(maxAbs || 0), 1);
+  return Number(((current / denominator) * 100).toFixed(2));
 }
 
 function paletteColorFor(items, key) {
@@ -1649,6 +1859,107 @@ function tradeSideLabel(value) {
   color: #f5fbff;
 }
 
+.asset-change-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asset-change-source-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(8, 14, 22, 0.72);
+}
+
+.asset-change-source-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-change-source-card header div {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-change-source-card header strong {
+  color: #f5fbff;
+  font-size: 18px;
+}
+
+.asset-change-source-card header small {
+  color: rgba(219, 229, 240, 0.56);
+  line-height: 1.5;
+  text-align: right;
+}
+
+.asset-change-source-kicker {
+  color: rgba(219, 229, 240, 0.66);
+  font-size: 11px;
+}
+
+.asset-breakdown-list {
+  display: grid;
+  gap: 10px;
+}
+
+.asset-breakdown-row {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-breakdown-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-breakdown-row-head span {
+  color: rgba(219, 229, 240, 0.82);
+  font-size: 12px;
+}
+
+.asset-breakdown-row-head strong {
+  color: #f5fbff;
+  font-size: 13px;
+}
+
+.asset-breakdown-bar-track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.asset-breakdown-bar-fill {
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: rgba(123, 231, 255, 0.66);
+}
+
+.asset-breakdown-bar-fill.up {
+  background: linear-gradient(90deg, rgba(110, 240, 167, 0.58), rgba(110, 240, 167, 0.94));
+}
+
+.asset-breakdown-bar-fill.dn {
+  background: linear-gradient(90deg, rgba(255, 95, 126, 0.58), rgba(255, 95, 126, 0.94));
+}
+
+.asset-breakdown-bar-fill.neutral {
+  background: linear-gradient(90deg, rgba(123, 231, 255, 0.52), rgba(123, 231, 255, 0.88));
+}
+
+.asset-breakdown-row small {
+  color: rgba(219, 229, 240, 0.54);
+  line-height: 1.45;
+}
+
 .asset-change-insight-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1814,6 +2125,7 @@ function tradeSideLabel(value) {
 }
 
 @media (max-width: 1180px) {
+  .asset-change-source-grid,
   .asset-change-step-grid,
   .asset-change-insight-grid,
   .asset-overview-secondary-grid,
