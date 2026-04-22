@@ -43,6 +43,7 @@ const DRAWING_LINE_STYLES = {
   dash: [6, 4],
   dot: [2, 4],
 };
+const LEGACY_INTRADAY_INTERVALS = new Set(["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const clampPositive = (value) => Math.max(value, Number.EPSILON);
@@ -50,6 +51,38 @@ const isFiniteNumber = (value) => Number.isFinite(value);
 const resolveAutoYPadding = (range) => (
   Math.max((((1 / AUTO_Y_TARGET_OCCUPANCY) - 1) * range) / 2, AUTO_Y_MIN_PADDING_ABS)
 );
+const pad2 = (value) => String(value).padStart(2, "0");
+const isLegacyIntradayInterval = (interval) => LEGACY_INTRADAY_INTERVALS.has(String(interval || "").toLowerCase());
+const parseLegacyDateValue = (value) => {
+  const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+const formatLegacyDateLabel = (date) => (
+  `${String(date.getFullYear()).slice(2)}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}`
+);
+const formatLegacyTimeLabel = (date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+const isSameLegacyCalendarDay = (left, right) => {
+  const leftDate = parseLegacyDateValue(left);
+  const rightDate = parseLegacyDateValue(right);
+  if (!leftDate || !rightDate) return false;
+  return leftDate.getFullYear() === rightDate.getFullYear()
+    && leftDate.getMonth() === rightDate.getMonth()
+    && leftDate.getDate() === rightDate.getDate();
+};
+
+export function formatLegacyAxisDateLabel(value, { rangeDays = 0, interval = "1d", includeDate = false } = {}) {
+  const date = parseLegacyDateValue(value);
+  if (!date) return String(value || "").slice(5);
+  if (isLegacyIntradayInterval(interval)) {
+    const timeLabel = formatLegacyTimeLabel(date);
+    return includeDate ? `${formatLegacyDateLabel(date)} ${timeLabel}` : timeLabel;
+  }
+  if (rangeDays >= 730) {
+    return `${String(date.getFullYear()).slice(2)}/${pad2(date.getMonth() + 1)}`;
+  }
+  return formatLegacyDateLabel(date);
+}
 
 export function resolveLegacyMainChartAutoScaleRange(data, _overlayValues = [], scaleMode = "linear") {
   const pricePoints = (Array.isArray(data) ? data : [])
@@ -685,26 +718,12 @@ export function useChartEngine({
     return color;
   };
 
-  const parseDateValue = (value) => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-
   const getDataRangeDays = (data) => {
     if (!data?.length) return 0;
-    const first = parseDateValue(data[0]?.date);
-    const last = parseDateValue(data[data.length - 1]?.date);
+    const first = parseLegacyDateValue(data[0]?.date);
+    const last = parseLegacyDateValue(data[data.length - 1]?.date);
     if (!first || !last) return 0;
     return Math.abs((last - first) / 86400000);
-  };
-
-  const formatAxisDateLabel = (value, rangeDays = 0) => {
-    const date = parseDateValue(value);
-    if (!date) return String(value || "").slice(5);
-    if (rangeDays >= 730) {
-      return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}`;
-    }
-    return `${String(date.getFullYear()).slice(2)}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
   };
 
   const getTimeTickIndices = (data, targetTickCount = 6) => {
@@ -725,11 +744,13 @@ export function useChartEngine({
     const top = options.top ?? PAD.top;
     const rangeDays = getDataRangeDays(data);
     const tickIndices = getTimeTickIndices(data, options.tickCount ?? 6);
+    const interval = options.interval || props.currentInterval || "1d";
+    const intraday = isLegacyIntradayInterval(interval);
 
     ctx.save();
     ctx.fillStyle = options.labelColor || "rgba(77,102,128,0.92)";
     ctx.font = options.font || "9px JetBrains Mono";
-    tickIndices.forEach((index) => {
+    tickIndices.forEach((index, tickPosition) => {
       const x = layout.barX(index);
       if (options.showVerticals !== false) {
         ctx.strokeStyle = options.gridColor || "rgba(30,45,61,0.55)";
@@ -739,8 +760,14 @@ export function useChartEngine({
         ctx.lineTo(x, options.verticalBottom ?? (height - PAD.bottom));
         ctx.stroke();
       }
-      const label = formatAxisDateLabel(data[index].date, rangeDays);
-      ctx.fillText(label, Math.max(PAD.left, x - Math.max(18, label.length * 3.4)), bottom);
+      if (options.showLabels !== false) {
+        const previousTickDate = tickPosition > 0 ? data[tickIndices[tickPosition - 1]]?.date : null;
+        const includeDate = intraday
+          && rangeDays >= 1
+          && (tickPosition === 0 || !isSameLegacyCalendarDay(data[index]?.date, previousTickDate));
+        const label = formatLegacyAxisDateLabel(data[index].date, { rangeDays, interval, includeDate });
+        ctx.fillText(label, Math.max(PAD.left, x - Math.max(18, label.length * 3.4)), bottom);
+      }
     });
     ctx.restore();
   };
@@ -753,6 +780,35 @@ export function useChartEngine({
       return true;
     }
     return !!props.activePanels?.[key];
+  };
+
+  const getVisibleLegacyLowerPanels = () => {
+    if (!visibleData.value.length) return [];
+    const panels = [];
+    if (props.compareSeries?.length) panels.push("compare");
+    if (!props.cleanChartMode) panels.push("volume");
+    if (props.activePanels?.rsi) panels.push("rsi");
+    if (props.activePanels?.aroon) panels.push("aroon");
+    if (props.activePanels?.trix) panels.push("trix");
+    if (props.activePanels?.williamsr) panels.push("williamsr");
+    if (props.activePanels?.mfi) panels.push("mfi");
+    if (props.activePanels?.roc) panels.push("roc");
+    if (props.activePanels?.bbPercent) panels.push("bbPercent");
+    if (props.activePanels?.bbWidth) panels.push("bbWidth");
+    if (isAuxPanelVisible("macd")) panels.push("macd");
+    if (isAuxPanelVisible("stoch")) panels.push("stoch");
+    if (props.activePanels?.atr) panels.push("atr");
+    if (props.activePanels?.cci) panels.push("cci");
+    if (props.activePanels?.obv) panels.push("obv");
+    if (props.activePanels?.adx) panels.push("adx");
+    if (props.activePanels?.cmf) panels.push("cmf");
+    return panels;
+  };
+
+  const hasVisibleLegacyLowerPanels = () => getVisibleLegacyLowerPanels().length > 0;
+  const isBottomLegacyLowerPanel = (panelKey) => {
+    const panels = getVisibleLegacyLowerPanels();
+    return panels.length > 0 && panels[panels.length - 1] === panelKey;
   };
 
   const drawCrosshairGuide = (ctx, x, top, bottom, dateLabel = "", width = 0) => {
@@ -812,11 +868,16 @@ export function useChartEngine({
     if (absoluteIndex < viewport.startIndex || absoluteIndex >= viewport.startIndex + data.length) return null;
     const localIndex = absoluteIndex - viewport.startIndex;
     const rangeDays = getDataRangeDays(data);
+    const interval = props.currentInterval || "1d";
     return {
       absoluteIndex,
       localIndex,
       x: layout.barX(localIndex),
-      dateLabel: formatAxisDateLabel(data[localIndex]?.date, rangeDays),
+      dateLabel: formatLegacyAxisDateLabel(data[localIndex]?.date, {
+        rangeDays,
+        interval,
+        includeDate: isLegacyIntradayInterval(interval),
+      }),
     };
   };
 
@@ -834,15 +895,23 @@ export function useChartEngine({
       tickCount: options.tickCount ?? 5,
       labelColor: options.labelColor || "rgba(77,102,128,0.92)",
       gridColor: options.gridColor || "rgba(30,45,61,0.45)",
+      showLabels: options.showLabels,
     });
 
     const marker = getCrosshairMarker(layout, data);
     if (marker) {
-      drawCrosshairGuide(ctx, marker.x, top, verticalBottom, marker.dateLabel, panelWidth);
+      drawCrosshairGuide(
+        ctx,
+        marker.x,
+        top,
+        verticalBottom,
+        options.showCrosshairLabel === false ? "" : marker.dateLabel,
+        options.showCrosshairLabel === false ? 0 : panelWidth,
+      );
     }
   };
 
-  const drawGrid = (ctx, canvas, min, max, data, scaleMode = "linear") => {
+  const drawGrid = (ctx, canvas, min, max, data, scaleMode = "linear", options = {}) => {
     const width = canvasWidth(canvas);
     const height = canvasHeight(canvas);
     const chartHeight = height - PAD.top - PAD.bottom;
@@ -868,6 +937,7 @@ export function useChartEngine({
       bottom: height - 8,
       top: PAD.top,
       verticalBottom: height - PAD.bottom,
+      showLabels: options.showLabels,
     });
   };
 
@@ -925,10 +995,13 @@ export function useChartEngine({
       );
     });
 
+    const isBottomPanel = isBottomLegacyLowerPanel(config.axisPanelKey);
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -1028,10 +1101,13 @@ export function useChartEngine({
       );
     });
 
+    const isBottomPanel = isBottomLegacyLowerPanel(config.axisPanelKey);
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -1683,7 +1759,9 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     mainMetrics.chartWidth = layout.width;
     mainMetrics.step = layout.step;
 
-    drawGrid(ctx, canvas, min, max, data, priceScaleMode.value);
+    drawGrid(ctx, canvas, min, max, data, priceScaleMode.value, {
+      showLabels: !hasVisibleLegacyLowerPanels(),
+    });
 
     if (chartMode.value === "candles") {
       data.forEach((row, index) => {
@@ -2082,7 +2160,14 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const prevRow = data[data.length - 2] || lastRow;
     const crosshairMarker = getCrosshairMarker(layout, data);
     if (crosshairMarker) {
-      drawCrosshairGuide(ctx, crosshairMarker.x, PAD.top, height - PAD.bottom, crosshairMarker.dateLabel, width);
+      drawCrosshairGuide(
+        ctx,
+        crosshairMarker.x,
+        PAD.top,
+        height - PAD.bottom,
+        hasVisibleLegacyLowerPanels() ? "" : crosshairMarker.dateLabel,
+        hasVisibleLegacyLowerPanels() ? 0 : width,
+      );
       if (Number.isFinite(props.crosshair?.canvasY)) {
         drawHorizontalCrosshairGuide(
           ctx,
@@ -2190,10 +2275,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       ctx.fillText(label, 8, 12 + seriesList.indexOf(series) * 11);
     });
 
+    const isBottomPanel = isBottomLegacyLowerPanel("compare");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2232,10 +2320,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     ctx.fillStyle = "rgba(77,102,128,0.6)";
     ctx.font = "9px JetBrains Mono";
     ctx.fillText(`VOL / MA${props.indicatorSettings.volumeMaPeriod}`, 2, 12);
+    const isBottomPanel = isBottomLegacyLowerPanel("volume");
     drawPanelAxisAndCrosshair(ctx, canvas, data, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2276,10 +2367,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
 
     drawLine(ctx, values, layout.barX, scale, "#00d9a3", 1.5);
+    const isBottomPanel = isBottomLegacyLowerPanel("rsi");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2294,6 +2388,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       { up: [], down: [] },
     );
     renderBoundedOscillatorPanel(aroonCanvas.value, sliceSeries(up), {
+      axisPanelKey: "aroon",
       min: 0,
       max: 100,
       levels: [
@@ -2316,6 +2411,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       props.indicatorSettings.trixSignal,
     );
     renderRangePanel(trixCanvas.value, sliceSeries(trix), {
+      axisPanelKey: "trix",
       zeroLine: true,
       minPad: 0.02,
       paddingRatio: 0.14,
@@ -2330,6 +2426,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     if (!williamsrCanvas.value || !visibleData.value.length || !props.activePanels.williamsr) return;
     const values = sliceSeries(calcWilliamsR(props.ohlcData, props.indicatorSettings.williamsrPeriod));
     renderBoundedOscillatorPanel(williamsrCanvas.value, values, {
+      axisPanelKey: "williamsr",
       min: -100,
       max: 0,
       bands: [
@@ -2349,6 +2446,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     if (!mfiCanvas.value || !visibleData.value.length || !props.activePanels.mfi) return;
     const values = sliceSeries(calcMFI(props.ohlcData, props.indicatorSettings.mfiPeriod));
     renderBoundedOscillatorPanel(mfiCanvas.value, values, {
+      axisPanelKey: "mfi",
       min: 0,
       max: 100,
       bands: [
@@ -2368,6 +2466,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     if (!rocCanvas.value || !visibleData.value.length || !props.activePanels.roc) return;
     const values = sliceSeries(calcROC(props.ohlcData, props.indicatorSettings.rocPeriod));
     renderRangePanel(rocCanvas.value, values, {
+      axisPanelKey: "roc",
       zeroLine: true,
       minPad: 1,
       paddingRatio: 0.12,
@@ -2381,6 +2480,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       calcBBPercent(props.ohlcData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier),
     );
     renderRangePanel(bbPercentCanvas.value, values, {
+      axisPanelKey: "bbPercent",
       min: -20,
       max: 120,
       ensureLevels: [0, 50, 100],
@@ -2403,6 +2503,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       calcBBWidth(props.ohlcData, props.indicatorSettings.bbPeriod, props.indicatorSettings.bbMultiplier),
     );
     renderRangePanel(bbWidthCanvas.value, values, {
+      axisPanelKey: "bbWidth",
       minPad: 0.5,
       paddingRatio: 0.16,
       area: {
@@ -2457,10 +2558,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
     drawLine(ctx, visibleMacd, layout.barX, scale, "#3b8bff", 1.2);
     drawLine(ctx, visibleSignal, layout.barX, scale, "#f5a623", 1.2);
+    const isBottomPanel = isBottomLegacyLowerPanel("macd");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2494,10 +2598,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
     drawLine(ctx, visibleK, layout.barX, scale, "#00d9a3", 1.5);
     drawLine(ctx, visibleD, layout.barX, scale, "#f5a623", 1);
+    const isBottomPanel = isBottomLegacyLowerPanel("stoch");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2556,10 +2663,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       "#ff8c42",
       "rgba(255,140,66,0.12)",
     );
+    const isBottomPanel = isBottomLegacyLowerPanel("atr");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2614,10 +2724,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
 
     drawLine(ctx, visibleCci, layout.barX, scale, "#9b6dff", 1.5);
+    const isBottomPanel = isBottomLegacyLowerPanel("cci");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2672,10 +2785,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       "#00d4ff",
       "rgba(0,212,255,0.10)",
     );
+    const isBottomPanel = isBottomLegacyLowerPanel("obv");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2716,10 +2832,13 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     drawLine(ctx, visibleAdx, layout.barX, scale, "#ffd166", 1.4);
     drawLine(ctx, visiblePlus, layout.barX, scale, "#00d9a3", 1.1);
     drawLine(ctx, visibleMinus, layout.barX, scale, "#ff4d6a", 1.1);
+    const isBottomPanel = isBottomLegacyLowerPanel("adx");
     drawPanelAxisAndCrosshair(ctx, canvas, visibleData.value, layout, {
       top: plotTop,
       verticalBottom: plotBottom,
       bottom: height - 4,
+      showLabels: isBottomPanel,
+      showCrosshairLabel: isBottomPanel,
     });
   };
 
@@ -2727,6 +2846,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     if (!cmfCanvas.value || !visibleData.value.length || !props.activePanels.cmf) return;
     const values = sliceSeries(calcCMF(props.ohlcData, props.indicatorSettings.cmfPeriod));
     renderRangePanel(cmfCanvas.value, values, {
+      axisPanelKey: "cmf",
       ensureLevels: [-0.2, 0, 0.2],
       zeroLine: true,
       minPad: 0.02,
