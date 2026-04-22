@@ -113,6 +113,11 @@ function toRealtimeRow(dateValue, price, source, volume = 0, interval = "1m") {
   };
 }
 
+function normalizeIncomingCandleVolume(value, fallback = 0) {
+  const numeric = toFiniteNumber(value);
+  return numeric == null ? fallback : Math.max(0, numeric);
+}
+
 function resolveIntradayVolumeDelta(quote) {
   const currentTotalVolume = toFiniteNumber(quote?.volume);
   const previousTotalVolume = toFiniteNumber(quote?.previous_total_volume);
@@ -206,5 +211,60 @@ export function upsertRealtimeOhlcFromQuote(rows, quote, interval) {
     Math.max(0, resolveIntradayVolumeDelta(quote) ?? 0),
     normalizedInterval,
   ));
+  return nextRows;
+}
+
+export function upsertRealtimeOhlcFromCandle(rows, candle, interval = "1m") {
+  if (!Array.isArray(rows) || !rows.length || !candle?.date) return Array.isArray(rows) ? rows : [];
+
+  const normalizedInterval = String(interval || "1m").toLowerCase();
+  const candleBucket = getIntervalBucketStart(candle.date, normalizedInterval);
+  const lastRow = rows[rows.length - 1];
+  const lastBucket = getIntervalBucketStart(lastRow?.date, normalizedInterval);
+  if (!candleBucket || !lastBucket) return rows;
+
+  const nextRows = [...rows];
+  const source = candle.source || lastRow?.source || "fubon_neo";
+  const lastIsSameBucket = lastBucket.getTime() === candleBucket.getTime();
+  const lastSameBucket = lastIsSameBucket ? lastRow : null;
+  const close = toPositivePrice(candle.close)
+    ?? toPositivePrice(candle.open)
+    ?? toPositivePrice(lastSameBucket?.close);
+  if (close == null) return rows;
+
+  const open = toPositivePrice(candle.open) ?? toPositivePrice(lastSameBucket?.open) ?? close;
+  const highCandidates = [
+    open,
+    close,
+    toPositivePrice(candle.high),
+    toPositivePrice(lastSameBucket?.high),
+  ].filter((value) => value != null);
+  const lowCandidates = [
+    open,
+    close,
+    toPositivePrice(candle.low),
+    toPositivePrice(lastSameBucket?.low),
+  ].filter((value) => value != null);
+  const nextRow = {
+    date: formatBucketLabel(candleBucket, normalizedInterval),
+    open,
+    high: Math.max(...highCandidates),
+    low: Math.min(...lowCandidates),
+    close,
+    volume: normalizeIncomingCandleVolume(candle.volume, normalizeIncomingCandleVolume(lastSameBucket?.volume, 0)),
+    adj_close: close,
+    source,
+  };
+
+  if (candleBucket.getTime() < lastBucket.getTime()) {
+    return rows;
+  }
+
+  if (lastIsSameBucket) {
+    nextRows[nextRows.length - 1] = nextRow;
+    return nextRows;
+  }
+
+  nextRows.push(nextRow);
   return nextRows;
 }

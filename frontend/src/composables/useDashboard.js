@@ -14,7 +14,7 @@ import {
   readLegacyWorkspacePresets,
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
-import { upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
+import { upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeRealtimeQuote } from "../utils/realtimeQuote";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
@@ -1460,54 +1460,12 @@ export function useDashboard() {
   }
 
   function upsertRealtimeCandleRow(data) {
-    if (!data?.date || currentInterval.value !== "1m") return;
-    const toFiniteNumberOrNull = (value) => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : null;
-    };
-    const toPositiveQuoteValue = (value) => {
-      const numeric = toFiniteNumberOrNull(value);
-      return numeric != null && numeric > 0 ? numeric : null;
-    };
-    const normalizedDate = String(data.date)
-      .replace("T", " ")
-      .replace(/[+-]\d{2}:\d{2}$/, "")
-      .replace(/Z$/, "")
-      .trim();
-    const rows = [...rawOhlcData.value];
-    const last = rows[rows.length - 1];
-    const lastSameBucket = last?.date === normalizedDate ? last : null;
-    const close = toPositiveQuoteValue(data.close) ?? toPositiveQuoteValue(data.open) ?? toPositiveQuoteValue(lastSameBucket?.close);
-    if (close == null) return;
-    const open = toPositiveQuoteValue(data.open) ?? toPositiveQuoteValue(lastSameBucket?.open) ?? close;
-    const highCandidates = [
-      open,
-      close,
-      toPositiveQuoteValue(data.high),
-      toPositiveQuoteValue(lastSameBucket?.high),
-    ].filter((value) => value != null);
-    const lowCandidates = [
-      open,
-      close,
-      toPositiveQuoteValue(data.low),
-      toPositiveQuoteValue(lastSameBucket?.low),
-    ].filter((value) => value != null);
-    const nextRow = {
-      date: normalizedDate,
-      open,
-      high: Math.max(...highCandidates),
-      low: Math.min(...lowCandidates),
-      close,
-      volume: toFiniteNumberOrNull(data.volume) ?? toFiniteNumberOrNull(lastSameBucket?.volume) ?? 0,
-      adj_close: close,
-      source: data.source || "fubon_neo",
-    };
-    if (last?.date === normalizedDate) {
-      rows[rows.length - 1] = nextRow;
-    } else {
-      rows.push(nextRow);
-    }
-    rawOhlcData.value = rows;
+    if (!data?.date || !isIntradayInterval(currentInterval.value)) return;
+    rawOhlcData.value = upsertRealtimeOhlcFromCandle(
+      rawOhlcData.value,
+      data,
+      currentInterval.value,
+    );
   }
 
   function handleRealtimeQuote(message) {

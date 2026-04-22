@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getIntervalBucketStart, upsertRealtimeOhlcFromQuote } from "./realtimeOhlc";
+import { getIntervalBucketStart, upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "./realtimeOhlc";
 
 describe("realtimeOhlc", () => {
   it("rounds intraday timestamps into the active timeframe bucket", () => {
@@ -155,6 +155,84 @@ describe("realtimeOhlc", () => {
       low: 105,
       close: 105,
       volume: 260,
+    });
+  });
+
+  it("merges second-level realtime candle timestamps into the same 1m bucket", () => {
+    const rows = [
+      {
+        date: "2026-04-22T09:49:00.000+08:00",
+        open: 2065,
+        high: 2070,
+        low: 2060,
+        close: 2060,
+        volume: 109,
+        adj_close: 2060,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromCandle(
+      rows,
+      {
+        date: "2026-04-22T09:49:37+08:00",
+        open: 2060,
+        high: 2065,
+        low: 2060,
+        close: 2065,
+        volume: 126,
+        source: "fubon_neo",
+      },
+      "1m",
+    );
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      date: "2026-04-22 09:49:00",
+      open: 2060,
+      high: 2070,
+      low: 2060,
+      close: 2065,
+      volume: 126,
+    });
+  });
+
+  it("creates a new intraday candle only after the bucket actually changes", () => {
+    const rows = [
+      {
+        date: "2026-04-22 09:49:00",
+        open: 2060,
+        high: 2065,
+        low: 2060,
+        close: 2065,
+        volume: 126,
+        adj_close: 2065,
+        source: "fubon_neo",
+      },
+    ];
+
+    const updated = upsertRealtimeOhlcFromCandle(
+      rows,
+      {
+        date: "2026-04-22T09:50:01+08:00",
+        open: 2065,
+        high: 2070,
+        low: 2065,
+        close: 2070,
+        volume: 18,
+        source: "fubon_neo",
+      },
+      "1m",
+    );
+
+    expect(updated).toHaveLength(2);
+    expect(updated[1]).toMatchObject({
+      date: "2026-04-22 09:50:00",
+      open: 2065,
+      high: 2070,
+      low: 2065,
+      close: 2070,
+      volume: 18,
     });
   });
 
