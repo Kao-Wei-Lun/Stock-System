@@ -1247,9 +1247,7 @@ const monthlyHeatmapOption = computed(() => {
       calculable: false,
       orient: "horizontal",
       left: "center",
-      bottom: 18,
-      itemWidth: 176,
-      itemHeight: 14,
+      bottom: 16,
       textStyle: { color: "rgba(219, 229, 240, 0.66)" },
       inRange: {
         color: ["#ff5f7e", "#292f3f", "#6ef0a7"],

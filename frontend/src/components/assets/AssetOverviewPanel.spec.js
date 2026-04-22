@@ -234,10 +234,12 @@ describe("AssetOverviewPanel", () => {
     const heatmapOption = findCharts(wrapper)[2].props("option");
 
     expect(heatmapOption.grid.bottom).toBe(82);
-    expect(heatmapOption.visualMap.bottom).toBe(18);
+    expect(heatmapOption.visualMap.bottom).toBe(16);
     expect(heatmapOption.xAxis.axisLabel.margin).toBe(16);
     expect(heatmapOption.tooltip.confine).toBe(true);
     expect(typeof heatmapOption.tooltip.position).toBe("function");
+    expect(heatmapOption.visualMap.itemWidth).toBeUndefined();
+    expect(heatmapOption.visualMap.itemHeight).toBeUndefined();
   });
 
   it("shows a story-first breakdown and keeps the waterfall view available", async () => {
