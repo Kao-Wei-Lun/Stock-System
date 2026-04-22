@@ -1802,12 +1802,15 @@ function tradeSideLabel(value) {
 
 .asset-change-step-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  align-items: stretch;
   gap: 10px;
 }
 
 .asset-change-step {
   display: grid;
+  min-width: 0;
+  align-content: start;
   gap: 8px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1833,9 +1836,14 @@ function tradeSideLabel(value) {
 }
 
 .asset-change-step strong {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   color: #f5fbff;
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: clamp(15px, 1.7vw, 18px);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .asset-change-step.up strong {
@@ -1851,8 +1859,10 @@ function tradeSideLabel(value) {
 }
 
 .asset-change-step small {
+  min-width: 0;
   color: rgba(219, 229, 240, 0.56);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .asset-change-equation {
