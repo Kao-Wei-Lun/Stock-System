@@ -226,6 +226,20 @@ describe("AssetOverviewPanel", () => {
     ]);
   });
 
+  it("keeps heatmap month labels and tooltips away from the legend area", () => {
+    const wrapper = mount(AssetOverviewPanel, {
+      props: buildProps(),
+    });
+
+    const heatmapOption = findCharts(wrapper)[2].props("option");
+
+    expect(heatmapOption.grid.bottom).toBe(82);
+    expect(heatmapOption.visualMap.bottom).toBe(18);
+    expect(heatmapOption.xAxis.axisLabel.margin).toBe(16);
+    expect(heatmapOption.tooltip.confine).toBe(true);
+    expect(typeof heatmapOption.tooltip.position).toBe("function");
+  });
+
   it("shows a story-first breakdown and keeps the waterfall view available", async () => {
     const wrapper = mount(AssetOverviewPanel, {
       props: buildProps(),

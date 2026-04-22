@@ -1190,7 +1190,20 @@ const monthlyHeatmapOption = computed(() => {
     animation: false,
     backgroundColor: "transparent",
     tooltip: {
-      position: "top",
+      confine: true,
+      position(point, _params, _dom, _rect, size) {
+        const [x = 0, y = 0] = Array.isArray(point) ? point : [0, 0];
+        const contentWidth = size?.contentSize?.[0] || 0;
+        const contentHeight = size?.contentSize?.[1] || 0;
+        const viewWidth = size?.viewSize?.[0] || 0;
+        const viewHeight = size?.viewSize?.[1] || 0;
+        const left = Math.max(12, Math.min(x - (contentWidth / 2), viewWidth - contentWidth - 12));
+        const topCandidate = y - contentHeight - 14;
+        const top = topCandidate >= 12
+          ? topCandidate
+          : Math.min(viewHeight - contentHeight - 12, y + 18);
+        return [left, Math.max(12, top)];
+      },
       backgroundColor: "rgba(8, 14, 22, 0.94)",
       borderColor: "rgba(123, 231, 255, 0.18)",
       textStyle: { color: "#e7f3ff" },
@@ -1209,13 +1222,16 @@ const monthlyHeatmapOption = computed(() => {
         ].join("");
       },
     },
-    grid: { top: 12, right: 12, bottom: 52, left: 42 },
+    grid: { top: 18, right: 12, bottom: 82, left: 42 },
     xAxis: {
       type: "category",
       data: monthNames,
       splitArea: { show: true },
       axisLine: { lineStyle: { color: "rgba(255, 255, 255, 0.12)" } },
-      axisLabel: { color: "rgba(219, 229, 240, 0.68)" },
+      axisLabel: {
+        color: "rgba(219, 229, 240, 0.68)",
+        margin: 16,
+      },
     },
     yAxis: {
       type: "category",
@@ -1231,7 +1247,9 @@ const monthlyHeatmapOption = computed(() => {
       calculable: false,
       orient: "horizontal",
       left: "center",
-      bottom: 6,
+      bottom: 18,
+      itemWidth: 176,
+      itemHeight: 14,
       textStyle: { color: "rgba(219, 229, 240, 0.66)" },
       inRange: {
         color: ["#ff5f7e", "#292f3f", "#6ef0a7"],
