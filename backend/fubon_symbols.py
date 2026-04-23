@@ -14,6 +14,7 @@ _FUTOPT_BASE_ALIASES = {
     "TXF": "TXF",
     "MTX": "MXF",
     "MXF": "MXF",
+    "TMF": "TMF",
 }
 
 
