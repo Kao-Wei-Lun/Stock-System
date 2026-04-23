@@ -384,6 +384,8 @@ def _deserialize_asset_account(row: Optional[Dict[str, Any]]) -> Optional[Dict[s
         "institution": row.get("institution"),
         "account_type": row.get("account_type"),
         "base_currency": row.get("base_currency") or "TWD",
+        "settlement_account_id": row.get("settlement_account_id"),
+        "auto_sync_trade_settlement": bool(row.get("auto_sync_trade_settlement", False)),
         "include_in_total": bool(row.get("include_in_total", True)),
         "sort_order": int(row.get("sort_order") or 0),
         "notes": row.get("notes"),
@@ -404,6 +406,9 @@ def _deserialize_asset_cash_ledger_entry(row: Optional[Dict[str, Any]]) -> Optio
         "currency": row.get("currency"),
         "fx_rate_to_base": row.get("fx_rate_to_base"),
         "is_initial_balance": bool(row.get("is_initial_balance", False)),
+        "source": row.get("source") or "manual",
+        "linked_trade_id": row.get("linked_trade_id"),
+        "linked_trade_role": row.get("linked_trade_role"),
         "counterparty": row.get("counterparty"),
         "note": row.get("note"),
         "created_at": _datetime_to_iso(row.get("created_at")),
@@ -897,11 +902,22 @@ def _normalize_asset_account_payload(
 ) -> Dict[str, Any]:
     source = dict(existing or {})
     source.update(payload or {})
+    account_type = _optional_string(source.get("account_type"), max_length=64) or "brokerage"
+    settlement_account_id = _optional_int(source.get("settlement_account_id"))
+    if settlement_account_id is not None and settlement_account_id <= 0:
+        settlement_account_id = None
+    auto_sync_trade_settlement = _coerce_bool(source.get("auto_sync_trade_settlement"), False)
+    if auto_sync_trade_settlement and account_type != "brokerage":
+        raise ValueError("Auto trade settlement sync requires a brokerage account")
+    if auto_sync_trade_settlement and settlement_account_id is None:
+        raise ValueError("Settlement account is required when auto trade settlement sync is enabled")
     return {
         "name": _required_string(source.get("name"), "Asset account name is required", max_length=128),
         "institution": _optional_string(source.get("institution"), max_length=128),
-        "account_type": _optional_string(source.get("account_type"), max_length=64) or "brokerage",
+        "account_type": account_type,
         "base_currency": (_optional_string(source.get("base_currency"), max_length=16) or "TWD").upper(),
+        "settlement_account_id": settlement_account_id,
+        "auto_sync_trade_settlement": auto_sync_trade_settlement,
         "include_in_total": _coerce_bool(source.get("include_in_total"), True),
         "sort_order": _optional_int(source.get("sort_order")) or 0,
         "notes": _optional_string(source.get("notes"), max_length=4000),
@@ -931,6 +947,9 @@ def _normalize_asset_cash_ledger_payload(
         "currency": (_optional_string(source.get("currency"), max_length=16) or "TWD").upper(),
         "fx_rate_to_base": fx_rate_to_base or 1.0,
         "is_initial_balance": _coerce_bool(source.get("is_initial_balance"), False),
+        "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "linked_trade_id": _optional_int(source.get("linked_trade_id")),
+        "linked_trade_role": _optional_string(source.get("linked_trade_role"), max_length=32),
         "counterparty": _optional_string(source.get("counterparty"), max_length=128),
         "note": _optional_string(source.get("note"), max_length=4000),
     }

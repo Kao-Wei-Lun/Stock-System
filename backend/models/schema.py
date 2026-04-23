@@ -681,6 +681,8 @@ CREATE_TABLE_STATEMENTS = {
             `institution` VARCHAR(128) NULL,
             `account_type` VARCHAR(64) NOT NULL DEFAULT 'brokerage',
             `base_currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
+            `settlement_account_id` BIGINT NULL,
+            `auto_sync_trade_settlement` TINYINT NOT NULL DEFAULT 0,
             `include_in_total` TINYINT NOT NULL DEFAULT 1,
             `sort_order` INT NOT NULL DEFAULT 0,
             `notes` TEXT NULL,
@@ -688,7 +690,8 @@ CREATE_TABLE_STATEMENTS = {
             `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             UNIQUE KEY `uq_asset_accounts_owner_name` (`owner_id`, `name`),
-            KEY `idx_asset_accounts_owner_sort` (`owner_id`, `sort_order`, `id`)
+            KEY `idx_asset_accounts_owner_sort` (`owner_id`, `sort_order`, `id`),
+            KEY `idx_asset_accounts_settlement` (`settlement_account_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     "asset_cash_ledger": """
@@ -702,6 +705,9 @@ CREATE_TABLE_STATEMENTS = {
             `currency` VARCHAR(16) NOT NULL DEFAULT 'TWD',
             `fx_rate_to_base` DOUBLE NOT NULL DEFAULT 1,
             `is_initial_balance` TINYINT NOT NULL DEFAULT 0,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'manual',
+            `linked_trade_id` BIGINT NULL,
+            `linked_trade_role` VARCHAR(32) NULL,
             `counterparty` VARCHAR(128) NULL,
             `note` TEXT NULL,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -709,6 +715,7 @@ CREATE_TABLE_STATEMENTS = {
             PRIMARY KEY (`id`),
             KEY `idx_asset_cash_ledger_owner_date` (`owner_id`, `flow_date`, `id`),
             KEY `idx_asset_cash_ledger_account_date` (`account_id`, `flow_date`, `id`),
+            KEY `idx_asset_cash_ledger_linked_trade` (`linked_trade_id`, `linked_trade_role`, `id`),
             CONSTRAINT `fk_asset_cash_ledger_account`
                 FOREIGN KEY (`account_id`) REFERENCES `asset_accounts` (`id`)
                 ON DELETE CASCADE
@@ -967,10 +974,32 @@ REQUIRED_COLUMN_MIGRATIONS = {
             ADD COLUMN `dealer_net_buy_sell` BIGINT NULL AFTER `investment_trust_net_buy_sell`
         """,
     },
+    "asset_accounts": {
+        "settlement_account_id": """
+            ALTER TABLE `asset_accounts`
+            ADD COLUMN `settlement_account_id` BIGINT NULL AFTER `base_currency`
+        """,
+        "auto_sync_trade_settlement": """
+            ALTER TABLE `asset_accounts`
+            ADD COLUMN `auto_sync_trade_settlement` TINYINT NOT NULL DEFAULT 0 AFTER `settlement_account_id`
+        """,
+    },
     "asset_cash_ledger": {
         "is_initial_balance": """
             ALTER TABLE `asset_cash_ledger`
             ADD COLUMN `is_initial_balance` TINYINT NOT NULL DEFAULT 0 AFTER `fx_rate_to_base`
+        """,
+        "source": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD COLUMN `source` VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER `is_initial_balance`
+        """,
+        "linked_trade_id": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD COLUMN `linked_trade_id` BIGINT NULL AFTER `source`
+        """,
+        "linked_trade_role": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD COLUMN `linked_trade_role` VARCHAR(32) NULL AFTER `linked_trade_id`
         """,
     },
     "asset_trade_ledger": {
@@ -987,6 +1016,18 @@ REQUIRED_INDEX_MIGRATIONS = {
         "idx_ohlcv_ticker_date_lookup": """
             ALTER TABLE `ohlcv`
             ADD INDEX `idx_ohlcv_ticker_date_lookup` (`ticker`, `date`)
+        """,
+    },
+    "asset_accounts": {
+        "idx_asset_accounts_settlement": """
+            ALTER TABLE `asset_accounts`
+            ADD INDEX `idx_asset_accounts_settlement` (`settlement_account_id`)
+        """,
+    },
+    "asset_cash_ledger": {
+        "idx_asset_cash_ledger_linked_trade": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD INDEX `idx_asset_cash_ledger_linked_trade` (`linked_trade_id`, `linked_trade_role`, `id`)
         """,
     },
     "market_quotes_latest": {

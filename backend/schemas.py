@@ -233,6 +233,8 @@ class AssetAccountCreatePayload(BaseModel):
     institution: str | None = Field(None, max_length=128)
     account_type: str = Field("brokerage", min_length=1, max_length=64)
     base_currency: str = Field("TWD", min_length=1, max_length=16)
+    settlement_account_id: int | None = None
+    auto_sync_trade_settlement: bool = False
     include_in_total: bool = True
     sort_order: int = 0
     notes: str | None = None
@@ -243,6 +245,8 @@ class AssetAccountUpdatePayload(BaseModel):
     institution: str | None = Field(None, max_length=128)
     account_type: str | None = Field(None, min_length=1, max_length=64)
     base_currency: str | None = Field(None, min_length=1, max_length=16)
+    settlement_account_id: int | None = None
+    auto_sync_trade_settlement: bool | None = None
     include_in_total: bool | None = None
     sort_order: int | None = None
     notes: str | None = None

@@ -61,6 +61,8 @@ def asset_store(monkeypatch):
             "institution": payload.get("institution"),
             "account_type": payload.get("account_type") or "brokerage",
             "base_currency": payload.get("base_currency") or "TWD",
+            "settlement_account_id": payload.get("settlement_account_id"),
+            "auto_sync_trade_settlement": bool(payload.get("auto_sync_trade_settlement", False)),
             "include_in_total": bool(payload.get("include_in_total", True)),
             "sort_order": int(payload.get("sort_order") or 0),
             "notes": payload.get("notes"),
@@ -111,6 +113,9 @@ def asset_store(monkeypatch):
             "currency": payload.get("currency") or "TWD",
             "fx_rate_to_base": fx_rate_to_base,
             "is_initial_balance": bool(payload.get("is_initial_balance", False)),
+            "source": payload.get("source") or "manual",
+            "linked_trade_id": payload.get("linked_trade_id"),
+            "linked_trade_role": payload.get("linked_trade_role"),
             "counterparty": payload.get("counterparty"),
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:20:00+00:00",
@@ -129,6 +134,15 @@ def asset_store(monkeypatch):
 
     async def delete_asset_cash_ledger_entry(entry_id, owner_id=1):
         return store["cash_entries"].pop(entry_id, None) is not None
+
+    async def list_asset_cash_ledger_entries_by_linked_trade(linked_trade_id, owner_id=1):
+        items = [
+            item
+            for item in store["cash_entries"].values()
+            if int(item.get("linked_trade_id") or 0) == int(linked_trade_id)
+        ]
+        items.sort(key=lambda item: item["id"])
+        return clone(items)
 
     async def list_asset_trade_entries(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200):
         items = list(store["trade_entries"].values())
@@ -188,6 +202,14 @@ def asset_store(monkeypatch):
         if not existing:
             return None
         existing.update(payload)
+        quantity = float(existing["quantity"])
+        price = float(existing["price"])
+        gross_amount = quantity * price
+        fee_amount = float(existing.get("fee_amount") or 0)
+        tax_amount = float(existing.get("tax_amount") or 0)
+        side = existing.get("side") or "buy"
+        existing["gross_amount"] = gross_amount
+        existing["net_amount"] = gross_amount + fee_amount + tax_amount if side == "buy" else gross_amount - fee_amount - tax_amount
         existing["updated_at"] = "2026-04-18T08:35:00+00:00"
         return clone(existing)
 
@@ -421,6 +443,7 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "create_asset_cash_ledger_entry", create_asset_cash_ledger_entry)
     monkeypatch.setattr(main.db, "update_asset_cash_ledger_entry", update_asset_cash_ledger_entry)
     monkeypatch.setattr(main.db, "delete_asset_cash_ledger_entry", delete_asset_cash_ledger_entry)
+    monkeypatch.setattr(main.db, "list_asset_cash_ledger_entries_by_linked_trade", list_asset_cash_ledger_entries_by_linked_trade)
     monkeypatch.setattr(main.db, "list_asset_trade_entries", list_asset_trade_entries)
     monkeypatch.setattr(main.db, "get_asset_trade_entry", get_asset_trade_entry)
     monkeypatch.setattr(main.db, "create_asset_trade_entry", create_asset_trade_entry)
@@ -598,6 +621,115 @@ def test_asset_routes_validate_unknown_account(client, asset_store):
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_asset_routes_auto_sync_trade_settlement_entries(client, asset_store):
+    settlement_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Settlement Bank",
+            "account_type": "bank",
+            "base_currency": "TWD",
+            "include_in_total": True,
+        },
+    )
+    assert settlement_response.status_code == 200
+    settlement_account = settlement_response.json()
+
+    broker_response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "settlement_account_id": settlement_account["id"],
+            "auto_sync_trade_settlement": True,
+            "include_in_total": True,
+        },
+    )
+    assert broker_response.status_code == 200
+    broker_account = broker_response.json()
+    assert broker_account["settlement_account_id"] == settlement_account["id"]
+    assert broker_account["auto_sync_trade_settlement"] is True
+
+    trade_response = client.post(
+        "/api/assets/trades",
+        json={
+            "account_id": broker_account["id"],
+            "trade_date": "2026-04-03T09:00:00",
+            "ticker": "2330",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "buy",
+            "quantity": 2,
+            "price": 100,
+            "fee_amount": 10,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+        },
+    )
+    assert trade_response.status_code == 200
+    trade_payload = trade_response.json()
+
+    linked_cash_entries = [
+        item for item in asset_store["cash_entries"].values()
+        if int(item.get("linked_trade_id") or 0) == int(trade_payload["id"])
+    ]
+    assert len(linked_cash_entries) == 2
+    linked_roles = {item["linked_trade_role"]: item for item in linked_cash_entries}
+    assert linked_roles["settlement_out"]["account_id"] == settlement_account["id"]
+    assert linked_roles["settlement_out"]["flow_type"] == "transfer_out"
+    assert linked_roles["settlement_out"]["amount"] == 210
+    assert linked_roles["settlement_out"]["source"] == "trade_settlement_auto"
+    assert linked_roles["broker_in"]["account_id"] == broker_account["id"]
+    assert linked_roles["broker_in"]["flow_type"] == "transfer_in"
+    assert linked_roles["broker_in"]["amount"] == 210
+
+    update_response = client.patch(
+        f"/api/assets/trades/{trade_payload['id']}",
+        json={
+            "side": "sell",
+            "price": 120,
+            "fee_amount": 5,
+            "tax_amount": 0,
+        },
+    )
+    assert update_response.status_code == 200
+
+    updated_linked_cash_entries = [
+        item for item in asset_store["cash_entries"].values()
+        if int(item.get("linked_trade_id") or 0) == int(trade_payload["id"])
+    ]
+    assert len(updated_linked_cash_entries) == 2
+    updated_roles = {item["linked_trade_role"]: item for item in updated_linked_cash_entries}
+    assert updated_roles["broker_out"]["flow_type"] == "transfer_out"
+    assert updated_roles["broker_out"]["account_id"] == broker_account["id"]
+    assert updated_roles["broker_out"]["amount"] == 235
+    assert updated_roles["settlement_in"]["flow_type"] == "transfer_in"
+    assert updated_roles["settlement_in"]["account_id"] == settlement_account["id"]
+    assert updated_roles["settlement_in"]["amount"] == 235
+
+    delete_response = client.delete(f"/api/assets/trades/{trade_payload['id']}")
+    assert delete_response.status_code == 200
+    assert asset_store["trade_entries"] == {}
+    assert asset_store["cash_entries"] == {}
+
+
+def test_asset_routes_require_settlement_account_when_auto_sync_enabled(client, asset_store):
+    response = client.post(
+        "/api/assets/accounts",
+        json={
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "auto_sync_trade_settlement": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Settlement account is required" in response.json()["detail"]
 
 
 def test_asset_routes_support_initial_balance_baseline_entries(client, asset_store):

@@ -42,6 +42,7 @@ router = APIRouter(prefix="/api/assets", tags=["assets"])
 _fetch_and_store_quote_snapshot = None
 _latest_public_fx_provider = None
 _SNAPSHOT_LIMIT = 5000
+_AUTO_TRADE_SETTLEMENT_SOURCE = "trade_settlement_auto"
 
 
 def configure(*, fetch_and_store_quote_snapshot, latest_public_fx_provider=None) -> None:
@@ -57,6 +58,147 @@ async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | Non
     if not account:
         raise HTTPException(400, f"Asset account {account_id} does not exist")
     return account
+
+
+def _build_trade_settlement_note(trade_entry: Dict[str, Any], broker_account: Dict[str, Any], settlement_account: Dict[str, Any]) -> str:
+    ticker = str(trade_entry.get("ticker") or "").strip().upper() or "UNKNOWN"
+    side = str(trade_entry.get("side") or "").strip().lower()
+    action = "buy" if side == "buy" else "sell"
+    return (
+        f"Auto settlement sync for trade #{trade_entry.get('id')} {ticker} {action} "
+        f"between {settlement_account.get('name') or settlement_account.get('id')} "
+        f"and {broker_account.get('name') or broker_account.get('id')}."
+    )
+
+
+def _build_trade_settlement_payloads(
+    trade_entry: Dict[str, Any],
+    broker_account: Dict[str, Any],
+    settlement_account: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    amount = abs(float(trade_entry.get("net_amount") or 0.0))
+    if amount <= 0:
+        return {}
+
+    trade_date = trade_entry.get("trade_date")
+    currency = trade_entry.get("currency") or broker_account.get("base_currency") or "TWD"
+    fx_rate_to_base = float(trade_entry.get("fx_rate_to_base") or 1.0)
+    side = str(trade_entry.get("side") or "").strip().lower()
+    note = _build_trade_settlement_note(trade_entry, broker_account, settlement_account)
+
+    common = {
+        "flow_date": trade_date,
+        "amount": amount,
+        "currency": currency,
+        "fx_rate_to_base": fx_rate_to_base,
+        "is_initial_balance": False,
+        "source": _AUTO_TRADE_SETTLEMENT_SOURCE,
+        "linked_trade_id": trade_entry.get("id"),
+        "note": note,
+    }
+    if side == "buy":
+        return {
+            "settlement_out": {
+                **common,
+                "account_id": settlement_account.get("id"),
+                "flow_type": "transfer_out",
+                "linked_trade_role": "settlement_out",
+                "counterparty": broker_account.get("name"),
+            },
+            "broker_in": {
+                **common,
+                "account_id": broker_account.get("id"),
+                "flow_type": "transfer_in",
+                "linked_trade_role": "broker_in",
+                "counterparty": settlement_account.get("name"),
+            },
+        }
+    if side == "sell":
+        return {
+            "broker_out": {
+                **common,
+                "account_id": broker_account.get("id"),
+                "flow_type": "transfer_out",
+                "linked_trade_role": "broker_out",
+                "counterparty": settlement_account.get("name"),
+            },
+            "settlement_in": {
+                **common,
+                "account_id": settlement_account.get("id"),
+                "flow_type": "transfer_in",
+                "linked_trade_role": "settlement_in",
+                "counterparty": broker_account.get("name"),
+            },
+        }
+    return {}
+
+
+async def _validate_account_settlement_config(payload: Dict[str, Any], *, account_id: int | None = None) -> None:
+    settlement_account_id = payload.get("settlement_account_id")
+    if settlement_account_id in ("", 0):
+        settlement_account_id = None
+    if settlement_account_id is not None:
+        settlement_account_id = int(settlement_account_id)
+        if account_id is not None and settlement_account_id == int(account_id):
+            raise HTTPException(400, "Settlement account cannot point to the same asset account")
+        await _ensure_account_exists(settlement_account_id)
+    if payload.get("auto_sync_trade_settlement") and settlement_account_id is None:
+        raise HTTPException(400, "Settlement account is required when auto trade settlement sync is enabled")
+
+
+async def _delete_trade_linked_cash_entries(trade_id: int) -> None:
+    linked_entries = await db.list_asset_cash_ledger_entries_by_linked_trade(trade_id, owner_id=DEFAULT_OWNER_ID)
+    for entry in linked_entries:
+        await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
+
+
+async def _sync_trade_linked_cash_entries(trade_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    linked_entries = await db.list_asset_cash_ledger_entries_by_linked_trade(
+        int(trade_entry.get("id") or 0),
+        owner_id=DEFAULT_OWNER_ID,
+    )
+    broker_account = await _ensure_account_exists(int(trade_entry.get("account_id")))
+    auto_enabled = bool(broker_account and broker_account.get("auto_sync_trade_settlement"))
+    settlement_account_id = int((broker_account or {}).get("settlement_account_id") or 0)
+    is_initial_balance = bool(trade_entry.get("is_initial_balance"))
+
+    if not auto_enabled or not settlement_account_id or is_initial_balance:
+        for entry in linked_entries:
+            await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
+        return []
+
+    settlement_account = await _ensure_account_exists(settlement_account_id)
+    if int(settlement_account.get("id") or 0) == int(broker_account.get("id") or 0):
+        raise HTTPException(400, "Settlement account cannot point to the same brokerage account")
+
+    payloads = _build_trade_settlement_payloads(trade_entry, broker_account, settlement_account)
+    expected_roles = set(payloads)
+    existing_by_role = {str(item.get("linked_trade_role") or ""): item for item in linked_entries}
+    synced_entries: List[Dict[str, Any]] = []
+
+    for role, payload in payloads.items():
+        existing = existing_by_role.get(role)
+        if existing:
+            synced = await db.update_asset_cash_ledger_entry(int(existing.get("id")), payload, owner_id=DEFAULT_OWNER_ID)
+        else:
+            synced = await db.create_asset_cash_ledger_entry(payload, owner_id=DEFAULT_OWNER_ID)
+        synced_entries.append(synced)
+
+    for entry in linked_entries:
+        if str(entry.get("linked_trade_role") or "") not in expected_roles:
+            await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
+
+    return synced_entries
+
+
+async def _create_trade_entry_with_settlement_sync(payload: Dict[str, Any]) -> Dict[str, Any]:
+    trade_entry = await db.create_asset_trade_entry(payload, owner_id=DEFAULT_OWNER_ID)
+    try:
+        await _sync_trade_linked_cash_entries(trade_entry)
+    except Exception:  # noqa: BLE001 - best-effort rollback to avoid half-created trade state
+        await db.delete_asset_trade_entry(int(trade_entry.get("id")), owner_id=DEFAULT_OWNER_ID)
+        raise
+    return trade_entry
 
 
 def _is_public_auto_fx_source(source: str | None) -> bool:
@@ -570,8 +712,10 @@ async def list_asset_accounts():
 
 @router.post("/accounts")
 async def create_asset_account(payload: AssetAccountCreatePayload):
+    data = payload.model_dump()
+    await _validate_account_settlement_config(data)
     try:
-        return await db.create_asset_account(payload.model_dump(), owner_id=DEFAULT_OWNER_ID)
+        return await db.create_asset_account(data, owner_id=DEFAULT_OWNER_ID)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -586,8 +730,15 @@ async def get_asset_account(account_id: int):
 
 @router.patch("/accounts/{account_id}")
 async def update_asset_account(account_id: int, payload: AssetAccountUpdatePayload):
+    existing = await db.get_asset_account(account_id, owner_id=DEFAULT_OWNER_ID)
+    if not existing:
+        raise HTTPException(404, "Asset account not found")
+    data = payload.model_dump(exclude_unset=True)
+    merged = dict(existing)
+    merged.update(data)
+    await _validate_account_settlement_config(merged, account_id=account_id)
     try:
-        account = await db.update_asset_account(account_id, payload.model_dump(exclude_unset=True), owner_id=DEFAULT_OWNER_ID)
+        account = await db.update_asset_account(account_id, data, owner_id=DEFAULT_OWNER_ID)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not account:
@@ -597,6 +748,14 @@ async def update_asset_account(account_id: int, payload: AssetAccountUpdatePaylo
 
 @router.delete("/accounts/{account_id}")
 async def delete_asset_account(account_id: int):
+    for account in await db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID):
+        if int(account.get("settlement_account_id") or 0) != int(account_id):
+            continue
+        await db.update_asset_account(
+            int(account.get("id")),
+            {"settlement_account_id": None, "auto_sync_trade_settlement": False},
+            owner_id=DEFAULT_OWNER_ID,
+        )
     deleted = await db.delete_asset_account(account_id, owner_id=DEFAULT_OWNER_ID)
     if not deleted:
         raise HTTPException(404, "Asset account not found")
@@ -687,7 +846,7 @@ async def create_asset_trade_entry(payload: AssetTradeCreatePayload):
     data = payload.model_dump()
     data["ticker"] = normalize_ticker(data["ticker"])
     try:
-        return await db.create_asset_trade_entry(data, owner_id=DEFAULT_OWNER_ID)
+        return await _create_trade_entry_with_settlement_sync(data)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -709,6 +868,8 @@ async def update_asset_trade_entry(entry_id: int, payload: AssetTradeUpdatePaylo
         data["ticker"] = normalize_ticker(data["ticker"])
     try:
         entry = await db.update_asset_trade_entry(entry_id, data, owner_id=DEFAULT_OWNER_ID)
+        if entry:
+            await _sync_trade_linked_cash_entries(entry)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not entry:
@@ -718,6 +879,10 @@ async def update_asset_trade_entry(entry_id: int, payload: AssetTradeUpdatePaylo
 
 @router.delete("/trades/{entry_id}")
 async def delete_asset_trade_entry(entry_id: int):
+    existing = await db.get_asset_trade_entry(entry_id, owner_id=DEFAULT_OWNER_ID)
+    if not existing:
+        raise HTTPException(404, "Asset trade entry not found")
+    await _delete_trade_linked_cash_entries(entry_id)
     deleted = await db.delete_asset_trade_entry(entry_id, owner_id=DEFAULT_OWNER_ID)
     if not deleted:
         raise HTTPException(404, "Asset trade entry not found")
@@ -957,7 +1122,7 @@ async def import_asset_trades_csv(payload: AssetCsvImportPayload):
     row_errors = list(errors)
     for index, item in enumerate(items, start=1):
         try:
-            created.append(await db.create_asset_trade_entry(item, owner_id=DEFAULT_OWNER_ID))
+            created.append(await _create_trade_entry_with_settlement_sync(item))
         except Exception as exc:  # noqa: BLE001
             row_errors.append({"row": index, "message": str(exc), "payload": item})
     return {
@@ -1014,7 +1179,7 @@ async def import_asset_journal_entries(payload: AssetJournalImportPayload):
             continue
         for trade_payload in item.get("payloads") or []:
             try:
-                created.append(await db.create_asset_trade_entry(trade_payload, owner_id=DEFAULT_OWNER_ID))
+                created.append(await _create_trade_entry_with_settlement_sync(trade_payload))
             except Exception as exc:  # noqa: BLE001
                 errors.append({"entry_id": item.get("entry_id"), "source": trade_payload.get("source"), "message": str(exc)})
     return {

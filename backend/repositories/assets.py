@@ -60,8 +60,8 @@ class AssetMixin:
             """
             INSERT INTO `asset_accounts`
                 (`owner_id`, `name`, `institution`, `account_type`, `base_currency`,
-                 `include_in_total`, `sort_order`, `notes`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 `settlement_account_id`, `auto_sync_trade_settlement`, `include_in_total`, `sort_order`, `notes`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -69,6 +69,8 @@ class AssetMixin:
                 normalized["institution"],
                 normalized["account_type"],
                 normalized["base_currency"],
+                normalized["settlement_account_id"],
+                1 if normalized["auto_sync_trade_settlement"] else 0,
                 1 if normalized["include_in_total"] else 0,
                 normalized["sort_order"],
                 normalized["notes"],
@@ -96,6 +98,8 @@ class AssetMixin:
                 `institution`=%s,
                 `account_type`=%s,
                 `base_currency`=%s,
+                `settlement_account_id`=%s,
+                `auto_sync_trade_settlement`=%s,
                 `include_in_total`=%s,
                 `sort_order`=%s,
                 `notes`=%s
@@ -106,6 +110,8 @@ class AssetMixin:
                 normalized["institution"],
                 normalized["account_type"],
                 normalized["base_currency"],
+                normalized["settlement_account_id"],
+                1 if normalized["auto_sync_trade_settlement"] else 0,
                 1 if normalized["include_in_total"] else 0,
                 normalized["sort_order"],
                 normalized["notes"],
@@ -183,8 +189,9 @@ class AssetMixin:
             """
             INSERT INTO `asset_cash_ledger`
                 (`owner_id`, `account_id`, `flow_date`, `flow_type`, `amount`, `currency`,
-                 `fx_rate_to_base`, `is_initial_balance`, `counterparty`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `fx_rate_to_base`, `is_initial_balance`, `source`, `linked_trade_id`,
+                 `linked_trade_role`, `counterparty`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -195,6 +202,9 @@ class AssetMixin:
                 normalized["currency"],
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
+                normalized["source"],
+                normalized["linked_trade_id"],
+                normalized["linked_trade_role"],
                 normalized["counterparty"],
                 normalized["note"],
             ),
@@ -224,6 +234,9 @@ class AssetMixin:
                 `currency`=%s,
                 `fx_rate_to_base`=%s,
                 `is_initial_balance`=%s,
+                `source`=%s,
+                `linked_trade_id`=%s,
+                `linked_trade_role`=%s,
                 `counterparty`=%s,
                 `note`=%s
             WHERE `id`=%s AND `owner_id`=%s
@@ -236,6 +249,9 @@ class AssetMixin:
                 normalized["currency"],
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
+                normalized["source"],
+                normalized["linked_trade_id"],
+                normalized["linked_trade_role"],
                 normalized["counterparty"],
                 normalized["note"],
                 entry_id,
@@ -245,6 +261,22 @@ class AssetMixin:
         if not updated:
             return None
         return await self.get_asset_cash_ledger_entry(entry_id, owner_id=owner_id)
+
+    async def list_asset_cash_ledger_entries_by_linked_trade(
+        self,
+        linked_trade_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> List[Dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `asset_cash_ledger`
+            WHERE `owner_id`=%s AND `linked_trade_id`=%s
+            ORDER BY `id` ASC
+            """,
+            (owner_id, linked_trade_id),
+        )
+        return [_deserialize_asset_cash_ledger_entry(row) for row in rows]
 
     async def delete_asset_cash_ledger_entry(self, entry_id: int, owner_id: int = DEFAULT_OWNER_ID) -> bool:
         deleted = await self._execute(
