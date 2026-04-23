@@ -416,3 +416,48 @@ class AssetJournalImportPayload(BaseModel):
 class AssetRecomputePayload(BaseModel):
     refresh: bool = True
     performance_range: str = Field("1y", min_length=2, max_length=16)
+
+
+# ─── Paper Trading ───────────────────────────────────────────
+
+class PaperTradingAccountCreate(BaseModel):
+    name: str = Field("TMF Paper Account", min_length=1, max_length=128)
+    product_symbol: str = Field("TMF", max_length=32)
+    starting_equity: float = Field(100_000, gt=0)
+    initial_margin_per_contract: float = Field(2_025, gt=0)
+    risk_config: dict = Field(default_factory=dict)
+    cost_model: dict = Field(default_factory=dict)
+    strategy_config: dict | None = None
+
+
+class PaperTradingBotCreate(BaseModel):
+    account_id: int
+    name: str = Field("TMF Trading Bot", min_length=1, max_length=128)
+    mode: str = Field("realtime", pattern="^(realtime|replay)$")
+    product_symbol: str = Field("TMF", max_length=32)
+    direction_symbol: str = Field("TXF", max_length=32)
+    session_mode: str = Field("day_session_only")
+    holding_policy: str = Field("day_only", pattern="^(day_only|overnight_allowed)$")
+    strategy_config: dict | None = None
+
+
+class PaperTradingBotUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    status: str | None = Field(None, pattern="^(idle|running|stopped|error)$")
+    session_mode: str | None = None
+    holding_policy: str | None = None
+    strategy_config: dict | None = None
+    error_message: str | None = None
+
+
+class PaperTradingReplayPayload(BaseModel):
+    account_id: int | None = None
+    product_symbol: str = Field("TMF", max_length=32)
+    direction_symbol: str = Field("TXF", max_length=32)
+    start_date: str = Field(..., min_length=10, max_length=10)
+    end_date: str = Field(..., min_length=10, max_length=10)
+    starting_equity: float = Field(100_000, gt=0)
+    initial_margin_per_contract: float = Field(2_025, gt=0)
+    risk_config: dict = Field(default_factory=dict)
+    strategy_config: dict = Field(default_factory=dict)
+    cost_model: dict = Field(default_factory=dict)

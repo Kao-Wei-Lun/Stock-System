@@ -49,7 +49,7 @@ from providers import (
     ws_manager,
     fubon_market_snapshot_provider,
 )
-from routers import alerts, assets, backtest, intelligence, journal, market_data, settings, system, watchlist, workspace
+from routers import alerts, assets, backtest, intelligence, journal, market_data, paper_trading, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
@@ -368,6 +368,7 @@ app.include_router(market_data.router)
 app.include_router(intelligence.router)
 app.include_router(settings.router)
 app.include_router(system.router)
+app.include_router(paper_trading.router)
 
 
 if __name__ == "__main__":
