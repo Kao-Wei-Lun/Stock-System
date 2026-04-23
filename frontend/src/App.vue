@@ -982,6 +982,10 @@ async function toggleTerminalRight() {
 }
 
 async function handleNavigate(page) {
+  if (page === "paper-trading") {
+    window.location.href = "/paper-trading";
+    return;
+  }
   const nextPage = normalizeWorkspacePage(page);
   await applyWorkspacePage(nextPage, nextPage === "review" ? reviewTab.value : nextPage === "assets" ? "assets" : drawerTab.value);
 }

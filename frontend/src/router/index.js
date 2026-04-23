@@ -7,6 +7,7 @@ const JournalView = () => import("../views/JournalView.vue");
 const BacktestView = () => import("../views/BacktestView.vue");
 const AssetsView = () => import("../views/AssetsView.vue");
 const SettingsView = () => import("../views/SettingsView.vue");
+const PaperTradingView = () => import("../views/PaperTradingView.vue");
 
 const redirectWithTicker = (name) => (to) => ({
   name,
@@ -56,6 +57,11 @@ const routes = [
     path: "/settings/:ticker?",
     name: "settings",
     component: SettingsView,
+  },
+  {
+    path: "/paper-trading",
+    name: "paper-trading",
+    component: PaperTradingView,
   },
   {
     path: "/dashboard/:ticker?",

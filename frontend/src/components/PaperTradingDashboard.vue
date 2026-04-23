@@ -1,0 +1,901 @@
+<template>
+  <div class="pt-dashboard">
+    <!-- ─── Header ────────────────────────────────────────── -->
+    <header class="pt-header">
+      <div class="pt-header-left">
+        <button class="pt-back-btn" @click="$router.push('/')">← 返回</button>
+        <h1 class="pt-title">
+          <span class="pt-title-icon">⚡</span>
+          TMF 模擬交易
+        </h1>
+        <span class="pt-badge">Paper Trading</span>
+      </div>
+      <div class="pt-header-right">
+        <div class="pt-status-pill" :class="activeBotStatusClass">
+          <span class="pt-status-dot"></span>
+          {{ activeBotStatusLabel }}
+        </div>
+      </div>
+    </header>
+
+    <!-- ─── Tab Bar ───────────────────────────────────────── -->
+    <nav class="pt-tabs">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="pt-tab"
+        :class="{ active: activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
+
+    <!-- ─── Account Setup Tab ─────────────────────────────── -->
+    <section v-if="activeTab === 'setup'" class="pt-section">
+      <div class="pt-card">
+        <h2 class="pt-card-title">帳戶設定</h2>
+        <div class="pt-form-grid">
+          <div class="pt-field">
+            <label>帳戶名稱</label>
+            <input v-model="accountForm.name" type="text" placeholder="TMF Paper Account" />
+          </div>
+          <div class="pt-field">
+            <label>初始權益 (TWD)</label>
+            <input v-model.number="accountForm.starting_equity" type="number" />
+          </div>
+          <div class="pt-field">
+            <label>原始保證金 / 口</label>
+            <input v-model.number="accountForm.initial_margin_per_contract" type="number" />
+          </div>
+          <div class="pt-field">
+            <label>單日虧損上限 (%)</label>
+            <input v-model.number="riskForm.daily_loss_limit_pct" type="number" step="0.01" />
+          </div>
+          <div class="pt-field">
+            <label>最大回撤上限 (%)</label>
+            <input v-model.number="riskForm.max_drawdown_pct" type="number" step="0.01" />
+          </div>
+          <div class="pt-field">
+            <label>口數硬上限</label>
+            <input v-model.number="riskForm.max_contracts_hard" type="number" />
+          </div>
+          <div class="pt-field">
+            <label>停損點數</label>
+            <input v-model.number="strategyForm.stop_loss_points" type="number" />
+          </div>
+          <div class="pt-field">
+            <label>停利點數</label>
+            <input v-model.number="strategyForm.take_profit_points" type="number" />
+          </div>
+        </div>
+        <div class="pt-card-actions">
+          <button class="pt-btn pt-btn-primary" :disabled="creatingAccount" @click="createAccount">
+            {{ creatingAccount ? '建立中...' : '建立帳戶' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Account List -->
+      <div v-if="accounts.length" class="pt-card">
+        <h2 class="pt-card-title">已建帳戶</h2>
+        <div class="pt-table-wrap">
+          <table class="pt-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名稱</th>
+                <th>商品</th>
+                <th>初始權益</th>
+                <th>保證金</th>
+                <th>建立時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="acct in accounts" :key="acct.id">
+                <td>{{ acct.id }}</td>
+                <td>{{ acct.name }}</td>
+                <td>{{ acct.product_symbol }}</td>
+                <td>{{ formatCurrency(acct.starting_equity) }}</td>
+                <td>{{ formatCurrency(acct.initial_margin_per_contract) }}</td>
+                <td>{{ formatTime(acct.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Bot Management Tab ────────────────────────────── -->
+    <section v-if="activeTab === 'bots'" class="pt-section">
+      <div class="pt-card">
+        <h2 class="pt-card-title">建立 Bot</h2>
+        <div class="pt-form-grid">
+          <div class="pt-field">
+            <label>帳戶</label>
+            <select v-model.number="botForm.account_id">
+              <option v-for="acct in accounts" :key="acct.id" :value="acct.id">
+                {{ acct.name }} (ID: {{ acct.id }})
+              </option>
+            </select>
+          </div>
+          <div class="pt-field">
+            <label>Bot 名稱</label>
+            <input v-model="botForm.name" type="text" placeholder="TMF Day Bot" />
+          </div>
+          <div class="pt-field">
+            <label>模式</label>
+            <select v-model="botForm.mode">
+              <option value="realtime">即時模擬</option>
+              <option value="replay">回放模擬</option>
+            </select>
+          </div>
+          <div class="pt-field">
+            <label>持倉政策</label>
+            <select v-model="botForm.holding_policy">
+              <option value="day_only">僅日內</option>
+              <option value="overnight_allowed">允許隔夜</option>
+            </select>
+          </div>
+        </div>
+        <div class="pt-card-actions">
+          <button class="pt-btn pt-btn-primary" :disabled="creatingBot" @click="createBot">
+            {{ creatingBot ? '建立中...' : '建立 Bot' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Bot List -->
+      <div v-if="bots.length" class="pt-card">
+        <h2 class="pt-card-title">Bot 列表</h2>
+        <div class="pt-table-wrap">
+          <table class="pt-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名稱</th>
+                <th>模式</th>
+                <th>狀態</th>
+                <th>K 棒數</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="bot in bots" :key="bot.id">
+                <td>{{ bot.id }}</td>
+                <td>{{ bot.name }}</td>
+                <td>
+                  <span class="pt-mode-badge" :class="bot.mode">{{ bot.mode === 'realtime' ? '即時' : '回放' }}</span>
+                </td>
+                <td>
+                  <span class="pt-status-badge" :class="bot.status">{{ botStatusLabel(bot.status) }}</span>
+                </td>
+                <td>{{ bot.bar_count }}</td>
+                <td>
+                  <div class="pt-btn-group">
+                    <button
+                      v-if="bot.status !== 'running'"
+                      class="pt-btn pt-btn-sm pt-btn-success"
+                      @click="startBot(bot.id)"
+                    >啟動</button>
+                    <button
+                      v-if="bot.status === 'running'"
+                      class="pt-btn pt-btn-sm pt-btn-danger"
+                      @click="stopBot(bot.id)"
+                    >停止</button>
+                    <button
+                      class="pt-btn pt-btn-sm"
+                      @click="refreshBotState(bot.id)"
+                    >狀態</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Live Bot State -->
+      <div v-if="liveBotState" class="pt-card">
+        <h2 class="pt-card-title">即時 Bot 狀態</h2>
+        <div class="pt-stats-grid">
+          <div class="pt-stat">
+            <div class="pt-stat-label">權益</div>
+            <div class="pt-stat-value">{{ formatCurrency(liveBotState.account?.equity) }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">未平倉損益</div>
+            <div class="pt-stat-value" :class="pnlClass(liveBotState.account?.unrealized_pnl)">
+              {{ formatCurrency(liveBotState.account?.unrealized_pnl) }}
+            </div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">已實現損益</div>
+            <div class="pt-stat-value" :class="pnlClass(liveBotState.account?.total_realized_pnl)">
+              {{ formatCurrency(liveBotState.account?.total_realized_pnl) }}
+            </div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">持倉</div>
+            <div class="pt-stat-value">{{ liveBotState.account?.position?.qty || 0 }} 口</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">方向</div>
+            <div class="pt-stat-value">{{ liveBotState.direction }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">K 棒數</div>
+            <div class="pt-stat-value">{{ liveBotState.bar_count }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Replay Tab ────────────────────────────────────── -->
+    <section v-if="activeTab === 'replay'" class="pt-section">
+      <div class="pt-card">
+        <h2 class="pt-card-title">歷史回放</h2>
+        <div class="pt-form-grid">
+          <div class="pt-field">
+            <label>帳戶</label>
+            <select v-model.number="replayForm.account_id">
+              <option :value="null">不儲存到帳戶</option>
+              <option v-for="acct in accounts" :key="acct.id" :value="acct.id">
+                {{ acct.name }} (ID: {{ acct.id }})
+              </option>
+            </select>
+          </div>
+          <div class="pt-field">
+            <label>開始日期</label>
+            <input v-model="replayForm.start_date" type="date" />
+          </div>
+          <div class="pt-field">
+            <label>結束日期</label>
+            <input v-model="replayForm.end_date" type="date" />
+          </div>
+          <div class="pt-field">
+            <label>初始權益</label>
+            <input v-model.number="replayForm.starting_equity" type="number" />
+          </div>
+        </div>
+        <div class="pt-card-actions">
+          <button class="pt-btn pt-btn-primary" :disabled="runningReplay" @click="runReplay">
+            {{ runningReplay ? '回放中...' : '執行回放' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Replay Result -->
+      <div v-if="replayResult" class="pt-card">
+        <h2 class="pt-card-title">回放結果</h2>
+        <div class="pt-stats-grid">
+          <div class="pt-stat">
+            <div class="pt-stat-label">總交易數</div>
+            <div class="pt-stat-value">{{ replayResult.summary?.trade_count || 0 }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">勝率</div>
+            <div class="pt-stat-value">{{ replayResult.summary?.win_rate || 0 }}%</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">總損益</div>
+            <div class="pt-stat-value" :class="pnlClass(replayResult.summary?.total_pnl)">
+              {{ formatCurrency(replayResult.summary?.total_pnl) }}
+            </div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">報酬率</div>
+            <div class="pt-stat-value" :class="pnlClass(replayResult.summary?.total_return_pct)">
+              {{ (replayResult.summary?.total_return_pct || 0).toFixed(2) }}%
+            </div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">最大回撤</div>
+            <div class="pt-stat-value pt-negative">{{ (replayResult.summary?.max_drawdown_pct || 0).toFixed(2) }}%</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">利潤因子</div>
+            <div class="pt-stat-value">{{ replayResult.summary?.profit_factor || '--' }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">最大單筆獲利</div>
+            <div class="pt-stat-value pt-positive">{{ formatCurrency(replayResult.summary?.max_win) }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">最大單筆虧損</div>
+            <div class="pt-stat-value pt-negative">{{ formatCurrency(replayResult.summary?.max_loss) }}</div>
+          </div>
+        </div>
+
+        <!-- Trade List -->
+        <div v-if="replayResult.trades?.length" class="pt-sub-section">
+          <h3 class="pt-sub-title">交易紀錄 ({{ replayResult.trades.length }})</h3>
+          <div class="pt-table-wrap pt-table-scroll">
+            <table class="pt-table">
+              <thead>
+                <tr>
+                  <th>進場時間</th>
+                  <th>方向</th>
+                  <th>口數</th>
+                  <th>進場價</th>
+                  <th>出場價</th>
+                  <th>毛利</th>
+                  <th>手續費</th>
+                  <th>淨損益</th>
+                  <th>出場原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in replayResult.trades" :key="t.trade_id">
+                  <td>{{ formatTime(t.entry_time) }}</td>
+                  <td>
+                    <span class="pt-side-badge" :class="t.side">{{ t.side === 'buy' ? '多' : '空' }}</span>
+                  </td>
+                  <td>{{ t.qty }}</td>
+                  <td>{{ t.entry_price }}</td>
+                  <td>{{ t.exit_price }}</td>
+                  <td :class="pnlClass(t.gross_pnl)">{{ formatCurrency(t.gross_pnl) }}</td>
+                  <td>{{ formatCurrency(t.fee_total) }}</td>
+                  <td :class="pnlClass(t.net_pnl)">{{ formatCurrency(t.net_pnl) }}</td>
+                  <td class="pt-reason">{{ t.exit_reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Risk Events -->
+        <div v-if="replayResult.risk_events?.length" class="pt-sub-section">
+          <h3 class="pt-sub-title">風控事件 ({{ replayResult.risk_events.length }})</h3>
+          <div class="pt-table-wrap pt-table-scroll">
+            <table class="pt-table">
+              <thead>
+                <tr>
+                  <th>類型</th>
+                  <th>時間</th>
+                  <th>詳情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(evt, i) in replayResult.risk_events" :key="i">
+                  <td>{{ evt.event_type }}</td>
+                  <td>{{ formatTime(evt.timestamp || evt.details?.bar_time) }}</td>
+                  <td class="pt-reason">{{ JSON.stringify(evt.details || {}) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Past Replays -->
+      <div v-if="replayRuns.length" class="pt-card">
+        <h2 class="pt-card-title">歷史回放紀錄</h2>
+        <div class="pt-table-wrap">
+          <table class="pt-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>日期範圍</th>
+                <th>交易數</th>
+                <th>報酬率</th>
+                <th>最大回撤</th>
+                <th>勝率</th>
+                <th>建立時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="run in replayRuns" :key="run.id">
+                <td>{{ run.id }}</td>
+                <td>{{ run.start_date }} ~ {{ run.end_date }}</td>
+                <td>{{ run.trade_count }}</td>
+                <td :class="pnlClass(run.total_return_pct)">{{ run.total_return_pct?.toFixed(2) }}%</td>
+                <td class="pt-negative">{{ run.max_drawdown_pct?.toFixed(2) }}%</td>
+                <td>{{ run.win_rate_pct?.toFixed(1) }}%</td>
+                <td>{{ formatTime(run.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Toast ─────────────────────────────────────────── -->
+    <div v-if="toast" class="pt-toast" :class="toast.type" @click="toast = null">
+      {{ toast.message }}
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted } from "vue";
+
+const API = "/api/paper-trading";
+
+const activeTab = ref("setup");
+const tabs = [
+  { key: "setup", label: "帳戶設定" },
+  { key: "bots", label: "Bot 管理" },
+  { key: "replay", label: "歷史回放" },
+];
+
+// ─── State ───────────────────────────────────────────────────
+const accounts = ref([]);
+const bots = ref([]);
+const replayRuns = ref([]);
+const replayResult = ref(null);
+const liveBotState = ref(null);
+const toast = ref(null);
+const creatingAccount = ref(false);
+const creatingBot = ref(false);
+const runningReplay = ref(false);
+
+const accountForm = reactive({
+  name: "TMF Paper Account",
+  starting_equity: 100000,
+  initial_margin_per_contract: 2025,
+});
+
+const riskForm = reactive({
+  daily_loss_limit_pct: 0.05,
+  max_drawdown_pct: 0.15,
+  max_contracts_hard: 10,
+});
+
+const strategyForm = reactive({
+  stop_loss_points: 60,
+  take_profit_points: 120,
+});
+
+const botForm = reactive({
+  account_id: null,
+  name: "TMF Day Bot",
+  mode: "realtime",
+  holding_policy: "day_only",
+});
+
+const replayForm = reactive({
+  account_id: null,
+  start_date: "",
+  end_date: "",
+  starting_equity: 100000,
+});
+
+// ─── Computed ────────────────────────────────────────────────
+const activeBotStatusClass = computed(() => {
+  const running = bots.value.some((b) => b.status === "running");
+  return running ? "running" : "idle";
+});
+
+const activeBotStatusLabel = computed(() => {
+  const running = bots.value.filter((b) => b.status === "running");
+  if (running.length) return `${running.length} Bot 運行中`;
+  return "無運行 Bot";
+});
+
+// ─── API Helpers ─────────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+function showToast(message, type = "info") {
+  toast.value = { message, type };
+  setTimeout(() => { toast.value = null; }, 4000);
+}
+
+// ─── Actions ─────────────────────────────────────────────────
+async function loadAccounts() {
+  try {
+    const data = await apiFetch("/accounts");
+    accounts.value = data.items || [];
+    if (accounts.value.length && !botForm.account_id) {
+      botForm.account_id = accounts.value[0].id;
+    }
+  } catch { /* ignore */ }
+}
+
+async function loadBots() {
+  try {
+    const data = await apiFetch("/bots");
+    bots.value = data.items || [];
+  } catch { /* ignore */ }
+}
+
+async function loadReplayRuns() {
+  try {
+    const data = await apiFetch("/replay/runs");
+    replayRuns.value = data.items || [];
+  } catch { /* ignore */ }
+}
+
+async function createAccount() {
+  creatingAccount.value = true;
+  try {
+    await apiFetch("/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        ...accountForm,
+        risk_config: { ...riskForm },
+        cost_model: {},
+        strategy_config: {
+          day_regular_profile: {
+            stop_loss_points: strategyForm.stop_loss_points,
+            take_profit_points: strategyForm.take_profit_points,
+          },
+        },
+      }),
+    });
+    showToast("帳戶建立成功", "success");
+    await loadAccounts();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    creatingAccount.value = false;
+  }
+}
+
+async function createBot() {
+  creatingBot.value = true;
+  try {
+    await apiFetch("/bots", {
+      method: "POST",
+      body: JSON.stringify(botForm),
+    });
+    showToast("Bot 建立成功", "success");
+    await loadBots();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    creatingBot.value = false;
+  }
+}
+
+async function startBot(botId) {
+  try {
+    const data = await apiFetch(`/bots/${botId}/start`, { method: "POST" });
+    showToast(`Bot ${botId} 已啟動`, "success");
+    liveBotState.value = data.bot;
+    await loadBots();
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function stopBot(botId) {
+  try {
+    const data = await apiFetch(`/bots/${botId}/stop`, { method: "POST" });
+    showToast(`Bot ${botId} 已停止`, "success");
+    liveBotState.value = data.bot;
+    await loadBots();
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function refreshBotState(botId) {
+  try {
+    const data = await apiFetch(`/bots/${botId}/state`);
+    liveBotState.value = data;
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function runReplay() {
+  runningReplay.value = true;
+  replayResult.value = null;
+  try {
+    const data = await apiFetch("/replay/run", {
+      method: "POST",
+      body: JSON.stringify({
+        ...replayForm,
+        risk_config: { ...riskForm },
+        strategy_config: {
+          day_regular_profile: {
+            stop_loss_points: strategyForm.stop_loss_points,
+            take_profit_points: strategyForm.take_profit_points,
+          },
+        },
+        cost_model: {},
+      }),
+    });
+    replayResult.value = data.result;
+    showToast("回放完成", "success");
+    await loadReplayRuns();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    runningReplay.value = false;
+  }
+}
+
+// ─── Formatters ──────────────────────────────────────────────
+function formatCurrency(val) {
+  if (val == null) return "--";
+  return new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(val);
+}
+
+function formatTime(val) {
+  if (!val) return "--";
+  try {
+    return new Date(val).toLocaleString("zh-TW", {
+      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return val; }
+}
+
+function pnlClass(val) {
+  if (val > 0) return "pt-positive";
+  if (val < 0) return "pt-negative";
+  return "";
+}
+
+function botStatusLabel(status) {
+  return { idle: "待命", running: "運行中", stopped: "已停止", error: "錯誤" }[status] || status;
+}
+
+// ─── Init ────────────────────────────────────────────────────
+onMounted(async () => {
+  await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
+});
+</script>
+
+<style scoped>
+/* ─── Layout ──────────────────────────────────────────────── */
+.pt-dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.pt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.pt-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pt-back-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(230,241,255,0.8);
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pt-back-btn:hover { background: rgba(255,255,255,0.1); }
+
+.pt-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pt-title-icon { font-size: 28px; }
+
+.pt-badge {
+  background: linear-gradient(135deg, rgba(90,170,255,0.2), rgba(56,119,179,0.3));
+  color: #90deff;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* ─── Status Pill ────────────────────────────────────────── */
+.pt-status-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 13px;
+}
+.pt-status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #6b7d91;
+}
+.pt-status-pill.running .pt-status-dot { background: #5dd39e; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ─── Tabs ───────────────────────────────────────────────── */
+.pt-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 4px;
+}
+.pt-tab {
+  background: none;
+  border: none;
+  color: rgba(230,241,255,0.6);
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.pt-tab:hover { color: rgba(230,241,255,0.9); }
+.pt-tab.active { color: #90deff; border-bottom-color: #90deff; }
+
+/* ─── Cards ──────────────────────────────────────────────── */
+.pt-section { display: flex; flex-direction: column; gap: 20px; }
+.pt-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 24px;
+}
+.pt-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 18px;
+  color: #e6f1ff;
+}
+.pt-card-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+}
+
+/* ─── Form ───────────────────────────────────────────────── */
+.pt-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+.pt-field label {
+  display: block;
+  font-size: 12px;
+  color: rgba(196,211,226,0.7);
+  margin-bottom: 6px;
+}
+.pt-field input,
+.pt-field select {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: #e6f1ff;
+  padding: 10px 12px;
+  outline: none;
+}
+.pt-field input:focus,
+.pt-field select:focus {
+  border-color: rgba(144,222,255,0.5);
+  box-shadow: 0 0 0 2px rgba(144,222,255,0.1);
+}
+
+/* ─── Buttons ────────────────────────────────────────────── */
+.pt-btn {
+  padding: 10px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.06);
+  color: #e6f1ff;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.pt-btn:hover { background: rgba(255,255,255,0.1); }
+.pt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pt-btn-primary { background: linear-gradient(135deg, #3877b3, #2d5f8f); border-color: rgba(56,119,179,0.5); }
+.pt-btn-primary:hover { background: linear-gradient(135deg, #4088c4, #3877b3); }
+.pt-btn-success { background: rgba(93,211,158,0.15); border-color: rgba(93,211,158,0.3); color: #5dd39e; }
+.pt-btn-danger { background: rgba(255,90,95,0.15); border-color: rgba(255,90,95,0.3); color: #ff5a5f; }
+.pt-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+.pt-btn-group { display: flex; gap: 6px; }
+
+/* ─── Stats Grid ─────────────────────────────────────────── */
+.pt-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.pt-stat {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.pt-stat-label {
+  font-size: 11px;
+  color: rgba(196,211,226,0.6);
+  margin-bottom: 6px;
+}
+.pt-stat-value { font-size: 18px; font-weight: 700; }
+
+/* ─── Table ──────────────────────────────────────────────── */
+.pt-table-wrap { overflow-x: auto; }
+.pt-table-scroll { max-height: 400px; overflow-y: auto; }
+.pt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pt-table th {
+  text-align: left;
+  padding: 10px 12px;
+  color: rgba(196,211,226,0.7);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: rgba(8,12,19,0.95);
+}
+.pt-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  white-space: nowrap;
+}
+
+/* ─── Badges ─────────────────────────────────────────────── */
+.pt-side-badge, .pt-mode-badge, .pt-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pt-side-badge.buy { background: rgba(93,211,158,0.15); color: #5dd39e; }
+.pt-side-badge.sell { background: rgba(255,90,95,0.15); color: #ff5a5f; }
+.pt-mode-badge.realtime { background: rgba(144,222,255,0.15); color: #90deff; }
+.pt-mode-badge.replay { background: rgba(255,200,100,0.15); color: #ffc864; }
+.pt-status-badge.idle { background: rgba(107,125,145,0.2); color: #8a9db2; }
+.pt-status-badge.running { background: rgba(93,211,158,0.15); color: #5dd39e; }
+.pt-status-badge.stopped { background: rgba(255,140,66,0.15); color: #ff8c42; }
+.pt-status-badge.error { background: rgba(255,90,95,0.15); color: #ff5a5f; }
+
+/* ─── Colors ─────────────────────────────────────────────── */
+.pt-positive { color: #5dd39e; }
+.pt-negative { color: #ff5a5f; }
+.pt-reason { max-width: 240px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: rgba(196,211,226,0.6); }
+
+/* ─── Sub Section ────────────────────────────────────────── */
+.pt-sub-section { margin-top: 20px; }
+.pt-sub-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: rgba(230,241,255,0.8); }
+
+/* ─── Toast ──────────────────────────────────────────────── */
+.pt-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: rgba(11,17,26,0.95);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #e6f1ff;
+  font-size: 13px;
+  cursor: pointer;
+  z-index: 100;
+  animation: fadeIn 0.2s;
+}
+.pt-toast.success { border-color: rgba(93,211,158,0.4); }
+.pt-toast.error { border-color: rgba(255,90,95,0.4); }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>

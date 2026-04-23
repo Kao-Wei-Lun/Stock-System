@@ -170,7 +170,8 @@ const navItems = [
   { key: "institutional", label: "籌碼", hint: "盤後研究", shortcut: "Alt+3" },
   { key: "review", label: "復盤", hint: "日誌回測", shortcut: "Alt+4" },
   { key: "assets", label: "資產", hint: "個人資產", shortcut: "Alt+5" },
-  { key: "settings", label: "設定", hint: "帳號連線", shortcut: "Alt+6" },
+  { key: "paper-trading", label: "模擬", hint: "TMF 練習", shortcut: "Alt+6" },
+  { key: "settings", label: "設定", hint: "帳號連線", shortcut: "Alt+7" },
 ];
 
 const rootRef = ref(null);
