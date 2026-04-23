@@ -40,6 +40,8 @@ function buildProps() {
       institution: "",
       account_type: "brokerage",
       base_currency: "TWD",
+      settlement_account_id: "",
+      auto_sync_trade_settlement: false,
       include_in_total: true,
       sort_order: 0,
       notes: "",

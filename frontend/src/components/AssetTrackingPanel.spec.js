@@ -11,7 +11,10 @@ function buildProps() {
     assetPerformanceRange: "1y",
     assetBaseCurrency: "TWD",
     assetSummary: {},
-    assetAccounts: [{ id: 1, name: "Main Broker", base_currency: "TWD" }],
+    assetAccounts: [
+      { id: 1, name: "Main Broker", base_currency: "TWD", auto_sync_trade_settlement: true, settlement_account_id: 2 },
+      { id: 2, name: "Settlement Bank", base_currency: "TWD", auto_sync_trade_settlement: false, settlement_account_id: null },
+    ],
     assetAccountsSummary: [],
     assetHoldings: [],
     assetWarnings: [],
@@ -41,6 +44,8 @@ function buildProps() {
       institution: "",
       account_type: "brokerage",
       base_currency: "TWD",
+      settlement_account_id: "",
+      auto_sync_trade_settlement: false,
       include_in_total: true,
       sort_order: 0,
       notes: "",
@@ -143,6 +148,18 @@ function buildProps() {
 }
 
 describe("AssetTrackingPanel", () => {
+  it("emits account settlement sync updates", async () => {
+    const wrapper = mount(AssetTrackingPanel, { props: buildProps() });
+
+    await wrapper.get('[data-testid="asset-account-settlement-account"]').setValue("2");
+    await wrapper.get('[data-testid="asset-account-auto-sync-trade-settlement"]').setValue(true);
+
+    expect(wrapper.emitted("update-asset-account-field")).toEqual([
+      [{ key: "settlement_account_id", value: "2" }],
+      [{ key: "auto_sync_trade_settlement", value: true }],
+    ]);
+  });
+
   it("emits cash initial balance updates", async () => {
     const wrapper = mount(AssetTrackingPanel, { props: buildProps() });
 

@@ -53,6 +53,8 @@ export function createDashboardAssetTracking({
     institution: "",
     account_type: "brokerage",
     base_currency: "TWD",
+    settlement_account_id: "",
+    auto_sync_trade_settlement: false,
     include_in_total: true,
     sort_order: 0,
     notes: "",
@@ -234,6 +236,8 @@ export function createDashboardAssetTracking({
     assetAccountForm.institution = "";
     assetAccountForm.account_type = "brokerage";
     assetAccountForm.base_currency = "TWD";
+    assetAccountForm.settlement_account_id = "";
+    assetAccountForm.auto_sync_trade_settlement = false;
     assetAccountForm.include_in_total = true;
     assetAccountForm.sort_order = 0;
     assetAccountForm.notes = "";
@@ -406,11 +410,26 @@ export function createDashboardAssetTracking({
 
   function updateAssetAccountField(key, value) {
     if (!Object.prototype.hasOwnProperty.call(assetAccountForm, key)) return;
-    assetAccountForm[key] = key === "include_in_total"
-      ? Boolean(value)
-      : key === "sort_order"
-        ? Number(value)
-        : value;
+    if (["include_in_total", "auto_sync_trade_settlement"].includes(key)) {
+      assetAccountForm[key] = Boolean(value);
+      return;
+    }
+    if (key === "sort_order") {
+      assetAccountForm.sort_order = Number(value);
+      return;
+    }
+    if (key === "settlement_account_id") {
+      assetAccountForm.settlement_account_id = value === "" ? "" : Number(value);
+      return;
+    }
+    if (key === "account_type") {
+      assetAccountForm.account_type = value;
+      if (value !== "brokerage") {
+        assetAccountForm.auto_sync_trade_settlement = false;
+      }
+      return;
+    }
+    assetAccountForm[key] = value;
   }
 
   function updateAssetCashField(key, value) {
@@ -563,6 +582,8 @@ export function createDashboardAssetTracking({
     assetAccountForm.institution = record.institution || "";
     assetAccountForm.account_type = record.account_type || "brokerage";
     assetAccountForm.base_currency = record.base_currency || "TWD";
+    assetAccountForm.settlement_account_id = record.settlement_account_id == null ? "" : Number(record.settlement_account_id);
+    assetAccountForm.auto_sync_trade_settlement = Boolean(record.auto_sync_trade_settlement);
     assetAccountForm.include_in_total = Boolean(record.include_in_total);
     assetAccountForm.sort_order = Number(record.sort_order || 0);
     assetAccountForm.notes = record.notes || "";
@@ -654,6 +675,8 @@ export function createDashboardAssetTracking({
         institution: String(assetAccountForm.institution || "").trim() || null,
         account_type: assetAccountForm.account_type || "brokerage",
         base_currency: String(assetAccountForm.base_currency || "TWD").toUpperCase(),
+        settlement_account_id: assetAccountForm.settlement_account_id === "" ? null : Number(assetAccountForm.settlement_account_id),
+        auto_sync_trade_settlement: Boolean(assetAccountForm.auto_sync_trade_settlement),
         include_in_total: Boolean(assetAccountForm.include_in_total),
         sort_order: Number(assetAccountForm.sort_order || 0),
         notes: String(assetAccountForm.notes || "").trim() || null,

@@ -164,6 +164,27 @@
           </select>
         </div>
         <div class="bt-row"><div class="bt-label">排序</div><input class="bt-inp" type="number" :value="assetAccountForm.sort_order" @input="$emit('update-asset-account-field', { key: 'sort_order', value: $event.target.value })"></div>
+        <div class="bt-row">
+          <div class="bt-label">交割帳戶</div>
+          <select
+            data-testid="asset-account-settlement-account"
+            class="bt-sel"
+            :value="assetAccountForm.settlement_account_id"
+            @change="$emit('update-asset-account-field', { key: 'settlement_account_id', value: $event.target.value })"
+          >
+            <option value="">不自動同步</option>
+            <option v-for="account in settlementAccountOptions" :key="account.id" :value="account.id">{{ account.name }}</option>
+          </select>
+        </div>
+        <label v-if="assetAccountForm.account_type === 'brokerage'" class="asset-checkbox">
+          <input
+            data-testid="asset-account-auto-sync-trade-settlement"
+            type="checkbox"
+            :checked="assetAccountForm.auto_sync_trade_settlement"
+            @change="$emit('update-asset-account-field', { key: 'auto_sync_trade_settlement', value: $event.target.checked })"
+          >
+          <span>新增 / 更新交易時，自動同步交割帳戶資金</span>
+        </label>
         <label class="asset-checkbox">
           <input type="checkbox" :checked="assetAccountForm.include_in_total" @change="$emit('update-asset-account-field', { key: 'include_in_total', value: $event.target.checked })">
           <span>列入總資產</span>
@@ -269,6 +290,7 @@
         </div>
         <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-trade-form')">帶入目前標的</button>
       </div>
+      <div v-if="tradeSettlementHint" class="bt-trade-sub">{{ tradeSettlementHint }}</div>
       <div class="asset-trade-grid">
         <div class="bt-row">
           <div class="bt-label">帳戶</div>
@@ -857,6 +879,21 @@ const reconciliationSummary = computed(() => props.assetReconciliation?.summary 
 const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
 const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
 const isMaintenanceMode = computed(() => props.panelMode === "maintenance");
+const settlementAccountOptions = computed(() => (
+  (props.assetAccounts || []).filter((account) => String(account?.id) !== String(props.assetAccountForm?.id || ""))
+));
+const selectedTradeAccount = computed(() => (
+  (props.assetAccounts || []).find((account) => String(account?.id) === String(props.assetTradeForm?.account_id || ""))
+));
+const tradeSettlementHint = computed(() => {
+  const account = selectedTradeAccount.value;
+  if (!account?.auto_sync_trade_settlement || !account?.settlement_account_id) return "";
+  const settlementAccount = (props.assetAccounts || []).find(
+    (item) => String(item?.id) === String(account?.settlement_account_id),
+  );
+  const settlementLabel = settlementAccount?.name || `帳戶 #${account.settlement_account_id}`;
+  return `此券商帳戶已綁定 ${settlementLabel}，儲存交易時會自動建立對應的轉入 / 轉出交割資金。`;
+});
 
 const summaryCards = computed(() => [
   { key: "total", label: "總資產現值", value: formatCurrency(props.assetSummary.total_asset_value_base), tone: "neutral" },
