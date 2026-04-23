@@ -885,6 +885,239 @@ CREATE_TABLE_STATEMENTS = {
                 ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "paper_trading_accounts": """
+        CREATE TABLE `paper_trading_accounts` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `name` VARCHAR(128) NOT NULL,
+            `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
+            `starting_equity` DOUBLE NOT NULL DEFAULT 100000,
+            `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 2025,
+            `risk_config_json` LONGTEXT NOT NULL,
+            `cost_model_json` LONGTEXT NOT NULL,
+            `strategy_config_json` LONGTEXT NULL,
+            `is_active` TINYINT NOT NULL DEFAULT 1,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_accounts_owner` (`owner_id`, `is_active`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_bots": """
+        CREATE TABLE `paper_trading_bots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `name` VARCHAR(128) NOT NULL,
+            `mode` VARCHAR(32) NOT NULL DEFAULT 'realtime',
+            `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
+            `direction_symbol` VARCHAR(32) NOT NULL DEFAULT 'TXF',
+            `session_mode` VARCHAR(32) NOT NULL DEFAULT 'day_session_only',
+            `holding_policy` VARCHAR(32) NOT NULL DEFAULT 'day_only',
+            `status` VARCHAR(32) NOT NULL DEFAULT 'idle',
+            `strategy_config_json` LONGTEXT NULL,
+            `started_at` DATETIME NULL,
+            `stopped_at` DATETIME NULL,
+            `last_signal_at` DATETIME NULL,
+            `bar_count` INT NOT NULL DEFAULT 0,
+            `error_message` TEXT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_bots_owner_status` (`owner_id`, `status`),
+            KEY `idx_paper_trading_bots_account` (`account_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_positions": """
+        CREATE TABLE `paper_trading_positions` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `bot_id` BIGINT NULL,
+            `symbol` VARCHAR(32) NOT NULL,
+            `requested_symbol` VARCHAR(32) NULL,
+            `resolved_symbol` VARCHAR(32) NULL,
+            `side` VARCHAR(16) NOT NULL,
+            `qty` INT NOT NULL DEFAULT 0,
+            `avg_entry_price` DOUBLE NOT NULL DEFAULT 0,
+            `unrealized_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `realized_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `last_price` DOUBLE NULL,
+            `entry_time` DATETIME NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_positions_account` (`account_id`, `symbol`),
+            KEY `idx_paper_trading_positions_bot` (`bot_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_orders": """
+        CREATE TABLE `paper_trading_orders` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `bot_id` BIGINT NULL,
+            `order_id` VARCHAR(64) NOT NULL,
+            `symbol` VARCHAR(32) NOT NULL,
+            `requested_symbol` VARCHAR(32) NULL,
+            `resolved_symbol` VARCHAR(32) NULL,
+            `side` VARCHAR(16) NOT NULL,
+            `qty` INT NOT NULL,
+            `order_type` VARCHAR(32) NOT NULL,
+            `price` DOUBLE NULL,
+            `stop_price` DOUBLE NULL,
+            `session` VARCHAR(16) NOT NULL DEFAULT 'day',
+            `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+            `reason` TEXT NULL,
+            `signal_bar_time` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_orders_account_created` (`account_id`, `created_at`),
+            KEY `idx_paper_trading_orders_bot` (`bot_id`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_fills": """
+        CREATE TABLE `paper_trading_fills` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `bot_id` BIGINT NULL,
+            `order_id` VARCHAR(64) NULL,
+            `fill_id` VARCHAR(64) NOT NULL,
+            `symbol` VARCHAR(32) NOT NULL,
+            `side` VARCHAR(16) NOT NULL,
+            `fill_qty` INT NOT NULL,
+            `fill_price` DOUBLE NOT NULL,
+            `slippage_ticks` DOUBLE NOT NULL DEFAULT 0,
+            `fee_amount` DOUBLE NOT NULL DEFAULT 0,
+            `fill_reason` VARCHAR(64) NOT NULL,
+            `session` VARCHAR(16) NOT NULL DEFAULT 'day',
+            `bar_open` DOUBLE NULL,
+            `bar_high` DOUBLE NULL,
+            `bar_low` DOUBLE NULL,
+            `bar_close` DOUBLE NULL,
+            `fill_time` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_fills_account_time` (`account_id`, `fill_time`),
+            KEY `idx_paper_trading_fills_bot` (`bot_id`, `fill_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_equity_snapshots": """
+        CREATE TABLE `paper_trading_equity_snapshots` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `bot_id` BIGINT NULL,
+            `replay_run_id` BIGINT NULL,
+            `snapshot_time` DATETIME NOT NULL,
+            `equity` DOUBLE NOT NULL,
+            `cash` DOUBLE NOT NULL,
+            `margin_used` DOUBLE NOT NULL DEFAULT 0,
+            `unrealized_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `realized_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `position_qty` INT NOT NULL DEFAULT 0,
+            `position_side` VARCHAR(16) NULL,
+            `close_price` DOUBLE NULL,
+            `drawdown_pct` DOUBLE NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_equity_snapshots_account` (`account_id`, `snapshot_time`),
+            KEY `idx_paper_trading_equity_snapshots_replay` (`replay_run_id`, `snapshot_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_risk_events": """
+        CREATE TABLE `paper_trading_risk_events` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NOT NULL,
+            `bot_id` BIGINT NULL,
+            `replay_run_id` BIGINT NULL,
+            `event_type` VARCHAR(64) NOT NULL,
+            `details_json` LONGTEXT NULL,
+            `event_time` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_risk_events_account` (`account_id`, `created_at`),
+            KEY `idx_paper_trading_risk_events_replay` (`replay_run_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_contract_resolutions": """
+        CREATE TABLE `paper_trading_contract_resolutions` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `requested_symbol` VARCHAR(32) NOT NULL,
+            `resolved_symbol` VARCHAR(32) NOT NULL,
+            `resolution_date` DATE NOT NULL,
+            `contract_type` VARCHAR(32) NULL,
+            `end_date` DATE NULL,
+            `instrument_type` VARCHAR(32) NOT NULL DEFAULT 'future',
+            `source` VARCHAR(64) NOT NULL DEFAULT 'fubon_neo',
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_paper_trading_contract_res` (`requested_symbol`, `resolution_date`),
+            KEY `idx_paper_trading_contract_res_date` (`resolution_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_cost_models": """
+        CREATE TABLE `paper_trading_cost_models` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `version` VARCHAR(32) NOT NULL,
+            `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
+            `broker_fee_per_side` DOUBLE NOT NULL DEFAULT 20,
+            `exchange_fee_per_side` DOUBLE NOT NULL DEFAULT 2,
+            `futures_tax_per_side` DOUBLE NOT NULL DEFAULT 0,
+            `slippage_ticks_day` DOUBLE NOT NULL DEFAULT 1,
+            `slippage_ticks_night` DOUBLE NOT NULL DEFAULT 2,
+            `is_active` TINYINT NOT NULL DEFAULT 1,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_cost_models_owner` (`owner_id`, `is_active`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_replay_runs": """
+        CREATE TABLE `paper_trading_replay_runs` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `account_id` BIGINT NULL,
+            `bot_id` BIGINT NULL,
+            `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
+            `direction_symbol` VARCHAR(32) NOT NULL DEFAULT 'TXF',
+            `start_date` DATE NOT NULL,
+            `end_date` DATE NOT NULL,
+            `bar_count` INT NOT NULL DEFAULT 0,
+            `trade_count` INT NOT NULL DEFAULT 0,
+            `starting_equity` DOUBLE NOT NULL,
+            `final_equity` DOUBLE NOT NULL,
+            `total_return_pct` DOUBLE NOT NULL DEFAULT 0,
+            `max_drawdown_pct` DOUBLE NOT NULL DEFAULT 0,
+            `win_rate_pct` DOUBLE NOT NULL DEFAULT 0,
+            `profit_factor` DOUBLE NOT NULL DEFAULT 0,
+            `total_pnl` DOUBLE NOT NULL DEFAULT 0,
+            `total_fees` DOUBLE NOT NULL DEFAULT 0,
+            `risk_config_json` LONGTEXT NOT NULL,
+            `strategy_config_json` LONGTEXT NOT NULL,
+            `cost_model_json` LONGTEXT NOT NULL,
+            `summary_json` LONGTEXT NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_replay_runs_owner` (`owner_id`, `created_at`),
+            KEY `idx_paper_trading_replay_runs_account` (`account_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "paper_trading_continuous_rolls": """
+        CREATE TABLE `paper_trading_continuous_rolls` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `owner_id` BIGINT NOT NULL DEFAULT 1,
+            `from_symbol` VARCHAR(32) NOT NULL,
+            `to_symbol` VARCHAR(32) NOT NULL,
+            `roll_timestamp` DATETIME NOT NULL,
+            `roll_reason` VARCHAR(64) NOT NULL DEFAULT 'volume_shift',
+            `product_base` VARCHAR(16) NOT NULL DEFAULT 'TMF',
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_paper_trading_continuous_rolls_product` (`product_base`, `roll_timestamp`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 }
 
 REQUIRED_COLUMN_MIGRATIONS = {

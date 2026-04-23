@@ -12,6 +12,7 @@ from repositories.sync import SyncMixin
 from repositories.taiwan_chip import TaiwanChipMixin
 from repositories.watchlist import WatchlistMixin
 from repositories.workspace import WorkspaceMixin
+from repositories.paper_trading import PaperTradingMixin
 
 class Database(
     DatabaseCore,
@@ -26,7 +27,8 @@ class Database(
     SyncMixin,
     TaiwanChipMixin,
     WatchlistMixin,
-    WorkspaceMixin
+    WorkspaceMixin,
+    PaperTradingMixin
 ):
     pass
 
