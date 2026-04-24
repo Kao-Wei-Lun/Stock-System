@@ -61,10 +61,17 @@
             <input v-model.number="riskForm.max_contracts_hard" type="number" />
           </div>
           <div class="pt-field">
+            <label>策略引擎</label>
+            <select v-model="strategyForm.strategy_type">
+              <option value="v1">V1: 固定點數停損停利</option>
+              <option value="v2">V2: ATR 動態加碼與移動停損</option>
+            </select>
+          </div>
+          <div class="pt-field" v-if="strategyForm.strategy_type === 'v1'">
             <label>停損點數</label>
             <input v-model.number="strategyForm.stop_loss_points" type="number" />
           </div>
-          <div class="pt-field">
+          <div class="pt-field" v-if="strategyForm.strategy_type === 'v1'">
             <label>停利點數</label>
             <input v-model.number="strategyForm.take_profit_points" type="number" />
           </div>
@@ -549,6 +556,7 @@ const riskForm = reactive({
 });
 
 const strategyForm = reactive({
+  strategy_type: "v1",
   stop_loss_points: 60,
   take_profit_points: 120,
 });
@@ -639,6 +647,7 @@ async function createAccount() {
         risk_config: { ...riskForm },
         cost_model: {},
         strategy_config: {
+          strategy_type: strategyForm.strategy_type,
           day_regular_profile: {
             stop_loss_points: strategyForm.stop_loss_points,
             take_profit_points: strategyForm.take_profit_points,
@@ -711,6 +720,7 @@ async function runReplay() {
         ...replayForm,
         risk_config: { ...riskForm },
         strategy_config: {
+          strategy_type: strategyForm.strategy_type,
           day_regular_profile: {
             stop_loss_points: strategyForm.stop_loss_points,
             take_profit_points: strategyForm.take_profit_points,
