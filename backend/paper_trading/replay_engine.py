@@ -176,9 +176,16 @@ class ReplayEngine:
             for fill in fills:
                 trade = account.on_fill(fill)
                 result.fills.append(fill.to_dict())
+                if account.position and account.position.side == fill.side:
+                    strategy.set_position_info(fill.fill_price, fill.side)
                 if trade:
                     result.trades.append(trade.to_dict())
-                    strategy.clear_position_info()
+                    if account.position:
+                        reducer = getattr(strategy, "on_position_reduced", None)
+                        if callable(reducer):
+                            reducer()
+                    else:
+                        strategy.clear_position_info()
 
             # 2. 更新帳戶未實現損益
             account.on_bar(tmf_bar.close, tmf_bar.time)
@@ -198,7 +205,12 @@ class ReplayEngine:
                 result.fills.append(fill.to_dict())
                 if trade:
                     result.trades.append(trade.to_dict())
-                strategy.clear_position_info()
+                if account.position:
+                    reducer = getattr(strategy, "on_position_reduced", None)
+                    if callable(reducer):
+                        reducer()
+                else:
+                    strategy.clear_position_info()
                 risk.record_risk_event("session_close_flatten", {
                     "bar_time": tmf_bar.time.isoformat(),
                     "session": session.value,
@@ -222,7 +234,12 @@ class ReplayEngine:
                     result.fills.append(fill.to_dict())
                     if trade:
                         result.trades.append(trade.to_dict())
-                    strategy.clear_position_info()
+                    if account.position:
+                        reducer = getattr(strategy, "on_position_reduced", None)
+                        if callable(reducer):
+                            reducer()
+                    else:
+                        strategy.clear_position_info()
                     event_type = "daily_loss_limit" if risk.check_daily_loss_limit(acct_state) else "max_drawdown"
                     risk.record_risk_event(event_type, {
                         "bar_time": tmf_bar.time.isoformat(),
@@ -247,10 +264,13 @@ class ReplayEngine:
                 if signal.action in (SignalAction.CLOSE_LONG, SignalAction.CLOSE_SHORT):
                     if account.position:
                         close_side = OrderSide.SELL if signal.action == SignalAction.CLOSE_LONG else OrderSide.BUY
+                        close_qty = account.position.qty
+                        if self.strategy_config.strategy_type == "v2":
+                            close_qty = min(account.position.qty, max(1, int(signal.qty or 1)))
                         broker.create_market_order(
                             symbol=tmf_bar.symbol or "TMF",
                             side=close_side,
-                            qty=account.position.qty,
+                            qty=close_qty,
                             session=session,
                             reason=signal.reason,
                             signal_bar_time=tmf_bar.time,
@@ -262,9 +282,17 @@ class ReplayEngine:
                     risk_check = risk.check_can_open(acct_state, tmf_bar.time)
                     if risk_check.allowed:
                         profile = self.strategy_config.get_profile(tmf_bar.time, session)
-                        stop_distance = profile.stop_loss_points
-                        qty = risk.calculate_position_size(acct_state, stop_distance, session)
-                        qty = min(qty, profile.max_qty)
+                        if self.strategy_config.strategy_type == "v2":
+                            current_atr = max(1.0, float(getattr(strategy, "current_atr", 0.0) or 1.0))
+                            stop_distance = current_atr * 1.5
+                            risk_qty = risk.calculate_position_size(acct_state, stop_distance, session)
+                            remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
+                            requested_qty = max(1, int(signal.qty or 1))
+                            qty = min(requested_qty, risk_qty, remaining_profile_qty)
+                        else:
+                            stop_distance = profile.stop_loss_points
+                            qty = risk.calculate_position_size(acct_state, stop_distance, session)
+                            qty = min(qty, profile.max_qty)
                         if qty > 0:
                             order_side = OrderSide.BUY if signal.action == SignalAction.BUY else OrderSide.SELL
                             broker.create_market_order(
@@ -274,10 +302,6 @@ class ReplayEngine:
                                 session=session,
                                 reason=signal.reason,
                                 signal_bar_time=tmf_bar.time,
-                            )
-                            strategy.set_position_info(
-                                signal.entry_price or tmf_bar.close,
-                                order_side,
                             )
                     else:
                         risk.record_risk_event("open_denied", {
@@ -305,6 +329,12 @@ class ReplayEngine:
                     result.fills.append(fill.to_dict())
                     if trade:
                         result.trades.append(trade.to_dict())
+                    if account.position:
+                        reducer = getattr(strategy, "on_position_reduced", None)
+                        if callable(reducer):
+                            reducer()
+                    else:
+                        strategy.clear_position_info()
 
         # 最終權益快照
         if tmf_bars:

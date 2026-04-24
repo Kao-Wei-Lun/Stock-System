@@ -278,8 +278,15 @@ class PaperTradingBot:
         fills = self.broker.process_bar(bar)
         for fill in fills:
             trade = self.account.on_fill(fill)
+            if self.account.position and self.account.position.side == fill.side:
+                self.strategy.set_position_info(fill.fill_price, fill.side)
             if trade:
-                self.strategy.clear_position_info()
+                if self.account.position:
+                    reducer = getattr(self.strategy, "on_position_reduced", None)
+                    if callable(reducer):
+                        reducer()
+                else:
+                    self.strategy.clear_position_info()
                 if self._on_trade:
                     try:
                         self._on_trade(self.bot_id, trade.to_dict())
@@ -322,10 +329,13 @@ class PaperTradingBot:
             if signal.action in (SignalAction.CLOSE_LONG, SignalAction.CLOSE_SHORT):
                 if self.account.position:
                     close_side = OrderSide.SELL if signal.action == SignalAction.CLOSE_LONG else OrderSide.BUY
+                    close_qty = self.account.position.qty
+                    if self.strategy_config.strategy_type == "v2":
+                        close_qty = min(self.account.position.qty, max(1, int(signal.qty or 1)))
                     self.broker.create_market_order(
                         symbol=bar.symbol or self.tmf_symbol,
                         side=close_side,
-                        qty=self.account.position.qty,
+                        qty=close_qty,
                         session=session,
                         reason=signal.reason,
                         signal_bar_time=bar.time,
@@ -337,9 +347,17 @@ class PaperTradingBot:
                 risk_check = self.risk.check_can_open(acct_state, bar.time)
                 if risk_check.allowed:
                     profile = self.strategy_config.get_profile(bar.time, session)
-                    stop_distance = profile.stop_loss_points
-                    qty = self.risk.calculate_position_size(acct_state, stop_distance, session)
-                    qty = min(qty, profile.max_qty)
+                    if self.strategy_config.strategy_type == "v2":
+                        current_atr = max(1.0, float(getattr(self.strategy, "current_atr", 0.0) or 1.0))
+                        stop_distance = current_atr * 1.5
+                        risk_qty = self.risk.calculate_position_size(acct_state, stop_distance, session)
+                        remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
+                        requested_qty = max(1, int(signal.qty or 1))
+                        qty = min(requested_qty, risk_qty, remaining_profile_qty)
+                    else:
+                        stop_distance = profile.stop_loss_points
+                        qty = self.risk.calculate_position_size(acct_state, stop_distance, session)
+                        qty = min(qty, profile.max_qty)
                     if qty > 0:
                         order_side = OrderSide.BUY if signal.action == SignalAction.BUY else OrderSide.SELL
                         self.broker.create_market_order(
@@ -349,10 +367,6 @@ class PaperTradingBot:
                             session=session,
                             reason=signal.reason,
                             signal_bar_time=bar.time,
-                        )
-                        self.strategy.set_position_info(
-                            signal.entry_price or bar.close,
-                            order_side,
                         )
                 else:
                     self.risk.record_risk_event("open_denied", {
@@ -391,7 +405,12 @@ class PaperTradingBot:
         )
         trade = self.account.on_fill(fill)
         if trade:
-            self.strategy.clear_position_info()
+            if self.account.position:
+                reducer = getattr(self.strategy, "on_position_reduced", None)
+                if callable(reducer):
+                    reducer()
+            else:
+                self.strategy.clear_position_info()
             if self._on_trade:
                 try:
                     self._on_trade(self.bot_id, trade.to_dict())

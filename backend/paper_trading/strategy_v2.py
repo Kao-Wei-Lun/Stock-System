@@ -103,6 +103,10 @@ class StrategyEngineV2:
     def current_direction(self) -> SignalDirection:
         return self._current_direction
 
+    @property
+    def current_atr(self) -> float:
+        return self._tmf_atr.value
+
     def update_tx_bar(self, bar: Bar) -> None:
         self._tx_latest_close = bar.close
         self._tx_vwap.update(bar)
@@ -177,6 +181,10 @@ class StrategyEngineV2:
         self._lowest_price_since_entry = float('inf')
         self._bars_since_entry = 0
 
+    def on_position_reduced(self) -> None:
+        """部分減碼後保留核心部位，重新計算盤整等待時間。"""
+        self._bars_since_entry = 0
+
     def reset_session(self) -> None:
         self._tx_vwap.reset()
         self._tx_5m.reset()
@@ -238,7 +246,7 @@ class StrategyEngineV2:
         # V2 試探倉只下 1 口
         entry_qty = 1
 
-        if self._current_direction == SignalDirection.LONG and bar.close > highest:
+        if self._current_direction == SignalDirection.LONG and self._5m_slope > 0 and bar.close > highest:
             return Signal(
                 bar_time=bar.time,
                 direction=SignalDirection.LONG,
@@ -249,7 +257,7 @@ class StrategyEngineV2:
                 session=session,
             )
 
-        if self._current_direction == SignalDirection.SHORT and bar.close < lowest:
+        if self._current_direction == SignalDirection.SHORT and self._5m_slope < 0 and bar.close < lowest:
             return Signal(
                 bar_time=bar.time,
                 direction=SignalDirection.SHORT,
@@ -317,7 +325,7 @@ class StrategyEngineV2:
                     reduce_qty = current_qty - 1
                     return Signal(
                         bar_time=bar.time,
-                        direction=SignalDirection.LONG,
+                        direction=SignalDirection.LONG if position_side == OrderSide.BUY else SignalDirection.SHORT,
                         action=SignalAction.CLOSE_LONG if position_side == OrderSide.BUY else SignalAction.CLOSE_SHORT,
                         qty=reduce_qty,
                         reason=f"v2_time_stop_reduce: 30 bars flat, reduce {reduce_qty} contracts",
@@ -327,7 +335,7 @@ class StrategyEngineV2:
                     # 只有 1 口，直接全平
                     return Signal(
                         bar_time=bar.time,
-                        direction=SignalDirection.LONG,
+                        direction=SignalDirection.LONG if position_side == OrderSide.BUY else SignalDirection.SHORT,
                         action=SignalAction.CLOSE_LONG if position_side == OrderSide.BUY else SignalAction.CLOSE_SHORT,
                         qty=current_qty,
                         reason=f"v2_time_stop_exit: 30 bars flat, exit 1 contract",

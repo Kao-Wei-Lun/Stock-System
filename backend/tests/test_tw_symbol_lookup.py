@@ -40,6 +40,7 @@ def _seed_cache():
         "6510": "6510.TWO", "6510.TW": "6510.TWO", "6510.TWO": "6510.TWO",
         "2454": "2454.TW", "2454.TW": "2454.TW",
     }
+    tw_symbol_lookup._lookup_cache["industries"] = {}
     tw_symbol_lookup._lookup_cache["rows"] = [
         {"ticker": "2330.TW", "name": "台積電", "stock_id": "2330", "market_type": "twse"},
         {"ticker": "2317.TW", "name": "鴻海", "stock_id": "2317", "market_type": "twse"},
@@ -144,7 +145,7 @@ class TestLoadLookupFromAPI:
         tw_symbol_lookup._lookup_cache["names"] = {}
 
         with patch("tw_symbol_lookup.requests.get", return_value=mock_resp):
-            names, canonical, rows = tw_symbol_lookup._load_lookup(force=True)
+            names, canonical, _, rows = tw_symbol_lookup._load_lookup(force=True)
 
         assert "2330.TW" in names
         assert names["2330.TW"] == "台積電"
@@ -156,6 +157,6 @@ class TestLoadLookupFromAPI:
         tw_symbol_lookup._lookup_cache["expires_at"] = 0  # expired but has data
 
         with patch("tw_symbol_lookup.requests.get", side_effect=Exception("network error")):
-            names, _, _ = tw_symbol_lookup._load_lookup()
+            names, _, _, _ = tw_symbol_lookup._load_lookup()
 
         assert "2330.TW" in names  # should still have cached data
