@@ -11,6 +11,8 @@ import PaperTradingDashboard from "../components/PaperTradingDashboard.vue";
 <style scoped>
 .paper-trading-page {
   min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   background: linear-gradient(135deg, #080c13 0%, #0d1520 50%, #0a1018 100%);
   color: #e6f1ff;
 }
