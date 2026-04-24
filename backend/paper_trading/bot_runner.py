@@ -135,6 +135,12 @@ class PaperTradingBot:
         if realtime_pool is not None:
             self._handler_ref = lambda msg: self._on_ws_message(msg)
             realtime_pool.register_message_handler(self._handler_ref)
+            
+            # 讓 realtime_pool 知道我們需要這兩檔商品的報價
+            source_id = f"paper_bot_{self.bot_id}"
+            realtime_pool.track_ticker(self.tx_symbol, source=source_id)
+            realtime_pool.track_ticker(self.tmf_symbol, source=source_id)
+            
             log.info(
                 "Paper trading bot %s started, listening for %s / %s",
                 self.bot_id, self.tx_symbol, self.tmf_symbol,
@@ -150,6 +156,11 @@ class PaperTradingBot:
         if realtime_pool and self._handler_ref:
             realtime_pool.unregister_message_handler(self._handler_ref)
             self._handler_ref = None
+            
+            # 解除追蹤
+            source_id = f"paper_bot_{self.bot_id}"
+            realtime_pool.untrack_ticker(self.tx_symbol, source=source_id)
+            realtime_pool.untrack_ticker(self.tmf_symbol, source=source_id)
 
         log.info("Paper trading bot %s stopped", self.bot_id)
 
@@ -179,6 +190,25 @@ class PaperTradingBot:
 
     def get_state(self) -> dict:
         """取得 Bot 目前狀態"""
+        # 最近 50 筆成交
+        recent_fills = []
+        for f in self.broker.all_fills[-50:]:
+            try:
+                recent_fills.append(f.to_dict())
+            except Exception:
+                pass
+
+        # 已完成的交易紀錄
+        trades = []
+        for t in self.account.trades[-50:]:
+            try:
+                trades.append(t.to_dict())
+            except Exception:
+                pass
+
+        # 風控事件
+        risk_events = self.risk.get_risk_events()[-20:]
+
         return {
             "bot_id": self.bot_id,
             "status": self.status.value,
@@ -189,6 +219,9 @@ class PaperTradingBot:
             "pending_orders": len(self.broker.pending_orders),
             "total_fills": len(self.broker.all_fills),
             "direction": self.strategy.current_direction.value,
+            "recent_fills": recent_fills,
+            "trades": trades,
+            "risk_events": risk_events,
         }
 
     # ─── Private ──────────────────────────────────────────────
@@ -201,9 +234,7 @@ class PaperTradingBot:
                 return
 
             channel = str(message.get("channel") or "").strip().lower()
-            if channel != "candles":
-                return
-
+            
             data = message.get("data")
             if not isinstance(data, dict):
                 return
@@ -212,7 +243,9 @@ class PaperTradingBot:
             if not symbol:
                 return
 
-            self.process_candle(symbol, data)
+            if "open" in data and "close" in data:
+                # 判斷是否為 K 棒資料: Fubon WS aggregates/candles
+                self.process_candle(symbol, data)
 
         except Exception as exc:
             log.warning("Paper trading bot %s WS handler error: %s", self.bot_id, exc)

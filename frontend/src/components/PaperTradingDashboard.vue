@@ -197,7 +197,10 @@
 
       <!-- Live Bot State -->
       <div v-if="liveBotState" class="pt-card">
-        <h2 class="pt-card-title">即時 Bot 狀態</h2>
+        <h2 class="pt-card-title">
+          即時 Bot 狀態
+          <span class="pt-live-dot"></span>
+        </h2>
         <div class="pt-stats-grid">
           <div class="pt-stat">
             <div class="pt-stat-label">權益</div>
@@ -216,16 +219,118 @@
             </div>
           </div>
           <div class="pt-stat">
+            <div class="pt-stat-label">今日損益</div>
+            <div class="pt-stat-value" :class="pnlClass(liveBotState.account?.daily_realized_pnl)">
+              {{ formatCurrency(liveBotState.account?.daily_realized_pnl) }}
+            </div>
+          </div>
+          <div class="pt-stat">
             <div class="pt-stat-label">持倉</div>
             <div class="pt-stat-value">{{ liveBotState.account?.position?.qty || 0 }} 口</div>
           </div>
           <div class="pt-stat">
-            <div class="pt-stat-label">方向</div>
-            <div class="pt-stat-value">{{ liveBotState.direction }}</div>
+            <div class="pt-stat-label">方向判斷</div>
+            <div class="pt-stat-value">{{ directionLabel }}</div>
           </div>
           <div class="pt-stat">
             <div class="pt-stat-label">K 棒數</div>
-            <div class="pt-stat-value">{{ liveBotState.bar_count }}</div>
+            <div class="pt-stat-value">{{ liveBotState.bar_count?.toLocaleString() }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">最大回撤</div>
+            <div class="pt-stat-value pt-negative">{{ ((liveBotState.account?.current_drawdown_pct || 0) * 100).toFixed(2) }}%</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">手續費</div>
+            <div class="pt-stat-value">{{ formatCurrency(liveBotState.account?.total_fees) }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">待成交</div>
+            <div class="pt-stat-value">{{ liveBotState.pending_orders || 0 }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">冷卻中</div>
+            <div class="pt-stat-value">{{ liveBotState.account?.cooldown_remaining_bars || 0 }} bar</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">總成交</div>
+            <div class="pt-stat-value">{{ liveBotState.total_fills || 0 }}</div>
+          </div>
+        </div>
+
+        <!-- Current Position -->
+        <div v-if="liveBotState.account?.position" class="pt-sub-section">
+          <h3 class="pt-sub-title">當前持倉</h3>
+          <div class="pt-stats-grid">
+            <div class="pt-stat">
+              <div class="pt-stat-label">方向</div>
+              <div class="pt-stat-value">
+                <span class="pt-side-badge" :class="liveBotState.account.position.side">
+                  {{ liveBotState.account.position.side === 'buy' ? '多' : '空' }}
+                </span>
+              </div>
+            </div>
+            <div class="pt-stat">
+              <div class="pt-stat-label">口數</div>
+              <div class="pt-stat-value">{{ liveBotState.account.position.qty }}</div>
+            </div>
+            <div class="pt-stat">
+              <div class="pt-stat-label">進場均價</div>
+              <div class="pt-stat-value">{{ liveBotState.account.position.avg_entry_price }}</div>
+            </div>
+            <div class="pt-stat">
+              <div class="pt-stat-label">最新價</div>
+              <div class="pt-stat-value">{{ liveBotState.account.position.last_price }}</div>
+            </div>
+            <div class="pt-stat">
+              <div class="pt-stat-label">未實現損益</div>
+              <div class="pt-stat-value" :class="pnlClass(liveBotState.account.position.unrealized_pnl)">
+                {{ formatCurrency(liveBotState.account.position.unrealized_pnl) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Trades -->
+        <div v-if="liveBotState.trades?.length" class="pt-sub-section">
+          <h3 class="pt-sub-title">交易紀錄 ({{ liveBotState.trades.length }})</h3>
+          <div class="pt-table-wrap pt-table-scroll">
+            <table class="pt-table">
+              <thead>
+                <tr>
+                  <th>進場時間</th><th>方向</th><th>口數</th>
+                  <th>進場價</th><th>出場價</th><th>淨損益</th><th>出場原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in liveBotState.trades" :key="t.trade_id">
+                  <td>{{ formatTime(t.entry_time) }}</td>
+                  <td><span class="pt-side-badge" :class="t.side">{{ t.side === 'buy' ? '多' : '空' }}</span></td>
+                  <td>{{ t.qty }}</td>
+                  <td>{{ t.entry_price }}</td>
+                  <td>{{ t.exit_price }}</td>
+                  <td :class="pnlClass(t.net_pnl)">{{ formatCurrency(t.net_pnl) }}</td>
+                  <td class="pt-reason">{{ t.exit_reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Risk Events -->
+        <div v-if="liveBotState.risk_events?.length" class="pt-sub-section">
+          <h3 class="pt-sub-title">風控事件 ({{ liveBotState.risk_events.length }})</h3>
+          <div class="pt-table-wrap pt-table-scroll">
+            <table class="pt-table">
+              <thead><tr><th>類型</th><th>時間</th><th>詳情</th></tr></thead>
+              <tbody>
+                <tr v-for="(evt, i) in liveBotState.risk_events" :key="i">
+                  <td>{{ evt.event_type }}</td>
+                  <td>{{ formatTime(evt.timestamp || evt.details?.bar_time) }}</td>
+                  <td class="pt-reason">{{ JSON.stringify(evt.details || {}) }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -408,7 +513,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 
 const API = "/api/paper-trading";
 
@@ -429,6 +534,7 @@ const toast = ref(null);
 const creatingAccount = ref(false);
 const creatingBot = ref(false);
 const runningReplay = ref(false);
+let _pollTimer = null;
 
 const accountForm = reactive({
   name: "TMF Paper Account",
@@ -471,6 +577,13 @@ const activeBotStatusLabel = computed(() => {
   const running = bots.value.filter((b) => b.status === "running");
   if (running.length) return `${running.length} Bot 運行中`;
   return "無運行 Bot";
+});
+
+const runningBotIds = computed(() => bots.value.filter((b) => b.status === "running").map((b) => b.id));
+
+const directionLabel = computed(() => {
+  const d = liveBotState.value?.direction;
+  return { long: "📈 做多", short: "📉 做空", neutral: "⏸ 觀望" }[d] || d || "--";
 });
 
 // ─── API Helpers ─────────────────────────────────────────────
@@ -564,6 +677,7 @@ async function startBot(botId) {
     showToast(`Bot ${botId} 已啟動`, "success");
     liveBotState.value = data.bot;
     await loadBots();
+    startPolling();
   } catch (e) {
     showToast(e.message, "error");
   }
@@ -584,9 +698,7 @@ async function refreshBotState(botId) {
   try {
     const data = await apiFetch(`/bots/${botId}/state`);
     liveBotState.value = data;
-  } catch (e) {
-    showToast(e.message, "error");
-  }
+  } catch { /* ignore */ }
 }
 
 async function runReplay() {
@@ -617,6 +729,36 @@ async function runReplay() {
   }
 }
 
+// ─── Auto Polling ────────────────────────────────────────────
+async function pollRunningBots() {
+  const ids = runningBotIds.value;
+  if (!ids.length) { stopPolling(); return; }
+  for (const id of ids) {
+    try {
+      const state = await apiFetch(`/bots/${id}/state`);
+      // Update bar_count in bot list
+      const bot = bots.value.find((b) => b.id === id);
+      if (bot) {
+        bot.bar_count = state.bar_count;
+        bot.status = state.status;
+      }
+      // Update live state if this bot is selected
+      if (liveBotState.value?.bot_id === id || ids.length === 1) {
+        liveBotState.value = state;
+      }
+    } catch { /* ignore */ }
+  }
+}
+
+function startPolling() {
+  stopPolling();
+  _pollTimer = setInterval(pollRunningBots, 3000);
+}
+
+function stopPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
 // ─── Formatters ──────────────────────────────────────────────
 function formatCurrency(val) {
   if (val == null) return "--";
@@ -645,7 +787,15 @@ function botStatusLabel(status) {
 // ─── Init ────────────────────────────────────────────────────
 onMounted(async () => {
   await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
+  // Auto-start polling if any bot is running
+  if (runningBotIds.value.length) {
+    // Also fetch initial state for the first running bot
+    await refreshBotState(runningBotIds.value[0]);
+    startPolling();
+  }
 });
+
+onUnmounted(() => { stopPolling(); });
 </script>
 
 <style scoped>
@@ -898,4 +1048,15 @@ onMounted(async () => {
 .pt-toast.success { border-color: rgba(93,211,158,0.4); }
 .pt-toast.error { border-color: rgba(255,90,95,0.4); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ─── Live Dot ──────────────────────────────────────────────── */
+.pt-live-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #5dd39e;
+  margin-left: 8px;
+  vertical-align: middle;
+  animation: pulse 1.5s infinite;
+}
 </style>
