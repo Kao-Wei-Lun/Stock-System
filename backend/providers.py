@@ -75,7 +75,7 @@ def _subscribe_fubon_streams(ticker: str) -> None:
     if not normalized:
         return
     if not supports_fubon_stock_realtime_ticker(normalized) and not (
-        is_exact_futopt_contract(normalized) or normalized in {"TX", "TXF", "MTX", "MXF"}
+        is_exact_futopt_contract(normalized) or normalized in {"TX", "TXF", "MTX", "MXF", "TMF"}
     ):
         return
     fubon_realtime_pool.track_ticker(normalized, source="ws")

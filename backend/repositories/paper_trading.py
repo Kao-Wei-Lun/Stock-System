@@ -464,3 +464,29 @@ class PaperTradingMixin:
                ORDER BY `id`""",
             (account_id, owner_id),
         )
+
+    # ─── Contract Resolutions ────────────────────────────────
+
+    async def save_paper_trading_contract_resolution(self, data: dict) -> int:
+        sql = """
+            INSERT INTO `paper_trading_contract_resolutions`
+            (`requested_symbol`, `resolved_symbol`, `resolution_date`,
+             `contract_type`, `end_date`, `instrument_type`, `source`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `resolved_symbol`=`incoming`.`resolved_symbol`,
+                `contract_type`=`incoming`.`contract_type`,
+                `end_date`=`incoming`.`end_date`,
+                `instrument_type`=`incoming`.`instrument_type`,
+                `source`=`incoming`.`source`
+        """
+        return await self._execute_insert(sql, (
+            data.get("requested_symbol", ""),
+            data.get("resolved_symbol", ""),
+            data.get("resolution_date"),
+            data.get("contract_type"),
+            data.get("end_date"),
+            data.get("instrument_type", "future"),
+            data.get("source", "fubon_neo"),
+        ))

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
+from futopt_history_service import sync_futopt_intraday_ohlc
 from fubon_symbols import looks_like_futopt_search_query
 from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
 from schemas import QuoteResponse
@@ -191,6 +192,29 @@ async def get_futopt_ohlc(
     if not payload:
         raise HTTPException(404, "Unable to fetch futopt ohlc")
     return payload
+
+
+@router.post("/futopt/sync/{symbol}")
+async def sync_futopt_ohlc(
+    symbol: str,
+    period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo"),
+    interval: str = Query("1m", description="1m 5m 15m 30m 60m 1h"),
+):
+    period, interval = _normalize_futopt_ohlc_query(period, interval)
+    try:
+        result = await sync_futopt_intraday_ohlc(
+            fubon_futopt_provider,
+            db,
+            symbol,
+            period=period,
+            interval=interval,
+        )
+    except Exception as exc:
+        log.warning("futopt ohlc sync failed for %s (%s/%s): %s", symbol, period, interval, exc)
+        raise HTTPException(502, f"Unable to sync futopt ohlc: {exc}") from exc
+    if not result:
+        raise HTTPException(404, "Unable to sync futopt ohlc")
+    return result
 
 
 @router.get("/fubon/snapshot/{market}")

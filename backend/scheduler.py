@@ -23,6 +23,9 @@ class SchedulerSettings:
     app_tz: tzinfo
     daily_latest_sync_time: time_of_day
     startup_download_delay_seconds: float = 2.5
+    futopt_recorder_enabled: bool = False
+    futopt_recorder_poll_seconds: int = 30
+    futopt_recorder_backfill_interval_seconds: int = 300
 
 
 @dataclass(slots=True)
@@ -41,6 +44,7 @@ class SchedulerDependencies:
     fubon_manager: Any = None
     skip_poll_for_ticker: Callable[[str], bool] | None = None
     archive_fubon_market_snapshot: Any = None
+    futopt_candle_recorder: Any = None
 
 
 async def startup_download(
@@ -578,6 +582,18 @@ class BackgroundScheduler:
                     logger=self._log,
                 ),
             )
+
+        if self._settings.futopt_recorder_enabled and self._deps.futopt_candle_recorder:
+            self._create_task(
+                "futopt-candle-recorder",
+                self._deps.futopt_candle_recorder.run(
+                    app_tz=self._settings.app_tz,
+                    poll_seconds=self._settings.futopt_recorder_poll_seconds,
+                    backfill_interval_seconds=self._settings.futopt_recorder_backfill_interval_seconds,
+                ),
+            )
+        else:
+            self._log.info("Futopt candle recorder skipped (FUTOPT_RECORDER_ENABLED=false).")
 
         if self._settings.alert_evaluator_enabled:
             self._create_task(

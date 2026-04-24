@@ -16,6 +16,12 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from database import DEFAULT_OWNER_ID, db
+from futopt_history_service import (
+    date_range_to_futopt_period,
+    intraday_end_bound,
+    sync_futopt_intraday_ohlc,
+)
+from providers import fubon_futopt_provider
 from schemas import (
     PaperTradingAccountCreate,
     PaperTradingBotCreate,
@@ -274,22 +280,64 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
     if payload.start_date > payload.end_date:
         raise HTTPException(400, "start_date must be before end_date")
 
+    replay_end_bound = intraday_end_bound(payload.end_date)
+
     # 從 DB 取得 K 棒資料
     tmf_bars = await db.get_ohlcv_range(
         payload.product_symbol,
         start_date=payload.start_date,
-        end_date=payload.end_date,
+        end_date=replay_end_bound,
         interval="1m",
     )
     tx_bars = await db.get_ohlcv_range(
         payload.direction_symbol,
         start_date=payload.start_date,
-        end_date=payload.end_date,
+        end_date=replay_end_bound,
         interval="1m",
     )
 
+    # 若資料庫缺少期貨分鐘 K，先嘗試用富邦 futopt intraday candles 補齊近期資料。
+    sync_period = date_range_to_futopt_period(payload.start_date, payload.end_date)
+    if not tmf_bars:
+        try:
+            await sync_futopt_intraday_ohlc(
+                fubon_futopt_provider,
+                db,
+                payload.product_symbol,
+                period=sync_period,
+                interval="1m",
+            )
+            tmf_bars = await db.get_ohlcv_range(
+                payload.product_symbol,
+                start_date=payload.start_date,
+                end_date=replay_end_bound,
+                interval="1m",
+            )
+        except Exception as exc:
+            log.warning("paper replay futopt sync failed for %s: %s", payload.product_symbol, exc)
+
+    if not tx_bars:
+        try:
+            await sync_futopt_intraday_ohlc(
+                fubon_futopt_provider,
+                db,
+                payload.direction_symbol,
+                period=sync_period,
+                interval="1m",
+            )
+            tx_bars = await db.get_ohlcv_range(
+                payload.direction_symbol,
+                start_date=payload.start_date,
+                end_date=replay_end_bound,
+                interval="1m",
+            )
+        except Exception as exc:
+            log.warning("paper replay futopt sync failed for %s: %s", payload.direction_symbol, exc)
+
     if not tmf_bars:
         raise HTTPException(400, f"No {payload.product_symbol} 1m bar data found for the given date range")
+    if not tx_bars:
+        raise HTTPException(400, f"No {payload.direction_symbol} 1m bar data found for the given date range")
 
     # 轉換 bar 格式
     def _to_bar_dict(row):

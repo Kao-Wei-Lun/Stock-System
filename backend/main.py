@@ -32,11 +32,13 @@ from env_validation import (
     read_url_env,
     validate_runtime_environment,
 )
+from futopt_history_service import FutoptCandleRecorder
 from macro_regime import build_macro_dashboard_payload
 from providers import (
     alert_engine,
     fetcher,
     fubon_manager,
+    fubon_futopt_provider,
     fubon_realtime_pool,
     fundamentals_provider,
     latest_public_fx_provider,
@@ -79,6 +81,14 @@ ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
 ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
 MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
 MARKET_INTELLIGENCE_STARTUP_SYNC = read_bool_env("MARKET_INTELLIGENCE_STARTUP_SYNC", True)
+FUTOPT_RECORDER_ENABLED = read_bool_env("FUTOPT_RECORDER_ENABLED", True)
+FUTOPT_RECORDER_SYMBOLS_RAW = read_text_env("FUTOPT_RECORDER_SYMBOLS", "TXF,TMF")
+FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
+    "FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS",
+    "300",
+    minimum=60,
+)
+FUTOPT_RECORDER_POLL_SECONDS = read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -102,6 +112,11 @@ TAIFEX_SPOT_REFERENCE = [
     {"ticker": "2330.TW", "label": "台積電"},
     {"ticker": "0050.TW", "label": "元大台灣50"},
 ]
+FUTOPT_RECORDER_SYMBOLS = [
+    symbol.strip().upper()
+    for symbol in FUTOPT_RECORDER_SYMBOLS_RAW.split(",")
+    if symbol.strip()
+] or ["TXF", "TMF"]
 
 FULL_HISTORY_PERIODS = {"10y", "max"}
 APP_TZ = ZoneInfo(APP_TIMEZONE)
@@ -197,6 +212,13 @@ store_realtime_quote = background_tasks.store_realtime_quote
 sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
 fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
 fubon_realtime_pool.configure_store_quote(store_realtime_quote)
+futopt_candle_recorder = FutoptCandleRecorder(
+    provider=fubon_futopt_provider,
+    db=db,
+    realtime_pool=fubon_realtime_pool,
+    symbols=FUTOPT_RECORDER_SYMBOLS,
+    logger=log,
+)
 
 
 background_scheduler = BackgroundScheduler(
@@ -212,6 +234,9 @@ background_scheduler = BackgroundScheduler(
         app_tz=APP_TZ,
         daily_latest_sync_time=DAILY_LATEST_SYNC_TIME,
         startup_download_delay_seconds=STARTUP_DOWNLOAD_DELAY_SECONDS,
+        futopt_recorder_enabled=FUTOPT_RECORDER_ENABLED,
+        futopt_recorder_poll_seconds=FUTOPT_RECORDER_POLL_SECONDS,
+        futopt_recorder_backfill_interval_seconds=FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -228,6 +253,7 @@ background_scheduler = BackgroundScheduler(
         fubon_manager=fubon_realtime_pool,
         skip_poll_for_ticker=lambda ticker: fubon_realtime_pool.supports_full_ws_quotes_for_ticker(ticker),
         archive_fubon_market_snapshot=fubon_market_snapshot_provider.archive_daily_snapshot,
+        futopt_candle_recorder=futopt_candle_recorder,
     ),
     logger=log,
 )
