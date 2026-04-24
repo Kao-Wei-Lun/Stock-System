@@ -230,6 +230,25 @@ def test_fetch_twse_cash_summary_uses_finmind_when_primary_unavailable(monkeypat
     assert meta == fallback_meta
 
 
+def test_fetch_twse_cash_summary_uses_fallback_when_primary_times_out(monkeypatch):
+    fetcher = TaifexFetcher()
+    fallback_rows = [
+        {"institution": "外資", "buy_amount": 90, "sell_amount": 40, "net_amount": 50},
+    ]
+    fallback_meta = {"source": "finmind", "warning": "fallback-timeout"}
+
+    def raise_timeout(*_args, **_kwargs):
+        raise taifex_fetcher.requests.ReadTimeout("timed out")
+
+    monkeypatch.setattr(taifex_fetcher.requests, "get", raise_timeout)
+    monkeypatch.setattr(fetcher, "_fetch_finmind_cash_summary", lambda _target_date: (fallback_rows, fallback_meta))
+
+    rows, meta = fetcher._fetch_twse_cash_summary(date(2026, 4, 3))
+
+    assert rows == fallback_rows
+    assert meta == fallback_meta
+
+
 def test_fallback_cash_summary_prefers_last_known_snapshot():
     fetcher = TaifexFetcher()
     fetcher._latest_cash_summary_snapshot = (

@@ -106,6 +106,25 @@ async def test_realtime_pool_promotes_ws_ticker_to_normal_mode_when_available():
 
 
 @pytest.mark.anyio
+async def test_realtime_pool_prefers_normal_for_paper_bot_source():
+    normal = FakeManager(1, ws_mode="Normal")
+    speed = FakeManager(2, ws_mode="Speed")
+
+    async def resolve_contract(_ticker):
+        return {"resolved_symbol": "TMFE6"}
+
+    pool = FubonRealtimeSubscriptionPool(normal, resolve_futopt_contract=resolve_contract)
+    pool._managers = {1: normal, 2: speed}
+
+    await pool.set_source_tickers("paper_bot_1", ["TMF"])
+
+    runtime = pool.get_account_runtime_statuses()
+    assert runtime[1]["realtime_assigned_tickers"] == ["TMF"]
+    assert runtime[2]["realtime_assigned_count"] == 0
+    assert ("futopt", "TMFE6", "candles") in [item[:3] for item in normal.subscribed]
+
+
+@pytest.mark.anyio
 async def test_realtime_pool_demotes_ws_ticker_back_to_speed_when_focus_is_removed():
     normal = FakeManager(1, ws_mode="Normal")
     speed = FakeManager(2, ws_mode="Speed")

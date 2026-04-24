@@ -701,16 +701,23 @@ class TaifexFetcher:
         if not target_date:
             return [], {"source": "none", "warning": None}
         target_key = _format_iso_date(target_date)
-        response = requests.get(
-            TWSE_CASH_SUMMARY_URL,
-            params={
-                "dayDate": target_date.strftime("%Y%m%d"),
-                "response": "json",
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=20,
-            verify=False,
-        )
+        try:
+            response = requests.get(
+                TWSE_CASH_SUMMARY_URL,
+                params={
+                    "dayDate": target_date.strftime("%Y%m%d"),
+                    "response": "json",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=20,
+                verify=False,
+            )
+        except requests.RequestException as exc:
+            log.warning("TWSE cash summary request failed for %s: %s", target_key, exc)
+            finmind_rows, finmind_meta = self._fetch_finmind_cash_summary(target_date)
+            if finmind_rows:
+                return finmind_rows, finmind_meta
+            return self._fallback_cash_summary(target_key, "TWSE 主來源連線逾時或請求失敗")
         content_type = (response.headers.get("content-type") or "").lower()
         if response.status_code != 200 or "json" not in content_type:
             log.warning(

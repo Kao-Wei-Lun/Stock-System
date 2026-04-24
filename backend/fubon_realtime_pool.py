@@ -417,7 +417,9 @@ class FubonRealtimeSubscriptionPool:
             for source, items in self._source_tickers.items()
             if ticker in items
         }
-        if WS_SOURCE in active_sources:
+        # Any active source beyond the passive watchlist should prefer Normal mode,
+        # because downstream consumers may require candle/aggregate channels.
+        if active_sources - {WATCHLIST_SOURCE}:
             return ("Normal", "Speed")
         if WATCHLIST_SOURCE in active_sources:
             return ("Speed", "Normal")

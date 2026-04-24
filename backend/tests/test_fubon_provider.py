@@ -1,6 +1,7 @@
 import asyncio
 import database
 import pytest
+import fubon_provider
 import repositories.fubon_accounts as fubon_accounts_repo
 
 from fubon_provider import FubonSDKManager
@@ -201,6 +202,63 @@ def test_disconnect_during_shutdown_does_not_reconnect():
 
     assert reconnected == []
     assert "stock" not in manager._ws_started_targets
+
+
+def test_disconnect_schedules_single_reconnect_while_timer_is_active(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    timers = []
+
+    class FakeTimer:
+        def __init__(self, interval, callback):
+            self.interval = interval
+            self.callback = callback
+            self.alive = False
+            self.daemon = False
+            timers.append(self)
+
+        def start(self):
+            self.alive = True
+
+        def is_alive(self):
+            return self.alive
+
+        def cancel(self):
+            self.alive = False
+
+    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
+
+    manager._handle_ws_disconnect("futopt", None, None)
+    manager._handle_ws_disconnect("futopt", None, None)
+
+    assert len(timers) == 1
+    assert "futopt" in manager._ws_reconnect_timers
+
+
+def test_run_scheduled_reconnect_cleans_timer_and_reconnects():
+    manager = FubonSDKManager()
+    manager.connected = True
+    reconnected = []
+
+    class FakeTimer:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return True
+
+    timer = FakeTimer()
+    manager._ws_reconnect_timers["futopt"] = timer
+    manager._reconnect_ws_target = lambda market_type: reconnected.append(market_type)
+
+    manager._run_scheduled_reconnect("futopt")
+
+    assert reconnected == ["futopt"]
+    assert "futopt" not in manager._ws_reconnect_timers
+    assert timer.cancelled is False
 
 
 class FakeSnapshotApi:
