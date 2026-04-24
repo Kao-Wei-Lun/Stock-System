@@ -100,6 +100,7 @@ DEFAULT_NIGHT_PROFILE = SessionProfile(
 @dataclass
 class StrategyConfig:
     """策略參數"""
+    strategy_type: str = "v1"  # v1=固定停損停利, v2=動態ATR與加碼
     day_open_profile: SessionProfile = field(default_factory=lambda: SessionProfile(**DEFAULT_DAY_OPEN_PROFILE.__dict__))
     day_regular_profile: SessionProfile = field(default_factory=lambda: SessionProfile(**DEFAULT_DAY_REGULAR_PROFILE.__dict__))
     night_profile: SessionProfile = field(default_factory=lambda: SessionProfile(**DEFAULT_NIGHT_PROFILE.__dict__))
@@ -127,6 +128,7 @@ class StrategyConfig:
 
     def to_dict(self) -> dict:
         return {
+            "strategy_type": self.strategy_type,
             "day_open_profile": self.day_open_profile.to_dict(),
             "day_regular_profile": self.day_regular_profile.to_dict(),
             "night_profile": self.night_profile.to_dict(),
@@ -136,6 +138,7 @@ class StrategyConfig:
     @classmethod
     def from_dict(cls, data: dict) -> "StrategyConfig":
         return cls(
+            strategy_type=data.get("strategy_type", "v1"),
             day_open_profile=SessionProfile.from_dict(data.get("day_open_profile", {})),
             day_regular_profile=SessionProfile.from_dict(data.get("day_regular_profile", {})),
             night_profile=SessionProfile.from_dict(data.get("night_profile", {})),
@@ -310,6 +313,7 @@ class StrategyEngine:
         has_position: bool = False,
         position_side: Optional[OrderSide] = None,
         position_entry_price: Optional[float] = None,
+        position_qty: int = 0,
     ) -> Optional[Signal]:
         """
         更新 TMF 1m bar，檢查是否產生訊號。

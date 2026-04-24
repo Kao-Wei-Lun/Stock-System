@@ -131,7 +131,11 @@ class ReplayEngine:
         )
         risk = RiskEngine(self.risk_config, self.cost_model, self.product)
         broker = SimulationBroker(self.cost_model, self.product)
-        strategy = StrategyEngine(self.strategy_config)
+        if self.strategy_config.strategy_type == "v2":
+            from paper_trading.strategy_v2 import StrategyEngineV2
+            strategy = StrategyEngineV2(self.strategy_config)
+        else:
+            strategy = StrategyEngine(self.strategy_config)
 
         # 建立 TX bar 索引（用時間戳對齊）
         tx_bar_map = self._build_bar_map(tx_bars)
@@ -233,6 +237,7 @@ class ReplayEngine:
                 has_position=account.position is not None,
                 position_side=account.position.side if account.position else None,
                 position_entry_price=account.position.avg_entry_price if account.position else None,
+                position_qty=account.position.qty if account.position else 0,
             )
 
             if signal:

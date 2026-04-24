@@ -106,7 +106,11 @@ class PaperTradingBot:
         )
         self.risk = RiskEngine(self.risk_config, self.cost_model, self.product)
         self.broker = SimulationBroker(self.cost_model, self.product)
-        self.strategy = StrategyEngine(self.strategy_config)
+        if self.strategy_config.strategy_type == "v2":
+            from paper_trading.strategy_v2 import StrategyEngineV2
+            self.strategy = StrategyEngineV2(self.strategy_config)
+        else:
+            self.strategy = StrategyEngine(self.strategy_config)
 
         # 狀態
         self.status = BotStatus.IDLE
@@ -304,6 +308,7 @@ class PaperTradingBot:
             has_position=self.account.position is not None,
             position_side=self.account.position.side if self.account.position else None,
             position_entry_price=self.account.position.avg_entry_price if self.account.position else None,
+            position_qty=self.account.position.qty if self.account.position else 0,
         )
 
         if signal:
