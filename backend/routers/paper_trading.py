@@ -123,6 +123,11 @@ async def start_paper_trading_bot(bot_id: int):
 
     # 建立 bot 實例
     risk_config = RiskConfig.from_dict(account.get("risk_config", {}))
+    # 用帳戶層級的 starting_equity / initial_margin_per_contract 覆蓋 risk_config 預設值
+    risk_config.starting_equity = float(account.get("starting_equity", risk_config.starting_equity))
+    risk_config.initial_margin_per_contract = float(
+        account.get("initial_margin_per_contract", risk_config.initial_margin_per_contract)
+    )
     strategy_config = StrategyConfig.from_dict(
         bot_record.get("strategy_config") or account.get("strategy_config") or {},
     )
