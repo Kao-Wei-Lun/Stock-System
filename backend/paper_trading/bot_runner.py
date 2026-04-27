@@ -76,6 +76,9 @@ class PaperTradingBot:
         product: FuturesProductSpec = TMF_SPEC,
         tx_symbol: str = "TXF",
         tmf_symbol: str = "TMF",
+        tx_requested_symbol: Optional[str] = None,
+        tmf_requested_symbol: Optional[str] = None,
+        data_source: str = "fubon_neo",
         on_trade: Optional[Callable] = None,
         on_signal: Optional[Callable] = None,
         on_equity_update: Optional[Callable] = None,
@@ -90,6 +93,9 @@ class PaperTradingBot:
         # 商品別名 → 用來比對 WS 訊息
         self.tx_symbol = tx_symbol.upper()
         self.tmf_symbol = tmf_symbol.upper()
+        self.tx_requested_symbol = (tx_requested_symbol or tx_symbol).upper()
+        self.tmf_requested_symbol = (tmf_requested_symbol or tmf_symbol).upper()
+        self.data_source = data_source
 
         # 回調
         self._on_trade = on_trade
@@ -117,8 +123,13 @@ class PaperTradingBot:
         self._handler_ref = None
         self._current_date: Optional[str] = None
         self._bar_count = 0
+        self._warmup_bar_count = 0
+        self._warmup_completed_at: Optional[datetime] = None
         self._tick_aggregator: dict[str, dict] = {}
         self._last_processed_minute: dict[str, str] = {}
+        self._last_processed_tx_minute: dict[str, str] = {}
+        self._latest_realtime_bar: Optional[Bar] = None
+        self._latest_realtime_bar_is_partial = False
 
         # 統計
         self.started_at: Optional[datetime] = None
@@ -135,7 +146,8 @@ class PaperTradingBot:
 
         self.status = BotStatus.RUNNING
         self.started_at = datetime.now()
-        self._current_date = None
+        if not self._warmup_bar_count:
+            self._current_date = None
         self._bar_count = 0
 
         if realtime_pool is not None:
@@ -154,6 +166,57 @@ class PaperTradingBot:
 
         return True
 
+    def warm_up(self, tx_bars: list[dict], tmf_bars: list[dict]) -> int:
+        """Prime strategy indicators from historical bars without creating orders or fills."""
+        tx_bar_map: dict[str, Bar] = {}
+        for raw_bar in tx_bars or []:
+            tx_bar = self._parse_candle(raw_bar, self.tx_symbol)
+            if tx_bar is None:
+                continue
+            tx_bar_map[tx_bar.time.strftime("%Y-%m-%d %H:%M")] = tx_bar
+        if tx_bar_map:
+            self._last_processed_tx_minute[self.tx_symbol] = max(tx_bar_map)
+
+        parsed_tmf_bars = []
+        for raw_bar in tmf_bars or []:
+            tmf_bar = self._parse_candle(raw_bar, self.tmf_symbol)
+            if tmf_bar is not None:
+                parsed_tmf_bars.append(tmf_bar)
+        parsed_tmf_bars.sort(key=lambda item: item.time)
+
+        warmed = 0
+        last_tmf_bar: Optional[Bar] = None
+        for tmf_bar in parsed_tmf_bars:
+            session = determine_session(tmf_bar.time)
+            if session is None:
+                continue
+
+            bar_date = tmf_bar.time.strftime("%Y-%m-%d")
+            if bar_date != self._current_date:
+                self._current_date = bar_date
+                self.account.reset_daily()
+                self.strategy.reset_session()
+
+            tx_bar = tx_bar_map.get(tmf_bar.time.strftime("%Y-%m-%d %H:%M"))
+            if tx_bar is not None:
+                self.strategy.update_tx_bar(tx_bar)
+
+            warmup_tmf_bar = getattr(self.strategy, "warmup_tmf_bar", None)
+            if callable(warmup_tmf_bar):
+                warmup_tmf_bar(tmf_bar, session)
+            else:
+                self.strategy.update_tmf_bar(tmf_bar, session)
+            warmed += 1
+            last_tmf_bar = tmf_bar
+
+        self._warmup_bar_count = warmed
+        self._warmup_completed_at = datetime.now() if warmed else None
+        if last_tmf_bar is not None:
+            self._last_processed_minute[last_tmf_bar.symbol or self.tmf_symbol] = (
+                last_tmf_bar.time.strftime("%Y-%m-%d %H:%M")
+            )
+        return warmed
+
     def stop(self, realtime_pool=None) -> None:
         """停止 Bot"""
         self.status = BotStatus.STOPPED
@@ -170,7 +233,7 @@ class PaperTradingBot:
 
         log.info("Paper trading bot %s stopped", self.bot_id)
 
-    def process_candle(self, symbol: str, candle_data: dict) -> None:
+    def process_candle(self, symbol: str, candle_data: dict, *, is_partial: bool = False) -> None:
         """
         處理一根新的 candle。
 
@@ -186,11 +249,11 @@ class PaperTradingBot:
         normalized_symbol = symbol.upper()
 
         # 判斷是 TX 還是 TMF
-        is_tx = any(normalized_symbol.startswith(prefix) for prefix in ("TXF", "TX"))
-        is_tmf = any(normalized_symbol.startswith(prefix) for prefix in ("TMF",))
+        is_tx = self._matches_configured_symbol(normalized_symbol, self.tx_symbol, ("TXF", "TX"))
+        is_tmf = self._matches_configured_symbol(normalized_symbol, self.tmf_symbol, ("TMF",))
 
         if is_tx:
-            self._process_tx_candle(bar)
+            self._process_tx_candle(bar, is_partial=is_partial)
             # TMF 虛擬商品（或微台指）若無獨立 WS 報價，可直接以 TXF 報價做為 TMF 價格
             if self.tmf_symbol.upper() == "TMF":
                 from paper_trading.simulation_broker import Bar
@@ -203,9 +266,29 @@ class PaperTradingBot:
                     volume=bar.volume,
                     symbol="TMF",
                 )
-                self._process_tmf_candle(tmf_bar)
+                self._process_tmf_candle(tmf_bar, is_partial=is_partial)
         elif is_tmf:
-            self._process_tmf_candle(bar)
+            self._process_tmf_candle(bar, is_partial=is_partial)
+
+    def _is_relevant_symbol(self, symbol: str) -> bool:
+        normalized_symbol = symbol.upper()
+        return (
+            self._matches_configured_symbol(normalized_symbol, self.tx_symbol, ("TXF", "TX"))
+            or self._matches_configured_symbol(normalized_symbol, self.tmf_symbol, ("TMF",))
+        )
+
+    @staticmethod
+    def _matches_configured_symbol(
+        symbol: str,
+        configured_symbol: str,
+        alias_prefixes: tuple[str, ...],
+    ) -> bool:
+        configured = configured_symbol.upper()
+        if symbol == configured:
+            return True
+        if configured in alias_prefixes:
+            return any(symbol.startswith(prefix) for prefix in alias_prefixes)
+        return False
 
     def get_state(self) -> dict:
         """取得 Bot 目前狀態"""
@@ -227,6 +310,15 @@ class PaperTradingBot:
 
         # 風控事件
         risk_events = self.risk.get_risk_events()[-20:]
+        v2_stop_distances = None
+        distance_getter = getattr(self.strategy, "get_effective_stop_distances", None)
+        if callable(distance_getter) and self._latest_realtime_bar is not None:
+            try:
+                session = determine_session(self._latest_realtime_bar.time)
+                if session is not None:
+                    v2_stop_distances = distance_getter(self._latest_realtime_bar, session).to_dict()
+            except Exception:
+                v2_stop_distances = None
 
         return {
             "bot_id": self.bot_id,
@@ -234,6 +326,18 @@ class PaperTradingBot:
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
             "bar_count": self._bar_count,
+            "warmup_bar_count": self._warmup_bar_count,
+            "warmup_completed_at": self._warmup_completed_at.isoformat() if self._warmup_completed_at else None,
+            "latest_realtime_bar": self._latest_realtime_bar.to_dict() if self._latest_realtime_bar else None,
+            "latest_realtime_bar_is_partial": self._latest_realtime_bar_is_partial,
+            "v2_stop_distances": v2_stop_distances,
+            "data_source": self.data_source,
+            "direction_symbol": self.tx_requested_symbol,
+            "product_symbol": self.tmf_requested_symbol,
+            "resolved_direction_symbol": self.tx_symbol,
+            "resolved_product_symbol": self.tmf_symbol,
+            "strategy_config": self.strategy_config.to_dict(),
+            "strategy_variant": getattr(self.strategy_config, "v2_variant", "baseline"),
             "account": self.account.to_dict(),
             "pending_orders": len(self.broker.pending_orders),
             "total_fills": len(self.broker.all_fills),
@@ -260,6 +364,8 @@ class PaperTradingBot:
 
             symbol = str(data.get("symbol") or "").strip().upper()
             if not symbol:
+                return
+            if not self._is_relevant_symbol(symbol):
                 return
 
             if "open" in data and "close" in data:
@@ -316,23 +422,55 @@ class PaperTradingBot:
                     "close": agg["close"],
                     "volume": agg["volume"],
                 }
-                self.process_candle(symbol, candle_payload)
+                self.process_candle(symbol, candle_payload, is_partial=True)
 
         except Exception as exc:
             log.warning("Paper trading bot %s WS handler error: %s", self.bot_id, exc)
 
-    def _process_tx_candle(self, bar: Bar) -> None:
+    def _ensure_trading_date(self, bar: Bar) -> None:
+        bar_date = bar.time.strftime("%Y-%m-%d")
+        if bar_date != self._current_date:
+            self._current_date = bar_date
+            self.account.reset_daily()
+            self.strategy.reset_session()
+
+    def _process_tx_candle(self, bar: Bar, *, is_partial: bool = False) -> None:
         """處理 TX candle → 更新方向判斷"""
+        if is_partial:
+            return
+
+        self._ensure_trading_date(bar)
+
+        symbol_key = bar.symbol or self.tx_symbol
+        tx_bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        if self._last_processed_tx_minute.get(symbol_key) == tx_bar_minute:
+            return
+
+        self._last_processed_tx_minute[symbol_key] = tx_bar_minute
         self.strategy.update_tx_bar(bar)
 
-    def _process_tmf_candle(self, bar: Bar) -> None:
+    def _process_tmf_candle(self, bar: Bar, *, is_partial: bool = False) -> None:
         """處理 TMF candle → 完整交易閉環"""
         bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        symbol_key = bar.symbol or self.tmf_symbol
+        self._latest_realtime_bar = bar
+        self._latest_realtime_bar_is_partial = is_partial
+
+        session = determine_session(bar.time)
+        if session is None:
+            return
+
+        if is_partial:
+            self.account.on_bar(bar.close, bar.time, advance_bar=False)
+            return
+
+        if self._last_processed_minute.get(symbol_key) == bar_minute:
+            self.account.on_bar(bar.close, bar.time, advance_bar=False)
+            return
 
         # 防止同一分鐘內收到多次更新導致 bar_count 狂飆
-        if self._last_processed_minute.get(bar.symbol or self.tmf_symbol) != bar_minute:
-            self._bar_count += 1
-            self._last_processed_minute[bar.symbol or self.tmf_symbol] = bar_minute
+        self._bar_count += 1
+        self._last_processed_minute[symbol_key] = bar_minute
 
         # 新的交易日重置
         bar_date = bar.time.strftime("%Y-%m-%d")
@@ -422,6 +560,9 @@ class PaperTradingBot:
                     if self.strategy_config.strategy_type == "v2":
                         current_atr = max(1.0, float(getattr(self.strategy, "current_atr", 0.0) or 1.0))
                         stop_distance = current_atr * 1.5
+                        distance_getter = getattr(self.strategy, "get_effective_stop_distances", None)
+                        if callable(distance_getter):
+                            stop_distance = distance_getter(bar, session, profile).initial_stop
                         remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
                         requested_qty = max(1, int(signal.qty or 1))
                         size_check = self.risk.check_order_size(

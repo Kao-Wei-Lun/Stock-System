@@ -201,20 +201,40 @@ class FubonSDKManager:
     def unsubscribe_stock(self, symbol: str, channel: str = "aggregates") -> None:
         self._unsubscribe(self._ws_stock, "stock", symbol, channel)
 
-    def subscribe_futopt(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
-        return self._subscribe(self._ws_futopt, "futopt", symbol, channel)
+    def subscribe_futopt(
+        self,
+        symbol: str,
+        channel: str = "aggregates",
+        *,
+        after_hours: bool = False,
+    ) -> Optional[str]:
+        return self._subscribe(self._ws_futopt, "futopt", symbol, channel, after_hours=after_hours)
 
     async def subscribe_futopt_async(
         self,
         symbol: str,
         channel: str = "aggregates",
         *,
+        after_hours: bool = False,
         timeout: float = 2.5,
     ) -> Optional[str]:
-        return await self._subscribe_async(self._ws_futopt, "futopt", symbol, channel, timeout=timeout)
+        return await self._subscribe_async(
+            self._ws_futopt,
+            "futopt",
+            symbol,
+            channel,
+            after_hours=after_hours,
+            timeout=timeout,
+        )
 
-    def unsubscribe_futopt(self, symbol: str, channel: str = "aggregates") -> None:
-        self._unsubscribe(self._ws_futopt, "futopt", symbol, channel)
+    def unsubscribe_futopt(
+        self,
+        symbol: str,
+        channel: str = "aggregates",
+        *,
+        after_hours: bool = False,
+    ) -> None:
+        self._unsubscribe(self._ws_futopt, "futopt", symbol, channel, after_hours=after_hours)
 
     def start_ws_stock(self) -> bool:
         return self._start_ws_target(self._ws_stock, "stock")
@@ -681,15 +701,23 @@ class FubonSDKManager:
 
     def _restore_ws_subscriptions(self, payloads: Dict[str, dict]) -> None:
         for key, payload in payloads.items():
-            market_type, _, _ = self._split_subscription_key(key)
+            market_type, _, _, _ = self._split_subscription_key(key)
             symbol = payload.get("symbol")
             channel = payload.get("channel")
             if not symbol or not channel:
                 continue
+            after_hours = self._coerce_bool(payload.get("afterHours"))
             if market_type == "stock":
                 self._subscribe(self._ws_stock, "stock", symbol, channel, force=True)
             elif market_type == "futopt":
-                self._subscribe(self._ws_futopt, "futopt", symbol, channel, force=True)
+                self._subscribe(
+                    self._ws_futopt,
+                    "futopt",
+                    symbol,
+                    channel,
+                    force=True,
+                    after_hours=after_hours,
+                )
 
     def _subscribe(
         self,
@@ -699,10 +727,11 @@ class FubonSDKManager:
         channel: str,
         *,
         force: bool = False,
+        after_hours: bool = False,
     ) -> Optional[str]:
         if not target:
             return None
-        key = self._subscription_key(market_type, symbol, channel)
+        key = self._subscription_key(market_type, symbol, channel, after_hours=after_hours)
         if key in self._subscriptions and not force:
             return self._subscriptions[key]
         if force:
@@ -711,6 +740,8 @@ class FubonSDKManager:
                 self._subscription_id_to_key.pop(previous_id, None)
 
         payload = {"channel": channel, "symbol": symbol}
+        if market_type == "futopt" and after_hours:
+            payload["afterHours"] = True
         result = self._call_ws_method(target, "subscribe", payload)
         channel_id = self._extract_subscription_id(result) or key
         self._subscription_payloads[key] = payload
@@ -727,11 +758,12 @@ class FubonSDKManager:
         channel: str,
         *,
         force: bool = False,
+        after_hours: bool = False,
         timeout: float = 2.5,
     ) -> Optional[str]:
         if not target:
             return None
-        key = self._subscription_key(market_type, symbol, channel)
+        key = self._subscription_key(market_type, symbol, channel, after_hours=after_hours)
         if key in self._subscriptions and not force:
             return self._subscriptions[key]
 
@@ -742,20 +774,35 @@ class FubonSDKManager:
 
         channel_id = None
         try:
-            channel_id = self._subscribe(target, market_type, symbol, channel, force=force)
+            channel_id = self._subscribe(
+                target,
+                market_type,
+                symbol,
+                channel,
+                force=force,
+                after_hours=after_hours,
+            )
             if channel_id and channel_id != key:
                 if not ack_future.done():
                     ack_future.set_result(channel_id)
             return await asyncio.wait_for(ack_future, timeout=max(float(timeout or 0), 0.1))
         except Exception:
             if channel_id:
-                self._unsubscribe(target, market_type, symbol, channel)
+                self._unsubscribe(target, market_type, symbol, channel, after_hours=after_hours)
             raise
         finally:
             self._discard_pending_subscription_ack(key, ack_future)
 
-    def _unsubscribe(self, target, market_type: str, symbol: str, channel: str) -> None:
-        key = self._subscription_key(market_type, symbol, channel)
+    def _unsubscribe(
+        self,
+        target,
+        market_type: str,
+        symbol: str,
+        channel: str,
+        *,
+        after_hours: bool = False,
+    ) -> None:
+        key = self._subscription_key(market_type, symbol, channel, after_hours=after_hours)
         channel_id = self._subscriptions.pop(key, None)
         self._subscription_payloads.pop(key, None)
         if channel_id:
@@ -779,9 +826,11 @@ class FubonSDKManager:
             channel_id = self._extract_subscription_id(item)
             if not symbol or not channel:
                 continue
-            key = self._subscription_key(market_type, str(symbol), str(channel))
+            key = self._resolve_subscription_key_for_ack(market_type, str(symbol), str(channel), item)
             if event == "subscribed":
                 self._subscription_payloads.setdefault(key, {"channel": channel, "symbol": symbol})
+                if key.endswith(":afterhours"):
+                    self._subscription_payloads[key]["afterHours"] = True
                 if channel_id:
                     self._subscriptions[key] = channel_id
                     self._subscription_id_to_key[channel_id] = key
@@ -807,7 +856,7 @@ class FubonSDKManager:
                 channel_id = self._extract_subscription_id(item)
                 if not symbol or not channel:
                     continue
-                key = self._subscription_key(market_type, str(symbol), str(channel))
+                key = self._resolve_subscription_key_for_ack(market_type, str(symbol), str(channel), item)
                 for future in list(self._pending_subscription_acks.get(key, [])):
                     if not future.done():
                         future.set_result(str(channel_id or key))
@@ -850,15 +899,56 @@ class FubonSDKManager:
         return normalized
 
     @staticmethod
-    def _subscription_key(market_type: str, symbol: str, channel: str) -> str:
-        return f"{market_type}:{symbol}:{channel}"
+    def _subscription_key(market_type: str, symbol: str, channel: str, *, after_hours: bool = False) -> str:
+        suffix = ":afterhours" if market_type == "futopt" and after_hours else ""
+        return f"{market_type}:{symbol}:{channel}{suffix}"
+
+    def _subscription_key_candidates(
+        self,
+        market_type: str,
+        symbol: str,
+        channel: str,
+        *,
+        after_hours: bool | None = None,
+    ) -> list[str]:
+        if market_type != "futopt":
+            return [self._subscription_key(market_type, symbol, channel)]
+        if after_hours is not None:
+            return [self._subscription_key(market_type, symbol, channel, after_hours=after_hours)]
+        return [
+            self._subscription_key(market_type, symbol, channel),
+            self._subscription_key(market_type, symbol, channel, after_hours=True),
+        ]
+
+    def _resolve_subscription_key_for_ack(self, market_type: str, symbol: str, channel: str, item: dict) -> str:
+        raw_after_hours = item.get("afterHours")
+        explicit_after_hours = None if raw_after_hours is None else self._coerce_bool(raw_after_hours)
+        candidates = self._subscription_key_candidates(
+            market_type,
+            symbol,
+            channel,
+            after_hours=explicit_after_hours,
+        )
+        for key in candidates:
+            if key in self._pending_subscription_acks:
+                return key
+        for key in candidates:
+            if key in self._subscriptions or key in self._subscription_payloads:
+                return key
+        return candidates[0]
 
     @staticmethod
-    def _split_subscription_key(key: str) -> tuple[str, str, str]:
-        parts = str(key).split(":", 2)
-        if len(parts) != 3:
-            return "stock", "", ""
-        return parts[0], parts[1], parts[2]
+    def _split_subscription_key(key: str) -> tuple[str, str, str, bool]:
+        parts = str(key).split(":")
+        if len(parts) < 3:
+            return "stock", "", "", False
+        return parts[0], parts[1], parts[2], len(parts) > 3 and parts[3] == "afterhours"
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y"}
+        return bool(value)
 
     @staticmethod
     def _call_ws_method(target, method_name: str, payload: dict):

@@ -133,6 +133,34 @@ def test_subscribe_stock_async_waits_for_subscribed_event():
     assert asyncio.run(run()) == "async-123"
 
 
+def test_subscribe_futopt_afterhours_sends_flag_and_matches_plain_ack():
+    manager = FubonSDKManager()
+    manager._ws_futopt = FakeWebSocket()
+    manager.connected = True
+    manager._attach_message_handlers()
+
+    async def run():
+        task = asyncio.create_task(
+            manager.subscribe_futopt_async("TXFE6", "books", after_hours=True, timeout=1.0)
+        )
+        await asyncio.sleep(0)
+        manager._dispatch_ws_message(
+            "futopt",
+            {
+                "event": "subscribed",
+                "data": {"id": "night-books", "channel": "books", "symbol": "TXFE6"},
+            },
+        )
+        return await task
+
+    assert asyncio.run(run()) == "night-books"
+    assert manager._ws_futopt.calls[0] == (
+        "subscribe",
+        {"channel": "books", "symbol": "TXFE6", "afterHours": True},
+    )
+    assert manager._subscriptions["futopt:TXFE6:books:afterhours"] == "night-books"
+
+
 def test_subscribe_stock_async_raises_on_error_event():
     manager = FubonSDKManager()
     manager._ws_stock = FakeWebSocket()

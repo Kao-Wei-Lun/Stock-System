@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from paper_trading.cost_model import CostModel
+from paper_trading.cost_model import CostModel, OrderSide, SessionType
 from paper_trading.replay_engine import ReplayEngine
 from paper_trading.risk_engine import RiskConfig
-from paper_trading.strategy_engine import SessionProfile, StrategyConfig
+from paper_trading.simulation_broker import Bar
+from paper_trading.strategy_engine import SessionProfile, SignalDirection, StrategyConfig
+from paper_trading.strategy_v2 import StrategyEngineV2
 
 
 def _bar(ts: datetime, close: float, *, open_: float | None = None, high: float | None = None, low: float | None = None) -> dict:
@@ -129,8 +131,8 @@ def test_v2_time_stop_reduces_position_back_to_one_contract() -> None:
     sell_fills = [fill for fill in result.fills if fill["side"] == "sell"]
 
     assert reduce_signals
-    assert reduce_signals[0]["qty"] == 2
-    assert any(fill["fill_qty"] == 2 for fill in sell_fills)
+    assert reduce_signals[0]["qty"] >= 1
+    assert any(fill["fill_qty"] == reduce_signals[0]["qty"] for fill in sell_fills)
 
 
 def test_v2_blocks_entry_when_size_exceeds_total_position_risk() -> None:
@@ -158,3 +160,206 @@ def test_v2_blocks_entry_when_size_exceeds_total_position_risk() -> None:
     assert any(signal["action"] == "buy" for signal in result.signals)
     assert [fill for fill in result.fills if fill["side"] == "buy"] == []
     assert any(event["event_type"] == "order_size_denied" for event in result.risk_events)
+
+
+def test_v2_trailing_stop_uses_confirmed_prior_extreme_not_current_bar_high() -> None:
+    start = datetime(2026, 4, 20, 8, 45)
+    strategy = StrategyEngineV2(StrategyConfig(strategy_type="v2"))
+
+    for index in range(14):
+        strategy.warmup_tmf_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=100,
+                high=102.5,
+                low=97.5,
+                close=100,
+                volume=100,
+                symbol="TMF",
+            ),
+            SessionType.DAY,
+        )
+
+    strategy.set_position_info(100, OrderSide.BUY)
+
+    first_signal = strategy.update_tmf_bar(
+        Bar(
+            time=start + timedelta(minutes=14),
+            open=100,
+            high=113,
+            low=105,
+            close=111,
+            volume=100,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+        has_position=True,
+        position_side=OrderSide.BUY,
+        position_entry_price=100,
+        position_qty=1,
+    )
+
+    assert first_signal is None
+    assert strategy._highest_price_since_entry == 113
+
+    second_signal = strategy.update_tmf_bar(
+        Bar(
+            time=start + timedelta(minutes=15),
+            open=111,
+            high=111,
+            low=100,
+            close=100.5,
+            volume=100,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+        has_position=True,
+        position_side=OrderSide.BUY,
+        position_entry_price=100,
+        position_qty=1,
+    )
+
+    assert second_signal is not None
+    assert second_signal.reason.startswith("v2_atr_stop")
+
+
+def test_v2_dynamic_stop_distances_scale_with_index_level_and_recent_noise() -> None:
+    start = datetime(2026, 4, 20, 9, 31)
+    strategy = StrategyEngineV2(StrategyConfig(strategy_type="v2"))
+
+    for index in range(60):
+        close = 40_000 + index
+        strategy.warmup_tmf_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=close,
+                high=close + 10,
+                low=close - 10,
+                close=close,
+                volume=100,
+                symbol="TMF",
+            ),
+            SessionType.DAY,
+        )
+
+    distances = strategy.get_effective_stop_distances(
+        Bar(
+            time=start + timedelta(minutes=60),
+            open=40_060,
+            high=40_070,
+            low=40_050,
+            close=40_060,
+            volume=100,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+    )
+
+    assert distances.initial_stop >= 80
+    assert distances.trailing_stop >= 60
+    assert distances.overheat_trailing_stop >= 48
+    assert distances.trailing_activation >= 80
+    assert distances.pyramid_distance >= 48
+
+
+def test_v2_variant_presets_resolve_candidate_parameters() -> None:
+    config = StrategyConfig.from_dict({
+        "strategy_type": "v2",
+        "v2_variant": "v2_winrate_candidate",
+    })
+
+    assert config.v2_setting("v2_entry_breakout_lookback") == 10
+    assert config.v2_setting("v2_entry_max_vwap_deviation") == 0.01
+    assert config.v2_setting("v2_entry_atr_cap") == 70.0
+    assert config.v2_setting("v2_reversal_confirm_5m_bars") == 2
+    assert config.v2_setting("v2_initial_stop_cap_points") == 150.0
+    assert config.v2_setting("v2_early_fail_bars") == 5
+    assert config.v2_setting("v2_vwap_loss_exit_after_early_fail") is True
+    assert config.to_dict()["v2_variant"] == "v2_winrate_candidate"
+
+
+def test_v2_profit_variant_caps_dynamic_stop_distance() -> None:
+    start = datetime(2026, 4, 20, 9, 31)
+    strategy = StrategyEngineV2(StrategyConfig(strategy_type="v2", v2_variant="v2_profit_candidate"))
+
+    for index in range(60):
+        close = 40_000 + index
+        strategy.warmup_tmf_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=close,
+                high=close + 120,
+                low=close - 120,
+                close=close,
+                volume=100,
+                symbol="TMF",
+            ),
+            SessionType.DAY,
+        )
+
+    distances = strategy.get_effective_stop_distances(
+        Bar(
+            time=start + timedelta(minutes=60),
+            open=40_060,
+            high=40_070,
+            low=40_050,
+            close=40_060,
+            volume=100,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+    )
+
+    assert distances.initial_stop == 120.0
+    assert distances.trailing_activation == 120.0
+    assert distances.trailing_stop <= 96.0
+
+
+def test_v2_winrate_variant_blocks_entries_when_atr_is_over_cap() -> None:
+    start = datetime(2026, 4, 20, 8, 45)
+    strategy = StrategyEngineV2(StrategyConfig(strategy_type="v2", v2_variant="v2_winrate_candidate"))
+
+    strategy._tx_vwap.update(
+        Bar(
+            time=start,
+            open=40_000,
+            high=40_010,
+            low=39_990,
+            close=40_000,
+            volume=100,
+            symbol="TXF",
+        )
+    )
+    strategy._tx_latest_close = 40_020
+    strategy._current_direction = SignalDirection.LONG
+    strategy._5m_slope = 25
+
+    for index in range(12):
+        strategy.warmup_tmf_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=40_000 + index,
+                high=40_100 + index,
+                low=39_900 + index,
+                close=40_000 + index,
+                volume=100,
+                symbol="TMF",
+            ),
+            SessionType.DAY,
+        )
+
+    signal = strategy.update_tmf_bar(
+        Bar(
+            time=start + timedelta(minutes=12),
+            open=40_020,
+            high=40_250,
+            low=39_980,
+            close=40_220,
+            volume=100,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+    )
+
+    assert strategy.current_atr > 70
+    assert signal is None

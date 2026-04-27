@@ -11,7 +11,9 @@ TMF 模擬交易 API：
 
 import json
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -45,6 +47,59 @@ router = APIRouter(prefix="/api/paper-trading", tags=["paper-trading"])
 
 # 全域 bot 實例管理
 _active_bots: dict[int, "PaperTradingBot"] = {}
+REALTIME_WARMUP_LOOKBACK_BARS = 240
+APP_TZ = ZoneInfo("Asia/Taipei")
+
+
+async def _resolve_nearest_futopt_contract(symbol: str, *, role: str) -> dict:
+    resolved = await fubon_futopt_provider.resolve_contract(symbol, session="REGULAR")
+    if not resolved:
+        raise HTTPException(502, f"Unable to resolve nearest futures contract for {role}: {symbol}")
+    if str(resolved.get("instrument_type") or "future").lower() != "future":
+        raise HTTPException(400, f"{role} must resolve to a futures contract")
+    return resolved
+
+
+async def _load_realtime_warmup_bars(
+    *,
+    requested_symbol: str,
+    resolved_symbol: str,
+    interval: str = "1m",
+    lookback_bars: int = REALTIME_WARMUP_LOOKBACK_BARS,
+) -> list[dict]:
+    now = datetime.now(APP_TZ)
+    start_date = (now - timedelta(days=1)).date().isoformat()
+    end_bound = intraday_end_bound(now.date().isoformat())
+    candidate_symbols = list(dict.fromkeys([resolved_symbol, requested_symbol]))
+
+    async def _read_rows() -> list[dict]:
+        for symbol in candidate_symbols:
+            rows = await db.get_ohlcv_range(
+                symbol,
+                start_date=start_date,
+                end_date=end_bound,
+                interval=interval,
+            )
+            if rows:
+                return rows
+        return []
+
+    rows = await _read_rows()
+    if not rows:
+        try:
+            await sync_futopt_intraday_ohlc(
+                fubon_futopt_provider,
+                db,
+                resolved_symbol,
+                period="1d",
+                interval=interval,
+            )
+            rows = await _read_rows()
+        except Exception as exc:
+            log.warning("paper realtime warmup sync failed for %s: %s", resolved_symbol, exc)
+
+    rows = sorted(rows, key=lambda item: str(item.get("date") or item.get("timestamp") or ""))
+    return rows[-lookback_bars:]
 
 
 async def _build_position_sizing_input(payload: FuturesPositionSizePayload) -> FuturesPositionSizingInput:
@@ -222,7 +277,13 @@ async def start_paper_trading_bot(bot_id: int):
         bot_record.get("strategy_config") or account.get("strategy_config") or {},
     )
     cost_model = CostModel.from_dict(account.get("cost_model", {}))
-    product = get_product_spec(bot_record.get("product_symbol", "TMF"))
+    requested_product_symbol = str(bot_record.get("product_symbol") or "TMF").strip().upper()
+    requested_direction_symbol = str(bot_record.get("direction_symbol") or "TXF").strip().upper()
+    product_resolution = await _resolve_nearest_futopt_contract(requested_product_symbol, role="paper trading product")
+    direction_resolution = await _resolve_nearest_futopt_contract(requested_direction_symbol, role="direction filter")
+    resolved_product_symbol = product_resolution["resolved_symbol"]
+    resolved_direction_symbol = direction_resolution["resolved_symbol"]
+    product = get_product_spec(requested_product_symbol)
 
     bot_instance = PaperTradingBot(
         bot_id=bot_id,
@@ -230,9 +291,32 @@ async def start_paper_trading_bot(bot_id: int):
         strategy_config=strategy_config,
         cost_model=cost_model,
         product=product,
-        tx_symbol=bot_record.get("direction_symbol", "TXF"),
-        tmf_symbol=bot_record.get("product_symbol", "TMF"),
+        tx_symbol=resolved_direction_symbol,
+        tmf_symbol=resolved_product_symbol,
+        tx_requested_symbol=requested_direction_symbol,
+        tmf_requested_symbol=requested_product_symbol,
+        data_source="fubon_neo",
     )
+
+    try:
+        tx_warmup_bars = await _load_realtime_warmup_bars(
+            requested_symbol=requested_direction_symbol,
+            resolved_symbol=resolved_direction_symbol,
+        )
+        tmf_warmup_bars = await _load_realtime_warmup_bars(
+            requested_symbol=requested_product_symbol,
+            resolved_symbol=resolved_product_symbol,
+        )
+        warmed = bot_instance.warm_up(tx_warmup_bars, tmf_warmup_bars)
+        log.info(
+            "Paper trading bot %s warmed up with %s bars (%s/%s)",
+            bot_id,
+            warmed,
+            resolved_direction_symbol,
+            resolved_product_symbol,
+        )
+    except Exception as exc:
+        log.warning("Paper trading bot %s warmup skipped: %s", bot_id, exc)
 
     # 嘗試連結 realtime_pool
     try:

@@ -94,6 +94,33 @@ DEFAULT_NIGHT_PROFILE = SessionProfile(
     slippage_assumption=2.0,
 )
 
+V2_STRATEGY_VARIANT_PRESETS = {
+    "baseline": {},
+    "v2_b15_c2": {
+        "v2_entry_breakout_lookback": 15,
+        "v2_entry_max_vwap_deviation": 0.01,
+        "v2_reversal_confirm_5m_bars": 2,
+    },
+    "v2_profit_candidate": {
+        "v2_entry_breakout_lookback": 15,
+        "v2_entry_max_vwap_deviation": 0.01,
+        "v2_entry_atr_cap": 70.0,
+        "v2_entry_breakout_atr_buffer_mult": 0.1,
+        "v2_reversal_confirm_5m_bars": 2,
+        "v2_initial_stop_cap_points": 120.0,
+    },
+    "v2_winrate_candidate": {
+        "v2_entry_breakout_lookback": 10,
+        "v2_entry_max_vwap_deviation": 0.01,
+        "v2_entry_atr_cap": 70.0,
+        "v2_reversal_confirm_5m_bars": 2,
+        "v2_initial_stop_cap_points": 150.0,
+        "v2_early_fail_bars": 5,
+        "v2_early_fail_min_progress_atr_mult": 0.2,
+        "v2_vwap_loss_exit_after_early_fail": True,
+    },
+}
+
 
 # ─── 策略設定 ─────────────────────────────────────────────────
 
@@ -106,11 +133,64 @@ class StrategyConfig:
     night_profile: SessionProfile = field(default_factory=lambda: SessionProfile(**DEFAULT_NIGHT_PROFILE.__dict__))
 
     # 開盤區間結束時間（日盤開盤後 N 分鐘切換到 regular profile）
-    day_open_phase_minutes: int = 30
+    day_open_phase_minutes: int = 45
 
     # 方向判斷使用的聚合週期
     direction_5m_periods: int = 5    # 5m K 棒用幾根 1m 聚合
     direction_15m_periods: int = 15  # 15m K 棒用幾根 1m 聚合
+
+    # V2 dynamic stop sizing. Percentages are decimals of the current index level.
+    v2_atr_period: int = 30
+    v2_noise_lookback_bars: int = 60
+    v2_initial_stop_atr_mult: float = 2.5
+    v2_trailing_stop_atr_mult: float = 2.0
+    v2_overheat_trailing_atr_mult: float = 1.0
+    v2_trailing_activation_atr_mult: float = 2.0
+    v2_pyramid_atr_mult: float = 1.0
+    v2_day_open_initial_stop_pct: float = 0.0030
+    v2_day_open_trailing_stop_pct: float = 0.0022
+    v2_day_open_overheat_trailing_pct: float = 0.0015
+    v2_day_open_activation_pct: float = 0.0030
+    v2_day_open_pyramid_pct: float = 0.0015
+    v2_regular_initial_stop_pct: float = 0.0020
+    v2_regular_trailing_stop_pct: float = 0.0015
+    v2_regular_overheat_trailing_pct: float = 0.0012
+    v2_regular_activation_pct: float = 0.0020
+    v2_regular_pyramid_pct: float = 0.0012
+    v2_night_initial_stop_pct: float = 0.0025
+    v2_night_trailing_stop_pct: float = 0.0018
+    v2_night_overheat_trailing_pct: float = 0.0013
+    v2_night_activation_pct: float = 0.0025
+    v2_night_pyramid_pct: float = 0.0013
+    v2_initial_noise_percentile: float = 0.90
+    v2_trailing_noise_percentile: float = 0.75
+    v2_overheat_noise_percentile: float = 0.75
+    v2_activation_noise_percentile: float = 0.90
+    v2_pyramid_noise_percentile: float = 0.75
+    v2_initial_noise_mult: float = 1.1
+    v2_trailing_noise_mult: float = 1.2
+    v2_overheat_noise_mult: float = 1.0
+    v2_activation_noise_mult: float = 1.0
+    v2_pyramid_noise_mult: float = 1.0
+    v2_variant: str = "baseline"
+    v2_entry_breakout_lookback: Optional[int] = None
+    v2_entry_min_vwap_deviation: float = 0.0
+    v2_entry_max_vwap_deviation: Optional[float] = None
+    v2_entry_atr_cap: Optional[float] = None
+    v2_entry_breakout_atr_buffer_mult: float = 0.0
+    v2_reversal_confirm_5m_bars: int = 0
+    v2_initial_stop_cap_points: Optional[float] = None
+    v2_early_fail_bars: int = 0
+    v2_early_fail_min_progress_atr_mult: float = 0.0
+    v2_vwap_loss_exit_after_early_fail: bool = False
+
+    def v2_setting(self, name: str):
+        value = getattr(self, name)
+        field_default = self.__dataclass_fields__[name].default
+        preset = V2_STRATEGY_VARIANT_PRESETS.get(self.v2_variant or "baseline", {})
+        if name in preset and value == field_default:
+            return preset[name]
+        return value
 
     def get_profile(self, bar_time: datetime, session: SessionType) -> SessionProfile:
         """根據時間與時段取得對應 profile"""
@@ -133,6 +213,49 @@ class StrategyConfig:
             "day_regular_profile": self.day_regular_profile.to_dict(),
             "night_profile": self.night_profile.to_dict(),
             "day_open_phase_minutes": self.day_open_phase_minutes,
+            "v2_atr_period": self.v2_atr_period,
+            "v2_noise_lookback_bars": self.v2_noise_lookback_bars,
+            "v2_initial_stop_atr_mult": self.v2_initial_stop_atr_mult,
+            "v2_trailing_stop_atr_mult": self.v2_trailing_stop_atr_mult,
+            "v2_overheat_trailing_atr_mult": self.v2_overheat_trailing_atr_mult,
+            "v2_trailing_activation_atr_mult": self.v2_trailing_activation_atr_mult,
+            "v2_pyramid_atr_mult": self.v2_pyramid_atr_mult,
+            "v2_day_open_initial_stop_pct": self.v2_day_open_initial_stop_pct,
+            "v2_day_open_trailing_stop_pct": self.v2_day_open_trailing_stop_pct,
+            "v2_day_open_overheat_trailing_pct": self.v2_day_open_overheat_trailing_pct,
+            "v2_day_open_activation_pct": self.v2_day_open_activation_pct,
+            "v2_day_open_pyramid_pct": self.v2_day_open_pyramid_pct,
+            "v2_regular_initial_stop_pct": self.v2_regular_initial_stop_pct,
+            "v2_regular_trailing_stop_pct": self.v2_regular_trailing_stop_pct,
+            "v2_regular_overheat_trailing_pct": self.v2_regular_overheat_trailing_pct,
+            "v2_regular_activation_pct": self.v2_regular_activation_pct,
+            "v2_regular_pyramid_pct": self.v2_regular_pyramid_pct,
+            "v2_night_initial_stop_pct": self.v2_night_initial_stop_pct,
+            "v2_night_trailing_stop_pct": self.v2_night_trailing_stop_pct,
+            "v2_night_overheat_trailing_pct": self.v2_night_overheat_trailing_pct,
+            "v2_night_activation_pct": self.v2_night_activation_pct,
+            "v2_night_pyramid_pct": self.v2_night_pyramid_pct,
+            "v2_initial_noise_percentile": self.v2_initial_noise_percentile,
+            "v2_trailing_noise_percentile": self.v2_trailing_noise_percentile,
+            "v2_overheat_noise_percentile": self.v2_overheat_noise_percentile,
+            "v2_activation_noise_percentile": self.v2_activation_noise_percentile,
+            "v2_pyramid_noise_percentile": self.v2_pyramid_noise_percentile,
+            "v2_initial_noise_mult": self.v2_initial_noise_mult,
+            "v2_trailing_noise_mult": self.v2_trailing_noise_mult,
+            "v2_overheat_noise_mult": self.v2_overheat_noise_mult,
+            "v2_activation_noise_mult": self.v2_activation_noise_mult,
+            "v2_pyramid_noise_mult": self.v2_pyramid_noise_mult,
+            "v2_variant": self.v2_variant,
+            "v2_entry_breakout_lookback": self.v2_entry_breakout_lookback,
+            "v2_entry_min_vwap_deviation": self.v2_entry_min_vwap_deviation,
+            "v2_entry_max_vwap_deviation": self.v2_entry_max_vwap_deviation,
+            "v2_entry_atr_cap": self.v2_entry_atr_cap,
+            "v2_entry_breakout_atr_buffer_mult": self.v2_entry_breakout_atr_buffer_mult,
+            "v2_reversal_confirm_5m_bars": self.v2_reversal_confirm_5m_bars,
+            "v2_initial_stop_cap_points": self.v2_initial_stop_cap_points,
+            "v2_early_fail_bars": self.v2_early_fail_bars,
+            "v2_early_fail_min_progress_atr_mult": self.v2_early_fail_min_progress_atr_mult,
+            "v2_vwap_loss_exit_after_early_fail": self.v2_vwap_loss_exit_after_early_fail,
         }
 
     @classmethod
@@ -142,7 +265,66 @@ class StrategyConfig:
             day_open_profile=SessionProfile.from_dict(data.get("day_open_profile", {})),
             day_regular_profile=SessionProfile.from_dict(data.get("day_regular_profile", {})),
             night_profile=SessionProfile.from_dict(data.get("night_profile", {})),
-            day_open_phase_minutes=int(data.get("day_open_phase_minutes", 30)),
+            day_open_phase_minutes=int(data.get("day_open_phase_minutes", 45)),
+            v2_atr_period=int(data.get("v2_atr_period", 30)),
+            v2_noise_lookback_bars=int(data.get("v2_noise_lookback_bars", 60)),
+            v2_initial_stop_atr_mult=float(data.get("v2_initial_stop_atr_mult", 2.5)),
+            v2_trailing_stop_atr_mult=float(data.get("v2_trailing_stop_atr_mult", 2.0)),
+            v2_overheat_trailing_atr_mult=float(data.get("v2_overheat_trailing_atr_mult", 1.0)),
+            v2_trailing_activation_atr_mult=float(data.get("v2_trailing_activation_atr_mult", 2.0)),
+            v2_pyramid_atr_mult=float(data.get("v2_pyramid_atr_mult", 1.0)),
+            v2_day_open_initial_stop_pct=float(data.get("v2_day_open_initial_stop_pct", 0.0030)),
+            v2_day_open_trailing_stop_pct=float(data.get("v2_day_open_trailing_stop_pct", 0.0022)),
+            v2_day_open_overheat_trailing_pct=float(data.get("v2_day_open_overheat_trailing_pct", 0.0015)),
+            v2_day_open_activation_pct=float(data.get("v2_day_open_activation_pct", 0.0030)),
+            v2_day_open_pyramid_pct=float(data.get("v2_day_open_pyramid_pct", 0.0015)),
+            v2_regular_initial_stop_pct=float(data.get("v2_regular_initial_stop_pct", 0.0020)),
+            v2_regular_trailing_stop_pct=float(data.get("v2_regular_trailing_stop_pct", 0.0015)),
+            v2_regular_overheat_trailing_pct=float(data.get("v2_regular_overheat_trailing_pct", 0.0012)),
+            v2_regular_activation_pct=float(data.get("v2_regular_activation_pct", 0.0020)),
+            v2_regular_pyramid_pct=float(data.get("v2_regular_pyramid_pct", 0.0012)),
+            v2_night_initial_stop_pct=float(data.get("v2_night_initial_stop_pct", 0.0025)),
+            v2_night_trailing_stop_pct=float(data.get("v2_night_trailing_stop_pct", 0.0018)),
+            v2_night_overheat_trailing_pct=float(data.get("v2_night_overheat_trailing_pct", 0.0013)),
+            v2_night_activation_pct=float(data.get("v2_night_activation_pct", 0.0025)),
+            v2_night_pyramid_pct=float(data.get("v2_night_pyramid_pct", 0.0013)),
+            v2_initial_noise_percentile=float(data.get("v2_initial_noise_percentile", 0.90)),
+            v2_trailing_noise_percentile=float(data.get("v2_trailing_noise_percentile", 0.75)),
+            v2_overheat_noise_percentile=float(data.get("v2_overheat_noise_percentile", 0.75)),
+            v2_activation_noise_percentile=float(data.get("v2_activation_noise_percentile", 0.90)),
+            v2_pyramid_noise_percentile=float(data.get("v2_pyramid_noise_percentile", 0.75)),
+            v2_initial_noise_mult=float(data.get("v2_initial_noise_mult", 1.1)),
+            v2_trailing_noise_mult=float(data.get("v2_trailing_noise_mult", 1.2)),
+            v2_overheat_noise_mult=float(data.get("v2_overheat_noise_mult", 1.0)),
+            v2_activation_noise_mult=float(data.get("v2_activation_noise_mult", 1.0)),
+            v2_pyramid_noise_mult=float(data.get("v2_pyramid_noise_mult", 1.0)),
+            v2_variant=str(data.get("v2_variant", "baseline") or "baseline"),
+            v2_entry_breakout_lookback=(
+                int(data["v2_entry_breakout_lookback"])
+                if data.get("v2_entry_breakout_lookback") is not None
+                else None
+            ),
+            v2_entry_min_vwap_deviation=float(data.get("v2_entry_min_vwap_deviation", 0.0)),
+            v2_entry_max_vwap_deviation=(
+                float(data["v2_entry_max_vwap_deviation"])
+                if data.get("v2_entry_max_vwap_deviation") is not None
+                else None
+            ),
+            v2_entry_atr_cap=(
+                float(data["v2_entry_atr_cap"])
+                if data.get("v2_entry_atr_cap") is not None
+                else None
+            ),
+            v2_entry_breakout_atr_buffer_mult=float(data.get("v2_entry_breakout_atr_buffer_mult", 0.0)),
+            v2_reversal_confirm_5m_bars=int(data.get("v2_reversal_confirm_5m_bars", 0)),
+            v2_initial_stop_cap_points=(
+                float(data["v2_initial_stop_cap_points"])
+                if data.get("v2_initial_stop_cap_points") is not None
+                else None
+            ),
+            v2_early_fail_bars=int(data.get("v2_early_fail_bars", 0)),
+            v2_early_fail_min_progress_atr_mult=float(data.get("v2_early_fail_min_progress_atr_mult", 0.0)),
+            v2_vwap_loss_exit_after_early_fail=bool(data.get("v2_vwap_loss_exit_after_early_fail", False)),
         )
 
 
@@ -337,6 +519,10 @@ class StrategyEngine:
         self._tx_15m.update(bar)
         self._update_direction(bar)
 
+    def warmup_tmf_bar(self, bar: Bar, session: SessionType) -> None:
+        """Warm up TMF bar history without emitting signals."""
+        self._append_tmf_bar(bar)
+
     def update_tmf_bar(
         self,
         bar: Bar,
@@ -352,13 +538,7 @@ class StrategyEngine:
 
         回傳 Signal 或 None。
         """
-        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
-        if self._tmf_recent_bars and self._tmf_recent_bars[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute:
-            self._tmf_recent_bars[-1] = bar
-        else:
-            self._tmf_recent_bars.append(bar)
-        if len(self._tmf_recent_bars) > self._tmf_max_bars:
-            self._tmf_recent_bars = self._tmf_recent_bars[-self._tmf_max_bars:]
+        self._append_tmf_bar(bar)
 
         profile = self.config.get_profile(bar.time, session)
 
@@ -379,6 +559,15 @@ class StrategyEngine:
                 return entry_signal
 
         return None
+
+    def _append_tmf_bar(self, bar: Bar) -> None:
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        if self._tmf_recent_bars and self._tmf_recent_bars[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute:
+            self._tmf_recent_bars[-1] = bar
+        else:
+            self._tmf_recent_bars.append(bar)
+        if len(self._tmf_recent_bars) > self._tmf_max_bars:
+            self._tmf_recent_bars = self._tmf_recent_bars[-self._tmf_max_bars:]
 
     def set_position_info(self, entry_price: float, side: OrderSide) -> None:
         """更新持倉資訊（開倉成功後呼叫）"""

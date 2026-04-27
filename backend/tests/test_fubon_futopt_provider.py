@@ -1,5 +1,6 @@
 import pytest
 
+import fubon_futopt_provider as futopt_module
 from fubon_futopt_provider import FubonFutoptProvider
 
 
@@ -129,7 +130,7 @@ async def test_futopt_provider_fetches_quote_with_resolved_symbol():
     manager = StubFutoptManager()
     provider = FubonFutoptProvider(manager)
 
-    quote = await provider.fetch_quote("TXF")
+    quote = await provider.fetch_quote("TXF", session="REGULAR")
 
     assert manager.quote_calls == [{"symbol": "TXFE6", "session": "REGULAR"}]
     assert quote["ticker"] == "TXFE6"
@@ -139,6 +140,18 @@ async def test_futopt_provider_fetches_quote_with_resolved_symbol():
     assert quote["is_delayed"] is False
     assert quote["bid"] == 20609
     assert quote["ask"] == 20610
+
+
+@pytest.mark.anyio
+async def test_futopt_provider_fetches_quote_from_auto_afterhours_session(monkeypatch):
+    monkeypatch.setattr(futopt_module, "resolve_futopt_session", lambda _session=None: "AFTERHOURS")
+    manager = StubFutoptManager()
+    provider = FubonFutoptProvider(manager)
+
+    quote = await provider.fetch_quote("TXF")
+
+    assert manager.quote_calls == [{"symbol": "TXFE6", "session": "AFTERHOURS"}]
+    assert quote["ticker"] == "TXFE6"
 
 
 @pytest.mark.anyio

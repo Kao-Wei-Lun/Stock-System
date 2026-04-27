@@ -41,6 +41,7 @@ class Position:
     unrealized_pnl: float = 0.0
     realized_pnl: float = 0.0
     last_price: float = 0.0
+    entry_reason: str = ""
 
     @property
     def is_long(self) -> bool:
@@ -73,6 +74,7 @@ class Position:
             "unrealized_pnl": round(self.unrealized_pnl, 2),
             "realized_pnl": round(self.realized_pnl, 2),
             "last_price": self.last_price,
+            "entry_reason": self.entry_reason,
         }
 
 
@@ -235,7 +237,13 @@ class PaperAccount:
         # 反方向 → 平倉
         return self._close_position(fill)
 
-    def on_bar(self, current_price: float, bar_time: Optional[datetime] = None) -> None:
+    def on_bar(
+        self,
+        current_price: float,
+        bar_time: Optional[datetime] = None,
+        *,
+        advance_bar: bool = True,
+    ) -> None:
         """更新未平倉損益與權益追蹤"""
         if self.position:
             self.position.update_unrealized(current_price, self.product.point_value)
@@ -248,7 +256,7 @@ class PaperAccount:
             self.current_drawdown_pct = max(0, (self.peak_equity - current_equity) / self.peak_equity)
 
         # 冷卻倒數
-        if self.cooldown_remaining_bars > 0:
+        if advance_bar and self.cooldown_remaining_bars > 0:
             self.cooldown_remaining_bars -= 1
 
     def take_equity_snapshot(self, bar_time: datetime, close_price: float = 0.0) -> EquitySnapshot:
@@ -318,6 +326,7 @@ class PaperAccount:
             qty=fill.fill_qty,
             avg_entry_price=fill.fill_price,
             entry_time=fill.fill_time,
+            entry_reason=fill.order_reason or fill.fill_reason.value,
         )
         self.margin_used = fill.fill_qty * self.margin_per_contract
         self._entry_fill_fee = fill.fee_amount
@@ -370,8 +379,8 @@ class PaperAccount:
             gross_pnl=gross_pnl,
             fee_total=total_fee,
             net_pnl=net_pnl,
-            entry_reason=getattr(pos, '_entry_reason', ''),
-            exit_reason=fill.fill_reason.value,
+            entry_reason=pos.entry_reason,
+            exit_reason=fill.order_reason or fill.fill_reason.value,
             holding_bars=self._bar_count,
         )
         self._next_trade_id += 1

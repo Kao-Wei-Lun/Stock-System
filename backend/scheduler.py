@@ -295,7 +295,17 @@ async def fubon_ws_listener_loop(
         if fubon_manager.connected:
             log.info("Fubon websocket listener is active")
 
+        last_session_refresh = 0.0
+
         while True:
+            refresh_sessions = getattr(fubon_manager, "refresh_session_assignments", None)
+            if callable(refresh_sessions) and time.monotonic() - last_session_refresh >= 30:
+                try:
+                    await refresh_sessions()
+                except Exception as exc:
+                    log.debug("Fubon realtime session refresh skipped: %s", exc)
+                last_session_refresh = time.monotonic()
+
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=60)
             except asyncio.TimeoutError:

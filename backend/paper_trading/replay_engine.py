@@ -285,6 +285,9 @@ class ReplayEngine:
                         if self.strategy_config.strategy_type == "v2":
                             current_atr = max(1.0, float(getattr(strategy, "current_atr", 0.0) or 1.0))
                             stop_distance = current_atr * 1.5
+                            distance_getter = getattr(strategy, "get_effective_stop_distances", None)
+                            if callable(distance_getter):
+                                stop_distance = distance_getter(tmf_bar, session, profile).initial_stop
                             remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
                             requested_qty = max(1, int(signal.qty or 1))
                             size_check = risk.check_order_size(

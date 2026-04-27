@@ -4,17 +4,13 @@ import asyncio
 import logging
 import time
 from datetime import date
-from datetime import datetime, time as time_of_day, tzinfo
+from datetime import datetime, tzinfo
 from typing import Any
 
+from futopt_session import is_futopt_trading_time
 from fubon_symbols import normalize_futopt_symbol_query
 
 log = logging.getLogger(__name__)
-
-DAY_SESSION_OPEN = time_of_day(8, 45)
-DAY_SESSION_CLOSE = time_of_day(13, 45)
-NIGHT_SESSION_OPEN = time_of_day(15, 0)
-NIGHT_SESSION_CLOSE = time_of_day(5, 0)
 
 
 def date_range_to_futopt_period(start_date: str, end_date: str) -> str:
@@ -43,11 +39,6 @@ def intraday_end_bound(end_date: str) -> str:
     if len(raw) == 10:
         return f"{raw}T23:59:59"
     return raw
-
-
-def is_futopt_trading_time(now: datetime) -> bool:
-    t = now.time()
-    return DAY_SESSION_OPEN <= t <= DAY_SESSION_CLOSE or t >= NIGHT_SESSION_OPEN or t <= NIGHT_SESSION_CLOSE
 
 
 def build_futopt_storage_tickers(symbol: str, payload: dict[str, Any]) -> list[str]:

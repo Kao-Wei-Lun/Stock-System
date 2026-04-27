@@ -166,9 +166,12 @@ async def get_quote(ticker: str):
 
 
 @router.get("/futopt/quote/{symbol}", response_model=QuoteResponse)
-async def get_futopt_quote(symbol: str):
+async def get_futopt_quote(
+    symbol: str,
+    session: str | None = Query("AUTO", description="AUTO, REGULAR, or AFTERHOURS"),
+):
     try:
-        quote = await fubon_futopt_provider.fetch_quote(symbol)
+        quote = await fubon_futopt_provider.fetch_quote(symbol, session=session)
     except Exception as exc:
         log.warning("futopt quote fetch failed for %s: %s", symbol, exc)
         raise HTTPException(502, f"Unable to fetch futopt quote: {exc}") from exc

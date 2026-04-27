@@ -1,5 +1,6 @@
 import pytest
 
+import fubon_realtime_pool as realtime_pool_module
 from fubon_realtime_pool import FubonRealtimeSubscriptionPool
 
 
@@ -23,15 +24,15 @@ class FakeManager:
         self.subscribed.append(("stock", symbol, channel, timeout))
         return f"{symbol}-{channel}"
 
-    async def subscribe_futopt_async(self, symbol, channel, timeout=2.5):
-        self.subscribed.append(("futopt", symbol, channel, timeout))
+    async def subscribe_futopt_async(self, symbol, channel, after_hours=False, timeout=2.5):
+        self.subscribed.append(("futopt", symbol, channel, after_hours, timeout))
         return f"{symbol}-{channel}"
 
     def unsubscribe_stock(self, symbol, channel):
         self.unsubscribed.append(("stock", symbol, channel))
 
-    def unsubscribe_futopt(self, symbol, channel):
-        self.unsubscribed.append(("futopt", symbol, channel))
+    def unsubscribe_futopt(self, symbol, channel, after_hours=False):
+        self.unsubscribed.append(("futopt", symbol, channel, after_hours))
 
     def shutdown(self):
         self.connected = False
@@ -155,6 +156,36 @@ async def test_realtime_pool_maps_alias_ticker_to_resolved_contract():
     await pool.set_source_tickers("watchlist", ["TXF"])
 
     assert pool.resolve_broadcast_tickers("TXFE6") == ("TXF",)
+
+
+@pytest.mark.anyio
+async def test_realtime_pool_subscribes_futopt_afterhours_when_night_session(monkeypatch):
+    monkeypatch.setattr(realtime_pool_module, "is_futopt_after_hours", lambda: True)
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._managers = {1: primary}
+
+    await pool.set_source_tickers("ws", ["TXFE6"])
+
+    assert ("futopt", "TXFE6", "books", True, 2.5) in primary.subscribed
+    assert ("futopt", "TXFE6", "candles", True, 2.5) in primary.subscribed
+    assert pool.get_account_runtime_statuses()[1]["realtime_afterhours_tickers"] == ["TXFE6"]
+
+
+@pytest.mark.anyio
+async def test_realtime_pool_refreshes_futopt_subscription_on_session_change(monkeypatch):
+    state = {"after_hours": False}
+    monkeypatch.setattr(realtime_pool_module, "is_futopt_after_hours", lambda: state["after_hours"])
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._managers = {1: primary}
+
+    await pool.set_source_tickers("ws", ["TXFE6"])
+    state["after_hours"] = True
+    await pool.refresh_session_assignments()
+
+    assert ("futopt", "TXFE6", "books", False) in primary.unsubscribed
+    assert ("futopt", "TXFE6", "books", True, 2.5) in primary.subscribed
 
 
 @pytest.mark.anyio

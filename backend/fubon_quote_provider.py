@@ -105,17 +105,20 @@ def build_fubon_quote_payload(
         price = _coerce_positive_float(payload.get("lastPrice"))
     if price is None:
         price = _coerce_positive_float(payload.get("price"))
+    if price is None and isinstance(payload.get("lastTrade"), dict):
+        price = _coerce_positive_float(payload["lastTrade"].get("price"))
     if price is None and isinstance(payload.get("trades"), list) and payload["trades"]:
         price = _coerce_positive_float(payload["trades"][0].get("price"))
     if price is None:
         return None
 
+    latest_trade = payload["trades"][0] if isinstance(payload.get("trades"), list) and payload["trades"] else {}
     bids = _normalize_order_levels(payload.get("bids"))
     asks = _normalize_order_levels(payload.get("asks"))
     if not bids:
-        bids = _normalize_scalar_book_level(payload.get("bid"))
+        bids = _normalize_scalar_book_level(payload.get("bid") or latest_trade.get("bid"))
     if not asks:
-        asks = _normalize_scalar_book_level(payload.get("ask"))
+        asks = _normalize_scalar_book_level(payload.get("ask") or latest_trade.get("ask"))
     total = payload.get("total") if isinstance(payload.get("total"), dict) else {}
 
     previous_close = _coerce_positive_float(payload.get("previousClose"))

@@ -107,6 +107,7 @@ class Fill:
     bar_high: Optional[float] = None
     bar_low: Optional[float] = None
     bar_close: Optional[float] = None
+    order_reason: str = ""
 
     @property
     def gross_value(self) -> float:
@@ -130,6 +131,7 @@ class Fill:
             "bar_high": self.bar_high,
             "bar_low": self.bar_low,
             "bar_close": self.bar_close,
+            "order_reason": self.order_reason,
         }
 
 
@@ -321,6 +323,7 @@ class SimulationBroker:
             bar_high=bar.high,
             bar_low=bar.low,
             bar_close=bar.close,
+            order_reason=reason.value,
         )
         self._next_fill_id += 1
         self._all_fills.append(fill)
@@ -365,6 +368,7 @@ class SimulationBroker:
             bar_high=bar.high,
             bar_low=bar.low,
             bar_close=bar.close,
+            order_reason=order.reason,
         )
         self._next_fill_id += 1
         return fill
@@ -410,6 +414,7 @@ class SimulationBroker:
             bar_high=bar.high,
             bar_low=bar.low,
             bar_close=bar.close,
+            order_reason=order.reason,
         )
         self._next_fill_id += 1
         return fill
@@ -451,6 +456,7 @@ class SimulationBroker:
             bar_high=bar.high,
             bar_low=bar.low,
             bar_close=bar.close,
+            order_reason=order.reason,
         )
         self._next_fill_id += 1
         return fill

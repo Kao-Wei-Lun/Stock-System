@@ -83,6 +83,14 @@
               <option value="v2">V2: ATR 動態加碼與移動停損</option>
             </select>
           </div>
+          <div class="pt-field" v-if="strategyForm.strategy_type === 'v2'">
+            <label>V2 Strategy Version</label>
+            <select v-model="strategyForm.v2_variant">
+              <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
           <div class="pt-field" v-if="strategyForm.strategy_type === 'v1'">
             <label>停損點數</label>
             <input v-model.number="strategyForm.stop_loss_points" type="number" />
@@ -165,6 +173,29 @@
               <option value="overnight_allowed">允許隔夜</option>
             </select>
           </div>
+          <div class="pt-field">
+            <label>Bot Strategy Engine</label>
+            <select v-model="botStrategyForm.strategy_type">
+              <option value="v1">V1 fixed points</option>
+              <option value="v2">V2 dynamic ATR</option>
+            </select>
+          </div>
+          <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v2'">
+            <label>Bot V2 Version</label>
+            <select v-model="botStrategyForm.v2_variant">
+              <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+          <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v1'">
+            <label>Bot Stop Loss Points</label>
+            <input v-model.number="botStrategyForm.stop_loss_points" type="number" />
+          </div>
+          <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v1'">
+            <label>Bot Take Profit Points</label>
+            <input v-model.number="botStrategyForm.take_profit_points" type="number" />
+          </div>
         </div>
         <div class="pt-card-actions">
           <button class="pt-btn pt-btn-primary" :disabled="creatingBot" @click="createBot">
@@ -183,6 +214,7 @@
                 <th>ID</th>
                 <th>名稱</th>
                 <th>模式</th>
+                <th>策略</th>
                 <th>狀態</th>
                 <th>K 棒數</th>
                 <th>操作</th>
@@ -195,6 +227,7 @@
                 <td>
                   <span class="pt-mode-badge" :class="bot.mode">{{ bot.mode === 'realtime' ? '即時' : '回放' }}</span>
                 </td>
+                <td>{{ strategyConfigLabel(bot.strategy_config) }}</td>
                 <td>
                   <span class="pt-status-badge" :class="bot.status">{{ botStatusLabel(bot.status) }}</span>
                 </td>
@@ -261,8 +294,44 @@
             <div class="pt-stat-value">{{ directionLabel }}</div>
           </div>
           <div class="pt-stat">
+            <div class="pt-stat-label">策略版本</div>
+            <div class="pt-stat-value">{{ strategyConfigLabel(liveBotState.strategy_config) }}</div>
+          </div>
+          <div class="pt-stat">
             <div class="pt-stat-label">K 棒數</div>
             <div class="pt-stat-value">{{ liveBotState.bar_count?.toLocaleString() }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">最新 K 價</div>
+            <div class="pt-stat-value">{{ liveBotState.latest_realtime_bar?.close ?? '--' }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">K 狀態</div>
+            <div class="pt-stat-value">{{ liveBotState.latest_realtime_bar_is_partial ? '形成中' : '完成' }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">V2 初始停損</div>
+            <div class="pt-stat-value">{{ formatPoints(liveBotState.v2_stop_distances?.initial_stop) }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">V2 移動停損</div>
+            <div class="pt-stat-value">{{ formatPoints(liveBotState.v2_stop_distances?.trailing_stop) }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">預熱 K 棒</div>
+            <div class="pt-stat-value">{{ liveBotState.warmup_bar_count?.toLocaleString() || 0 }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">資料來源</div>
+            <div class="pt-stat-value">{{ dataSourceLabel }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">商品合約</div>
+            <div class="pt-stat-value">{{ liveBotState.resolved_product_symbol || '--' }}</div>
+          </div>
+          <div class="pt-stat">
+            <div class="pt-stat-label">方向合約</div>
+            <div class="pt-stat-value">{{ liveBotState.resolved_direction_symbol || '--' }}</div>
           </div>
           <div class="pt-stat">
             <div class="pt-stat-label">最大回撤</div>
@@ -389,6 +458,29 @@
           <div class="pt-field">
             <label>初始權益</label>
             <input v-model.number="replayForm.starting_equity" type="number" />
+          </div>
+          <div class="pt-field">
+            <label>Replay Strategy Engine</label>
+            <select v-model="replayStrategyForm.strategy_type">
+              <option value="v1">V1 fixed points</option>
+              <option value="v2">V2 dynamic ATR</option>
+            </select>
+          </div>
+          <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v2'">
+            <label>Replay V2 Version</label>
+            <select v-model="replayStrategyForm.v2_variant">
+              <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+          <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v1'">
+            <label>Replay Stop Loss Points</label>
+            <input v-model.number="replayStrategyForm.stop_loss_points" type="number" />
+          </div>
+          <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v1'">
+            <label>Replay Take Profit Points</label>
+            <input v-model.number="replayStrategyForm.take_profit_points" type="number" />
           </div>
         </div>
         <FuturesRiskSizerPanel
@@ -574,6 +666,13 @@ const riskSizingError = ref("");
 let _pollTimer = null;
 let _riskSizingTimer = null;
 
+const v2VariantOptions = [
+  { value: "baseline", label: "V2 原始動態 ATR" },
+  { value: "v2_b15_c2", label: "前一版 B15+C2" },
+  { value: "v2_profit_candidate", label: "損益候選版" },
+  { value: "v2_winrate_candidate", label: "勝率候選版" },
+];
+
 const accountForm = reactive({
   name: "TMF Paper Account",
   starting_equity: 100000,
@@ -592,6 +691,7 @@ const riskForm = reactive({
 
 const strategyForm = reactive({
   strategy_type: "v1",
+  v2_variant: "baseline",
   stop_loss_points: 60,
   take_profit_points: 120,
 });
@@ -601,6 +701,20 @@ const botForm = reactive({
   name: "TMF Day Bot",
   mode: "realtime",
   holding_policy: "day_only",
+});
+
+const botStrategyForm = reactive({
+  strategy_type: "v2",
+  v2_variant: "v2_winrate_candidate",
+  stop_loss_points: 60,
+  take_profit_points: 120,
+});
+
+const replayStrategyForm = reactive({
+  strategy_type: "v2",
+  v2_variant: "v2_winrate_candidate",
+  stop_loss_points: 60,
+  take_profit_points: 120,
 });
 
 const replayForm = reactive({
@@ -629,8 +743,17 @@ const directionLabel = computed(() => {
   return { long: "📈 做多", short: "📉 做空", neutral: "⏸ 觀望" }[d] || d || "--";
 });
 
+const dataSourceLabel = computed(() => {
+  const source = liveBotState.value?.data_source;
+  return { fubon_neo: "富邦 API" }[source] || source || "--";
+});
+
 const riskSizingCapital = computed(() => (
   activeTab.value === "replay" ? replayForm.starting_equity : accountForm.starting_equity
+));
+
+const activeRiskStrategyForm = computed(() => (
+  activeTab.value === "replay" ? replayStrategyForm : strategyForm
 ));
 
 // ─── API Helpers ─────────────────────────────────────────────
@@ -656,13 +779,47 @@ function buildRiskSizingPayload() {
     product_symbol: "TMF",
     futures_capital: Number(riskSizingCapital.value || 0),
     initial_margin: Number(accountForm.initial_margin_per_contract || 0),
-    stop_loss_points: Number(strategyForm.stop_loss_points || 0),
+    stop_loss_points: Number(riskSizingStopLossPoints(activeRiskStrategyForm.value) || 0),
     stress_points: Number(riskForm.stress_points || 0),
     margin_usage_limit: Number(riskForm.max_margin_usage_pct || 0),
     single_trade_risk_pct: Number(riskForm.risk_per_trade_pct || 0),
     total_position_risk_pct: Number(riskForm.total_position_risk_pct || 0),
     user_max_contracts: Number(riskForm.max_contracts_hard || 0),
   };
+}
+
+function riskSizingStopLossPoints(form) {
+  if (form.strategy_type !== "v2") return Number(form.stop_loss_points || 0);
+  const variantStops = {
+    v2_b15_c2: 150,
+    v2_profit_candidate: 120,
+    v2_winrate_candidate: 150,
+  };
+  return variantStops[form.v2_variant] || 120;
+}
+
+function buildStrategyConfig(form) {
+  const config = {
+    strategy_type: form.strategy_type,
+    day_regular_profile: {
+      stop_loss_points: Number(form.stop_loss_points || 0),
+      take_profit_points: Number(form.take_profit_points || 0),
+    },
+  };
+  if (form.strategy_type === "v2") {
+    config.v2_variant = form.v2_variant || "baseline";
+  }
+  return config;
+}
+
+function strategyVariantLabel(value) {
+  return v2VariantOptions.find((item) => item.value === value)?.label || "V2 原始動態 ATR";
+}
+
+function strategyConfigLabel(config) {
+  const strategyType = config?.strategy_type || "v1";
+  if (strategyType !== "v2") return "V1 固定點數";
+  return strategyVariantLabel(config?.v2_variant || "baseline");
 }
 
 async function refreshRiskSizing() {
@@ -726,13 +883,7 @@ async function createAccount() {
         ...accountForm,
         risk_config: { ...riskForm },
         cost_model: {},
-        strategy_config: {
-          strategy_type: strategyForm.strategy_type,
-          day_regular_profile: {
-            stop_loss_points: strategyForm.stop_loss_points,
-            take_profit_points: strategyForm.take_profit_points,
-          },
-        },
+        strategy_config: buildStrategyConfig(strategyForm),
       }),
     });
     showToast("帳戶建立成功", "success");
@@ -749,7 +900,10 @@ async function createBot() {
   try {
     await apiFetch("/bots", {
       method: "POST",
-      body: JSON.stringify(botForm),
+      body: JSON.stringify({
+        ...botForm,
+        strategy_config: buildStrategyConfig(botStrategyForm),
+      }),
     });
     showToast("Bot 建立成功", "success");
     await loadBots();
@@ -799,13 +953,7 @@ async function runReplay() {
       body: JSON.stringify({
         ...replayForm,
         risk_config: { ...riskForm },
-        strategy_config: {
-          strategy_type: strategyForm.strategy_type,
-          day_regular_profile: {
-            stop_loss_points: strategyForm.stop_loss_points,
-            take_profit_points: strategyForm.take_profit_points,
-          },
-        },
+        strategy_config: buildStrategyConfig(replayStrategyForm),
         cost_model: {},
       }),
     });
@@ -831,6 +979,7 @@ async function pollRunningBots() {
       if (bot) {
         bot.bar_count = state.bar_count;
         bot.status = state.status;
+        bot.strategy_config = state.strategy_config || bot.strategy_config;
       }
       // Update live state if this bot is selected
       if (liveBotState.value?.bot_id === id || ids.length === 1) {
@@ -853,6 +1002,11 @@ function stopPolling() {
 function formatCurrency(val) {
   if (val == null) return "--";
   return new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(val);
+}
+
+function formatPoints(val) {
+  if (val == null || Number.isNaN(Number(val))) return "--";
+  return `${Number(val).toFixed(1)} 點`;
 }
 
 function formatTime(val) {
@@ -881,7 +1035,12 @@ watch(
     () => accountForm.starting_equity,
     () => replayForm.starting_equity,
     () => accountForm.initial_margin_per_contract,
+    () => strategyForm.strategy_type,
+    () => strategyForm.v2_variant,
     () => strategyForm.stop_loss_points,
+    () => replayStrategyForm.strategy_type,
+    () => replayStrategyForm.v2_variant,
+    () => replayStrategyForm.stop_loss_points,
     () => riskForm.max_contracts_hard,
     () => riskForm.max_margin_usage_pct,
     () => riskForm.risk_per_trade_pct,

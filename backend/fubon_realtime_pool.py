@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from data_fetcher import normalize_ticker
+from futopt_session import is_futopt_after_hours
 from fubon_quote_provider import build_fubon_quote_payload
 from fubon_symbols import (
     is_exact_futopt_contract,
@@ -31,6 +32,7 @@ class RealtimeAssignment:
     symbol: str
     channels: tuple[str, ...]
     account_id: int
+    after_hours: bool = False
 
 
 class FubonRealtimeSubscriptionPool:
@@ -232,10 +234,28 @@ class FubonRealtimeSubscriptionPool:
                 "realtime_assigned_count": len(assignments),
                 "realtime_assigned_tickers": [item.requested_ticker for item in assignments],
                 "realtime_resolved_tickers": sorted({item.resolved_ticker for item in assignments}),
+                "realtime_afterhours_tickers": [
+                    item.requested_ticker
+                    for item in assignments
+                    if item.market_type == "futopt" and item.after_hours
+                ],
                 "realtime_ws_mode": manager.ws_mode,
                 "realtime_connected": bool(manager.connected),
             }
         return result
+
+    async def refresh_session_assignments(self) -> None:
+        """Re-subscribe futures/options streams when TAIFEX switches day/night sessions."""
+        desired_after_hours = is_futopt_after_hours()
+        stale_tickers = [
+            ticker
+            for ticker, assignment in list(self._assignments.items())
+            if assignment.market_type == "futopt"
+            and assignment.after_hours != desired_after_hours
+            and self._has_any_source(ticker)
+        ]
+        for ticker in stale_tickers:
+            await self._ensure_assignment(ticker)
 
     def _attach_bridge_handler(self, account_id: int, manager: FubonSDKManager) -> None:
         existing = self._manager_bridge_handlers.get(account_id)
@@ -340,6 +360,7 @@ class FubonRealtimeSubscriptionPool:
                     symbol=target["symbol"],
                     channels=channels,
                     account_id=account_id,
+                    after_hours=bool(target.get("after_hours")),
                 )
                 self._assignments[normalized] = assignment
                 self._resolved_to_requested[target["resolved_ticker"]].add(normalized)
@@ -395,6 +416,7 @@ class FubonRealtimeSubscriptionPool:
                 "resolved_ticker": normalized,
                 "market_type": "futopt",
                 "symbol": normalized,
+                "after_hours": is_futopt_after_hours(),
             }
 
         if not callable(self._resolve_futopt_contract):
@@ -409,6 +431,7 @@ class FubonRealtimeSubscriptionPool:
             "resolved_ticker": resolved_symbol,
             "market_type": "futopt",
             "symbol": resolved_symbol,
+            "after_hours": is_futopt_after_hours(),
         }
 
     def _preferred_ws_modes_for_ticker(self, ticker: str) -> tuple[str, ...]:
@@ -436,6 +459,8 @@ class FubonRealtimeSubscriptionPool:
     def _assignment_satisfies_preference(self, ticker: str, assignment: RealtimeAssignment) -> bool:
         manager = self._managers.get(assignment.account_id)
         if not manager or not manager.connected:
+            return False
+        if assignment.market_type == "futopt" and assignment.after_hours != is_futopt_after_hours():
             return False
 
         candidates = self._candidate_managers(ticker)
@@ -481,6 +506,7 @@ class FubonRealtimeSubscriptionPool:
     async def _subscribe_target_on_manager(self, manager: FubonSDKManager, target: dict[str, str]) -> tuple[str, ...]:
         channels = self._channels_for(manager, target["market_type"])
         subscribed: list[str] = []
+        after_hours = bool(target.get("after_hours"))
 
         try:
             for channel in channels:
@@ -494,6 +520,7 @@ class FubonRealtimeSubscriptionPool:
                     await manager.subscribe_futopt_async(
                         target["symbol"],
                         channel,
+                        after_hours=after_hours,
                         timeout=self._subscription_timeout_seconds,
                     )
                 subscribed.append(channel)
@@ -502,7 +529,7 @@ class FubonRealtimeSubscriptionPool:
                 if target["market_type"] == "stock":
                     manager.unsubscribe_stock(target["symbol"], channel)
                 else:
-                    manager.unsubscribe_futopt(target["symbol"], channel)
+                    manager.unsubscribe_futopt(target["symbol"], channel, after_hours=after_hours)
             raise
 
         return channels
@@ -556,4 +583,4 @@ class FubonRealtimeSubscriptionPool:
             if assignment.market_type == "stock":
                 manager.unsubscribe_stock(assignment.symbol, channel)
             else:
-                manager.unsubscribe_futopt(assignment.symbol, channel)
+                manager.unsubscribe_futopt(assignment.symbol, channel, after_hours=assignment.after_hours)

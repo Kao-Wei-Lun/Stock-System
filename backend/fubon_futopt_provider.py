@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from data_fetcher import normalize_ticker
+from futopt_session import resolve_futopt_session
 from fubon_quote_provider import build_fubon_quote_payload
 from fubon_symbols import (
     derive_futopt_product_query,
@@ -149,6 +150,7 @@ class FubonFutoptProvider:
     async def resolve_contract(self, symbol: str, *, session: str = "REGULAR") -> Optional[dict]:
         normalized_symbol = normalize_ticker(symbol)
         query = normalize_futopt_symbol_query(normalized_symbol)
+        resolved_session = resolve_futopt_session(session)
         if is_exact_futopt_contract(query):
             return {
                 "requested_symbol": normalized_symbol,
@@ -161,7 +163,7 @@ class FubonFutoptProvider:
         if not is_futopt_base_alias(query):
             return None
 
-        contracts = await self._load_contracts(query, session=session)
+        contracts = await self._load_contracts(query, session=resolved_session)
         if not contracts:
             return None
 
@@ -181,12 +183,13 @@ class FubonFutoptProvider:
             "instrument_type": _instrument_type_label(resolved, "FUTURE"),
         }
 
-    async def fetch_quote(self, symbol: str, *, session: str = "REGULAR") -> Optional[dict]:
-        resolved = await self.resolve_contract(symbol, session=session)
+    async def fetch_quote(self, symbol: str, *, session: str = "AUTO") -> Optional[dict]:
+        resolved_session = resolve_futopt_session(session)
+        resolved = await self.resolve_contract(symbol, session=resolved_session)
         if not resolved:
             return None
 
-        response = await self._manager.fetch_futopt_quote(resolved["resolved_symbol"], session=session)
+        response = await self._manager.fetch_futopt_quote(resolved["resolved_symbol"], session=resolved_session)
         payload = build_fubon_quote_payload(
             resolved["resolved_symbol"],
             response or {},
