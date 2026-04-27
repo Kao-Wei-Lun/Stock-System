@@ -424,7 +424,7 @@ class PaperTradingAccountCreate(BaseModel):
     name: str = Field("TMF Paper Account", min_length=1, max_length=128)
     product_symbol: str = Field("TMF", max_length=32)
     starting_equity: float = Field(100_000, gt=0)
-    initial_margin_per_contract: float = Field(2_025, gt=0)
+    initial_margin_per_contract: float = Field(26_300, gt=0)
     risk_config: dict = Field(default_factory=dict)
     cost_model: dict = Field(default_factory=dict)
     strategy_config: dict | None = None
@@ -457,7 +457,28 @@ class PaperTradingReplayPayload(BaseModel):
     start_date: str = Field(..., min_length=10, max_length=10)
     end_date: str = Field(..., min_length=10, max_length=10)
     starting_equity: float = Field(100_000, gt=0)
-    initial_margin_per_contract: float = Field(2_025, gt=0)
+    initial_margin_per_contract: float = Field(26_300, gt=0)
     risk_config: dict = Field(default_factory=dict)
     strategy_config: dict = Field(default_factory=dict)
     cost_model: dict = Field(default_factory=dict)
+
+
+class FuturesPositionSizePayload(BaseModel):
+    account_id: int | None = None
+    product_symbol: str = Field("TMF", max_length=32)
+    futures_capital: float | None = Field(None, gt=0)
+    point_value: float | None = Field(None, gt=0)
+    initial_margin: float | None = Field(None, gt=0)
+    maintenance_margin: float | None = Field(None, ge=0)
+    stop_loss_points: float = Field(..., gt=0)
+    stress_points: float = Field(2_000, gt=0)
+    margin_usage_limit: float = Field(0.6, ge=0)
+    single_trade_risk_pct: float = Field(0.02, ge=0)
+    total_position_risk_pct: float = Field(0.2, ge=0)
+    user_max_contracts: int = Field(10, ge=0)
+    open_contracts: int | None = Field(None, ge=0)
+    margin_used: float | None = Field(None, ge=0)
+
+
+class FuturesOrderValidatePayload(FuturesPositionSizePayload):
+    requested_qty: int = Field(..., ge=1)

@@ -148,7 +148,10 @@ async def test_futopt_provider_fetches_intraday_ohlc():
 
     payload = await provider.fetch_intraday_ohlc("MXF", period="1d", interval="1m")
 
-    assert manager.candle_calls == [{"symbol": "MXFE6", "timeframe": "1", "session": "REGULAR"}]
+    # 因為 session 預設為 ALL，現在會平行抓取 REGULAR 與 AFTERHOURS
+    assert {"symbol": "MXFE6", "timeframe": "1", "session": "REGULAR"} in manager.candle_calls
+    assert {"symbol": "MXFE6", "timeframe": "1", "session": "AFTERHOURS"} in manager.candle_calls
+    assert len(manager.candle_calls) == 2
     assert payload["ticker"] == "MXFE6"
     assert payload["interval"] == "1m"
     assert payload["data"][0]["source"] == "fubon_neo"

@@ -285,14 +285,37 @@ class ReplayEngine:
                         if self.strategy_config.strategy_type == "v2":
                             current_atr = max(1.0, float(getattr(strategy, "current_atr", 0.0) or 1.0))
                             stop_distance = current_atr * 1.5
-                            risk_qty = risk.calculate_position_size(acct_state, stop_distance, session)
                             remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
                             requested_qty = max(1, int(signal.qty or 1))
-                            qty = min(requested_qty, risk_qty, remaining_profile_qty)
+                            size_check = risk.check_order_size(
+                                acct_state,
+                                requested_qty,
+                                stop_distance,
+                                session,
+                            )
+                            qty = requested_qty if size_check.allowed and requested_qty <= remaining_profile_qty else 0
+                            if qty <= 0:
+                                risk.record_risk_event("order_size_denied", {
+                                    "bar_time": tmf_bar.time.isoformat(),
+                                    "signal": signal.reason,
+                                    "requested_qty": requested_qty,
+                                    "profile_allowed_qty": remaining_profile_qty,
+                                    **size_check.details,
+                                })
                         else:
                             stop_distance = profile.stop_loss_points
-                            qty = risk.calculate_position_size(acct_state, stop_distance, session)
-                            qty = min(qty, profile.max_qty)
+                            sizing = risk.calculate_position_sizing(acct_state, stop_distance, session)
+                            remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
+                            qty = min(sizing.addable_contracts, remaining_profile_qty)
+                            if qty <= 0:
+                                risk.record_risk_event("order_size_denied", {
+                                    "bar_time": tmf_bar.time.isoformat(),
+                                    "signal": signal.reason,
+                                    "requested_qty": qty,
+                                    "profile_allowed_qty": remaining_profile_qty,
+                                    "allowed_qty": sizing.addable_contracts,
+                                    "sizing": sizing.to_dict(),
+                                })
                         if qty > 0:
                             order_side = OrderSide.BUY if signal.action == SignalAction.BUY else OrderSide.SELL
                             broker.create_market_order(
@@ -355,11 +378,16 @@ class ReplayEngine:
     @staticmethod
     def _build_bar_map(bars: list[dict]) -> dict[str, dict]:
         """建立 bar 時間索引"""
+        import zoneinfo
         bar_map: dict[str, dict] = {}
         for raw_bar in bars:
             raw_time = raw_bar.get("time") or raw_bar.get("date") or ""
             try:
                 dt = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(zoneinfo.ZoneInfo("Asia/Taipei"))
+                else:
+                    dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("Asia/Taipei"))
                 key = dt.strftime("%Y-%m-%d %H:%M")
                 bar_map[key] = raw_bar
             except (ValueError, TypeError):
@@ -369,9 +397,14 @@ class ReplayEngine:
     @staticmethod
     def _parse_bar(raw: dict, symbol: str = "") -> Optional[Bar]:
         """解析 K 棒資料"""
+        import zoneinfo
         raw_time = raw.get("time") or raw.get("date") or ""
         try:
             dt = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(zoneinfo.ZoneInfo("Asia/Taipei"))
+            else:
+                dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("Asia/Taipei"))
         except (ValueError, TypeError):
             return None
 

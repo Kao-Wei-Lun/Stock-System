@@ -28,7 +28,7 @@ def _tx_bars(count: int) -> list[dict]:
     ]
 
 
-def _v2_engine(max_qty: int = 5) -> ReplayEngine:
+def _v2_engine(max_qty: int = 5, total_position_risk_pct: float = 1.0) -> ReplayEngine:
     profile = SessionProfile(
         stop_loss_points=60,
         take_profit_points=120,
@@ -57,6 +57,7 @@ def _v2_engine(max_qty: int = 5) -> ReplayEngine:
         max_contracts_hard=10,
         max_margin_usage_pct=1.0,
         risk_per_trade_pct=1.0,
+        total_position_risk_pct=total_position_risk_pct,
         daily_loss_limit_pct=1.0,
         max_drawdown_pct=1.0,
     )
@@ -130,3 +131,30 @@ def test_v2_time_stop_reduces_position_back_to_one_contract() -> None:
     assert reduce_signals
     assert reduce_signals[0]["qty"] == 2
     assert any(fill["fill_qty"] == 2 for fill in sell_fills)
+
+
+def test_v2_blocks_entry_when_size_exceeds_total_position_risk() -> None:
+    start = datetime(2026, 4, 20, 8, 45)
+    tmf_bars = []
+    for index in range(30):
+        tmf_bars.append(_bar(start + timedelta(minutes=index), 100 + index * 0.01))
+    for offset, close in enumerate([101.0, 101.7, 102.4], start=30):
+        tmf_bars.append(
+            _bar(
+                start + timedelta(minutes=offset),
+                close,
+                open_=close - 0.6,
+                high=close + 0.2,
+                low=close - 0.2,
+            )
+        )
+
+    result = _v2_engine(max_qty=5, total_position_risk_pct=0.1).run(
+        _tx_bars(len(tmf_bars)),
+        tmf_bars,
+        equity_snapshot_interval=1,
+    )
+
+    assert any(signal["action"] == "buy" for signal in result.signals)
+    assert [fill for fill in result.fills if fill["side"] == "buy"] == []
+    assert any(event["event_type"] == "order_size_denied" for event in result.risk_events)

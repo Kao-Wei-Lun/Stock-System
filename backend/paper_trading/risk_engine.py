@@ -10,8 +10,7 @@ QuantVision Pro — Paper Trading Risk Engine
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, time as time_of_day
 from enum import Enum
 from typing import Optional
@@ -23,6 +22,11 @@ from paper_trading.cost_model import (
     SessionType,
     TMF_SPEC,
     DEFAULT_COST_MODEL,
+)
+from paper_trading.futures_risk_sizing import (
+    FuturesPositionSizingInput,
+    FuturesPositionSizingResult,
+    calculate_futures_position_sizing,
 )
 
 
@@ -42,6 +46,7 @@ class RiskDenyReason(str, Enum):
     NO_EQUITY = "insufficient_equity"
     QUOTE_STALE = "quote_data_stale"
     OUTSIDE_SESSION = "outside_trading_session"
+    ORDER_SIZE_EXCEEDED = "order_size_exceeded"
 
 
 # ─── 交易時段定義 ─────────────────────────────────────────────
@@ -88,7 +93,8 @@ class RiskConfig:
 
     # 帳戶與資金
     starting_equity: float = 100_000.0          # 模擬帳戶初始權益 (TWD)
-    initial_margin_per_contract: float = 2_025.0  # TMF 原始保證金
+    initial_margin_per_contract: float = 26_300.0  # TMF 原始保證金
+    maintenance_margin_per_contract: float = 20_150.0  # TMF 維持保證金
 
     # 口數上限
     max_contracts_hard: int = 10                # 硬上限口數
@@ -96,6 +102,8 @@ class RiskConfig:
 
     # 單筆風險
     risk_per_trade_pct: float = 0.02            # 單筆交易風險（帳戶比例）
+    stress_points: float = 2_000.0              # 壓力測試點數
+    total_position_risk_pct: float = 0.2        # 總部位壓力風險（帳戶比例）
 
     # 單日虧損
     daily_loss_limit_pct: float = 0.05          # 單日虧損上限比例
@@ -127,9 +135,15 @@ class RiskConfig:
         return {
             "starting_equity": self.starting_equity,
             "initial_margin_per_contract": self.initial_margin_per_contract,
+            "maintenance_margin_per_contract": self.maintenance_margin_per_contract,
             "max_contracts_hard": self.max_contracts_hard,
             "max_margin_usage_pct": self.max_margin_usage_pct,
+            "margin_usage_limit": self.max_margin_usage_pct,
             "risk_per_trade_pct": self.risk_per_trade_pct,
+            "single_trade_risk_pct": self.risk_per_trade_pct,
+            "stress_points": self.stress_points,
+            "total_position_risk_pct": self.total_position_risk_pct,
+            "user_max_contracts": self.max_contracts_hard,
             "daily_loss_limit_pct": self.daily_loss_limit_pct,
             "max_drawdown_pct": self.max_drawdown_pct,
             "max_open_loss_base": self.max_open_loss_base,
@@ -147,10 +161,13 @@ class RiskConfig:
         holding = data.get("holding_policy", "day_only")
         return cls(
             starting_equity=float(data.get("starting_equity", 100_000)),
-            initial_margin_per_contract=float(data.get("initial_margin_per_contract", 2_025)),
-            max_contracts_hard=int(data.get("max_contracts_hard", 10)),
-            max_margin_usage_pct=float(data.get("max_margin_usage_pct", 0.6)),
-            risk_per_trade_pct=float(data.get("risk_per_trade_pct", 0.02)),
+            initial_margin_per_contract=float(data.get("initial_margin_per_contract", 26_300)),
+            maintenance_margin_per_contract=float(data.get("maintenance_margin_per_contract", 20_150)),
+            max_contracts_hard=int(data.get("max_contracts_hard", data.get("user_max_contracts", 10))),
+            max_margin_usage_pct=float(data.get("max_margin_usage_pct", data.get("margin_usage_limit", 0.6))),
+            risk_per_trade_pct=float(data.get("risk_per_trade_pct", data.get("single_trade_risk_pct", 0.02))),
+            stress_points=float(data.get("stress_points", 2_000)),
+            total_position_risk_pct=float(data.get("total_position_risk_pct", 0.2)),
             daily_loss_limit_pct=float(data.get("daily_loss_limit_pct", 0.05)),
             max_drawdown_pct=float(data.get("max_drawdown_pct", 0.15)),
             max_open_loss_base=float(data.get("max_open_loss_base", 5_000)),
@@ -189,9 +206,15 @@ class AccountState:
 class RiskCheckResult:
     """風控檢查結果"""
 
-    def __init__(self, allowed: bool, deny_reasons: Optional[list[RiskDenyReason]] = None):
+    def __init__(
+        self,
+        allowed: bool,
+        deny_reasons: Optional[list[RiskDenyReason]] = None,
+        details: Optional[dict] = None,
+    ):
         self.allowed = allowed
         self.deny_reasons = deny_reasons or []
+        self.details = details or {}
 
     def __bool__(self) -> bool:
         return self.allowed
@@ -200,6 +223,7 @@ class RiskCheckResult:
         return {
             "allowed": self.allowed,
             "deny_reasons": [r.value for r in self.deny_reasons],
+            "details": self.details,
         }
 
 
@@ -289,34 +313,63 @@ class RiskEngine:
         2. 保證金可承受口數
         3. 停損風險可承受口數
         """
-        if stop_distance_points <= 0 or account.equity <= 0:
-            return 0
+        return self.calculate_position_sizing(
+            account,
+            stop_distance_points,
+            session,
+        ).addable_contracts
 
-        # 1. 硬上限
-        hard_limit = self.config.max_contracts_hard
-
-        # 2. 保證金可承受
-        available_equity = max(0, account.equity)
-        max_margin = available_equity * self.config.max_margin_usage_pct
-        remaining_margin = max(0, max_margin - account.margin_used)
-        margin_limit = math.floor(remaining_margin / self.config.initial_margin_per_contract)
-
-        # 3. 停損風險可承受
-        risk_budget = account.equity * self.config.risk_per_trade_pct
-        cost_per_contract = (
-            stop_distance_points * self.product.point_value
-            + self.cost_model.fee_round_trip()
-            + self.cost_model.slippage_ticks(session) * self.product.tick_value
+    def calculate_position_sizing(
+        self,
+        account: AccountState,
+        stop_distance_points: float,
+        session: SessionType = SessionType.DAY,
+    ) -> FuturesPositionSizingResult:
+        initial_margin = float(
+            self.config.initial_margin_per_contract
+            or self.product.initial_margin
+            or 0.0
         )
-        risk_limit = math.floor(risk_budget / cost_per_contract) if cost_per_contract > 0 else 0
+        maintenance_margin = float(
+            self.config.maintenance_margin_per_contract
+            or self.product.maintenance_margin
+            or 0.0
+        )
+        params = FuturesPositionSizingInput(
+            futures_capital=account.equity,
+            point_value=self.product.point_value,
+            initial_margin=initial_margin,
+            maintenance_margin=maintenance_margin,
+            stop_loss_points=stop_distance_points,
+            stress_points=self.config.stress_points,
+            margin_usage_limit=self.config.max_margin_usage_pct,
+            single_trade_risk_pct=self.config.risk_per_trade_pct,
+            total_position_risk_pct=self.config.total_position_risk_pct,
+            user_max_contracts=self.config.max_contracts_hard,
+            open_contracts=abs(account.open_position_qty),
+            margin_used=account.margin_used,
+        )
+        return calculate_futures_position_sizing(params)
 
-        # 取最小值，至少 0
-        result = max(0, min(hard_limit, margin_limit, risk_limit))
-
-        # 扣除已持倉
-        result = max(0, result - abs(account.open_position_qty))
-
-        return result
+    def check_order_size(
+        self,
+        account: AccountState,
+        requested_qty: int,
+        stop_distance_points: float,
+        session: SessionType = SessionType.DAY,
+    ) -> RiskCheckResult:
+        sizing = self.calculate_position_sizing(account, stop_distance_points, session)
+        normalized_qty = max(0, int(requested_qty or 0))
+        allowed = normalized_qty > 0 and normalized_qty <= sizing.addable_contracts
+        return RiskCheckResult(
+            allowed,
+            [] if allowed else [RiskDenyReason.ORDER_SIZE_EXCEEDED],
+            {
+                "requested_qty": normalized_qty,
+                "allowed_qty": sizing.addable_contracts,
+                "sizing": sizing.to_dict(),
+            },
+        )
 
     def check_must_flatten(
         self,

@@ -32,6 +32,8 @@ class FuturesProductSpec:
     name: str
     point_value: float          # 每點價值（TWD）
     tick_size: float = 1.0      # 最小升降單位（點）
+    initial_margin: float = 0.0
+    maintenance_margin: float = 0.0
     currency: str = "TWD"
     exchange: str = "TAIFEX"
 
@@ -41,7 +43,13 @@ class FuturesProductSpec:
 
 
 # 預設商品規格
-TMF_SPEC = FuturesProductSpec(symbol="TMF", name="微型臺指期貨", point_value=10.0)
+TMF_SPEC = FuturesProductSpec(
+    symbol="TMF",
+    name="微型臺指期貨",
+    point_value=10.0,
+    initial_margin=26_300.0,
+    maintenance_margin=20_150.0,
+)
 TX_SPEC = FuturesProductSpec(symbol="TXF", name="臺股期貨", point_value=200.0)
 MTX_SPEC = FuturesProductSpec(symbol="MXF", name="小型臺指期貨", point_value=50.0)
 
@@ -53,8 +61,16 @@ PRODUCT_SPECS = {
 
 
 def get_product_spec(symbol: str) -> FuturesProductSpec:
-    base = symbol.upper().rstrip("0123456789")
-    for key in (symbol.upper(), base):
+    normalized = str(symbol or "").strip().upper()
+    if normalized.startswith("TMF"):
+        return TMF_SPEC
+    if normalized.startswith(("MXF", "MTX")):
+        return MTX_SPEC
+    if normalized.startswith(("TXF", "TX")):
+        return TX_SPEC
+
+    base = normalized.rstrip("0123456789")
+    for key in (normalized, base):
         if key in PRODUCT_SPECS:
             return PRODUCT_SPECS[key]
     return TMF_SPEC

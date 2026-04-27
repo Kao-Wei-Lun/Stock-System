@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -117,6 +117,8 @@ class PaperTradingBot:
         self._handler_ref = None
         self._current_date: Optional[str] = None
         self._bar_count = 0
+        self._tick_aggregator: dict[str, dict] = {}
+        self._last_processed_minute: dict[str, str] = {}
 
         # 統計
         self.started_at: Optional[datetime] = None
@@ -189,6 +191,19 @@ class PaperTradingBot:
 
         if is_tx:
             self._process_tx_candle(bar)
+            # TMF 虛擬商品（或微台指）若無獨立 WS 報價，可直接以 TXF 報價做為 TMF 價格
+            if self.tmf_symbol.upper() == "TMF":
+                from paper_trading.simulation_broker import Bar
+                tmf_bar = Bar(
+                    time=bar.time,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                    symbol="TMF",
+                )
+                self._process_tmf_candle(tmf_bar)
         elif is_tmf:
             self._process_tmf_candle(bar)
 
@@ -250,6 +265,58 @@ class PaperTradingBot:
             if "open" in data and "close" in data:
                 # 判斷是否為 K 棒資料: Fubon WS aggregates/candles
                 self.process_candle(symbol, data)
+            elif channel == "trades" and "price" in data:
+                # Fubon WS Mode = Speed 時，僅推播 trades。需在此自行合成 1m K棒。
+                price = float(data["price"])
+                volume = float(data.get("volume", 0))
+                time_val = data.get("time")
+                if not time_val:
+                    return
+                # time_val 為 microseconds
+                trade_dt = datetime.fromtimestamp(time_val / 1000000.0, tz=timezone.utc)
+                trade_minute = trade_dt.strftime("%Y-%m-%d %H:%M")
+
+                agg = self._tick_aggregator.get(symbol)
+                if agg and agg["minute"] != trade_minute:
+                    # 分鐘切換，送出上一分鐘的合成 K 棒
+                    candle_payload = {
+                        "date": agg["minute"] + ":00+00:00",
+                        "open": agg["open"],
+                        "high": agg["high"],
+                        "low": agg["low"],
+                        "close": agg["close"],
+                        "volume": agg["volume"],
+                    }
+                    self.process_candle(symbol, candle_payload)
+                    agg = None
+
+                if not agg:
+                    agg = {
+                        "minute": trade_minute,
+                        "open": price,
+                        "high": price,
+                        "low": price,
+                        "close": price,
+                        "volume": volume,
+                    }
+                else:
+                    agg["high"] = max(agg["high"], price)
+                    agg["low"] = min(agg["low"], price)
+                    agg["close"] = price
+                    agg["volume"] += volume
+
+                self._tick_aggregator[symbol] = agg
+
+                # 同時我們也將「當前未完成的 K 棒」送出，讓策略能即時反應（Strategy 支援 partial bar 更新）
+                candle_payload = {
+                    "date": trade_minute + ":00+00:00",
+                    "open": agg["open"],
+                    "high": agg["high"],
+                    "low": agg["low"],
+                    "close": agg["close"],
+                    "volume": agg["volume"],
+                }
+                self.process_candle(symbol, candle_payload)
 
         except Exception as exc:
             log.warning("Paper trading bot %s WS handler error: %s", self.bot_id, exc)
@@ -260,7 +327,12 @@ class PaperTradingBot:
 
     def _process_tmf_candle(self, bar: Bar) -> None:
         """處理 TMF candle → 完整交易閉環"""
-        self._bar_count += 1
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+
+        # 防止同一分鐘內收到多次更新導致 bar_count 狂飆
+        if self._last_processed_minute.get(bar.symbol or self.tmf_symbol) != bar_minute:
+            self._bar_count += 1
+            self._last_processed_minute[bar.symbol or self.tmf_symbol] = bar_minute
 
         # 新的交易日重置
         bar_date = bar.time.strftime("%Y-%m-%d")
@@ -350,14 +422,55 @@ class PaperTradingBot:
                     if self.strategy_config.strategy_type == "v2":
                         current_atr = max(1.0, float(getattr(self.strategy, "current_atr", 0.0) or 1.0))
                         stop_distance = current_atr * 1.5
-                        risk_qty = self.risk.calculate_position_size(acct_state, stop_distance, session)
                         remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
                         requested_qty = max(1, int(signal.qty or 1))
-                        qty = min(requested_qty, risk_qty, remaining_profile_qty)
+                        size_check = self.risk.check_order_size(
+                            acct_state,
+                            requested_qty,
+                            stop_distance,
+                            session,
+                        )
+                        qty = requested_qty if size_check.allowed and requested_qty <= remaining_profile_qty else 0
+                        if qty <= 0:
+                            details = {
+                                "bar_time": bar.time.isoformat(),
+                                "signal": signal.reason,
+                                "requested_qty": requested_qty,
+                                "profile_allowed_qty": remaining_profile_qty,
+                                **size_check.details,
+                            }
+                            self.risk.record_risk_event("order_size_denied", details)
+                            if self._on_risk_event:
+                                try:
+                                    self._on_risk_event(self.bot_id, {
+                                        "type": "order_size_denied",
+                                        "details": details,
+                                    })
+                                except Exception:
+                                    pass
                     else:
                         stop_distance = profile.stop_loss_points
-                        qty = self.risk.calculate_position_size(acct_state, stop_distance, session)
-                        qty = min(qty, profile.max_qty)
+                        sizing = self.risk.calculate_position_sizing(acct_state, stop_distance, session)
+                        remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
+                        qty = min(sizing.addable_contracts, remaining_profile_qty)
+                        if qty <= 0:
+                            details = {
+                                "bar_time": bar.time.isoformat(),
+                                "signal": signal.reason,
+                                "requested_qty": qty,
+                                "profile_allowed_qty": remaining_profile_qty,
+                                "allowed_qty": sizing.addable_contracts,
+                                "sizing": sizing.to_dict(),
+                            }
+                            self.risk.record_risk_event("order_size_denied", details)
+                            if self._on_risk_event:
+                                try:
+                                    self._on_risk_event(self.bot_id, {
+                                        "type": "order_size_denied",
+                                        "details": details,
+                                    })
+                                except Exception:
+                                    pass
                     if qty > 0:
                         order_side = OrderSide.BUY if signal.action == SignalAction.BUY else OrderSide.SELL
                         self.broker.create_market_order(
@@ -429,6 +542,12 @@ class PaperTradingBot:
         try:
             time_str = str(raw_time).replace("Z", "+00:00").replace(" ", "T")
             dt = datetime.fromisoformat(time_str)
+            # 確保時區轉換為台北時間，避免影響 determine_session 時段判斷
+            import zoneinfo
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(zoneinfo.ZoneInfo("Asia/Taipei"))
+            else:
+                dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("Asia/Taipei"))
         except (ValueError, TypeError):
             return None
 

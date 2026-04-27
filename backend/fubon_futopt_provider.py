@@ -209,23 +209,47 @@ class FubonFutoptProvider:
         *,
         period: str = "1d",
         interval: str = "1m",
-        session: str = "REGULAR",
+        session: str = "ALL",
     ) -> Optional[dict]:
         normalized_interval = str(interval or "1m").strip().lower()
         timeframe = FUBON_FUTOPT_INTERVALS.get(normalized_interval)
         if not timeframe:
             raise ValueError(f"Unsupported futopt interval '{normalized_interval}'")
 
-        resolved = await self.resolve_contract(symbol, session=session)
+        resolve_session = "REGULAR" if session.upper() == "ALL" else session
+        resolved = await self.resolve_contract(symbol, session=resolve_session)
         if not resolved:
             return None
 
-        response = await self._manager.fetch_futopt_intraday_candles(
-            resolved["resolved_symbol"],
-            timeframe=timeframe,
-            session=session,
-        )
-        rows = _filter_rows_by_period(_rows_from_futopt_candles(response), period)
+        if session.upper() == "ALL":
+            import asyncio
+            res_regular, res_afterhours = await asyncio.gather(
+                self._manager.fetch_futopt_intraday_candles(
+                    resolved["resolved_symbol"],
+                    timeframe=timeframe,
+                    session="REGULAR",
+                ),
+                self._manager.fetch_futopt_intraday_candles(
+                    resolved["resolved_symbol"],
+                    timeframe=timeframe,
+                    session="AFTERHOURS",
+                ),
+                return_exceptions=True
+            )
+
+            rows_regular = _rows_from_futopt_candles(res_regular if isinstance(res_regular, dict) else None)
+            rows_afterhours = _rows_from_futopt_candles(res_afterhours if isinstance(res_afterhours, dict) else None)
+
+            all_rows = sorted(rows_regular + rows_afterhours, key=lambda x: x["date"])
+            rows = _filter_rows_by_period(all_rows, period)
+        else:
+            response = await self._manager.fetch_futopt_intraday_candles(
+                resolved["resolved_symbol"],
+                timeframe=timeframe,
+                session=session,
+            )
+            rows = _filter_rows_by_period(_rows_from_futopt_candles(response), period)
+
         return {
             "ticker": resolved["resolved_symbol"],
             "requested_symbol": resolved["requested_symbol"],

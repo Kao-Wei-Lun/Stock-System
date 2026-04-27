@@ -61,6 +61,22 @@
             <input v-model.number="riskForm.max_contracts_hard" type="number" />
           </div>
           <div class="pt-field">
+            <label>保證金使用率上限</label>
+            <input v-model.number="riskForm.max_margin_usage_pct" type="number" step="0.01" />
+          </div>
+          <div class="pt-field">
+            <label>單筆風險比例</label>
+            <input v-model.number="riskForm.risk_per_trade_pct" type="number" step="0.01" />
+          </div>
+          <div class="pt-field">
+            <label>總部位風險比例</label>
+            <input v-model.number="riskForm.total_position_risk_pct" type="number" step="0.01" />
+          </div>
+          <div class="pt-field">
+            <label>壓力測試點數</label>
+            <input v-model.number="riskForm.stress_points" type="number" />
+          </div>
+          <div class="pt-field">
             <label>策略引擎</label>
             <select v-model="strategyForm.strategy_type">
               <option value="v1">V1: 固定點數停損停利</option>
@@ -76,6 +92,11 @@
             <input v-model.number="strategyForm.take_profit_points" type="number" />
           </div>
         </div>
+        <FuturesRiskSizerPanel
+          :sizing="riskSizingPreview"
+          :loading="riskSizingLoading"
+          :error="riskSizingError"
+        />
         <div class="pt-card-actions">
           <button class="pt-btn pt-btn-primary" :disabled="creatingAccount" @click="createAccount">
             {{ creatingAccount ? '建立中...' : '建立帳戶' }}
@@ -370,6 +391,11 @@
             <input v-model.number="replayForm.starting_equity" type="number" />
           </div>
         </div>
+        <FuturesRiskSizerPanel
+          :sizing="riskSizingPreview"
+          :loading="riskSizingLoading"
+          :error="riskSizingError"
+        />
         <div class="pt-card-actions">
           <button class="pt-btn pt-btn-primary" :disabled="runningReplay" @click="runReplay">
             {{ runningReplay ? '回放中...' : '執行回放' }}
@@ -521,6 +547,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
+import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
 
 const API = "/api/paper-trading";
 
@@ -541,18 +568,26 @@ const toast = ref(null);
 const creatingAccount = ref(false);
 const creatingBot = ref(false);
 const runningReplay = ref(false);
+const riskSizingPreview = ref(null);
+const riskSizingLoading = ref(false);
+const riskSizingError = ref("");
 let _pollTimer = null;
+let _riskSizingTimer = null;
 
 const accountForm = reactive({
   name: "TMF Paper Account",
   starting_equity: 100000,
-  initial_margin_per_contract: 2025,
+  initial_margin_per_contract: 26300,
 });
 
 const riskForm = reactive({
   daily_loss_limit_pct: 0.05,
   max_drawdown_pct: 0.15,
   max_contracts_hard: 10,
+  max_margin_usage_pct: 0.6,
+  risk_per_trade_pct: 0.02,
+  stress_points: 2000,
+  total_position_risk_pct: 0.2,
 });
 
 const strategyForm = reactive({
@@ -594,6 +629,10 @@ const directionLabel = computed(() => {
   return { long: "📈 做多", short: "📉 做空", neutral: "⏸ 觀望" }[d] || d || "--";
 });
 
+const riskSizingCapital = computed(() => (
+  activeTab.value === "replay" ? replayForm.starting_equity : accountForm.starting_equity
+));
+
 // ─── API Helpers ─────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -610,6 +649,47 @@ async function apiFetch(path, options = {}) {
 function showToast(message, type = "info") {
   toast.value = { message, type };
   setTimeout(() => { toast.value = null; }, 4000);
+}
+
+function buildRiskSizingPayload() {
+  return {
+    product_symbol: "TMF",
+    futures_capital: Number(riskSizingCapital.value || 0),
+    initial_margin: Number(accountForm.initial_margin_per_contract || 0),
+    stop_loss_points: Number(strategyForm.stop_loss_points || 0),
+    stress_points: Number(riskForm.stress_points || 0),
+    margin_usage_limit: Number(riskForm.max_margin_usage_pct || 0),
+    single_trade_risk_pct: Number(riskForm.risk_per_trade_pct || 0),
+    total_position_risk_pct: Number(riskForm.total_position_risk_pct || 0),
+    user_max_contracts: Number(riskForm.max_contracts_hard || 0),
+  };
+}
+
+async function refreshRiskSizing() {
+  const payload = buildRiskSizingPayload();
+  if (!payload.futures_capital || !payload.initial_margin || !payload.stop_loss_points) {
+    riskSizingPreview.value = null;
+    riskSizingError.value = "";
+    return;
+  }
+  riskSizingLoading.value = true;
+  try {
+    const data = await apiFetch("/risk/position-size", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    riskSizingPreview.value = data.sizing;
+    riskSizingError.value = "";
+  } catch (e) {
+    riskSizingError.value = e.message;
+  } finally {
+    riskSizingLoading.value = false;
+  }
+}
+
+function scheduleRiskSizing() {
+  if (_riskSizingTimer) clearTimeout(_riskSizingTimer);
+  _riskSizingTimer = setTimeout(refreshRiskSizing, 250);
 }
 
 // ─── Actions ─────────────────────────────────────────────────
@@ -795,6 +875,23 @@ function botStatusLabel(status) {
 }
 
 // ─── Init ────────────────────────────────────────────────────
+watch(
+  [
+    () => activeTab.value,
+    () => accountForm.starting_equity,
+    () => replayForm.starting_equity,
+    () => accountForm.initial_margin_per_contract,
+    () => strategyForm.stop_loss_points,
+    () => riskForm.max_contracts_hard,
+    () => riskForm.max_margin_usage_pct,
+    () => riskForm.risk_per_trade_pct,
+    () => riskForm.total_position_risk_pct,
+    () => riskForm.stress_points,
+  ],
+  scheduleRiskSizing,
+  { immediate: true },
+);
+
 onMounted(async () => {
   await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
   // Auto-start polling if any bot is running
@@ -805,7 +902,10 @@ onMounted(async () => {
   }
 });
 
-onUnmounted(() => { stopPolling(); });
+onUnmounted(() => {
+  stopPolling();
+  if (_riskSizingTimer) clearTimeout(_riskSizingTimer);
+});
 </script>
 
 <style scoped>

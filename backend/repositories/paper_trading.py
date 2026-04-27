@@ -28,7 +28,7 @@ class PaperTradingMixin:
             data.get("name", "Default Account"),
             data.get("product_symbol", "TMF"),
             data.get("starting_equity", 100000),
-            data.get("initial_margin_per_contract", 2025),
+            data.get("initial_margin_per_contract", 26300),
             json.dumps(data.get("risk_config", {}), ensure_ascii=False),
             json.dumps(data.get("cost_model", {}), ensure_ascii=False),
             json.dumps(data.get("strategy_config", {}), ensure_ascii=False) if data.get("strategy_config") else None,

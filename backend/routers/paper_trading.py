@@ -23,12 +23,18 @@ from futopt_history_service import (
 )
 from providers import fubon_futopt_provider
 from schemas import (
+    FuturesOrderValidatePayload,
+    FuturesPositionSizePayload,
     PaperTradingAccountCreate,
     PaperTradingBotCreate,
     PaperTradingBotUpdate,
     PaperTradingReplayPayload,
 )
 from paper_trading.cost_model import CostModel, get_product_spec
+from paper_trading.futures_risk_sizing import (
+    FuturesPositionSizingInput,
+    calculate_futures_position_sizing,
+)
 from paper_trading.risk_engine import RiskConfig
 from paper_trading.strategy_engine import StrategyConfig
 from paper_trading.replay_engine import ReplayEngine
@@ -39,6 +45,84 @@ router = APIRouter(prefix="/api/paper-trading", tags=["paper-trading"])
 
 # 全域 bot 實例管理
 _active_bots: dict[int, "PaperTradingBot"] = {}
+
+
+async def _build_position_sizing_input(payload: FuturesPositionSizePayload) -> FuturesPositionSizingInput:
+    account = None
+    if payload.account_id is not None:
+        account = await db.get_paper_trading_account(payload.account_id, owner_id=DEFAULT_OWNER_ID)
+        if not account:
+            raise HTTPException(404, "Paper trading account not found")
+
+    product = get_product_spec(payload.product_symbol)
+    futures_capital = (
+        payload.futures_capital
+        if payload.futures_capital is not None
+        else float((account or {}).get("starting_equity", 100_000))
+    )
+    initial_margin = (
+        payload.initial_margin
+        if payload.initial_margin is not None
+        else float((account or {}).get("initial_margin_per_contract") or product.initial_margin or 0)
+    )
+    maintenance_margin = (
+        payload.maintenance_margin
+        if payload.maintenance_margin is not None
+        else float(product.maintenance_margin or 0)
+    )
+
+    open_contracts = payload.open_contracts
+    if open_contracts is None:
+        open_contracts = 0
+        if payload.account_id is not None:
+            positions = await db.get_paper_trading_positions(payload.account_id, owner_id=DEFAULT_OWNER_ID)
+            open_contracts = sum(
+                abs(int(row.get("qty") or 0))
+                for row in positions
+                if get_product_spec(row.get("symbol") or payload.product_symbol).symbol == product.symbol
+            )
+
+    margin_used = (
+        payload.margin_used
+        if payload.margin_used is not None
+        else float(open_contracts or 0) * initial_margin
+    )
+
+    return FuturesPositionSizingInput(
+        futures_capital=futures_capital,
+        point_value=payload.point_value or product.point_value,
+        initial_margin=initial_margin,
+        maintenance_margin=maintenance_margin,
+        stop_loss_points=payload.stop_loss_points,
+        stress_points=payload.stress_points,
+        margin_usage_limit=payload.margin_usage_limit,
+        single_trade_risk_pct=payload.single_trade_risk_pct,
+        total_position_risk_pct=payload.total_position_risk_pct,
+        user_max_contracts=payload.user_max_contracts,
+        open_contracts=int(open_contracts or 0),
+        margin_used=float(margin_used or 0),
+    )
+
+
+@router.post("/risk/position-size")
+async def calculate_futures_position_size(payload: FuturesPositionSizePayload):
+    sizing_input = await _build_position_sizing_input(payload)
+    result = calculate_futures_position_sizing(sizing_input)
+    return {"sizing": result.to_dict()}
+
+
+@router.post("/orders/validate")
+async def validate_paper_trading_order(payload: FuturesOrderValidatePayload):
+    sizing_input = await _build_position_sizing_input(payload)
+    result = calculate_futures_position_sizing(sizing_input)
+    allowed = payload.requested_qty <= result.addable_contracts
+    return {
+        "allowed": allowed,
+        "deny_reasons": [] if allowed else ["order_size_exceeded"],
+        "requested_qty": payload.requested_qty,
+        "allowed_qty": result.addable_contracts,
+        "sizing": result.to_dict(),
+    }
 
 
 # ─── Accounts ─────────────────────────────────────────────────

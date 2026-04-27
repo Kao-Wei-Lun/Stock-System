@@ -187,6 +187,7 @@ class VWAPCalculator:
     """Session VWAP 計算器"""
 
     def __init__(self):
+        self._bars: list[Bar] = []
         self._cumulative_volume_price = 0.0
         self._cumulative_volume = 0
         self._value = 0.0
@@ -196,14 +197,24 @@ class VWAPCalculator:
         return self._value
 
     def update(self, bar: Bar) -> float:
-        typical_price = (bar.high + bar.low + bar.close) / 3
-        self._cumulative_volume_price += typical_price * bar.volume
-        self._cumulative_volume += bar.volume
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        if self._bars and self._bars[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute:
+            self._bars[-1] = bar
+        else:
+            self._bars.append(bar)
+
+        self._cumulative_volume_price = 0.0
+        self._cumulative_volume = 0
+        for item in self._bars:
+            typical_price = (item.high + item.low + item.close) / 3
+            self._cumulative_volume_price += typical_price * item.volume
+            self._cumulative_volume += item.volume
         if self._cumulative_volume > 0:
             self._value = self._cumulative_volume_price / self._cumulative_volume
         return self._value
 
     def reset(self) -> None:
+        self._bars.clear()
         self._cumulative_volume_price = 0.0
         self._cumulative_volume = 0
         self._value = 0.0
@@ -218,6 +229,8 @@ class BarAggregator:
         self.period = period
         self._buffer: list[Bar] = []
         self._completed: list[Bar] = []
+        self._last_completed_source_bars: list[Bar] = []
+        self._last_completed_end_minute: Optional[str] = None
 
     @property
     def last_completed(self) -> Optional[Bar]:
@@ -229,25 +242,44 @@ class BarAggregator:
 
     def update(self, bar: Bar) -> Optional[Bar]:
         """加入新 1m bar，若滿足 period 則回傳聚合後的 bar"""
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        if self._buffer and self._buffer[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute:
+            self._buffer[-1] = bar
+            return None
+
+        if self._completed and self._last_completed_end_minute == bar_minute:
+            self._last_completed_source_bars[-1] = bar
+            self._completed[-1] = self._aggregate(self._last_completed_source_bars)
+            return self._completed[-1]
+
         self._buffer.append(bar)
         if len(self._buffer) >= self.period:
-            aggregated = Bar(
-                time=self._buffer[0].time,
-                open=self._buffer[0].open,
-                high=max(b.high for b in self._buffer),
-                low=min(b.low for b in self._buffer),
-                close=self._buffer[-1].close,
-                volume=sum(b.volume for b in self._buffer),
-                symbol=bar.symbol,
-            )
+            completed_source = list(self._buffer)
+            aggregated = self._aggregate(completed_source)
             self._completed.append(aggregated)
+            self._last_completed_source_bars = completed_source
+            self._last_completed_end_minute = completed_source[-1].time.strftime("%Y-%m-%d %H:%M")
             self._buffer.clear()
             return aggregated
         return None
 
+    @staticmethod
+    def _aggregate(bars: list[Bar]) -> Bar:
+        return Bar(
+            time=bars[0].time,
+            open=bars[0].open,
+            high=max(b.high for b in bars),
+            low=min(b.low for b in bars),
+            close=bars[-1].close,
+            volume=sum(b.volume for b in bars),
+            symbol=bars[-1].symbol,
+        )
+
     def reset(self) -> None:
         self._buffer.clear()
         self._completed.clear()
+        self._last_completed_source_bars.clear()
+        self._last_completed_end_minute = None
 
 
 # ─── 策略引擎 ─────────────────────────────────────────────────
@@ -320,7 +352,11 @@ class StrategyEngine:
 
         回傳 Signal 或 None。
         """
-        self._tmf_recent_bars.append(bar)
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        if self._tmf_recent_bars and self._tmf_recent_bars[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute:
+            self._tmf_recent_bars[-1] = bar
+        else:
+            self._tmf_recent_bars.append(bar)
         if len(self._tmf_recent_bars) > self._tmf_max_bars:
             self._tmf_recent_bars = self._tmf_recent_bars[-self._tmf_max_bars:]
 

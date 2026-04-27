@@ -892,7 +892,7 @@ CREATE_TABLE_STATEMENTS = {
             `name` VARCHAR(128) NOT NULL,
             `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
             `starting_equity` DOUBLE NOT NULL DEFAULT 100000,
-            `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 2025,
+            `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 26300,
             `risk_config_json` LONGTEXT NOT NULL,
             `cost_model_json` LONGTEXT NOT NULL,
             `strategy_config_json` LONGTEXT NULL,

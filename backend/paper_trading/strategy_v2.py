@@ -32,6 +32,8 @@ class ATRCalculator:
         self.period = period
         self._trs: list[float] = []
         self._prev_close: Optional[float] = None
+        self._last_bar_minute: Optional[str] = None
+        self._last_prev_close_for_bar: Optional[float] = None
         self._value = 0.0
 
     @property
@@ -39,20 +41,30 @@ class ATRCalculator:
         return self._value
 
     def update(self, bar: Bar) -> float:
-        if self._prev_close is None:
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        is_same_bar = self._last_bar_minute == bar_minute and bool(self._trs)
+        prev_close = self._last_prev_close_for_bar if is_same_bar else self._prev_close
+
+        if prev_close is None:
             tr = bar.high - bar.low
         else:
             tr = max(
                 bar.high - bar.low,
-                abs(bar.high - self._prev_close),
-                abs(bar.low - self._prev_close)
+                abs(bar.high - prev_close),
+                abs(bar.low - prev_close)
             )
+
+        if is_same_bar:
+            self._trs[-1] = tr
+        else:
+            self._last_prev_close_for_bar = self._prev_close
+            self._trs.append(tr)
+            if len(self._trs) > self.period:
+                self._trs.pop(0)
+            self._last_bar_minute = bar_minute
+
         self._prev_close = bar.close
-        
-        self._trs.append(tr)
-        if len(self._trs) > self.period:
-            self._trs.pop(0)
-            
+
         if len(self._trs) == self.period:
             self._value = sum(self._trs) / self.period
         else:
@@ -66,6 +78,8 @@ class ATRCalculator:
     def reset(self):
         self._trs.clear()
         self._prev_close = None
+        self._last_bar_minute = None
+        self._last_prev_close_for_bar = None
         self._value = 0.0
 
 
@@ -124,15 +138,25 @@ class StrategyEngineV2:
         position_entry_price: Optional[float] = None,
         position_qty: int = 0,
     ) -> Optional[Signal]:
-        self._tmf_recent_bars.append(bar)
+        bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
+        is_new_bar = not (
+            self._tmf_recent_bars
+            and self._tmf_recent_bars[-1].time.strftime("%Y-%m-%d %H:%M") == bar_minute
+        )
+
+        if is_new_bar:
+            self._tmf_recent_bars.append(bar)
+        else:
+            self._tmf_recent_bars[-1] = bar
         if len(self._tmf_recent_bars) > self._tmf_max_bars:
             self._tmf_recent_bars = self._tmf_recent_bars[-self._tmf_max_bars:]
-            
+
         self._tmf_atr.update(bar)
         profile = self.config.get_profile(bar.time, session)
 
         if has_position and position_side and position_entry_price is not None:
-            self._bars_since_entry += 1
+            if is_new_bar:
+                self._bars_since_entry += 1
             if bar.high > self._highest_price_since_entry:
                 self._highest_price_since_entry = bar.high
             if bar.low < self._lowest_price_since_entry:
