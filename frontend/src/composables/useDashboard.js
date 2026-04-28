@@ -39,6 +39,13 @@ const TIMEFRAME_OPTIONS = [
   { tf: "10y", iv: "1d", label: "10Y" },
   { tf: "max", iv: "1d", label: "MAX" },
 ];
+const FUTOPT_TIMEFRAME_OPTIONS = [
+  { tf: "1d", iv: "1m", label: "1m" },
+  { tf: "5d", iv: "5m", label: "5m" },
+  { tf: "1mo", iv: "15m", label: "15m" },
+  { tf: "1mo", iv: "30m", label: "30m" },
+  { tf: "3mo", iv: "60m", label: "60m" },
+];
 const KLINE_DISPLAY_OPTIONS = [
   { key: "day", label: "日K" },
   { key: "week", label: "週K" },
@@ -60,7 +67,7 @@ export const WATCHLIST_COLOR_OPTIONS = [
   "#9b6dff",
   "#ff4d6a",
 ];
-const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF"]);
+const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF", "TMF"]);
 const FUTOPT_FUTURE_CONTRACT_RE = /^[A-Z]{2,5}[A-Z]\d$/;
 const FUTOPT_OPTION_CONTRACT_RE = /^[A-Z]{2,5}\d{3,6}[A-Z]\d$/;
 const FUTOPT_ALLOWED_PERIODS = new Set(["1d", "5d", "1mo", "3mo", "6mo"]);
@@ -429,6 +436,26 @@ function resolveFutoptPeriod(period, interval) {
   return FUTOPT_DEFAULT_PERIODS[resolveFutoptInterval(interval)] || "1d";
 }
 
+export function getTimeframeOptionsForTicker(ticker) {
+  return isFutoptTicker(ticker) ? FUTOPT_TIMEFRAME_OPTIONS : TIMEFRAME_OPTIONS;
+}
+
+export function resolveDashboardTimeframeForTicker(ticker, period, interval) {
+  const normalizedTicker = normalizeTicker(ticker);
+  const requestedPeriod = String(period || "1y").toLowerCase();
+  if (isFutoptTicker(normalizedTicker)) {
+    const resolvedInterval = resolveFutoptInterval(interval);
+    return {
+      period: resolveFutoptPeriod(requestedPeriod, resolvedInterval),
+      interval: resolvedInterval,
+    };
+  }
+  return {
+    period: requestedPeriod,
+    interval: resolveTimeframeInterval(requestedPeriod, interval),
+  };
+}
+
 function inferMarketFromTicker(ticker) {
   const normalized = normalizeTicker(ticker);
   if (isFutoptTicker(normalized)) return "FUTOPT";
@@ -494,6 +521,7 @@ export function useDashboard() {
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
   const dashboardApi = createDashboardApi({ baseUrl: apiBase });
   const storedPrefs = readDashboardPrefs();
+  const initialTicker = normalizeTicker(storedPrefs.currentTicker || "AAPL");
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
     (option) => option.tf === storedPrefs.currentPeriod && option.iv === storedPrefs.currentInterval,
   );
@@ -503,10 +531,14 @@ export function useDashboard() {
   const initialKlineDisplayMode = normalizeKlineDisplayMode(storedPrefs.klineDisplayMode);
   const initialChartEngineMode = normalizeChartEngineMode(storedPrefs.chartEngineMode);
   const initialWorkspaceTab = WORKSPACE_TAB_OPTIONS.includes(storedPrefs.workspaceTab) ? storedPrefs.workspaceTab : "chart";
-  const initialPeriod = storedPrefs.currentPeriod || storedTimeframe?.tf || "1y";
-  const initialInterval = resolveTimeframeInterval(initialPeriod, storedPrefs.currentInterval || storedTimeframe?.iv || "1d");
+  const initialResolvedTimeframe = resolveDashboardTimeframeForTicker(
+    initialTicker,
+    storedPrefs.currentPeriod || storedTimeframe?.tf || "1y",
+    storedPrefs.currentInterval || storedTimeframe?.iv || "1d",
+  );
+  const initialPeriod = initialResolvedTimeframe.period;
+  const initialInterval = initialResolvedTimeframe.interval;
 
-  const timeframeOptions = TIMEFRAME_OPTIONS;
   const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
   const searchQuery = ref("");
   const searchResults = ref([]);
@@ -563,10 +595,11 @@ export function useDashboard() {
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
   const rightTab = ref(["indicators", "alerts", "assets", "backtest", "journal", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
   const workspaceTab = ref(initialWorkspaceTab);
-  const currentTicker = ref(normalizeTicker(storedPrefs.currentTicker || "AAPL"));
+  const currentTicker = ref(initialTicker);
   const currentName = ref("載入中...");
   const currentPeriod = ref(initialPeriod);
   const currentInterval = ref(initialInterval);
+  const timeframeOptions = computed(() => getTimeframeOptionsForTicker(currentTicker.value));
   const klineDisplayMode = ref(getEffectiveKlineDisplayMode(initialKlineDisplayMode, initialInterval));
   const chartEngineMode = ref(initialChartEngineMode);
   const cleanChartMode = ref(Boolean(storedPrefs.cleanChartMode));
@@ -1869,13 +1902,11 @@ export function useDashboard() {
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
     const normalized = normalizeTicker(ticker);
     const isFutopt = isFutoptTicker(normalized);
-    const requestedPeriod = (period || "1y").toLowerCase();
-    const resolvedInterval = isFutopt
-      ? resolveFutoptInterval(interval)
-      : resolveTimeframeInterval(requestedPeriod, interval);
-    const resolvedPeriod = isFutopt
-      ? resolveFutoptPeriod(requestedPeriod, resolvedInterval)
-      : requestedPeriod;
+    const { period: resolvedPeriod, interval: resolvedInterval } = resolveDashboardTimeframeForTicker(
+      normalized,
+      period,
+      interval,
+    );
     const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
     const fetchPeriod = isFutopt ? resolvedPeriod : getExpandedFetchPeriod(resolvedPeriod, displayMode);
     currentPeriod.value = resolvedPeriod;
@@ -1947,13 +1978,17 @@ export function useDashboard() {
 
   function setTimeframe(timeframe) {
     const nextPeriod = timeframe?.tf || currentPeriod.value;
-    const nextInterval = resolveTimeframeInterval(nextPeriod, timeframe?.iv || currentInterval.value);
-    if (isIntradayInterval(nextInterval)) {
+    const { period: resolvedPeriod, interval: resolvedInterval } = resolveDashboardTimeframeForTicker(
+      currentTicker.value,
+      nextPeriod,
+      timeframe?.iv || currentInterval.value,
+    );
+    if (isIntradayInterval(resolvedInterval)) {
       klineDisplayMode.value = "day";
     }
-    currentPeriod.value = nextPeriod;
-    currentInterval.value = nextInterval;
-    loadKline(currentTicker.value, nextPeriod, nextInterval);
+    currentPeriod.value = resolvedPeriod;
+    currentInterval.value = resolvedInterval;
+    loadKline(currentTicker.value, resolvedPeriod, resolvedInterval);
   }
 
   async function loadInstitutionalData(dateValue = institutionalDate.value, forceRefresh = false) {
@@ -2567,8 +2602,13 @@ export function useDashboard() {
     dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
     currentTicker.value = normalizedTicker;
     currentName.value = preset.currentName || normalizedTicker;
-    currentPeriod.value = preset.currentPeriod || currentPeriod.value;
-    currentInterval.value = resolveTimeframeInterval(currentPeriod.value, preset.currentInterval || currentInterval.value);
+    const resolvedTimeframe = resolveDashboardTimeframeForTicker(
+      normalizedTicker,
+      preset.currentPeriod || currentPeriod.value,
+      preset.currentInterval || currentInterval.value,
+    );
+    currentPeriod.value = resolvedTimeframe.period;
+    currentInterval.value = resolvedTimeframe.interval;
     klineDisplayMode.value = getEffectiveKlineDisplayMode(preset.klineDisplayMode, currentInterval.value);
     chartEngineMode.value = normalizeChartEngineMode(preset.chartEngineMode);
     cleanChartMode.value = Boolean(preset.cleanChartMode);

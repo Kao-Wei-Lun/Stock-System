@@ -37,15 +37,6 @@
     </div>
 
     <div class="terminal-stage">
-      <button
-        v-if="!chartFullscreen && leftCollapsed"
-        class="terminal-collapsed-toggle left"
-        type="button"
-        @click="$emit('toggle-left')"
-      >
-        觀察池
-      </button>
-
       <TerminalTickerRail
         v-if="!chartFullscreen && !leftCollapsed"
         :items="watchlist"
@@ -416,10 +407,6 @@ function openDrawer(tab) {
   cursor: pointer;
   font-size: 10px;
   backdrop-filter: blur(14px);
-}
-
-.terminal-collapsed-toggle.left {
-  left: 18px;
 }
 
 .terminal-collapsed-toggle.right {

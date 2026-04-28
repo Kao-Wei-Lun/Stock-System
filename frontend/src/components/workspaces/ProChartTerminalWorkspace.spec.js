@@ -95,6 +95,18 @@ describe("ProChartTerminalWorkspace", () => {
     expect(wrapper.findAll(".terminal-action")).toHaveLength(4);
   });
 
+  it("only renders the commandbar watchlist toggle when the left rail is collapsed", () => {
+    const wrapper = mount(ProChartTerminalWorkspace, {
+      props: createProps(),
+      global: createGlobal(),
+    });
+
+    const watchlistButtons = wrapper.findAll("button").filter((button) => button.text().includes("觀察池"));
+
+    expect(watchlistButtons).toHaveLength(1);
+    expect(wrapper.find(".terminal-collapsed-toggle.left").exists()).toBe(false);
+  });
+
   it("keeps chart-focused zen mode free of command chrome", () => {
     const wrapper = mount(ProChartTerminalWorkspace, {
       props: {

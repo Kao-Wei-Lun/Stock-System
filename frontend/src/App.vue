@@ -1320,13 +1320,14 @@ async function handleOpenHeatmap() {
 }
 
 function shiftTimeframe(step) {
-  const currentIndex = timeframeOptions.findIndex(
+  const availableTimeframes = readStateValue(timeframeOptions) || [];
+  const currentIndex = availableTimeframes.findIndex(
     (option) => option.tf === readStateValue(currentPeriod) && option.iv === readStateValue(currentInterval),
   );
   if (currentIndex < 0) return;
-  const nextIndex = Math.max(0, Math.min(timeframeOptions.length - 1, currentIndex + step));
+  const nextIndex = Math.max(0, Math.min(availableTimeframes.length - 1, currentIndex + step));
   if (nextIndex === currentIndex) return;
-  void setTimeframe(timeframeOptions[nextIndex]);
+  void setTimeframe(availableTimeframes[nextIndex]);
 }
 
 function shiftKlineDisplay(step) {
