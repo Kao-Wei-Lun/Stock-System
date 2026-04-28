@@ -331,8 +331,15 @@ onBeforeUnmount(() => {
 
 .search-wrap {
   position: relative;
+  display: block;
   min-width: 260px;
   max-width: 340px;
+  width: 340px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .search-wrap input {
