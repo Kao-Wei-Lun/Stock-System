@@ -50,6 +50,37 @@ class PaperTradingMixin:
         )
         return [self._decode_paper_trading_account(r) for r in rows]
 
+    async def delete_paper_trading_account(self, account_id: int, owner_id: int = 1) -> bool:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT `id` FROM `paper_trading_accounts` WHERE `id`=%s AND `owner_id`=%s",
+                        (account_id, owner_id),
+                    )
+                    if not await cur.fetchone():
+                        return False
+
+                    for table in (
+                        "paper_trading_positions",
+                        "paper_trading_orders",
+                        "paper_trading_fills",
+                        "paper_trading_equity_snapshots",
+                        "paper_trading_risk_events",
+                        "paper_trading_replay_runs",
+                        "paper_trading_bots",
+                    ):
+                        await cur.execute(
+                            f"DELETE FROM `{table}` WHERE `account_id`=%s AND `owner_id`=%s",
+                            (account_id, owner_id),
+                        )
+
+                    await cur.execute(
+                        "DELETE FROM `paper_trading_accounts` WHERE `id`=%s AND `owner_id`=%s",
+                        (account_id, owner_id),
+                    )
+                    return cur.rowcount > 0
+
     @staticmethod
     def _decode_paper_trading_account(row: dict) -> dict:
         result = dict(row)
@@ -130,6 +161,29 @@ class PaperTradingMixin:
         params.extend([bot_id, owner_id])
         await self._execute(sql, tuple(params))
         return await self.get_paper_trading_bot(bot_id, owner_id)
+
+    async def delete_paper_trading_bot(self, bot_id: int, owner_id: int = 1) -> bool:
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    for table in (
+                        "paper_trading_positions",
+                        "paper_trading_orders",
+                        "paper_trading_fills",
+                        "paper_trading_equity_snapshots",
+                        "paper_trading_risk_events",
+                        "paper_trading_replay_runs",
+                    ):
+                        await cur.execute(
+                            f"DELETE FROM `{table}` WHERE `bot_id`=%s AND `owner_id`=%s",
+                            (bot_id, owner_id),
+                        )
+
+                    await cur.execute(
+                        "DELETE FROM `paper_trading_bots` WHERE `id`=%s AND `owner_id`=%s",
+                        (bot_id, owner_id),
+                    )
+                    return cur.rowcount > 0
 
     @staticmethod
     def _decode_paper_trading_bot(row: dict) -> dict:

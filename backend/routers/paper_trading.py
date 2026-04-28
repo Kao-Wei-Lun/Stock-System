@@ -202,6 +202,26 @@ async def get_paper_trading_account(account_id: int):
     return account
 
 
+@router.delete("/accounts/{account_id}")
+async def delete_paper_trading_account(account_id: int):
+    account_bots = await db.list_paper_trading_bots(
+        owner_id=DEFAULT_OWNER_ID,
+        account_id=account_id,
+    )
+    running_bot_ids = [
+        int(bot["id"])
+        for bot in account_bots
+        if int(bot.get("id") or 0) in _active_bots
+    ]
+    if running_bot_ids:
+        raise HTTPException(409, f"Stop running paper trading bots before deleting account: {running_bot_ids}")
+
+    deleted = await db.delete_paper_trading_account(account_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Paper trading account not found")
+    return {"ok": True, "account_id": account_id}
+
+
 # ─── Bots ─────────────────────────────────────────────────────
 
 @router.post("/bots")
@@ -245,6 +265,17 @@ async def update_paper_trading_bot(bot_id: int, payload: PaperTradingBotUpdate):
     return updated
 
 
+@router.delete("/bots/{bot_id}")
+async def delete_paper_trading_bot(bot_id: int):
+    if bot_id in _active_bots:
+        raise HTTPException(409, "Stop the paper trading bot before deleting it")
+
+    deleted = await db.delete_paper_trading_bot(bot_id, owner_id=DEFAULT_OWNER_ID)
+    if not deleted:
+        raise HTTPException(404, "Paper trading bot not found")
+    return {"ok": True, "bot_id": bot_id}
+
+
 # ─── Bot Start/Stop ───────────────────────────────────────────
 
 @router.post("/bots/{bot_id}/start")
@@ -267,7 +298,7 @@ async def start_paper_trading_bot(bot_id: int):
         raise HTTPException(400, "Associated account not found")
 
     # 建立 bot 實例
-    risk_config = RiskConfig.from_dict(account.get("risk_config", {}))
+    risk_config = RiskConfig.from_dict(account.get("risk_config", {}) or {})
     # 用帳戶層級的 starting_equity / initial_margin_per_contract 覆蓋 risk_config 預設值
     risk_config.starting_equity = float(account.get("starting_equity", risk_config.starting_equity))
     risk_config.initial_margin_per_contract = float(
@@ -448,17 +479,23 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
     if payload.start_date > payload.end_date:
         raise HTTPException(400, "start_date must be before end_date")
 
+    account = await db.get_paper_trading_account(payload.account_id, owner_id=DEFAULT_OWNER_ID)
+    if not account:
+        raise HTTPException(404, "Paper trading account not found")
+
+    product_symbol = str(account.get("product_symbol") or payload.product_symbol or "TMF").strip().upper()
+    direction_symbol = str(payload.direction_symbol or "TXF").strip().upper()
     replay_end_bound = intraday_end_bound(payload.end_date)
 
     # 從 DB 取得 K 棒資料
     tmf_bars = await db.get_ohlcv_range(
-        payload.product_symbol,
+        product_symbol,
         start_date=payload.start_date,
         end_date=replay_end_bound,
         interval="1m",
     )
     tx_bars = await db.get_ohlcv_range(
-        payload.direction_symbol,
+        direction_symbol,
         start_date=payload.start_date,
         end_date=replay_end_bound,
         interval="1m",
@@ -471,41 +508,41 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
             await sync_futopt_intraday_ohlc(
                 fubon_futopt_provider,
                 db,
-                payload.product_symbol,
+                product_symbol,
                 period=sync_period,
                 interval="1m",
             )
             tmf_bars = await db.get_ohlcv_range(
-                payload.product_symbol,
+                product_symbol,
                 start_date=payload.start_date,
                 end_date=replay_end_bound,
                 interval="1m",
             )
         except Exception as exc:
-            log.warning("paper replay futopt sync failed for %s: %s", payload.product_symbol, exc)
+            log.warning("paper replay futopt sync failed for %s: %s", product_symbol, exc)
 
     if not tx_bars:
         try:
             await sync_futopt_intraday_ohlc(
                 fubon_futopt_provider,
                 db,
-                payload.direction_symbol,
+                direction_symbol,
                 period=sync_period,
                 interval="1m",
             )
             tx_bars = await db.get_ohlcv_range(
-                payload.direction_symbol,
+                direction_symbol,
                 start_date=payload.start_date,
                 end_date=replay_end_bound,
                 interval="1m",
             )
         except Exception as exc:
-            log.warning("paper replay futopt sync failed for %s: %s", payload.direction_symbol, exc)
+            log.warning("paper replay futopt sync failed for %s: %s", direction_symbol, exc)
 
     if not tmf_bars:
-        raise HTTPException(400, f"No {payload.product_symbol} 1m bar data found for the given date range")
+        raise HTTPException(400, f"No {product_symbol} 1m bar data found for the given date range")
     if not tx_bars:
-        raise HTTPException(400, f"No {payload.direction_symbol} 1m bar data found for the given date range")
+        raise HTTPException(400, f"No {direction_symbol} 1m bar data found for the given date range")
 
     # 轉換 bar 格式
     def _to_bar_dict(row):
@@ -522,12 +559,20 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
     tx_bar_dicts = [_to_bar_dict(r) for r in tx_bars]
 
     # 建立回放引擎
-    risk_config = RiskConfig.from_dict(payload.risk_config)
-    risk_config.starting_equity = payload.starting_equity
-    risk_config.initial_margin_per_contract = payload.initial_margin_per_contract
+    risk_config = RiskConfig.from_dict(account.get("risk_config", {}) or {})
+    risk_config.starting_equity = float(
+        account.get("starting_equity")
+        or payload.starting_equity
+        or risk_config.starting_equity
+    )
+    risk_config.initial_margin_per_contract = float(
+        account.get("initial_margin_per_contract")
+        or payload.initial_margin_per_contract
+        or risk_config.initial_margin_per_contract
+    )
     strategy_config = StrategyConfig.from_dict(payload.strategy_config)
-    cost_model = CostModel.from_dict(payload.cost_model)
-    product = get_product_spec(payload.product_symbol)
+    cost_model = CostModel.from_dict(account.get("cost_model", {}) or payload.cost_model)
+    product = get_product_spec(product_symbol)
 
     engine = ReplayEngine(
         risk_config=risk_config,
@@ -544,12 +589,12 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
     # 儲存回放結果
     run_data = {
         "account_id": payload.account_id,
-        "product_symbol": payload.product_symbol,
-        "direction_symbol": payload.direction_symbol,
+        "product_symbol": product_symbol,
+        "direction_symbol": direction_symbol,
         "start_date": payload.start_date,
         "end_date": payload.end_date,
         "bar_count": result.bar_count,
-        "starting_equity": payload.starting_equity,
+        "starting_equity": risk_config.starting_equity,
         "total_fees": result.account_final.get("total_fees", 0),
         "summary": result.summary,
         "risk_config": risk_config.to_dict(),

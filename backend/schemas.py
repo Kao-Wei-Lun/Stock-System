@@ -451,13 +451,13 @@ class PaperTradingBotUpdate(BaseModel):
 
 
 class PaperTradingReplayPayload(BaseModel):
-    account_id: int | None = None
+    account_id: int = Field(..., gt=0)
     product_symbol: str = Field("TMF", max_length=32)
     direction_symbol: str = Field("TXF", max_length=32)
     start_date: str = Field(..., min_length=10, max_length=10)
     end_date: str = Field(..., min_length=10, max_length=10)
-    starting_equity: float = Field(100_000, gt=0)
-    initial_margin_per_contract: float = Field(26_300, gt=0)
+    starting_equity: float | None = Field(None, gt=0)
+    initial_margin_per_contract: float | None = Field(None, gt=0)
     risk_config: dict = Field(default_factory=dict)
     strategy_config: dict = Field(default_factory=dict)
     cost_model: dict = Field(default_factory=dict)

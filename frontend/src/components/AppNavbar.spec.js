@@ -40,10 +40,9 @@ describe("AppNavbar", () => {
     const wrapper = mount(AppNavbar, { props: createProps() });
 
     const titles = wrapper.findAll(".workspace-nav-btn").map((button) => button.attributes("title"));
-    expect(titles[0]).toContain("Alt+1");
-    expect(titles[1]).toContain("Alt+2");
-    expect(titles[titles.length - 2]).toContain("Alt+5");
-    expect(titles[titles.length - 1]).toContain("Alt+6");
+    titles.forEach((title, index) => {
+      expect(title).toContain(`Alt+${index + 1}`);
+    });
   });
 
   it("shows a live quote badge when realtime data is active", () => {

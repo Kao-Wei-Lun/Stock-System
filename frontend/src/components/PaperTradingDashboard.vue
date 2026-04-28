@@ -8,7 +8,7 @@
           <span class="pt-title-icon">⚡</span>
           TMF 模擬交易
         </h1>
-        <span class="pt-badge">Paper Trading</span>
+        <span class="pt-badge">模擬交易</span>
       </div>
       <div class="pt-header-right">
         <div class="pt-status-pill" :class="activeBotStatusClass">
@@ -38,7 +38,7 @@
         <div class="pt-form-grid">
           <div class="pt-field">
             <label>帳戶名稱</label>
-            <input v-model="accountForm.name" type="text" placeholder="TMF Paper Account" />
+            <input v-model="accountForm.name" type="text" placeholder="TMF 模擬帳戶" />
           </div>
           <div class="pt-field">
             <label>初始權益 (TWD)</label>
@@ -76,35 +76,7 @@
             <label>壓力測試點數</label>
             <input v-model.number="riskForm.stress_points" type="number" />
           </div>
-          <div class="pt-field">
-            <label>策略引擎</label>
-            <select v-model="strategyForm.strategy_type">
-              <option value="v1">V1: 固定點數停損停利</option>
-              <option value="v2">V2: ATR 動態加碼與移動停損</option>
-            </select>
-          </div>
-          <div class="pt-field" v-if="strategyForm.strategy_type === 'v2'">
-            <label>V2 Strategy Version</label>
-            <select v-model="strategyForm.v2_variant">
-              <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
-          <div class="pt-field" v-if="strategyForm.strategy_type === 'v1'">
-            <label>停損點數</label>
-            <input v-model.number="strategyForm.stop_loss_points" type="number" />
-          </div>
-          <div class="pt-field" v-if="strategyForm.strategy_type === 'v1'">
-            <label>停利點數</label>
-            <input v-model.number="strategyForm.take_profit_points" type="number" />
-          </div>
         </div>
-        <FuturesRiskSizerPanel
-          :sizing="riskSizingPreview"
-          :loading="riskSizingLoading"
-          :error="riskSizingError"
-        />
         <div class="pt-card-actions">
           <button class="pt-btn pt-btn-primary" :disabled="creatingAccount" @click="createAccount">
             {{ creatingAccount ? '建立中...' : '建立帳戶' }}
@@ -125,6 +97,7 @@
                 <th>初始權益</th>
                 <th>保證金</th>
                 <th>建立時間</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -135,6 +108,15 @@
                 <td>{{ formatCurrency(acct.starting_equity) }}</td>
                 <td>{{ formatCurrency(acct.initial_margin_per_contract) }}</td>
                 <td>{{ formatTime(acct.created_at) }}</td>
+                <td>
+                  <button
+                    class="pt-btn pt-btn-sm pt-btn-danger"
+                    :disabled="deletingAccounts[acct.id]"
+                    @click="deleteAccount(acct)"
+                  >
+                    {{ deletingAccounts[acct.id] ? '刪除中' : '刪除' }}
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -157,7 +139,7 @@
           </div>
           <div class="pt-field">
             <label>Bot 名稱</label>
-            <input v-model="botForm.name" type="text" placeholder="TMF Day Bot" />
+            <input v-model="botForm.name" type="text" placeholder="TMF 日盤 Bot" />
           </div>
           <div class="pt-field">
             <label>模式</label>
@@ -174,14 +156,14 @@
             </select>
           </div>
           <div class="pt-field">
-            <label>Bot Strategy Engine</label>
+            <label>策略引擎</label>
             <select v-model="botStrategyForm.strategy_type">
-              <option value="v1">V1 fixed points</option>
-              <option value="v2">V2 dynamic ATR</option>
+              <option value="v1">V1：固定點數停損停利</option>
+              <option value="v2">V2：ATR 動態加碼與移動停損</option>
             </select>
           </div>
           <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v2'">
-            <label>Bot V2 Version</label>
+            <label>V2 策略版本</label>
             <select v-model="botStrategyForm.v2_variant">
               <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -189,14 +171,19 @@
             </select>
           </div>
           <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v1'">
-            <label>Bot Stop Loss Points</label>
+            <label>停損點數</label>
             <input v-model.number="botStrategyForm.stop_loss_points" type="number" />
           </div>
           <div class="pt-field" v-if="botStrategyForm.strategy_type === 'v1'">
-            <label>Bot Take Profit Points</label>
+            <label>停利點數</label>
             <input v-model.number="botStrategyForm.take_profit_points" type="number" />
           </div>
         </div>
+        <FuturesRiskSizerPanel
+          :sizing="riskSizingPreview"
+          :loading="riskSizingLoading"
+          :error="riskSizingError"
+        />
         <div class="pt-card-actions">
           <button class="pt-btn pt-btn-primary" :disabled="creatingBot" @click="createBot">
             {{ creatingBot ? '建立中...' : '建立 Bot' }}
@@ -248,6 +235,13 @@
                       class="pt-btn pt-btn-sm"
                       @click="refreshBotState(bot.id)"
                     >狀態</button>
+                    <button
+                      class="pt-btn pt-btn-sm pt-btn-danger"
+                      :disabled="bot.status === 'running' || deletingBots[bot.id]"
+                      @click="deleteBot(bot)"
+                    >
+                      {{ deletingBots[bot.id] ? '刪除中' : '刪除' }}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -441,7 +435,6 @@
           <div class="pt-field">
             <label>帳戶</label>
             <select v-model.number="replayForm.account_id">
-              <option :value="null">不儲存到帳戶</option>
               <option v-for="acct in accounts" :key="acct.id" :value="acct.id">
                 {{ acct.name }} (ID: {{ acct.id }})
               </option>
@@ -456,18 +449,14 @@
             <input v-model="replayForm.end_date" type="date" />
           </div>
           <div class="pt-field">
-            <label>初始權益</label>
-            <input v-model.number="replayForm.starting_equity" type="number" />
-          </div>
-          <div class="pt-field">
-            <label>Replay Strategy Engine</label>
+            <label>回放策略引擎</label>
             <select v-model="replayStrategyForm.strategy_type">
-              <option value="v1">V1 fixed points</option>
-              <option value="v2">V2 dynamic ATR</option>
+              <option value="v1">V1：固定點數停損停利</option>
+              <option value="v2">V2：ATR 動態加碼與移動停損</option>
             </select>
           </div>
           <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v2'">
-            <label>Replay V2 Version</label>
+            <label>回放 V2 策略版本</label>
             <select v-model="replayStrategyForm.v2_variant">
               <option v-for="option in v2VariantOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -475,11 +464,11 @@
             </select>
           </div>
           <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v1'">
-            <label>Replay Stop Loss Points</label>
+            <label>回放停損點數</label>
             <input v-model.number="replayStrategyForm.stop_loss_points" type="number" />
           </div>
           <div class="pt-field" v-if="replayStrategyForm.strategy_type === 'v1'">
-            <label>Replay Take Profit Points</label>
+            <label>回放停利點數</label>
             <input v-model.number="replayStrategyForm.take_profit_points" type="number" />
           </div>
         </div>
@@ -489,7 +478,7 @@
           :error="riskSizingError"
         />
         <div class="pt-card-actions">
-          <button class="pt-btn pt-btn-primary" :disabled="runningReplay" @click="runReplay">
+          <button class="pt-btn pt-btn-primary" :disabled="runningReplay || !replayForm.account_id" @click="runReplay">
             {{ runningReplay ? '回放中...' : '執行回放' }}
           </button>
         </div>
@@ -660,6 +649,8 @@ const toast = ref(null);
 const creatingAccount = ref(false);
 const creatingBot = ref(false);
 const runningReplay = ref(false);
+const deletingAccounts = reactive({});
+const deletingBots = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
@@ -674,7 +665,7 @@ const v2VariantOptions = [
 ];
 
 const accountForm = reactive({
-  name: "TMF Paper Account",
+  name: "TMF 模擬帳戶",
   starting_equity: 100000,
   initial_margin_per_contract: 26300,
 });
@@ -689,16 +680,9 @@ const riskForm = reactive({
   total_position_risk_pct: 0.2,
 });
 
-const strategyForm = reactive({
-  strategy_type: "v1",
-  v2_variant: "baseline",
-  stop_loss_points: 60,
-  take_profit_points: 120,
-});
-
 const botForm = reactive({
   account_id: null,
-  name: "TMF Day Bot",
+  name: "TMF 日盤 Bot",
   mode: "realtime",
   holding_policy: "day_only",
 });
@@ -721,7 +705,6 @@ const replayForm = reactive({
   account_id: null,
   start_date: "",
   end_date: "",
-  starting_equity: 100000,
 });
 
 // ─── Computed ────────────────────────────────────────────────
@@ -738,6 +721,14 @@ const activeBotStatusLabel = computed(() => {
 
 const runningBotIds = computed(() => bots.value.filter((b) => b.status === "running").map((b) => b.id));
 
+const selectedBotAccount = computed(() => (
+  accounts.value.find((acct) => Number(acct.id) === Number(botForm.account_id)) || null
+));
+
+const selectedReplayAccount = computed(() => (
+  accounts.value.find((acct) => Number(acct.id) === Number(replayForm.account_id)) || null
+));
+
 const directionLabel = computed(() => {
   const d = liveBotState.value?.direction;
   return { long: "📈 做多", short: "📉 做空", neutral: "⏸ 觀望" }[d] || d || "--";
@@ -748,12 +739,43 @@ const dataSourceLabel = computed(() => {
   return { fubon_neo: "富邦 API" }[source] || source || "--";
 });
 
-const riskSizingCapital = computed(() => (
-  activeTab.value === "replay" ? replayForm.starting_equity : accountForm.starting_equity
-));
+const riskSizingCapital = computed(() => {
+  if (activeTab.value === "replay") {
+    return selectedReplayAccount.value?.starting_equity
+      ?? accountForm.starting_equity;
+  }
+  if (activeTab.value === "bots") {
+    return selectedBotAccount.value?.equity
+      ?? selectedBotAccount.value?.starting_equity
+      ?? accountForm.starting_equity;
+  }
+  return accountForm.starting_equity;
+});
+
+const activeInitialMargin = computed(() => {
+  if (activeTab.value === "bots") {
+    return selectedBotAccount.value?.initial_margin_per_contract
+      ?? accountForm.initial_margin_per_contract;
+  }
+  if (activeTab.value === "replay") {
+    return selectedReplayAccount.value?.initial_margin_per_contract
+      ?? accountForm.initial_margin_per_contract;
+  }
+  return accountForm.initial_margin_per_contract;
+});
+
+const activeRiskConfig = computed(() => {
+  if (activeTab.value === "bots" && selectedBotAccount.value?.risk_config) {
+    return selectedBotAccount.value.risk_config;
+  }
+  if (activeTab.value === "replay" && selectedReplayAccount.value?.risk_config) {
+    return selectedReplayAccount.value.risk_config;
+  }
+  return riskForm;
+});
 
 const activeRiskStrategyForm = computed(() => (
-  activeTab.value === "replay" ? replayStrategyForm : strategyForm
+  activeTab.value === "replay" ? replayStrategyForm : botStrategyForm
 ));
 
 // ─── API Helpers ─────────────────────────────────────────────
@@ -775,16 +797,17 @@ function showToast(message, type = "info") {
 }
 
 function buildRiskSizingPayload() {
+  const riskConfig = activeRiskConfig.value || {};
   return {
     product_symbol: "TMF",
     futures_capital: Number(riskSizingCapital.value || 0),
-    initial_margin: Number(accountForm.initial_margin_per_contract || 0),
+    initial_margin: Number(activeInitialMargin.value || 0),
     stop_loss_points: Number(riskSizingStopLossPoints(activeRiskStrategyForm.value) || 0),
-    stress_points: Number(riskForm.stress_points || 0),
-    margin_usage_limit: Number(riskForm.max_margin_usage_pct || 0),
-    single_trade_risk_pct: Number(riskForm.risk_per_trade_pct || 0),
-    total_position_risk_pct: Number(riskForm.total_position_risk_pct || 0),
-    user_max_contracts: Number(riskForm.max_contracts_hard || 0),
+    stress_points: Number(riskConfig.stress_points ?? riskForm.stress_points ?? 0),
+    margin_usage_limit: Number(riskConfig.max_margin_usage_pct ?? riskForm.max_margin_usage_pct ?? 0),
+    single_trade_risk_pct: Number(riskConfig.risk_per_trade_pct ?? riskForm.risk_per_trade_pct ?? 0),
+    total_position_risk_pct: Number(riskConfig.total_position_risk_pct ?? riskForm.total_position_risk_pct ?? 0),
+    user_max_contracts: Number(riskConfig.max_contracts_hard ?? riskForm.max_contracts_hard ?? 0),
   };
 }
 
@@ -823,6 +846,11 @@ function strategyConfigLabel(config) {
 }
 
 async function refreshRiskSizing() {
+  if (!["bots", "replay"].includes(activeTab.value)) {
+    riskSizingPreview.value = null;
+    riskSizingError.value = "";
+    return;
+  }
   const payload = buildRiskSizingPayload();
   if (!payload.futures_capital || !payload.initial_margin || !payload.stop_loss_points) {
     riskSizingPreview.value = null;
@@ -857,6 +885,9 @@ async function loadAccounts() {
     if (accounts.value.length && !botForm.account_id) {
       botForm.account_id = accounts.value[0].id;
     }
+    if (accounts.value.length && !replayForm.account_id) {
+      replayForm.account_id = accounts.value[0].id;
+    }
   } catch { /* ignore */ }
 }
 
@@ -883,7 +914,6 @@ async function createAccount() {
         ...accountForm,
         risk_config: { ...riskForm },
         cost_model: {},
-        strategy_config: buildStrategyConfig(strategyForm),
       }),
     });
     showToast("帳戶建立成功", "success");
@@ -911,6 +941,45 @@ async function createBot() {
     showToast(e.message, "error");
   } finally {
     creatingBot.value = false;
+  }
+}
+
+async function deleteAccount(account) {
+  if (!window.confirm(`確定要刪除帳戶「${account.name}」？相關 Bot、回放與交易紀錄也會一併刪除。`)) {
+    return;
+  }
+  deletingAccounts[account.id] = true;
+  try {
+    const relatedBotIds = bots.value
+      .filter((bot) => Number(bot.account_id) === Number(account.id))
+      .map((bot) => Number(bot.id));
+    await apiFetch(`/accounts/${account.id}`, { method: "DELETE" });
+    showToast("帳戶已刪除", "success");
+    if (Number(botForm.account_id) === Number(account.id)) botForm.account_id = null;
+    if (Number(replayForm.account_id) === Number(account.id)) replayForm.account_id = null;
+    if (relatedBotIds.includes(Number(liveBotState.value?.bot_id))) liveBotState.value = null;
+    await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    delete deletingAccounts[account.id];
+  }
+}
+
+async function deleteBot(bot) {
+  if (!window.confirm(`確定要刪除 Bot「${bot.name}」？該 Bot 的模擬紀錄也會一併刪除。`)) {
+    return;
+  }
+  deletingBots[bot.id] = true;
+  try {
+    await apiFetch(`/bots/${bot.id}`, { method: "DELETE" });
+    showToast("Bot 已刪除", "success");
+    if (liveBotState.value?.bot_id === bot.id) liveBotState.value = null;
+    await Promise.all([loadBots(), loadReplayRuns()]);
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    delete deletingBots[bot.id];
   }
 }
 
@@ -952,9 +1021,7 @@ async function runReplay() {
       method: "POST",
       body: JSON.stringify({
         ...replayForm,
-        risk_config: { ...riskForm },
         strategy_config: buildStrategyConfig(replayStrategyForm),
-        cost_model: {},
       }),
     });
     replayResult.value = data.result;
@@ -1033,11 +1100,19 @@ watch(
   [
     () => activeTab.value,
     () => accountForm.starting_equity,
-    () => replayForm.starting_equity,
+    () => replayForm.account_id,
     () => accountForm.initial_margin_per_contract,
-    () => strategyForm.strategy_type,
-    () => strategyForm.v2_variant,
-    () => strategyForm.stop_loss_points,
+    () => botForm.account_id,
+    () => selectedBotAccount.value?.equity,
+    () => selectedBotAccount.value?.starting_equity,
+    () => selectedBotAccount.value?.initial_margin_per_contract,
+    () => selectedReplayAccount.value?.starting_equity,
+    () => selectedReplayAccount.value?.initial_margin_per_contract,
+    () => JSON.stringify(selectedBotAccount.value?.risk_config || {}),
+    () => JSON.stringify(selectedReplayAccount.value?.risk_config || {}),
+    () => botStrategyForm.strategy_type,
+    () => botStrategyForm.v2_variant,
+    () => botStrategyForm.stop_loss_points,
     () => replayStrategyForm.strategy_type,
     () => replayStrategyForm.v2_variant,
     () => replayStrategyForm.stop_loss_points,
@@ -1201,11 +1276,20 @@ onUnmounted(() => {
   color: #e6f1ff;
   padding: 10px 12px;
   outline: none;
+  color-scheme: dark;
 }
 .pt-field input:focus,
 .pt-field select:focus {
   border-color: rgba(144,222,255,0.5);
   box-shadow: 0 0 0 2px rgba(144,222,255,0.1);
+}
+.pt-field select option {
+  background: #171f2b;
+  color: #e6f1ff;
+}
+.pt-field select option:checked {
+  background: #2563eb;
+  color: #ffffff;
 }
 
 /* ─── Buttons ────────────────────────────────────────────── */

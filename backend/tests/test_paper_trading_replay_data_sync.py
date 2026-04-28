@@ -59,15 +59,33 @@ def test_paper_replay_auto_syncs_missing_futopt_minute_bars(client, monkeypatch)
     async def fake_save_replay_run(data, owner_id=1):
         return {"id": 77, **data}
 
+    async def fake_get_paper_trading_account(account_id, owner_id=1):
+        return {
+            "id": account_id,
+            "product_symbol": "TMF",
+            "starting_equity": 250000,
+            "initial_margin_per_contract": 26300,
+            "risk_config": {},
+            "cost_model": {},
+        }
+
+    async def fake_save_records(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(main.paper_trading.db, "get_paper_trading_account", fake_get_paper_trading_account)
     monkeypatch.setattr(main.paper_trading.db, "get_ohlcv_range", fake_get_ohlcv_range)
     monkeypatch.setattr(main.paper_trading.db, "upsert_ohlcv_batch", fake_upsert_ohlcv_batch)
     monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_contract_resolution", fake_save_contract_resolution)
     monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_replay_run", fake_save_replay_run)
+    monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_fills", fake_save_records)
+    monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_equity_snapshots", fake_save_records)
+    monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_risk_events", fake_save_records)
     monkeypatch.setattr(main.paper_trading.fubon_futopt_provider, "fetch_intraday_ohlc", fake_fetch_intraday_ohlc)
 
     response = client.post(
         "/api/paper-trading/replay/run",
         json={
+            "account_id": 1,
             "product_symbol": "TMF",
             "direction_symbol": "TXF",
             "start_date": "2026-04-11",
@@ -79,6 +97,7 @@ def test_paper_replay_auto_syncs_missing_futopt_minute_bars(client, monkeypatch)
     assert response.status_code == 200
     payload = response.json()
     assert payload["result"]["bar_count"] == 40
+    assert payload["run"]["starting_equity"] == 250000
     assert fetch_calls == [
         {"symbol": "TMF", "period": "1d", "interval": "1m"},
         {"symbol": "TXF", "period": "1d", "interval": "1m"},
