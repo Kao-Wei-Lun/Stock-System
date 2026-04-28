@@ -62,7 +62,11 @@ async def get_fubon_accounts_status():
     runtime = fubon_realtime_pool.get_account_runtime_statuses()
     for account in accounts:
         account.update(runtime.get(int(account.get("id") or 0), {}))
-    return {"accounts": accounts}
+    diagnostics = {}
+    get_diagnostics = getattr(fubon_realtime_pool, "get_ws_diagnostics", None)
+    if callable(get_diagnostics):
+        diagnostics = get_diagnostics()
+    return {"accounts": accounts, "realtime_diagnostics": diagnostics}
 
 
 @router.put("/fubon-accounts/{account_id}")

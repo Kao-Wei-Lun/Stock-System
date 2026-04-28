@@ -79,6 +79,8 @@ const FUTOPT_DEFAULT_PERIODS = {
   "60m": "3mo",
   "1h": "3mo",
 };
+const FUTOPT_REST_POLL_MS = 15000;
+const FUTOPT_WS_STALE_MS = 12000;
 const WORKSPACE_TAB_OPTIONS = ["chart", "institutional", "events", "macro", "screener"];
 const DEFAULT_ACTIVE_IND = {
   cycleMa: true,
@@ -421,6 +423,17 @@ function isFutoptTicker(ticker) {
     || FUTOPT_FUTURE_CONTRACT_RE.test(normalized)
     || FUTOPT_OPTION_CONTRACT_RE.test(normalized)
   );
+}
+
+export function shouldPollFutoptRestFallback({
+  ticker,
+  interval,
+  lastRealtimeAt = 0,
+  now = Date.now(),
+  staleMs = FUTOPT_WS_STALE_MS,
+} = {}) {
+  if (!isFutoptTicker(ticker) || !isIntradayInterval(interval)) return false;
+  return !lastRealtimeAt || now - lastRealtimeAt >= staleMs;
 }
 
 function resolveFutoptInterval(interval) {
@@ -979,6 +992,9 @@ export function useDashboard() {
   let clockTimer = null;
   let watchlistTimer = null;
   let alertPollingTimer = null;
+  let futoptFallbackTimer = null;
+  let futoptFallbackInFlight = false;
+  let lastFutoptQuoteOrCandleAt = 0;
 
   function pushNotification({ icon, title, msg, type = "" }) {
     const id = `${Date.now()}-${Math.random()}`;
@@ -1504,6 +1520,7 @@ export function useDashboard() {
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
+    if (isFutoptTicker(data.ticker)) lastFutoptQuoteOrCandleAt = Date.now();
     const mergedQuote = applyQuote(data);
     updateCurrentCandleFromQuote(mergedQuote);
   }
@@ -1547,6 +1564,7 @@ export function useDashboard() {
   function handleRealtimeCandle(message) {
     const data = message.data;
     if (message.ticker !== currentTicker.value && message.ticker !== normalizeTicker(currentTicker.value)) return;
+    if (isFutoptTicker(message.ticker || data?.ticker)) lastFutoptQuoteOrCandleAt = Date.now();
     upsertRealtimeCandleRow(data);
   }
 
@@ -1893,6 +1911,60 @@ export function useDashboard() {
 
   function setComparisonMode(mode) {
     comparisonMode.value = mode === "price" ? "price" : "percent";
+  }
+
+  async function refreshFutoptRealtimeFallback({ force = false } = {}) {
+    const requestedTicker = normalizeTicker(currentTicker.value);
+    const requestedPeriod = currentPeriod.value;
+    const requestedInterval = currentInterval.value;
+    if (
+      futoptFallbackInFlight
+      || (!force && !shouldPollFutoptRestFallback({
+        ticker: requestedTicker,
+        interval: requestedInterval,
+        lastRealtimeAt: lastFutoptQuoteOrCandleAt,
+      }))
+    ) {
+      return;
+    }
+
+    futoptFallbackInFlight = true;
+    try {
+      const [ohlcResult, quoteResult] = await Promise.allSettled([
+        dashboardApi.getFutoptOhlc(requestedTicker, {
+          period: requestedPeriod,
+          interval: requestedInterval,
+        }),
+        dashboardApi.getFutoptQuote(requestedTicker),
+      ]);
+
+      const ohlcPayload = ohlcResult.status === "fulfilled" ? ohlcResult.value : null;
+      const quotePayload = quoteResult.status === "fulfilled" ? quoteResult.value : null;
+      const resolvedTicker = normalizeTicker(ohlcPayload?.ticker || quotePayload?.ticker || requestedTicker);
+      const activeTicker = normalizeTicker(currentTicker.value);
+      if (![requestedTicker, resolvedTicker].includes(activeTicker)) return;
+
+      if (resolvedTicker && resolvedTicker !== activeTicker) {
+        dashboardRealtime.unsubscribeTicker(activeTicker);
+        currentTicker.value = resolvedTicker;
+        dashboardRealtime.subscribeTicker(resolvedTicker);
+      }
+
+      if (Array.isArray(ohlcPayload?.data) && ohlcPayload.data.length) {
+        rawOhlcData.value = ohlcPayload.data;
+      }
+      if (quotePayload) {
+        const mergedQuote = applyQuote(quotePayload);
+        updateCurrentCandleFromQuote(mergedQuote);
+      }
+      if (ohlcPayload || quotePayload) {
+        lastFutoptQuoteOrCandleAt = Date.now();
+      }
+    } catch (error) {
+      console.debug("Futopt realtime REST fallback skipped", error);
+    } finally {
+      futoptFallbackInFlight = false;
+    }
   }
 
   async function loadQuote(ticker = currentTicker.value) {
@@ -2903,12 +2975,16 @@ export function useDashboard() {
       void loadAlerts();
       void loadNotifications();
     }, 30000);
+    futoptFallbackTimer = window.setInterval(() => {
+      void refreshFutoptRealtimeFallback();
+    }, FUTOPT_REST_POLL_MS);
   });
 
   onBeforeUnmount(() => {
     if (clockTimer) clearInterval(clockTimer);
     if (watchlistTimer) clearInterval(watchlistTimer);
     if (alertPollingTimer) clearInterval(alertPollingTimer);
+    if (futoptFallbackTimer) clearInterval(futoptFallbackTimer);
     dashboardRealtime.disconnect();
   });
 

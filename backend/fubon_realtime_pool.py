@@ -5,6 +5,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from data_fetcher import normalize_ticker
@@ -60,6 +61,7 @@ class FubonRealtimeSubscriptionPool:
         self._assignment_lock = asyncio.Lock()
         self._pending_tasks: dict[str, asyncio.Task] = {}
         self._last_shortage_notifications: dict[str, float] = {}
+        self._ws_diagnostics: dict[str, dict[str, Any]] = {}
 
     @property
     def connected(self) -> bool:
@@ -155,6 +157,7 @@ class FubonRealtimeSubscriptionPool:
         self._assignments.clear()
         self._resolved_to_requested.clear()
         self._source_tickers.clear()
+        self._ws_diagnostics.clear()
 
     async def sync_watchlist_from_db(self, db=None) -> None:
         database = db or self._db
@@ -208,9 +211,69 @@ class FubonRealtimeSubscriptionPool:
     def resolve_broadcast_tickers(self, ticker: str) -> tuple[str, ...]:
         normalized = normalize_ticker(ticker)
         requested = set(self._resolved_to_requested.get(normalized, set()))
-        if not requested:
-            return (normalized,)
+        requested.add(normalized)
         return tuple(sorted(requested))
+
+    def record_ws_message(
+        self,
+        ticker: str,
+        channel: str,
+        *,
+        market_type: str | None = None,
+        account_id: int | None = None,
+        target_tickers: tuple[str, ...] | list[str] | set[str] = (),
+    ) -> None:
+        normalized = normalize_ticker(ticker)
+        normalized_channel = str(channel or "").strip().lower()
+        if not normalized or not normalized_channel:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        keys = {normalized}
+        for item in target_tickers:
+            target = normalize_ticker(item)
+            if target:
+                keys.add(target)
+
+        for key in keys:
+            diagnostic = self._ws_diagnostics.setdefault(
+                key,
+                {
+                    "ticker": key,
+                    "last_seen_at": None,
+                    "last_channel": None,
+                    "channels": {},
+                },
+            )
+            channel_state = diagnostic["channels"].setdefault(
+                normalized_channel,
+                {
+                    "count": 0,
+                    "last_seen_at": None,
+                    "market_type": None,
+                    "account_id": None,
+                    "source_ticker": None,
+                },
+            )
+            channel_state["count"] += 1
+            channel_state["last_seen_at"] = now
+            channel_state["market_type"] = market_type
+            channel_state["account_id"] = account_id
+            channel_state["source_ticker"] = normalized
+            diagnostic["last_seen_at"] = now
+            diagnostic["last_channel"] = normalized_channel
+
+    def get_ws_diagnostics(self) -> dict[str, dict[str, Any]]:
+        return {
+            ticker: {
+                **payload,
+                "channels": {
+                    channel: dict(channel_payload)
+                    for channel, channel_payload in sorted(payload.get("channels", {}).items())
+                },
+            }
+            for ticker, payload in sorted(self._ws_diagnostics.items())
+        }
 
     def supports_full_ws_quotes_for_ticker(self, ticker: str) -> bool:
         assignment = self._assignments.get(normalize_ticker(ticker))

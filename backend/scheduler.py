@@ -328,6 +328,16 @@ async def fubon_ws_listener_loop(
                     resolved_targets = [item for item in resolver(ticker) if item]
                     if resolved_targets:
                         target_tickers = resolved_targets
+                recorder = getattr(fubon_manager, "record_ws_message", None)
+                if callable(recorder):
+                    diagnostic_channel = "quote" if channel in {"aggregates", "trades"} else channel
+                    recorder(
+                        ticker,
+                        diagnostic_channel,
+                        market_type=market_type,
+                        account_id=message.get("account_id"),
+                        target_tickers=tuple(target_tickers),
+                    )
 
                 if channel == "aggregates":
                     for target_ticker in target_tickers:

@@ -155,7 +155,28 @@ async def test_realtime_pool_maps_alias_ticker_to_resolved_contract():
 
     await pool.set_source_tickers("watchlist", ["TXF"])
 
-    assert pool.resolve_broadcast_tickers("TXFE6") == ("TXF",)
+    assert pool.resolve_broadcast_tickers("TXFE6") == ("TXF", "TXFE6")
+
+
+def test_realtime_pool_records_ws_message_diagnostics():
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+
+    pool.record_ws_message(
+        "TMFE6",
+        "books",
+        market_type="futopt",
+        account_id=1,
+        target_tickers=("TMF",),
+    )
+    pool.record_ws_message("TMFE6", "books", market_type="futopt", account_id=1)
+
+    diagnostics = pool.get_ws_diagnostics()
+    assert diagnostics["TMFE6"]["last_channel"] == "books"
+    assert diagnostics["TMFE6"]["channels"]["books"]["count"] == 2
+    assert diagnostics["TMFE6"]["channels"]["books"]["market_type"] == "futopt"
+    assert diagnostics["TMFE6"]["channels"]["books"]["account_id"] == 1
+    assert diagnostics["TMF"]["channels"]["books"]["count"] == 1
 
 
 @pytest.mark.anyio

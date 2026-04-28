@@ -154,6 +154,7 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
             self.unregistered = None
             self.start_stock_calls = 0
             self.start_futopt_calls = 0
+            self.recorded_messages = []
 
         def register_message_handler(self, handler):
             self.handler = handler
@@ -168,6 +169,9 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
         def start_ws_futopt(self):
             self.start_futopt_calls += 1
             return True
+
+        def record_ws_message(self, ticker, channel, **kwargs):
+            self.recorded_messages.append((ticker, channel, kwargs))
 
     manager = FakeFubonManager()
     task = asyncio.create_task(
@@ -231,3 +235,5 @@ async def test_fubon_ws_listener_broadcasts_quote_and_books_messages():
     assert messages[0][0] == "2330.TW"
     assert messages[0][1]["type"] == "quote"
     assert messages[1][1]["type"] == "books"
+    assert manager.recorded_messages[0][0:2] == ("2330.TW", "quote")
+    assert manager.recorded_messages[1][0:2] == ("2330.TW", "books")

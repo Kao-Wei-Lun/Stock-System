@@ -4,6 +4,7 @@ import {
   getTimeframeOptionsForTicker,
   normalizeTicker,
   resolveDashboardTimeframeForTicker,
+  shouldPollFutoptRestFallback,
 } from "./useDashboard";
 
 describe("dashboard timeframe helpers", () => {
@@ -37,5 +38,36 @@ describe("dashboard timeframe helpers", () => {
       period: "1d",
       interval: "1m",
     });
+  });
+
+  it("polls futopt REST fallback only when intraday realtime is stale", () => {
+    expect(shouldPollFutoptRestFallback({
+      ticker: "TMFE6",
+      interval: "1m",
+      lastRealtimeAt: 1_000,
+      now: 14_000,
+      staleMs: 12_000,
+    })).toBe(true);
+    expect(shouldPollFutoptRestFallback({
+      ticker: "TMFE6",
+      interval: "1m",
+      lastRealtimeAt: 10_000,
+      now: 14_000,
+      staleMs: 12_000,
+    })).toBe(false);
+    expect(shouldPollFutoptRestFallback({
+      ticker: "2330.TW",
+      interval: "1m",
+      lastRealtimeAt: 1_000,
+      now: 14_000,
+      staleMs: 12_000,
+    })).toBe(false);
+    expect(shouldPollFutoptRestFallback({
+      ticker: "TMFE6",
+      interval: "1d",
+      lastRealtimeAt: 1_000,
+      now: 14_000,
+      staleMs: 12_000,
+    })).toBe(false);
   });
 });
