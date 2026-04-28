@@ -6,7 +6,7 @@ from paper_trading.cost_model import CostModel, OrderSide, SessionType
 from paper_trading.replay_engine import ReplayEngine
 from paper_trading.risk_engine import RiskConfig
 from paper_trading.simulation_broker import Bar
-from paper_trading.strategy_engine import SessionProfile, SignalDirection, StrategyConfig
+from paper_trading.strategy_engine import SessionProfile, SignalAction, SignalDirection, StrategyConfig
 from paper_trading.strategy_v2 import StrategyEngineV2
 
 
@@ -363,3 +363,56 @@ def test_v2_winrate_variant_blocks_entries_when_atr_is_over_cap() -> None:
 
     assert strategy.current_atr > 70
     assert signal is None
+
+
+def test_v2_can_emit_short_entry_when_trend_and_breakdown_align() -> None:
+    start = datetime(2026, 4, 20, 8, 45)
+    strategy = StrategyEngineV2(StrategyConfig(strategy_type="v2", v2_variant="v2_winrate_candidate"))
+
+    for index in range(35):
+        close = 20_000 - index * 1.5
+        strategy.update_tx_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=close + 0.5,
+                high=close + 1.0,
+                low=close - 1.0,
+                close=close,
+                volume=1_000,
+                symbol="TXF",
+            )
+        )
+
+    for index in range(12):
+        close = 20_000 - index * 0.4
+        strategy.update_tmf_bar(
+            Bar(
+                time=start + timedelta(minutes=index),
+                open=close + 0.2,
+                high=close + 0.5,
+                low=close - 0.5,
+                close=close,
+                volume=1_000,
+                symbol="TMF",
+            ),
+            SessionType.DAY,
+        )
+
+    signal = strategy.update_tmf_bar(
+        Bar(
+            time=start + timedelta(minutes=12),
+            open=19_980,
+            high=19_981,
+            low=19_975,
+            close=19_976,
+            volume=1_000,
+            symbol="TMF",
+        ),
+        SessionType.DAY,
+    )
+
+    assert strategy.current_direction == SignalDirection.SHORT
+    assert signal is not None
+    assert signal.action == SignalAction.SELL
+    assert signal.direction == SignalDirection.SHORT
+    assert "v2_short_entry" in signal.reason

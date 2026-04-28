@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from paper_trading.bot_runner import PaperTradingBot
 from paper_trading.cost_model import OrderSide, SessionType
-from paper_trading.risk_engine import determine_session
+from paper_trading.risk_engine import determine_session, trading_session_key
 from paper_trading.strategy_engine import StrategyConfig
 
 
@@ -38,6 +38,49 @@ def test_parse_candle_converts_utc_payload_to_taipei_night_session() -> None:
     assert bar.time.hour == 21
     assert bar.time.utcoffset().total_seconds() == 8 * 60 * 60
     assert determine_session(bar.time) == SessionType.NIGHT
+
+
+def test_trading_session_key_keeps_night_session_across_midnight() -> None:
+    assert trading_session_key(datetime(2026, 4, 24, 23, 59), SessionType.NIGHT) == "2026-04-24:night"
+    assert trading_session_key(datetime(2026, 4, 25, 0, 1), SessionType.NIGHT) == "2026-04-24:night"
+    assert trading_session_key(datetime(2026, 4, 25, 8, 45), SessionType.DAY) == "2026-04-25:day"
+
+
+def test_realtime_strategy_resets_at_day_session_boundary_after_night() -> None:
+    bot = PaperTradingBot(bot_id=1)
+    bot.start(None)
+
+    bot.process_candle(
+        "TXF",
+        {
+            "date": "2026-04-25T04:59:00+08:00",
+            "open": 19_900,
+            "high": 19_910,
+            "low": 19_890,
+            "close": 19_905,
+            "volume": 100,
+        },
+    )
+
+    night_session_key = bot._current_session_key
+    assert night_session_key == "2026-04-24:night"
+    assert len(bot.strategy._tx_vwap._bars) == 1
+
+    bot.process_candle(
+        "TXF",
+        {
+            "date": "2026-04-25T08:45:00+08:00",
+            "open": 20_000,
+            "high": 20_010,
+            "low": 19_990,
+            "close": 20_005,
+            "volume": 100,
+        },
+    )
+
+    assert bot._current_session_key == "2026-04-25:day"
+    assert len(bot.strategy._tx_vwap._bars) == 1
+    assert bot.strategy._tx_vwap._bars[-1].time.hour == 8
 
 
 def test_speed_mode_trade_messages_build_realtime_one_minute_bars() -> None:

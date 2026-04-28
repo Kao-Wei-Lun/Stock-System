@@ -27,6 +27,7 @@ from paper_trading.risk_engine import (
     RiskEngine,
     HoldingPolicy,
     determine_session,
+    trading_session_key,
 )
 from paper_trading.simulation_broker import (
     Bar,
@@ -140,8 +141,9 @@ class ReplayEngine:
         # 建立 TX bar 索引（用時間戳對齊）
         tx_bar_map = self._build_bar_map(tx_bars)
 
-        # 追蹤交易日
+        # 追蹤日曆日與期貨交易時段。夜盤跨午夜時仍屬於同一個策略 session。
         current_date: Optional[str] = None
+        current_session_key: Optional[str] = None
         bar_count = 0
 
         for raw_bar in tmf_bars:
@@ -149,19 +151,23 @@ class ReplayEngine:
             if tmf_bar is None:
                 continue
 
-            bar_count += 1
-
-            # 新的交易日重置
-            bar_date = tmf_bar.time.strftime("%Y-%m-%d")
-            if bar_date != current_date:
-                current_date = bar_date
-                account.reset_daily()
-                strategy.reset_session()
-
             # 判斷時段
             session = determine_session(tmf_bar.time)
             if session is None:
                 continue
+
+            bar_count += 1
+
+            # 新的日曆日只重置帳戶單日統計，不重置策略狀態。
+            bar_date = tmf_bar.time.strftime("%Y-%m-%d")
+            if bar_date != current_date:
+                current_date = bar_date
+                account.reset_daily()
+
+            session_key = trading_session_key(tmf_bar.time, session)
+            if session_key != current_session_key:
+                current_session_key = session_key
+                strategy.reset_session()
 
             # 同步 TX bar
             tx_key = tmf_bar.time.strftime("%Y-%m-%d %H:%M")

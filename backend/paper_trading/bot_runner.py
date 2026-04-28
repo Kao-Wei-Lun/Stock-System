@@ -32,6 +32,7 @@ from paper_trading.risk_engine import (
     RiskEngine,
     HoldingPolicy,
     determine_session,
+    trading_session_key,
 )
 from paper_trading.simulation_broker import (
     Bar,
@@ -122,6 +123,7 @@ class PaperTradingBot:
         self.status = BotStatus.IDLE
         self._handler_ref = None
         self._current_date: Optional[str] = None
+        self._current_session_key: Optional[str] = None
         self._bar_count = 0
         self._warmup_bar_count = 0
         self._warmup_completed_at: Optional[datetime] = None
@@ -148,6 +150,7 @@ class PaperTradingBot:
         self.started_at = datetime.now()
         if not self._warmup_bar_count:
             self._current_date = None
+            self._current_session_key = None
         self._bar_count = 0
 
         if realtime_pool is not None:
@@ -191,11 +194,7 @@ class PaperTradingBot:
             if session is None:
                 continue
 
-            bar_date = tmf_bar.time.strftime("%Y-%m-%d")
-            if bar_date != self._current_date:
-                self._current_date = bar_date
-                self.account.reset_daily()
-                self.strategy.reset_session()
+            self._ensure_trading_context(tmf_bar, session)
 
             tx_bar = tx_bar_map.get(tmf_bar.time.strftime("%Y-%m-%d %H:%M"))
             if tx_bar is not None:
@@ -427,11 +426,14 @@ class PaperTradingBot:
         except Exception as exc:
             log.warning("Paper trading bot %s WS handler error: %s", self.bot_id, exc)
 
-    def _ensure_trading_date(self, bar: Bar) -> None:
+    def _ensure_trading_context(self, bar: Bar, session: SessionType) -> None:
         bar_date = bar.time.strftime("%Y-%m-%d")
         if bar_date != self._current_date:
             self._current_date = bar_date
             self.account.reset_daily()
+        session_key = trading_session_key(bar.time, session)
+        if session_key != self._current_session_key:
+            self._current_session_key = session_key
             self.strategy.reset_session()
 
     def _process_tx_candle(self, bar: Bar, *, is_partial: bool = False) -> None:
@@ -439,7 +441,10 @@ class PaperTradingBot:
         if is_partial:
             return
 
-        self._ensure_trading_date(bar)
+        session = determine_session(bar.time)
+        if session is None:
+            return
+        self._ensure_trading_context(bar, session)
 
         symbol_key = bar.symbol or self.tx_symbol
         tx_bar_minute = bar.time.strftime("%Y-%m-%d %H:%M")
@@ -472,17 +477,8 @@ class PaperTradingBot:
         self._bar_count += 1
         self._last_processed_minute[symbol_key] = bar_minute
 
-        # 新的交易日重置
-        bar_date = bar.time.strftime("%Y-%m-%d")
-        if bar_date != self._current_date:
-            self._current_date = bar_date
-            self.account.reset_daily()
-            self.strategy.reset_session()
-
-        # 判斷時段
-        session = determine_session(bar.time)
-        if session is None:
-            return
+        # Calendar day resets account daily stats; futures session resets strategy state.
+        self._ensure_trading_context(bar, session)
 
         # 1. 用當前 bar 撮合待成交委託
         fills = self.broker.process_bar(bar)

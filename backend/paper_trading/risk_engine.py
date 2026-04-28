@@ -11,7 +11,7 @@ QuantVision Pro — Paper Trading Risk Engine
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time as time_of_day
+from datetime import datetime, time as time_of_day, timedelta
 from enum import Enum
 from typing import Optional
 
@@ -68,6 +68,14 @@ def determine_session(bar_time: datetime) -> Optional[SessionType]:
     if t >= NIGHT_SESSION_OPEN or t <= NIGHT_SESSION_CLOSE:
         return SessionType.NIGHT
     return None
+
+
+def trading_session_key(bar_time: datetime, session: SessionType) -> str:
+    """Return a stable key for the trading session containing bar_time."""
+    session_date = bar_time.date()
+    if session == SessionType.NIGHT and bar_time.time() <= NIGHT_SESSION_CLOSE:
+        session_date = (bar_time - timedelta(days=1)).date()
+    return f"{session_date.isoformat()}:{session.value}"
 
 
 def minutes_to_session_close(bar_time: datetime, session: SessionType) -> float:
