@@ -15,7 +15,7 @@ import {
   toWorkspaceSaveRequest,
 } from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
-import { mergeRealtimeQuote } from "../utils/realtimeQuote";
+import { mergeBookLevels, mergeRealtimeQuote } from "../utils/realtimeQuote";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
@@ -1528,8 +1528,16 @@ export function useDashboard() {
       : (quote.ask ?? null);
     quote.bid_size = data.bid_size ?? quote.bid_size ?? null;
     quote.ask_size = data.ask_size ?? quote.ask_size ?? null;
-    quote.bids = Array.isArray(data.bids) ? data.bids : [];
-    quote.asks = Array.isArray(data.asks) ? data.asks : [];
+    quote.bids = mergeBookLevels(
+      quote.bids,
+      data.bids,
+      hasField("bid") || hasField("bid_size") ? { price: quote.bid, size: quote.bid_size } : null,
+    );
+    quote.asks = mergeBookLevels(
+      quote.asks,
+      data.asks,
+      hasField("ask") || hasField("ask_size") ? { price: quote.ask, size: quote.ask_size } : null,
+    );
     if (data.quote_timestamp) {
       quote.quote_timestamp = data.quote_timestamp;
       lastUpdate.value = formatQuoteTimestampLabel(data.quote_timestamp);
