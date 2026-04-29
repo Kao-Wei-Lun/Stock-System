@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from database import db
 from data_fetcher import DataFetcher, normalize_ticker
 from fubon_quote_provider import build_fubon_quote_payload
-from fubon_symbols import supports_fubon_stock_realtime_ticker, tw_ticker_to_fubon
+from fubon_symbols import is_taiwan_stock_ticker, tw_ticker_to_fubon
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +70,16 @@ def _history_start_from_period(period: str) -> str:
     return (today - timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS)).isoformat()
 
 
+def _merge_unique_rows(rows: list[dict]) -> list[dict]:
+    by_date: dict[str, dict] = {}
+    for row in rows:
+        row_date = str(row.get("date") or "")
+        if not row_date:
+            continue
+        by_date[row_date] = row
+    return [by_date[key] for key in sorted(by_date)]
+
+
 def _rows_from_fubon_candles(payload: Optional[dict]) -> list[dict]:
     if not isinstance(payload, dict):
         return []
@@ -111,7 +121,12 @@ class HybridDataFetcher:
         include_info: bool = False,
     ) -> int:
         normalized_ticker = normalize_ticker(ticker)
-        if self._should_use_fubon_stock_history(normalized_ticker, interval):
+        if is_taiwan_stock_ticker(normalized_ticker):
+            if not self._should_use_fubon_stock_history(normalized_ticker, interval):
+                message = "Taiwan stock history is restricted to Fubon API and this interval is unsupported or Fubon is disconnected"
+                log.warning("%s: %s (%s)", message, normalized_ticker, interval)
+                await db.log_sync(normalized_ticker, "error", 0, message)
+                return 0
             try:
                 count = await self._fetch_and_store_fubon_stock(
                     normalized_ticker,
@@ -121,13 +136,16 @@ class HybridDataFetcher:
                 )
                 return count
             except Exception as exc:
+                message = f"Fubon stock candle fetch failed: {exc}"
                 log.warning(
-                    "Fubon stock candle fetch failed for %s (%s/%s), fallback to Yahoo: %s",
+                    "Fubon stock candle fetch failed for %s (%s/%s); Yahoo fallback is disabled for Taiwan stocks: %s",
                     normalized_ticker,
                     period,
                     interval,
                     exc,
                 )
+                await db.log_sync(normalized_ticker, "error", 0, message)
+                return 0
         return await self._yahoo.fetch_and_store(
             normalized_ticker,
             period=period,
@@ -137,17 +155,27 @@ class HybridDataFetcher:
 
     async def fetch_realtime_quote(self, ticker: str) -> Optional[Dict]:
         normalized_ticker = normalize_ticker(ticker)
-        if supports_fubon_stock_realtime_ticker(normalized_ticker) and self._fubon_manager.connected:
+        if is_taiwan_stock_ticker(normalized_ticker):
+            if not self._fubon_manager.connected:
+                log.warning(
+                    "Fubon realtime quote unavailable for %s; Yahoo fallback is disabled for Taiwan stocks",
+                    normalized_ticker,
+                )
+                return None
             symbol = tw_ticker_to_fubon(normalized_ticker)
-            if symbol:
-                response = await self._fubon_manager.fetch_stock_quote(symbol)
-                payload = build_fubon_quote_payload(normalized_ticker, response or {}, source="fubon_neo")
-                if payload:
-                    return payload
+            if not symbol:
+                return None
+            response = await self._fubon_manager.fetch_stock_quote(symbol)
+            payload = build_fubon_quote_payload(normalized_ticker, response or {}, source="fubon_neo")
+            return payload
         return await self._yahoo.fetch_realtime_quote(normalized_ticker)
 
     async def fetch_and_store_info(self, ticker: str) -> Optional[Dict]:
-        return await self._yahoo.fetch_and_store_info(normalize_ticker(ticker))
+        normalized_ticker = normalize_ticker(ticker)
+        if is_taiwan_stock_ticker(normalized_ticker):
+            log.info("Skipping Yahoo stock info fetch for Taiwan ticker %s", normalized_ticker)
+            return None
+        return await self._yahoo.fetch_and_store_info(normalized_ticker)
 
     async def incremental_update(self, ticker: str) -> int:
         return await self.fetch_and_store(ticker, period="5d", include_info=False)
@@ -155,20 +183,10 @@ class HybridDataFetcher:
     def _should_use_fubon_stock_history(self, ticker: str, interval: str) -> bool:
         if not self._fubon_manager.connected:
             return False
-        if not supports_fubon_stock_realtime_ticker(ticker):
+        if not is_taiwan_stock_ticker(ticker):
             return False
         normalized_interval = str(interval or "1d").strip().lower()
         return normalized_interval in FUBON_INTRADAY_INTERVALS or normalized_interval in FUBON_HISTORY_INTERVALS
-
-    def _should_use_fubon_historical_period(self, period: str) -> bool:
-        normalized = str(period or "1y").strip().lower()
-        if normalized == "max":
-            return False
-        if normalized.endswith("y") and normalized[:-1].isdigit():
-            return int(normalized[:-1]) <= 1
-        if normalized.endswith("mo") and normalized[:-2].isdigit():
-            return int(normalized[:-2]) <= 11
-        return True
 
     async def _fetch_and_store_fubon_stock(
         self,
@@ -190,14 +208,7 @@ class HybridDataFetcher:
                 sort="asc",
             )
         else:
-            if not self._should_use_fubon_historical_period(period):
-                return await self._yahoo.fetch_and_store(
-                    ticker,
-                    period=period,
-                    interval=interval,
-                    include_info=include_info,
-                )
-            response = await self._fubon_manager.fetch_stock_historical_candles(
+            response = await self._fetch_fubon_historical_candles_chunked(
                 symbol,
                 from_date=_history_start_from_period(period),
                 to_date=date.today().isoformat(),
@@ -206,7 +217,7 @@ class HybridDataFetcher:
                 sort="asc",
             )
 
-        rows = _rows_from_fubon_candles(response)
+        rows = _merge_unique_rows(_rows_from_fubon_candles(response))
         if normalized_interval == "1d" and rows:
             await db.delete_ohlcv_range(
                 ticker,
@@ -217,9 +228,38 @@ class HybridDataFetcher:
 
         count = await db.upsert_ohlcv_batch(ticker, rows, normalized_interval)
         if include_info:
-            await self._yahoo.fetch_and_store_info(ticker)
+            log.info("Skipping Yahoo stock info fetch for Taiwan ticker %s", ticker)
 
         status = "ok" if count else "empty"
         message = "" if count else "No rows returned from Fubon historical candles"
         await db.log_sync(ticker, status, count, message)
         return count
+
+    async def _fetch_fubon_historical_candles_chunked(
+        self,
+        symbol: str,
+        *,
+        from_date: str,
+        to_date: str,
+        timeframe: str,
+        adjusted: bool,
+        sort: str,
+    ) -> dict:
+        start = date.fromisoformat(from_date)
+        end = date.fromisoformat(to_date)
+        rows: list[dict] = []
+        cursor = start
+        while cursor <= end:
+            chunk_end = min(cursor + timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS), end)
+            response = await self._fubon_manager.fetch_stock_historical_candles(
+                symbol,
+                from_date=cursor.isoformat(),
+                to_date=chunk_end.isoformat(),
+                timeframe=timeframe,
+                adjusted=adjusted,
+                sort=sort,
+            )
+            if isinstance(response, dict):
+                rows.extend(response.get("data") or [])
+            cursor = chunk_end + timedelta(days=1)
+        return {"symbol": symbol, "data": rows}

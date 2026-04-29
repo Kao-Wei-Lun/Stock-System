@@ -99,7 +99,7 @@ async def test_fubon_quote_provider_fetches_taiwan_stock_quote():
 
 
 @pytest.mark.anyio
-async def test_hybrid_quote_provider_falls_back_to_yahoo_when_fubon_returns_none():
+async def test_hybrid_quote_provider_does_not_fallback_to_yahoo_for_taiwan_quote():
     fubon_manager = StubFubonManager(None)
     fubon_provider = FubonQuoteProvider(fubon_manager)
     yahoo_fetcher = StubFetcher(
@@ -116,7 +116,29 @@ async def test_hybrid_quote_provider_falls_back_to_yahoo_when_fubon_returns_none
     quote = await provider.fetch_quote("2330")
 
     assert fubon_manager.calls == ["2330"]
-    assert yahoo_fetcher.calls == ["2330.TW"]
+    assert yahoo_fetcher.calls == []
+    assert quote is None
+
+
+@pytest.mark.anyio
+async def test_hybrid_quote_provider_uses_yahoo_for_us_quote():
+    fubon_manager = StubFubonManager(None)
+    fubon_provider = FubonQuoteProvider(fubon_manager)
+    yahoo_fetcher = StubFetcher(
+        {
+            "ticker": "AAPL",
+            "price": 210.5,
+            "source": "yahoo_finance",
+            "quote_timestamp": "2026-04-11T20:00:00+00:00",
+        }
+    )
+    yahoo_provider = YahooFinanceQuoteProvider(yahoo_fetcher)
+    provider = HybridQuoteProvider(fubon_provider, yahoo_provider)
+
+    quote = await provider.fetch_quote("AAPL")
+
+    assert fubon_manager.calls == []
+    assert yahoo_fetcher.calls == ["AAPL"]
     assert quote["source"] == "yahoo_finance"
     assert quote["is_delayed"] is True
 

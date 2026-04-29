@@ -211,6 +211,5 @@ class HybridQuoteProvider(QuoteProvider):
         normalized_ticker = normalize_ticker(ticker)
         if is_taiwan_stock_ticker(normalized_ticker):
             fubon_quote = await self._fubon.fetch_quote(normalized_ticker)
-            if fubon_quote:
-                return fubon_quote
+            return fubon_quote
         return await self._yahoo.fetch_quote(normalized_ticker)

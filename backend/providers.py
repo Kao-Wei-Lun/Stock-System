@@ -31,7 +31,7 @@ from ws_manager import ConnectionManager
 _yahoo_fetcher = DataFetcher()
 fubon_manager = FubonSDKManager()
 fetcher = HybridDataFetcher(_yahoo_fetcher, fubon_manager)
-yahoo_quote_provider = YahooFinanceQuoteProvider(fetcher)
+yahoo_quote_provider = YahooFinanceQuoteProvider(_yahoo_fetcher)
 fubon_quote_provider = FubonQuoteProvider(fubon_manager)
 fubon_futopt_provider = FubonFutoptProvider(fubon_manager)
 fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager, db=db)

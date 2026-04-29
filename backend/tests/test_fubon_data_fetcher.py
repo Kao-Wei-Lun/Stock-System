@@ -110,7 +110,7 @@ async def test_hybrid_fetcher_uses_fubon_for_taiwan_daily_history(monkeypatch):
     assert stored["upsert"][0] == "2330.TW"
     assert stored["upsert"][1] == "1d"
     assert stored["upsert"][2][0]["source"] == "fubon_neo"
-    assert yahoo.info_calls == ["2330.TW"]
+    assert yahoo.info_calls == []
     assert yahoo.fetch_calls == []
 
 
@@ -138,17 +138,25 @@ async def test_hybrid_fetcher_uses_fubon_for_taiwan_intraday_history(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_hybrid_fetcher_falls_back_to_yahoo_for_unsupported_intervals():
+async def test_hybrid_fetcher_blocks_yahoo_for_unsupported_taiwan_intervals(monkeypatch):
     yahoo = StubYahooFetcher()
     manager = StubFubonManager()
     fetcher = HybridDataFetcher(yahoo, manager)
+    stored = {}
+
+    async def log_sync(ticker, status, count, message):
+        stored["log"] = (ticker, status, count, message)
+
+    monkeypatch.setattr(fubon_data_fetcher.db, "log_sync", log_sync)
 
     count = await fetcher.fetch_and_store("2330.TW", period="5d", interval="2m", include_info=False)
 
-    assert count == 77
-    assert yahoo.fetch_calls[0]["ticker"] == "2330.TW"
+    assert count == 0
+    assert yahoo.fetch_calls == []
     assert manager.history_calls == []
     assert manager.intraday_calls == []
+    assert stored["log"][0] == "2330.TW"
+    assert stored["log"][1] == "error"
 
 
 @pytest.mark.anyio
@@ -164,6 +172,20 @@ async def test_hybrid_fetcher_uses_fubon_for_taiwan_realtime_quote():
     assert yahoo.quote_calls == []
 
 
+@pytest.mark.anyio
+async def test_hybrid_fetcher_does_not_fallback_to_yahoo_for_taiwan_quote_when_fubon_disconnected():
+    yahoo = StubYahooFetcher()
+    manager = StubFubonManager()
+    manager.connected = False
+    fetcher = HybridDataFetcher(yahoo, manager)
+
+    quote = await fetcher.fetch_realtime_quote("2330")
+
+    assert quote is None
+    assert manager.quote_calls == []
+    assert yahoo.quote_calls == []
+
+
 def test_history_start_from_period_1y_stays_under_fubon_limit():
     start = date.fromisoformat(fubon_data_fetcher._history_start_from_period("1y"))
 
@@ -171,15 +193,32 @@ def test_history_start_from_period_1y_stays_under_fubon_limit():
 
 
 @pytest.mark.anyio
-async def test_hybrid_fetcher_uses_yahoo_for_periods_over_fubon_history_limit():
+async def test_hybrid_fetcher_chunks_fubon_history_for_periods_over_single_call_limit(monkeypatch):
     yahoo = StubYahooFetcher()
     manager = StubFubonManager()
     fetcher = HybridDataFetcher(yahoo, manager)
+    stored = {}
+
+    async def delete_ohlcv_range(ticker, interval, start_date, end_date):
+        stored["deleted"] = (ticker, interval, start_date, end_date)
+        return 2
+
+    async def upsert_ohlcv_batch(ticker, rows, interval):
+        stored["upsert"] = (ticker, interval, rows)
+        return len(rows)
+
+    async def log_sync(ticker, status, count, message):
+        stored["log"] = (ticker, status, count, message)
+
+    monkeypatch.setattr(fubon_data_fetcher.db, "delete_ohlcv_range", delete_ohlcv_range)
+    monkeypatch.setattr(fubon_data_fetcher.db, "upsert_ohlcv_batch", upsert_ohlcv_batch)
+    monkeypatch.setattr(fubon_data_fetcher.db, "log_sync", log_sync)
 
     count = await fetcher.fetch_and_store("2330.TW", period="2y", interval="1d", include_info=False)
 
-    assert count == 77
-    assert yahoo.fetch_calls == [
-        {"ticker": "2330.TW", "period": "2y", "interval": "1d", "include_info": False}
-    ]
-    assert manager.history_calls == []
+    assert count == 2
+    assert yahoo.fetch_calls == []
+    assert len(manager.history_calls) >= 2
+    assert {call["symbol"] for call in manager.history_calls} == {"2330"}
+    assert stored["upsert"][0] == "2330.TW"
+    assert stored["upsert"][1] == "1d"
