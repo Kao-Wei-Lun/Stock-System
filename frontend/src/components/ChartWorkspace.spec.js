@@ -281,9 +281,12 @@ describe("ChartWorkspace", () => {
 
     const macdToggle = wrapper.findAll(".indicator-chip").find((button) => button.text().startsWith("MACD"));
     await macdToggle.trigger("click");
+    const kdToggle = wrapper.findAll(".indicator-chip").find((button) => button.text().startsWith("KD Stoch"));
+    await kdToggle.trigger("click");
 
     expect(wrapper.find(".indicator-deck").exists()).toBe(true);
     expect(wrapper.emitted("toggle-panel")[0]).toEqual(["macd"]);
+    expect(wrapper.emitted("toggle-panel")[1]).toEqual(["stoch"]);
   });
 
   it("renders event markers and links event rows to vertical lines", async () => {

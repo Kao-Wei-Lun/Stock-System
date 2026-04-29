@@ -115,7 +115,7 @@ const panelItems = [
   { key: "bbPercent", label: "BB %B" },
   { key: "bbWidth", label: "BB Width" },
   { key: "macd", label: "MACD" },
-  { key: "stoch", label: "Stoch" },
+  { key: "stoch", label: "KD Stoch" },
   { key: "atr", label: "ATR" },
   { key: "cci", label: "CCI" },
   { key: "obv", label: "OBV" },
