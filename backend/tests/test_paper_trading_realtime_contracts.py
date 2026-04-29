@@ -55,6 +55,28 @@ class FakeDb:
             "strategy_config": {},
         }
 
+    async def list_paper_trading_bots(self, owner_id=1, account_id=None):
+        return [
+            {
+                "id": 42,
+                "account_id": 101,
+                "name": "Resolved Contract Bot",
+                "product_symbol": "TMF",
+                "direction_symbol": "TXF",
+                "strategy_config": {},
+                "status": "idle",
+            },
+            {
+                "id": 43,
+                "account_id": 101,
+                "name": "Second Contract Bot",
+                "product_symbol": "TMF",
+                "direction_symbol": "TXF",
+                "strategy_config": {},
+                "status": "idle",
+            },
+        ]
+
     async def get_paper_trading_account(self, account_id, owner_id=1):
         return {
             "id": account_id,
@@ -155,5 +177,39 @@ def test_realtime_bot_start_resolves_nearest_fubon_contracts(client, monkeypatch
 
         fake_pool.handlers[0](_candle("TMFE6"))
         assert client.get("/api/paper-trading/bots/42/state").json()["bar_count"] == 1
+    finally:
+        main.paper_trading._active_bots.clear()
+
+
+def test_start_all_realtime_bots_starts_each_bot(client, monkeypatch):
+    fake_db = FakeDb()
+    fake_pool = FakeRealtimePool()
+    main.paper_trading._active_bots.clear()
+    monkeypatch.setattr(main.paper_trading, "db", fake_db)
+    monkeypatch.setattr(main, "fubon_realtime_pool", fake_pool)
+    monkeypatch.setattr(
+        main.paper_trading.fubon_futopt_provider,
+        "resolve_contract",
+        fake_resolve_contract,
+    )
+
+    try:
+        response = client.post("/api/paper-trading/bots/start-all")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "started"
+        assert payload["total_count"] == 2
+        assert payload["started_count"] == 2
+        assert payload["failed_count"] == 0
+        assert {item["bot_id"] for item in payload["items"]} == {42, 43}
+        assert set(main.paper_trading._active_bots) == {42, 43}
+        assert fake_pool.tracked == [
+            ("TXFE6", "paper_bot_42"),
+            ("TMFE6", "paper_bot_42"),
+            ("TXFE6", "paper_bot_43"),
+            ("TMFE6", "paper_bot_43"),
+        ]
+        assert [item["data"]["status"] for item in fake_db.updated] == ["running", "running"]
     finally:
         main.paper_trading._active_bots.clear()

@@ -195,7 +195,16 @@
 
       <!-- Bot List -->
       <div v-if="bots.length" class="pt-card">
-        <h2 class="pt-card-title">Bot 列表</h2>
+        <div class="pt-card-heading">
+          <h2 class="pt-card-title">Bot 列表</h2>
+          <button
+            class="pt-btn pt-btn-sm pt-btn-success"
+            :disabled="startingAllBots || !startableBotCount"
+            @click="startAllBots"
+          >
+            {{ startingAllBots ? '啟動中...' : `啟動全部 (${startableBotCount})` }}
+          </button>
+        </div>
         <div class="pt-table-wrap">
           <table class="pt-table">
             <thead>
@@ -652,6 +661,7 @@ const liveBotState = ref(null);
 const toast = ref(null);
 const creatingAccount = ref(false);
 const creatingBot = ref(false);
+const startingAllBots = ref(false);
 const runningReplay = ref(false);
 const deletingAccounts = reactive({});
 const deletingBots = reactive({});
@@ -724,6 +734,7 @@ const activeBotStatusLabel = computed(() => {
 });
 
 const runningBotIds = computed(() => bots.value.filter((b) => b.status === "running").map((b) => b.id));
+const startableBotCount = computed(() => bots.value.filter((b) => b.status !== "running").length);
 
 const selectedBotAccount = computed(() => (
   accounts.value.find((acct) => Number(acct.id) === Number(botForm.account_id)) || null
@@ -1012,6 +1023,31 @@ async function startBot(botId) {
   }
 }
 
+async function startAllBots() {
+  startingAllBots.value = true;
+  try {
+    const data = await apiFetch("/bots/start-all", { method: "POST" });
+    const firstLive = (data.items || []).find((item) => item.bot)?.bot;
+    if (firstLive) liveBotState.value = firstLive;
+    await loadBots();
+    if (runningBotIds.value.length) startPolling();
+
+    if (data.failed_count) {
+      showToast(`已啟動 ${data.started_count || 0} 個 Bot，${data.failed_count} 個失敗`, "error");
+    } else if (data.started_count) {
+      showToast(`已啟動 ${data.started_count} 個 Bot`, "success");
+    } else if (data.already_running_count) {
+      showToast("所有 Bot 已在運行中", "success");
+    } else {
+      showToast("沒有可啟動的 Bot", "info");
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    startingAllBots.value = false;
+  }
+}
+
 async function stopBot(botId) {
   try {
     const data = await apiFetch(`/bots/${botId}/stop`, { method: "POST" });
@@ -1266,6 +1302,14 @@ onUnmounted(() => {
   margin: 0 0 18px;
   color: #e6f1ff;
 }
+.pt-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.pt-card-heading .pt-card-title { margin: 0; }
 .pt-card-actions {
   margin-top: 18px;
   display: flex;

@@ -278,9 +278,8 @@ async def delete_paper_trading_bot(bot_id: int):
 
 # ─── Bot Start/Stop ───────────────────────────────────────────
 
-@router.post("/bots/{bot_id}/start")
-async def start_paper_trading_bot(bot_id: int):
-    """啟動即時模擬交易 Bot"""
+async def _start_paper_trading_bot_by_id(bot_id: int) -> dict:
+    """Start one realtime paper trading bot and return the API payload."""
     from paper_trading.bot_runner import PaperTradingBot, BotStatus
 
     bot_record = await db.get_paper_trading_bot(bot_id, owner_id=DEFAULT_OWNER_ID)
@@ -366,6 +365,75 @@ async def start_paper_trading_bot(bot_id: int):
     }, owner_id=DEFAULT_OWNER_ID)
 
     return {"status": "started", "bot": bot_instance.get_state()}
+
+
+@router.post("/bots/start-all")
+async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
+    """啟動所有尚未執行的 Bot；單一 Bot 失敗時會繼續處理下一個。"""
+    bots = await db.list_paper_trading_bots(
+        owner_id=DEFAULT_OWNER_ID,
+        account_id=account_id,
+    )
+    items = []
+    started_count = 0
+    already_running_count = 0
+    failed_count = 0
+
+    for bot_record in bots:
+        bot_id = int(bot_record.get("id") or 0)
+        if bot_id <= 0:
+            continue
+        try:
+            result = await _start_paper_trading_bot_by_id(bot_id)
+            status = str(result.get("status") or "")
+            if status == "started":
+                started_count += 1
+            elif status == "already_running":
+                already_running_count += 1
+            items.append({
+                "bot_id": bot_id,
+                "status": status,
+                "bot": result.get("bot"),
+            })
+        except HTTPException as exc:
+            failed_count += 1
+            items.append({
+                "bot_id": bot_id,
+                "status": "error",
+                "detail": exc.detail,
+            })
+        except Exception as exc:
+            failed_count += 1
+            log.exception("Failed to start paper trading bot %s in bulk start", bot_id)
+            items.append({
+                "bot_id": bot_id,
+                "status": "error",
+                "detail": str(exc),
+            })
+
+    if failed_count:
+        status = "completed_with_errors"
+    elif started_count:
+        status = "started"
+    elif already_running_count:
+        status = "already_running"
+    else:
+        status = "no_bots"
+
+    return {
+        "status": status,
+        "total_count": len(items),
+        "started_count": started_count,
+        "already_running_count": already_running_count,
+        "failed_count": failed_count,
+        "items": items,
+    }
+
+
+@router.post("/bots/{bot_id}/start")
+async def start_paper_trading_bot(bot_id: int):
+    """啟動即時模擬交易 Bot"""
+    return await _start_paper_trading_bot_by_id(bot_id)
 
 
 @router.post("/bots/{bot_id}/stop")
