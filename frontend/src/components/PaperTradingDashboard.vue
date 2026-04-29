@@ -158,6 +158,8 @@
           <div class="pt-field">
             <label>策略引擎</label>
             <select v-model="botStrategyForm.strategy_type">
+              <option value="tmf_pullback_breakout">TMF C: 1m pullback breakout</option>
+              <option value="tmf_psar_flip">TMF PSAR: 3m flip confirmation</option>
               <option value="v1">V1：固定點數停損停利</option>
               <option value="v2">V2：ATR 動態加碼與移動停損</option>
             </select>
@@ -451,6 +453,8 @@
           <div class="pt-field">
             <label>回放策略引擎</label>
             <select v-model="replayStrategyForm.strategy_type">
+              <option value="tmf_pullback_breakout">TMF C: 1m pullback breakout</option>
+              <option value="tmf_psar_flip">TMF PSAR: 3m flip confirmation</option>
               <option value="v1">V1：固定點數停損停利</option>
               <option value="v2">V2：ATR 動態加碼與移動停損</option>
             </select>
@@ -812,6 +816,11 @@ function buildRiskSizingPayload() {
 }
 
 function riskSizingStopLossPoints(form) {
+  const indicatorStops = {
+    tmf_pullback_breakout: 80,
+    tmf_psar_flip: 120,
+  };
+  if (indicatorStops[form.strategy_type]) return indicatorStops[form.strategy_type];
   if (form.strategy_type !== "v2") return Number(form.stop_loss_points || 0);
   const variantStops = {
     v2_b15_c2: 150,
@@ -839,9 +848,17 @@ function strategyVariantLabel(value) {
   return v2VariantOptions.find((item) => item.value === value)?.label || "V2 原始動態 ATR";
 }
 
+function strategyTypeLabel(value) {
+  return {
+    v1: "V1 fixed points",
+    tmf_pullback_breakout: "TMF C: 1m pullback breakout",
+    tmf_psar_flip: "TMF PSAR: 3m flip confirmation",
+  }[value] || "V1 fixed points";
+}
+
 function strategyConfigLabel(config) {
   const strategyType = config?.strategy_type || "v1";
-  if (strategyType !== "v2") return "V1 固定點數";
+  if (strategyType !== "v2") return strategyTypeLabel(strategyType);
   return strategyVariantLabel(config?.v2_variant || "baseline");
 }
 

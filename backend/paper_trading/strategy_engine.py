@@ -122,6 +122,39 @@ V2_STRATEGY_VARIANT_PRESETS = {
 }
 
 
+INDICATOR_STRATEGY_TYPES = {
+    "tmf_pullback_breakout",
+    "tmf_psar_flip",
+}
+
+
+INDICATOR_STRATEGY_PRESETS = {
+    "tmf_pullback_breakout": {
+        "indicator_entry_timeframe_minutes": 1,
+        "indicator_trend_timeframe_minutes": 5,
+        "indicator_entry_type": "pullback_breakout",
+        "indicator_longs_enabled": True,
+        "indicator_shorts_enabled": False,
+        "indicator_kd_long_max": 85.0,
+        "indicator_kd_short_min": 15.0,
+        "indicator_atr_stop_mult": 1.0,
+        "indicator_atr_target_mult": 1.0,
+        "indicator_min_hold_bars": 5,
+    },
+    "tmf_psar_flip": {
+        "indicator_entry_timeframe_minutes": 3,
+        "indicator_trend_timeframe_minutes": 5,
+        "indicator_entry_type": "psar_flip",
+        "indicator_longs_enabled": True,
+        "indicator_shorts_enabled": True,
+        "indicator_kd_long_max": 85.0,
+        "indicator_kd_short_min": 25.0,
+        "indicator_atr_stop_mult": 1.2,
+        "indicator_atr_target_mult": 2.0,
+    },
+}
+
+
 # ─── 策略設定 ─────────────────────────────────────────────────
 
 @dataclass
@@ -184,6 +217,26 @@ class StrategyConfig:
     v2_early_fail_min_progress_atr_mult: float = 0.0
     v2_vwap_loss_exit_after_early_fail: bool = False
 
+    # Indicator combo strategy parameters. These power the TMF strategies that
+    # combine TXF EMA/MACD trend filters with TMF KD/PSAR/ATR entries and exits.
+    indicator_entry_timeframe_minutes: int = 1
+    indicator_trend_timeframe_minutes: int = 5
+    indicator_entry_type: str = "pullback_breakout"
+    indicator_longs_enabled: bool = True
+    indicator_shorts_enabled: bool = False
+    indicator_kd_long_max: float = 85.0
+    indicator_kd_short_min: float = 15.0
+    indicator_atr_stop_mult: float = 1.0
+    indicator_atr_target_mult: float = 1.0
+    indicator_touch_atr_mult: float = 0.15
+    indicator_trend_hist_min: float = 0.0
+    indicator_entry_hist_min: float = 0.0
+    indicator_require_psar_entry: bool = False
+    indicator_trail_psar: bool = True
+    indicator_trail_after_bars: int = 1
+    indicator_min_hold_bars: int = 1
+    indicator_cooldown_bars: int = 2
+
     def v2_setting(self, name: str):
         value = getattr(self, name)
         field_default = self.__dataclass_fields__[name].default
@@ -191,6 +244,9 @@ class StrategyConfig:
         if name in preset and value == field_default:
             return preset[name]
         return value
+
+    def indicator_setting(self, name: str):
+        return getattr(self, name)
 
     def get_profile(self, bar_time: datetime, session: SessionType) -> SessionProfile:
         """根據時間與時段取得對應 profile"""
@@ -256,12 +312,35 @@ class StrategyConfig:
             "v2_early_fail_bars": self.v2_early_fail_bars,
             "v2_early_fail_min_progress_atr_mult": self.v2_early_fail_min_progress_atr_mult,
             "v2_vwap_loss_exit_after_early_fail": self.v2_vwap_loss_exit_after_early_fail,
+            "indicator_entry_timeframe_minutes": self.indicator_setting("indicator_entry_timeframe_minutes"),
+            "indicator_trend_timeframe_minutes": self.indicator_setting("indicator_trend_timeframe_minutes"),
+            "indicator_entry_type": self.indicator_setting("indicator_entry_type"),
+            "indicator_longs_enabled": self.indicator_setting("indicator_longs_enabled"),
+            "indicator_shorts_enabled": self.indicator_setting("indicator_shorts_enabled"),
+            "indicator_kd_long_max": self.indicator_setting("indicator_kd_long_max"),
+            "indicator_kd_short_min": self.indicator_setting("indicator_kd_short_min"),
+            "indicator_atr_stop_mult": self.indicator_setting("indicator_atr_stop_mult"),
+            "indicator_atr_target_mult": self.indicator_setting("indicator_atr_target_mult"),
+            "indicator_touch_atr_mult": self.indicator_setting("indicator_touch_atr_mult"),
+            "indicator_trend_hist_min": self.indicator_setting("indicator_trend_hist_min"),
+            "indicator_entry_hist_min": self.indicator_setting("indicator_entry_hist_min"),
+            "indicator_require_psar_entry": self.indicator_setting("indicator_require_psar_entry"),
+            "indicator_trail_psar": self.indicator_setting("indicator_trail_psar"),
+            "indicator_trail_after_bars": self.indicator_setting("indicator_trail_after_bars"),
+            "indicator_min_hold_bars": self.indicator_setting("indicator_min_hold_bars"),
+            "indicator_cooldown_bars": self.indicator_setting("indicator_cooldown_bars"),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "StrategyConfig":
+        strategy_type = str(data.get("strategy_type", "v1") or "v1")
+        indicator_preset = INDICATOR_STRATEGY_PRESETS.get(strategy_type, {})
+
+        def indicator_value(name: str, fallback):
+            return data[name] if name in data else indicator_preset.get(name, fallback)
+
         return cls(
-            strategy_type=data.get("strategy_type", "v1"),
+            strategy_type=strategy_type,
             day_open_profile=SessionProfile.from_dict(data.get("day_open_profile", {})),
             day_regular_profile=SessionProfile.from_dict(data.get("day_regular_profile", {})),
             night_profile=SessionProfile.from_dict(data.get("night_profile", {})),
@@ -325,6 +404,23 @@ class StrategyConfig:
             v2_early_fail_bars=int(data.get("v2_early_fail_bars", 0)),
             v2_early_fail_min_progress_atr_mult=float(data.get("v2_early_fail_min_progress_atr_mult", 0.0)),
             v2_vwap_loss_exit_after_early_fail=bool(data.get("v2_vwap_loss_exit_after_early_fail", False)),
+            indicator_entry_timeframe_minutes=int(indicator_value("indicator_entry_timeframe_minutes", 1)),
+            indicator_trend_timeframe_minutes=int(indicator_value("indicator_trend_timeframe_minutes", 5)),
+            indicator_entry_type=str(indicator_value("indicator_entry_type", "pullback_breakout") or "pullback_breakout"),
+            indicator_longs_enabled=bool(indicator_value("indicator_longs_enabled", True)),
+            indicator_shorts_enabled=bool(indicator_value("indicator_shorts_enabled", False)),
+            indicator_kd_long_max=float(indicator_value("indicator_kd_long_max", 85.0)),
+            indicator_kd_short_min=float(indicator_value("indicator_kd_short_min", 15.0)),
+            indicator_atr_stop_mult=float(indicator_value("indicator_atr_stop_mult", 1.0)),
+            indicator_atr_target_mult=float(indicator_value("indicator_atr_target_mult", 1.0)),
+            indicator_touch_atr_mult=float(indicator_value("indicator_touch_atr_mult", 0.15)),
+            indicator_trend_hist_min=float(indicator_value("indicator_trend_hist_min", 0.0)),
+            indicator_entry_hist_min=float(indicator_value("indicator_entry_hist_min", 0.0)),
+            indicator_require_psar_entry=bool(indicator_value("indicator_require_psar_entry", False)),
+            indicator_trail_psar=bool(indicator_value("indicator_trail_psar", True)),
+            indicator_trail_after_bars=int(indicator_value("indicator_trail_after_bars", 1)),
+            indicator_min_hold_bars=int(indicator_value("indicator_min_hold_bars", 1)),
+            indicator_cooldown_bars=int(indicator_value("indicator_cooldown_bars", 2)),
         )
 
 

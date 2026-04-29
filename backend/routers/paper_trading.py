@@ -47,7 +47,7 @@ router = APIRouter(prefix="/api/paper-trading", tags=["paper-trading"])
 
 # 全域 bot 實例管理
 _active_bots: dict[int, "PaperTradingBot"] = {}
-REALTIME_WARMUP_LOOKBACK_BARS = 240
+REALTIME_WARMUP_LOOKBACK_BARS = 420
 APP_TZ = ZoneInfo("Asia/Taipei")
 
 

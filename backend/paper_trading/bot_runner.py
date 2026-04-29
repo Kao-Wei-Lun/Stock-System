@@ -41,6 +41,7 @@ from paper_trading.simulation_broker import (
 )
 from paper_trading.paper_account import PaperAccount
 from paper_trading.strategy_engine import (
+    INDICATOR_STRATEGY_TYPES,
     StrategyConfig,
     StrategyEngine,
     SignalAction,
@@ -116,6 +117,9 @@ class PaperTradingBot:
         if self.strategy_config.strategy_type == "v2":
             from paper_trading.strategy_v2 import StrategyEngineV2
             self.strategy = StrategyEngineV2(self.strategy_config)
+        elif self.strategy_config.strategy_type in INDICATOR_STRATEGY_TYPES:
+            from paper_trading.indicator_combo_strategy import IndicatorComboStrategyEngine
+            self.strategy = IndicatorComboStrategyEngine(self.strategy_config)
         else:
             self.strategy = StrategyEngine(self.strategy_config)
 
@@ -553,12 +557,9 @@ class PaperTradingBot:
                 risk_check = self.risk.check_can_open(acct_state, bar.time)
                 if risk_check.allowed:
                     profile = self.strategy_config.get_profile(bar.time, session)
-                    if self.strategy_config.strategy_type == "v2":
-                        current_atr = max(1.0, float(getattr(self.strategy, "current_atr", 0.0) or 1.0))
-                        stop_distance = current_atr * 1.5
-                        distance_getter = getattr(self.strategy, "get_effective_stop_distances", None)
-                        if callable(distance_getter):
-                            stop_distance = distance_getter(bar, session, profile).initial_stop
+                    distance_getter = getattr(self.strategy, "get_effective_stop_distances", None)
+                    if callable(distance_getter):
+                        stop_distance = distance_getter(bar, session, profile).initial_stop
                         remaining_profile_qty = max(0, profile.max_qty - abs(acct_state.open_position_qty))
                         requested_qty = max(1, int(signal.qty or 1))
                         size_check = self.risk.check_order_size(
