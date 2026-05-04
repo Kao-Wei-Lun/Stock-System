@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from background_tasks import BackgroundTaskService
-from database import db, init_db
+from database import DEFAULT_OWNER_ID, db, init_db
 from env_validation import (
     read_bool_env,
     read_hhmm_env,
@@ -34,6 +34,7 @@ from env_validation import (
 )
 from futopt_history_service import FutoptCandleRecorder
 from macro_regime import build_macro_dashboard_payload
+from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
     alert_engine,
     fetcher,
@@ -82,6 +83,7 @@ ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", 
 MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
 MARKET_INTELLIGENCE_STARTUP_SYNC = read_bool_env("MARKET_INTELLIGENCE_STARTUP_SYNC", True)
 FUTOPT_RECORDER_ENABLED = read_bool_env("FUTOPT_RECORDER_ENABLED", True)
+PAPER_MARGIN_AUTO_SYNC_ENABLED = read_bool_env("PAPER_MARGIN_AUTO_SYNC_ENABLED", True)
 FUTOPT_RECORDER_SYMBOLS_RAW = read_text_env("FUTOPT_RECORDER_SYMBOLS", "TXF,TMF")
 FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
     "FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS",
@@ -221,6 +223,16 @@ futopt_candle_recorder = FutoptCandleRecorder(
 )
 
 
+async def sync_paper_trading_margins(reason: str = "scheduled") -> dict:
+    return await sync_all_paper_trading_account_margins(
+        db,
+        fubon_futopt_provider,
+        owner_id=DEFAULT_OWNER_ID,
+        app_tz=APP_TZ,
+        reason=reason,
+    )
+
+
 background_scheduler = BackgroundScheduler(
     settings=SchedulerSettings(
         startup_download_enabled=STARTUP_DOWNLOAD_ENABLED,
@@ -237,6 +249,7 @@ background_scheduler = BackgroundScheduler(
         futopt_recorder_enabled=FUTOPT_RECORDER_ENABLED,
         futopt_recorder_poll_seconds=FUTOPT_RECORDER_POLL_SECONDS,
         futopt_recorder_backfill_interval_seconds=FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS,
+        paper_margin_auto_sync_enabled=PAPER_MARGIN_AUTO_SYNC_ENABLED,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -254,6 +267,7 @@ background_scheduler = BackgroundScheduler(
         skip_poll_for_ticker=lambda ticker: fubon_realtime_pool.supports_full_ws_quotes_for_ticker(ticker),
         archive_fubon_market_snapshot=fubon_market_snapshot_provider.archive_daily_snapshot,
         futopt_candle_recorder=futopt_candle_recorder,
+        sync_paper_trading_margins=sync_paper_trading_margins,
     ),
     logger=log,
 )

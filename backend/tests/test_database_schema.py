@@ -136,3 +136,29 @@ def test_build_schema_plan_adds_missing_taiwan_chip_columns():
         for statement in plan
     )
     assert any("ALTER TABLE `taiwan_chip_snapshots`" in statement and "`dealer_net_buy_sell`" in statement for statement in plan)
+
+
+def test_build_schema_plan_adds_missing_paper_trading_margin_columns():
+    existing_tables = {"paper_trading_accounts"}
+    existing_columns = {
+        "paper_trading_accounts": {
+            "id",
+            "owner_id",
+            "name",
+            "product_symbol",
+            "starting_equity",
+            "initial_margin_per_contract",
+            "risk_config_json",
+            "cost_model_json",
+            "strategy_config_json",
+            "is_active",
+            "created_at",
+            "updated_at",
+        }
+    }
+
+    plan = build_schema_plan(existing_tables, existing_columns, {})
+
+    assert any("ALTER TABLE `paper_trading_accounts`" in statement and "`margin_source`" in statement for statement in plan)
+    assert any("ALTER TABLE `paper_trading_accounts`" in statement and "`margin_synced_at`" in statement for statement in plan)
+    assert any("ALTER TABLE `paper_trading_accounts`" in statement and "`margin_sync_error`" in statement for statement in plan)

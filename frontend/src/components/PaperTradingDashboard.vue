@@ -46,7 +46,10 @@
           </div>
           <div class="pt-field">
             <label>原始保證金 / 口</label>
-            <input v-model.number="accountForm.initial_margin_per_contract" type="number" />
+            <div class="pt-margin-auto-box">
+              <div class="pt-margin-value">{{ formatCurrency(marginPreview?.initial_margin_per_contract ?? activeInitialMargin) }}</div>
+              <div class="pt-margin-meta">{{ marginPreviewLabel }}</div>
+            </div>
           </div>
           <div class="pt-field">
             <label>單日虧損上限 (%)</label>
@@ -81,12 +84,20 @@
           <button class="pt-btn pt-btn-primary" :disabled="creatingAccount" @click="createAccount">
             {{ creatingAccount ? '建立中...' : '建立帳戶' }}
           </button>
+          <button class="pt-btn" :disabled="marginPreviewLoading" @click="previewAccountMargin">
+            {{ marginPreviewLoading ? '\u67e5\u8a62\u4e2d...' : '\u9810\u67e5\u4fdd\u8b49\u91d1' }}
+          </button>
         </div>
       </div>
 
       <!-- Account List -->
       <div v-if="accounts.length" class="pt-card">
         <h2 class="pt-card-title">已建帳戶</h2>
+        <div class="pt-card-actions pt-card-actions-top">
+          <button class="pt-btn pt-btn-sm" :disabled="refreshingAllMargins" @click="refreshAllMargins">
+            {{ refreshAllMarginsLabel }}
+          </button>
+        </div>
         <div class="pt-table-wrap">
           <table class="pt-table">
             <thead>
@@ -106,9 +117,20 @@
                 <td>{{ acct.name }}</td>
                 <td>{{ acct.product_symbol }}</td>
                 <td>{{ formatCurrency(acct.starting_equity) }}</td>
-                <td>{{ formatCurrency(acct.initial_margin_per_contract) }}</td>
+                <td>
+                  <div>{{ formatCurrency(acct.initial_margin_per_contract) }}</div>
+                  <div class="pt-muted-line">{{ marginMetaLabel(acct) }}</div>
+                  <div v-if="acct.margin_sync_error" class="pt-error-line">{{ acct.margin_sync_error }}</div>
+                </td>
                 <td>{{ formatTime(acct.created_at) }}</td>
                 <td>
+                  <button
+                    class="pt-btn pt-btn-sm"
+                    :disabled="refreshingAccountMargins[acct.id]"
+                    @click="refreshAccountMargin(acct)"
+                  >
+                    {{ refreshingAccountMargins[acct.id] ? refreshingAccountMarginBusyLabel : refreshAccountMarginLabel }}
+                  </button>
                   <button
                     class="pt-btn pt-btn-sm pt-btn-danger"
                     :disabled="deletingAccounts[acct.id]"
@@ -656,6 +678,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
 
 const API = "/api/paper-trading";
+const DEFAULT_INITIAL_MARGIN = 26300;
 
 const activeTab = ref("setup");
 const tabs = [
@@ -677,6 +700,10 @@ const startingAllBots = ref(false);
 const runningReplay = ref(false);
 const deletingAccounts = reactive({});
 const deletingBots = reactive({});
+const marginPreview = ref(null);
+const marginPreviewLoading = ref(false);
+const refreshingAllMargins = ref(false);
+const refreshingAccountMargins = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
@@ -692,8 +719,8 @@ const v2VariantOptions = [
 
 const accountForm = reactive({
   name: "TMF 模擬帳戶",
+  product_symbol: "TMF",
   starting_equity: 100000,
-  initial_margin_per_contract: 26300,
 });
 
 const riskForm = reactive({
@@ -780,16 +807,29 @@ const riskSizingCapital = computed(() => {
 });
 
 const activeInitialMargin = computed(() => {
+  const previewMargin = marginPreview.value?.initial_margin_per_contract ?? DEFAULT_INITIAL_MARGIN;
   if (activeTab.value === "bots") {
     return selectedBotAccount.value?.initial_margin_per_contract
-      ?? accountForm.initial_margin_per_contract;
+      ?? previewMargin;
   }
   if (activeTab.value === "replay") {
     return selectedReplayAccount.value?.initial_margin_per_contract
-      ?? accountForm.initial_margin_per_contract;
+      ?? previewMargin;
   }
-  return accountForm.initial_margin_per_contract;
+  return previewMargin;
 });
+
+const marginPreviewLabel = computed(() => {
+  if (marginPreviewLoading.value) return "\u5bcc\u90a6 API \u67e5\u8a62\u4e2d";
+  const preview = marginPreview.value;
+  if (!preview) return "\u5efa\u7acb\u6642\u81ea\u52d5\u7531\u5bcc\u90a6 API \u67e5\u8a62\uff0c\u67e5\u8a62\u5931\u6557\u6703\u4fdd\u7559\u9810\u8a2d\u503c";
+  return `${marginSourceLabel(preview.margin_source || preview.source)} · ${preview.margin_reference_symbol || "TMF"} · ${formatTime(preview.margin_synced_at)}`;
+});
+const refreshAllMarginsLabel = computed(() => (
+  refreshingAllMargins.value ? "\u66f4\u65b0\u4e2d" : "\u66f4\u65b0\u5168\u90e8\u4fdd\u8b49\u91d1"
+));
+const refreshAccountMarginLabel = "\u66f4\u65b0\u4fdd\u8b49\u91d1";
+const refreshAccountMarginBusyLabel = "\u66f4\u65b0\u4e2d";
 
 const activeRiskConfig = computed(() => {
   if (activeTab.value === "bots" && selectedBotAccount.value?.risk_config) {
@@ -958,10 +998,63 @@ async function loadReplayRuns() {
   } catch { /* ignore */ }
 }
 
+async function previewAccountMargin({ silent = false } = {}) {
+  marginPreviewLoading.value = true;
+  try {
+    const data = await apiFetch("/accounts/margin/estimate", {
+      method: "POST",
+      body: JSON.stringify({ product_symbol: accountForm.product_symbol || "TMF" }),
+    });
+    marginPreview.value = data;
+    if (!silent) {
+      showToast(
+        data.ok ? "\u4fdd\u8b49\u91d1\u9810\u67e5\u5b8c\u6210" : "\u5df2\u4f7f\u7528\u9810\u8a2d\u4fdd\u8b49\u91d1",
+        data.ok ? "success" : "error",
+      );
+    }
+  } catch (e) {
+    if (!silent) showToast(e.message, "error");
+  } finally {
+    marginPreviewLoading.value = false;
+  }
+}
+
+async function refreshAccountMargin(account) {
+  refreshingAccountMargins[account.id] = true;
+  try {
+    const data = await apiFetch(`/accounts/${account.id}/margin/refresh`, { method: "POST" });
+    showToast(
+      data.ok ? "\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0" : "\u4fdd\u8b49\u91d1\u66f4\u65b0\u5931\u6557\uff0c\u5df2\u4fdd\u7559\u53ef\u7528\u503c",
+      data.ok ? "success" : "error",
+    );
+    await loadAccounts();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    delete refreshingAccountMargins[account.id];
+  }
+}
+
+async function refreshAllMargins() {
+  refreshingAllMargins.value = true;
+  try {
+    const data = await apiFetch("/accounts/margins/refresh", { method: "POST" });
+    showToast(
+      data.failed ? `\u5df2\u66f4\u65b0 ${data.success}/${data.total} \u500b\u5e33\u6236` : "\u5168\u90e8\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0",
+      data.failed ? "error" : "success",
+    );
+    await loadAccounts();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    refreshingAllMargins.value = false;
+  }
+}
+
 async function createAccount() {
   creatingAccount.value = true;
   try {
-    await apiFetch("/accounts", {
+    const account = await apiFetch("/accounts", {
       method: "POST",
       body: JSON.stringify({
         ...accountForm,
@@ -969,7 +1062,10 @@ async function createAccount() {
         cost_model: {},
       }),
     });
-    showToast("帳戶建立成功", "success");
+    showToast(
+      account.margin_sync_error ? "\u5e33\u6236\u5df2\u5efa\u7acb\uff0c\u4fdd\u8b49\u91d1\u66ab\u7528\u9810\u8a2d\u503c" : "\u5e33\u6236\u5efa\u7acb\u6210\u529f",
+      account.margin_sync_error ? "error" : "success",
+    );
     await loadAccounts();
   } catch (e) {
     showToast(e.message, "error");
@@ -1163,6 +1259,23 @@ function formatTime(val) {
   } catch { return val; }
 }
 
+function marginSourceLabel(source) {
+  return {
+    fubon_query_estimate_margin: "\u5bcc\u90a6 API",
+    fallback_existing: "\u4fdd\u7559\u539f\u503c",
+    fallback_product_spec: "\u5546\u54c1\u9810\u8a2d",
+    fallback_default: "\u7cfb\u7d71\u9810\u8a2d",
+    manual: "\u624b\u52d5",
+  }[source] || source || "--";
+}
+
+function marginMetaLabel(account) {
+  const source = marginSourceLabel(account?.margin_source);
+  const symbol = account?.margin_reference_symbol || account?.product_symbol || "TMF";
+  const syncedAt = formatTime(account?.margin_synced_at);
+  return `${source} · ${symbol} · ${syncedAt}`;
+}
+
 function formatDetails(value) {
   if (!value) return "{}";
   if (typeof value === "string") return value;
@@ -1189,7 +1302,6 @@ watch(
     () => activeTab.value,
     () => accountForm.starting_equity,
     () => replayForm.account_id,
-    () => accountForm.initial_margin_per_contract,
     () => botForm.account_id,
     () => selectedBotAccount.value?.equity,
     () => selectedBotAccount.value?.starting_equity,
@@ -1216,6 +1328,7 @@ watch(
 
 onMounted(async () => {
   await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
+  await previewAccountMargin({ silent: true });
   // Auto-start polling if any bot is running
   if (runningBotIds.value.length) {
     // Also fetch initial state for the first running bot
@@ -1350,6 +1463,11 @@ onUnmounted(() => {
   display: flex;
   gap: 10px;
 }
+.pt-card-actions-top {
+  margin-top: 0;
+  margin-bottom: 12px;
+  justify-content: flex-end;
+}
 
 /* ─── Form ───────────────────────────────────────────────── */
 .pt-form-grid {
@@ -1386,6 +1504,34 @@ onUnmounted(() => {
 .pt-field select option:checked {
   background: #2563eb;
   color: #ffffff;
+}
+.pt-margin-auto-box {
+  min-height: 42px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.pt-margin-value {
+  color: #e6f1ff;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.pt-margin-meta,
+.pt-muted-line {
+  margin-top: 3px;
+  color: rgba(196,211,226,0.6);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.pt-error-line {
+  margin-top: 3px;
+  color: #ff8c42;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  max-width: 260px;
 }
 
 /* ─── Buttons ────────────────────────────────────────────── */
@@ -1452,6 +1598,9 @@ onUnmounted(() => {
   border-bottom: 1px solid rgba(255,255,255,0.04);
   white-space: nowrap;
   vertical-align: top;
+}
+.pt-table td .pt-btn + .pt-btn {
+  margin-left: 6px;
 }
 
 /* ─── Badges ─────────────────────────────────────────────── */

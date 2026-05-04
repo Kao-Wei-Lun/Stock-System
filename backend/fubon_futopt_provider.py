@@ -54,6 +54,18 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
+def _object_field(value: Any, *names: str) -> Any:
+    if isinstance(value, dict):
+        for name in names:
+            if name in value:
+                return value.get(name)
+        return None
+    for name in names:
+        if hasattr(value, name):
+            return getattr(value, name)
+    return None
+
+
 def _parse_contract_date(value: Any) -> Optional[date]:
     if not value:
         return None
@@ -205,6 +217,72 @@ class FubonFutoptProvider:
         payload["name"] = response.get("name") or resolved.get("name") or resolved["resolved_symbol"]
         payload["currency"] = response.get("currency") or "TWD"
         return payload
+
+    async def estimate_margin(
+        self,
+        symbol: str,
+        *,
+        lot: int = 1,
+        session: str = "REGULAR",
+    ) -> Optional[dict]:
+        resolved_session = resolve_futopt_session(session)
+        resolved = await self.resolve_contract(symbol, session=resolved_session)
+        if not resolved:
+            return None
+        if str(resolved.get("instrument_type") or "future").lower() != "future":
+            raise ValueError(f"Margin estimate only supports futures contracts: {symbol}")
+
+        quote = await self._manager.fetch_futopt_quote(
+            resolved["resolved_symbol"],
+            session=resolved_session,
+        ) or {}
+        price = _coerce_float(
+            quote.get("closePrice")
+            or quote.get("lastPrice")
+            or quote.get("price")
+            or quote.get("referencePrice")
+            or quote.get("previousClose")
+        )
+        if price is None:
+            payload = build_fubon_quote_payload(
+                resolved["resolved_symbol"],
+                quote,
+                source="fubon_neo",
+            ) or {}
+            price = _coerce_float(payload.get("price") or payload.get("close") or payload.get("previous_close"))
+        if price is None:
+            raise RuntimeError(f"Unable to determine quote price for margin estimate: {resolved['resolved_symbol']}")
+
+        response = await self._manager.query_futopt_estimate_margin(
+            resolved["resolved_symbol"],
+            price=price,
+            lot=max(1, int(lot or 1)),
+            session=resolved_session,
+        )
+        if _object_field(response, "is_success", "isSuccess") is False:
+            raise RuntimeError(str(_object_field(response, "message") or "Fubon margin estimate failed"))
+
+        data = _object_field(response, "data") or response
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        estimate_margin = _coerce_float(
+            _object_field(data, "estimate_margin", "estimateMargin", "initial_margin", "margin")
+        )
+        if estimate_margin is None:
+            raise RuntimeError("Fubon margin estimate response did not include estimate_margin")
+
+        return {
+            "product_symbol": normalize_ticker(symbol),
+            "requested_symbol": resolved["requested_symbol"],
+            "resolved_symbol": resolved["resolved_symbol"],
+            "initial_margin_per_contract": estimate_margin,
+            "estimate_margin": estimate_margin,
+            "currency": _object_field(data, "currency") or quote.get("currency") or "TWD",
+            "date": _object_field(data, "date"),
+            "price": price,
+            "lot": max(1, int(lot or 1)),
+            "source": "fubon_query_estimate_margin",
+        }
 
     async def fetch_intraday_ohlc(
         self,

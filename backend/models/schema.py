@@ -893,6 +893,11 @@ CREATE_TABLE_STATEMENTS = {
             `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
             `starting_equity` DOUBLE NOT NULL DEFAULT 100000,
             `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 26300,
+            `margin_source` VARCHAR(64) NOT NULL DEFAULT 'manual',
+            `margin_reference_symbol` VARCHAR(32) NULL,
+            `margin_currency` VARCHAR(16) NULL,
+            `margin_synced_at` DATETIME NULL,
+            `margin_sync_error` TEXT NULL,
             `risk_config_json` LONGTEXT NOT NULL,
             `cost_model_json` LONGTEXT NOT NULL,
             `strategy_config_json` LONGTEXT NULL,
@@ -1239,6 +1244,33 @@ REQUIRED_COLUMN_MIGRATIONS = {
         "is_initial_balance": """
             ALTER TABLE `asset_trade_ledger`
             ADD COLUMN `is_initial_balance` TINYINT NOT NULL DEFAULT 0 AFTER `fx_rate_to_base`
+        """,
+    },
+    "paper_trading_accounts": {
+        "margin_source": """
+            ALTER TABLE `paper_trading_accounts`
+            ADD COLUMN `margin_source` VARCHAR(64) NOT NULL DEFAULT 'manual'
+            AFTER `initial_margin_per_contract`
+        """,
+        "margin_reference_symbol": """
+            ALTER TABLE `paper_trading_accounts`
+            ADD COLUMN `margin_reference_symbol` VARCHAR(32) NULL
+            AFTER `margin_source`
+        """,
+        "margin_currency": """
+            ALTER TABLE `paper_trading_accounts`
+            ADD COLUMN `margin_currency` VARCHAR(16) NULL
+            AFTER `margin_reference_symbol`
+        """,
+        "margin_synced_at": """
+            ALTER TABLE `paper_trading_accounts`
+            ADD COLUMN `margin_synced_at` DATETIME NULL
+            AFTER `margin_currency`
+        """,
+        "margin_sync_error": """
+            ALTER TABLE `paper_trading_accounts`
+            ADD COLUMN `margin_sync_error` TEXT NULL
+            AFTER `margin_synced_at`
         """,
     },
 }

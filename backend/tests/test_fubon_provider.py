@@ -64,6 +64,16 @@ def test_login_result_failure_is_detected():
     assert FubonSDKManager._login_message({"is_success": False, "message": "bad credentials"}) == "bad credentials"
 
 
+def test_login_accounts_extracts_and_selects_futopt_account():
+    stock_account = {"account_type": "stock", "account": "S001"}
+    futopt_account = {"account_type": "futopt", "account": "F001"}
+
+    accounts = FubonSDKManager._extract_login_accounts({"data": [stock_account, futopt_account]})
+
+    assert accounts == [stock_account, futopt_account]
+    assert FubonSDKManager._select_futopt_account(accounts) == futopt_account
+
+
 class FakeWebSocket:
     def __init__(self):
         self.handlers = {}
@@ -329,6 +339,20 @@ class FakeRestFutopt:
         self.intraday = intraday
 
 
+class FakeFutoptTradeApi:
+    def __init__(self):
+        self.calls = []
+
+    def query_estimate_margin(self, account, order):
+        self.calls.append((account, order))
+        return {"is_success": True, "data": {"estimate_margin": 27100, "currency": "TWD"}}
+
+
+class FakeTradeSDK:
+    def __init__(self, futopt):
+        self.futopt = futopt
+
+
 class FakeRepo:
     def __init__(self, account):
         self.account = account
@@ -442,4 +466,29 @@ def test_fetch_futopt_requests_omit_regular_session_and_keep_afterhours():
         ("candles", {"symbol": "MXFE6", "timeframe": "1"}),
         ("quote", {"symbol": "MXFE6", "session": "afterhours"}),
         ("candles", {"symbol": "MXFE6", "timeframe": "1", "session": "afterhours"}),
+    ]
+
+
+def test_query_futopt_estimate_margin_calls_sdk_trade_api(monkeypatch):
+    manager = FubonSDKManager()
+    futopt_api = FakeFutoptTradeApi()
+    account = {"account_type": "futopt", "account": "F001"}
+    manager.connected = True
+    manager._sdk = FakeTradeSDK(futopt_api)
+    manager._active_futopt_account = account
+    manager.ensure_trading_ready = lambda: asyncio.sleep(0, result=True)
+
+    monkeypatch.setattr(
+        fubon_provider,
+        "_build_futopt_estimate_margin_order",
+        lambda symbol, **kwargs: {"symbol": symbol, **kwargs},
+    )
+
+    payload = asyncio.run(
+        manager.query_futopt_estimate_margin("TMFE6", price=40500, lot=1, session="REGULAR")
+    )
+
+    assert payload["data"]["estimate_margin"] == 27100
+    assert futopt_api.calls == [
+        (account, {"symbol": "TMFE6", "price": 40500, "lot": 1, "session": "REGULAR"})
     ]

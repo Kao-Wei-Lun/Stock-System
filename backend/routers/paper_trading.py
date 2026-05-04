@@ -28,6 +28,7 @@ from schemas import (
     FuturesOrderValidatePayload,
     FuturesPositionSizePayload,
     PaperTradingAccountCreate,
+    PaperTradingMarginEstimatePayload,
     PaperTradingBotCreate,
     PaperTradingBotUpdate,
     PaperTradingReplayPayload,
@@ -40,6 +41,12 @@ from paper_trading.futures_risk_sizing import (
 from paper_trading.risk_engine import RiskConfig
 from paper_trading.strategy_engine import StrategyConfig
 from paper_trading.replay_engine import ReplayEngine
+from paper_trading.margin_sync import (
+    build_margin_update,
+    ensure_account_margin_current,
+    sync_all_paper_trading_account_margins,
+    sync_paper_trading_account_margin,
+)
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +192,13 @@ async def validate_paper_trading_order(payload: FuturesOrderValidatePayload):
 @router.post("/accounts")
 async def create_paper_trading_account(payload: PaperTradingAccountCreate):
     data = payload.model_dump()
+    margin_update, _ = await build_margin_update(
+        fubon_futopt_provider,
+        data.get("product_symbol") or "TMF",
+        current_margin=data.get("initial_margin_per_contract"),
+        app_tz=APP_TZ,
+    )
+    data.update(margin_update)
     account = await db.create_paper_trading_account(data, owner_id=DEFAULT_OWNER_ID)
     return account
 
@@ -192,6 +206,42 @@ async def create_paper_trading_account(payload: PaperTradingAccountCreate):
 @router.get("/accounts")
 async def list_paper_trading_accounts():
     return {"items": await db.list_paper_trading_accounts(owner_id=DEFAULT_OWNER_ID)}
+
+
+@router.post("/accounts/margin/estimate")
+async def estimate_paper_trading_margin(payload: PaperTradingMarginEstimatePayload):
+    margin_update, ok = await build_margin_update(
+        fubon_futopt_provider,
+        payload.product_symbol,
+        current_margin=None,
+        app_tz=APP_TZ,
+    )
+    return {"ok": ok, **margin_update}
+
+
+@router.post("/accounts/margins/refresh")
+async def refresh_all_paper_trading_margins():
+    return await sync_all_paper_trading_account_margins(
+        db,
+        fubon_futopt_provider,
+        owner_id=DEFAULT_OWNER_ID,
+        app_tz=APP_TZ,
+        reason="manual-api",
+    )
+
+
+@router.post("/accounts/{account_id}/margin/refresh")
+async def refresh_paper_trading_account_margin(account_id: int):
+    account = await db.get_paper_trading_account(account_id, owner_id=DEFAULT_OWNER_ID)
+    if not account:
+        raise HTTPException(404, "Paper trading account not found")
+    return await sync_paper_trading_account_margin(
+        db,
+        fubon_futopt_provider,
+        account,
+        owner_id=DEFAULT_OWNER_ID,
+        app_tz=APP_TZ,
+    )
 
 
 @router.get("/accounts/{account_id}")
@@ -295,6 +345,13 @@ async def _start_paper_trading_bot_by_id(bot_id: int) -> dict:
     )
     if not account:
         raise HTTPException(400, "Associated account not found")
+    account = await ensure_account_margin_current(
+        db,
+        fubon_futopt_provider,
+        account,
+        owner_id=DEFAULT_OWNER_ID,
+        app_tz=APP_TZ,
+    )
 
     # 建立 bot 實例
     risk_config = RiskConfig.from_dict(account.get("risk_config", {}) or {})
@@ -550,6 +607,13 @@ async def run_paper_trading_replay(payload: PaperTradingReplayPayload):
     account = await db.get_paper_trading_account(payload.account_id, owner_id=DEFAULT_OWNER_ID)
     if not account:
         raise HTTPException(404, "Paper trading account not found")
+    account = await ensure_account_margin_current(
+        db,
+        fubon_futopt_provider,
+        account,
+        owner_id=DEFAULT_OWNER_ID,
+        app_tz=APP_TZ,
+    )
 
     product_symbol = str(account.get("product_symbol") or payload.product_symbol or "TMF").strip().upper()
     direction_symbol = str(payload.direction_symbol or "TXF").strip().upper()

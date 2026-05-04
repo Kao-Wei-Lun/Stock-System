@@ -17,6 +17,59 @@ def _normalize_futopt_session(session: str | None) -> Optional[str]:
     return None
 
 
+def _object_field(value: Any, *names: str) -> Any:
+    if isinstance(value, dict):
+        for name in names:
+            if name in value:
+                return value.get(name)
+        return None
+    for name in names:
+        if hasattr(value, name):
+            return getattr(value, name)
+    return None
+
+
+def _build_futopt_estimate_margin_order(
+    symbol: str,
+    *,
+    price: float,
+    lot: int = 1,
+    session: str | None = "REGULAR",
+):
+    try:
+        from fubon_neo.constant import (
+            BSAction,
+            FutOptMarketType,
+            FutOptOrderType,
+            FutOptPriceType,
+            TimeInForce,
+        )
+        from fubon_neo.sdk import FutOptOrder
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "fubon_neo SDK is not installed. Install docs/fubon_neo-2.2.8-cp37-abi3-win_amd64.whl first."
+        ) from exc
+
+    numeric_price = float(price)
+    price_text = str(int(numeric_price)) if numeric_price.is_integer() else str(numeric_price)
+    market_type = (
+        FutOptMarketType.FutureNight
+        if _normalize_futopt_session(session) == "afterhours"
+        else FutOptMarketType.Future
+    )
+    return FutOptOrder(
+        buy_sell=BSAction.Buy,
+        symbol=str(symbol).strip().upper(),
+        price=price_text,
+        lot=max(1, int(lot or 1)),
+        market_type=market_type,
+        price_type=FutOptPriceType.Limit,
+        time_in_force=TimeInForce.ROD,
+        order_type=FutOptOrderType.New,
+        user_def="QVMargin",
+    )
+
+
 class FubonSDKManager:
     _RECONNECT_DELAY_SECONDS = 1.0
 
@@ -26,6 +79,8 @@ class FubonSDKManager:
         self._ws_mode = "Speed"
         self._ws_stock = None
         self._ws_futopt = None
+        self._login_accounts: list[Any] = []
+        self._active_futopt_account = None
         self._ws_started_targets: set[str] = set()
         self._subscriptions: Dict[str, str] = {}
         self._subscription_payloads: Dict[str, dict] = {}
@@ -75,7 +130,7 @@ class FubonSDKManager:
         self._reset_runtime_state()
 
         try:
-            sdk, ws_stock, ws_futopt = await asyncio.to_thread(self._login_sync, account)
+            sdk, ws_stock, ws_futopt, login_accounts = await asyncio.to_thread(self._login_sync, account)
         except Exception as exc:
             for target in old_targets:
                 self._best_effort_shutdown(target)
@@ -92,6 +147,8 @@ class FubonSDKManager:
         self._ws_mode = str(account.get("ws_mode") or "Speed")
         self._ws_stock = ws_stock
         self._ws_futopt = ws_futopt
+        self._login_accounts = login_accounts
+        self._active_futopt_account = self._select_futopt_account(login_accounts)
         self.connected = True
         self._attach_message_handlers()
 
@@ -122,7 +179,7 @@ class FubonSDKManager:
         websocket_client = getattr(getattr(sdk, "marketdata", None), "websocket_client", None)
         ws_stock = getattr(websocket_client, "stock", None)
         ws_futopt = getattr(websocket_client, "futopt", None)
-        return sdk, ws_stock, ws_futopt
+        return sdk, ws_stock, ws_futopt, self._extract_login_accounts(login_result)
 
     @staticmethod
     def _login_account(sdk, account: dict):
@@ -160,6 +217,28 @@ class FubonSDKManager:
         if hasattr(login_result, "message"):
             return str(getattr(login_result, "message") or "")
         return ""
+
+    @staticmethod
+    def _extract_login_accounts(login_result) -> list[Any]:
+        if login_result is None:
+            return []
+        if isinstance(login_result, (list, tuple)):
+            return list(login_result)
+        data = _object_field(login_result, "data", "accounts")
+        if isinstance(data, (list, tuple)):
+            return list(data)
+        if data is not None:
+            return [data]
+        return []
+
+    @staticmethod
+    def _select_futopt_account(login_accounts: list[Any]):
+        fallback = login_accounts[0] if login_accounts else None
+        for account in login_accounts:
+            account_type = str(_object_field(account, "account_type", "accountType", "type") or "").lower()
+            if any(token in account_type for token in ("futopt", "future", "futures", "option", "期貨")):
+                return account
+        return fallback
 
     async def hot_switch(self, account: dict) -> bool:
         old_subscriptions = dict(self._subscription_payloads)
@@ -288,6 +367,38 @@ class FubonSDKManager:
             self.start_ws_futopt()
             return self._has_marketdata_ready(require_futopt=require_futopt)
 
+    async def ensure_trading_ready(self) -> bool:
+        if self._shutting_down:
+            return False
+        if self.connected and self._sdk and self._active_futopt_account is not None:
+            return True
+
+        async with self._reinit_lock:
+            if self.connected and self._sdk and self._active_futopt_account is not None:
+                return True
+
+            from database import db as _db
+            from repositories.fubon_accounts import FubonAccountRepository
+
+            repo = FubonAccountRepository(_db)
+            account = await repo.get_active_account()
+            if not account:
+                self.connected = False
+                log.info("No active Fubon account configured; trading reinitialization skipped")
+                return False
+
+            log.warning(
+                "Fubon trading client unavailable in memory; reinitializing active account %s",
+                account.get("label") or account.get("id"),
+            )
+            success = await self._init_with_account(account, repo)
+            if not success:
+                return False
+
+            self.start_ws_stock()
+            self.start_ws_futopt()
+            return bool(self.connected and self._sdk and self._active_futopt_account is not None)
+
     def _has_marketdata_ready(self, *, require_futopt: bool = False) -> bool:
         if not self.connected:
             return False
@@ -296,6 +407,41 @@ class FubonSDKManager:
         if require_futopt and self.get_rest_futopt() is None:
             return False
         return True
+
+    def get_futopt_account(self):
+        if self._active_futopt_account is not None:
+            return self._active_futopt_account
+        self._active_futopt_account = self._select_futopt_account(self._login_accounts)
+        return self._active_futopt_account
+
+    async def query_futopt_estimate_margin(
+        self,
+        symbol: str,
+        *,
+        price: float,
+        lot: int = 1,
+        session: str | None = "REGULAR",
+    ):
+        if not await self.ensure_trading_ready():
+            raise RuntimeError("Fubon trading client is not ready")
+        account = self.get_futopt_account()
+        if account is None:
+            raise RuntimeError("No Fubon futures/options account returned by login")
+        futopt_api = getattr(self._sdk, "futopt", None)
+        query_estimate_margin = getattr(futopt_api, "query_estimate_margin", None)
+        if not callable(query_estimate_margin):
+            raise RuntimeError("Fubon futopt query_estimate_margin API is unavailable")
+        order = _build_futopt_estimate_margin_order(
+            symbol,
+            price=price,
+            lot=lot,
+            session=session,
+        )
+
+        def _query_sync():
+            return query_estimate_margin(account, order)
+
+        return await asyncio.to_thread(_query_sync)
 
     async def fetch_stock_quote(self, symbol: str) -> Optional[dict]:
         await self.ensure_marketdata_ready()
@@ -558,6 +704,8 @@ class FubonSDKManager:
         self._ws_mode = "Speed"
         self._ws_stock = None
         self._ws_futopt = None
+        self._login_accounts = []
+        self._active_futopt_account = None
         self._ws_started_targets = set()
         self._subscriptions = {}
         self._subscription_payloads = {}

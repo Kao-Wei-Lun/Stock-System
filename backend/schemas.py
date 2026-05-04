@@ -424,10 +424,14 @@ class PaperTradingAccountCreate(BaseModel):
     name: str = Field("TMF Paper Account", min_length=1, max_length=128)
     product_symbol: str = Field("TMF", max_length=32)
     starting_equity: float = Field(100_000, gt=0)
-    initial_margin_per_contract: float = Field(26_300, gt=0)
+    initial_margin_per_contract: float | None = Field(None, gt=0)
     risk_config: dict = Field(default_factory=dict)
     cost_model: dict = Field(default_factory=dict)
     strategy_config: dict | None = None
+
+
+class PaperTradingMarginEstimatePayload(BaseModel):
+    product_symbol: str = Field("TMF", max_length=32)
 
 
 class PaperTradingBotCreate(BaseModel):

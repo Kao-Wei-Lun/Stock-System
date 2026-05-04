@@ -19,22 +19,62 @@ class PaperTradingMixin:
         sql = """
             INSERT INTO `paper_trading_accounts`
             (`owner_id`, `name`, `product_symbol`, `starting_equity`,
-             `initial_margin_per_contract`, `risk_config_json`,
-             `cost_model_json`, `strategy_config_json`, `is_active`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             `initial_margin_per_contract`, `margin_source`, `margin_reference_symbol`,
+             `margin_currency`, `margin_synced_at`, `margin_sync_error`,
+             `risk_config_json`, `cost_model_json`, `strategy_config_json`, `is_active`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         row_id = await self._execute_insert(sql, (
             owner_id,
             data.get("name", "Default Account"),
             data.get("product_symbol", "TMF"),
             data.get("starting_equity", 100000),
-            data.get("initial_margin_per_contract", 26300),
+            data.get("initial_margin_per_contract") or 26300,
+            data.get("margin_source", "manual"),
+            data.get("margin_reference_symbol"),
+            data.get("margin_currency"),
+            data.get("margin_synced_at"),
+            data.get("margin_sync_error"),
             json.dumps(data.get("risk_config", {}), ensure_ascii=False),
             json.dumps(data.get("cost_model", {}), ensure_ascii=False),
             json.dumps(data.get("strategy_config", {}), ensure_ascii=False) if data.get("strategy_config") else None,
             1,
         ))
         return await self.get_paper_trading_account(row_id, owner_id)
+
+    async def update_paper_trading_account(self, account_id: int, data: dict, owner_id: int = 1) -> Optional[dict]:
+        updates = []
+        params = []
+        for col in (
+            "name",
+            "product_symbol",
+            "starting_equity",
+            "initial_margin_per_contract",
+            "margin_source",
+            "margin_reference_symbol",
+            "margin_currency",
+            "margin_synced_at",
+            "margin_sync_error",
+            "is_active",
+        ):
+            if col in data:
+                updates.append(f"`{col}`=%s")
+                params.append(data[col])
+        if "risk_config" in data:
+            updates.append("`risk_config_json`=%s")
+            params.append(json.dumps(data["risk_config"], ensure_ascii=False))
+        if "cost_model" in data:
+            updates.append("`cost_model_json`=%s")
+            params.append(json.dumps(data["cost_model"], ensure_ascii=False))
+        if "strategy_config" in data:
+            updates.append("`strategy_config_json`=%s")
+            params.append(json.dumps(data["strategy_config"], ensure_ascii=False) if data["strategy_config"] else None)
+        if not updates:
+            return await self.get_paper_trading_account(account_id, owner_id)
+        sql = f"UPDATE `paper_trading_accounts` SET {', '.join(updates)} WHERE `id`=%s AND `owner_id`=%s"
+        params.extend([account_id, owner_id])
+        await self._execute(sql, tuple(params))
+        return await self.get_paper_trading_account(account_id, owner_id)
 
     async def get_paper_trading_account(self, account_id: int, owner_id: int = 1) -> Optional[dict]:
         row = await self._fetchone(

@@ -9,6 +9,7 @@ class StubFutoptManager:
         self.ticker_calls = []
         self.quote_calls = []
         self.candle_calls = []
+        self.estimate_margin_calls = []
 
     async def fetch_futopt_tickers(self, **kwargs):
         self.ticker_calls.append(kwargs)
@@ -112,6 +113,17 @@ class StubFutoptManager:
             ],
         }
 
+    async def query_futopt_estimate_margin(self, symbol, **kwargs):
+        self.estimate_margin_calls.append({"symbol": symbol, **kwargs})
+        return {
+            "is_success": True,
+            "data": {
+                "date": "2026/05/04",
+                "currency": "TWD",
+                "estimate_margin": 27100,
+            },
+        }
+
 
 @pytest.mark.anyio
 async def test_futopt_provider_resolves_nearest_contract_from_base_alias():
@@ -140,6 +152,21 @@ async def test_futopt_provider_fetches_quote_with_resolved_symbol():
     assert quote["is_delayed"] is False
     assert quote["bid"] == 20609
     assert quote["ask"] == 20610
+
+
+@pytest.mark.anyio
+async def test_futopt_provider_estimates_margin_with_resolved_contract():
+    manager = StubFutoptManager()
+    provider = FubonFutoptProvider(manager)
+
+    payload = await provider.estimate_margin("TXF", session="REGULAR")
+
+    assert payload["resolved_symbol"] == "TXFE6"
+    assert payload["initial_margin_per_contract"] == 27100
+    assert payload["currency"] == "TWD"
+    assert manager.estimate_margin_calls == [
+        {"symbol": "TXFE6", "price": 20610.0, "lot": 1, "session": "REGULAR"}
+    ]
 
 
 @pytest.mark.anyio

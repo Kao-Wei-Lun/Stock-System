@@ -26,6 +26,7 @@ class SchedulerSettings:
     futopt_recorder_enabled: bool = False
     futopt_recorder_poll_seconds: int = 30
     futopt_recorder_backfill_interval_seconds: int = 300
+    paper_margin_auto_sync_enabled: bool = True
 
 
 @dataclass(slots=True)
@@ -45,6 +46,7 @@ class SchedulerDependencies:
     skip_poll_for_ticker: Callable[[str], bool] | None = None
     archive_fubon_market_snapshot: Any = None
     futopt_candle_recorder: Any = None
+    sync_paper_trading_margins: Any = None
 
 
 async def startup_download(
@@ -184,6 +186,36 @@ async def daily_latest_sync_loop(
             await sync_tracked_market_data(reason="daily-latest")
         except Exception as exc:
             log.warning("Daily latest market sync failed: %s", exc)
+
+
+async def daily_paper_margin_sync_loop(
+    sync_paper_trading_margins,
+    app_tz: tzinfo,
+    daily_sync_time: time_of_day,
+    logger: logging.Logger | None = None,
+) -> None:
+    log = logger or logging.getLogger(__name__)
+    await asyncio.sleep(25)
+    try:
+        summary = await sync_paper_trading_margins(reason="startup-paper-margin")
+        log.info("Paper trading margin startup sync finished: %s", summary)
+    except Exception as exc:
+        log.warning("Startup paper trading margin sync failed: %s", exc)
+
+    while True:
+        now = datetime.now(app_tz)
+        next_run_date = now.date()
+        next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        if now >= next_run:
+            next_run_date += timedelta(days=1)
+            next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        sleep_seconds = max(60, int((next_run - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+        try:
+            summary = await sync_paper_trading_margins(reason="daily-paper-margin")
+            log.info("Paper trading margin daily sync finished: %s", summary)
+        except Exception as exc:
+            log.warning("Daily paper trading margin sync failed: %s", exc)
 
 
 def _normalize_order_levels(levels: Any) -> list[dict]:
@@ -591,6 +623,19 @@ class BackgroundScheduler:
                 logger=self._log,
             ),
         )
+
+        if self._settings.paper_margin_auto_sync_enabled and self._deps.sync_paper_trading_margins:
+            self._create_task(
+                "paper-margin-sync",
+                daily_paper_margin_sync_loop(
+                    sync_paper_trading_margins=self._deps.sync_paper_trading_margins,
+                    app_tz=self._settings.app_tz,
+                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    logger=self._log,
+                ),
+            )
+        else:
+            self._log.info("Paper trading margin auto sync skipped (PAPER_MARGIN_AUTO_SYNC_ENABLED=false).")
 
         if self._deps.fubon_manager:
             self._create_task(
