@@ -416,7 +416,7 @@
                   <td>{{ t.entry_price }}</td>
                   <td>{{ t.exit_price }}</td>
                   <td :class="pnlClass(t.net_pnl)">{{ formatCurrency(t.net_pnl) }}</td>
-                  <td class="pt-reason">{{ t.exit_reason }}</td>
+                  <td class="pt-reason" :title="t.exit_reason || ''">{{ t.exit_reason }}</td>
                 </tr>
               </tbody>
             </table>
@@ -433,7 +433,9 @@
                 <tr v-for="(evt, i) in liveBotState.risk_events" :key="i">
                   <td>{{ evt.event_type }}</td>
                   <td>{{ formatTime(evt.timestamp || evt.details?.bar_time) }}</td>
-                  <td class="pt-reason">{{ JSON.stringify(evt.details || {}) }}</td>
+                  <td class="pt-reason pt-detail-cell">
+                    <pre class="pt-detail-text">{{ formatDetails(evt.details) }}</pre>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -577,7 +579,7 @@
                   <td :class="pnlClass(t.gross_pnl)">{{ formatCurrency(t.gross_pnl) }}</td>
                   <td>{{ formatCurrency(t.fee_total) }}</td>
                   <td :class="pnlClass(t.net_pnl)">{{ formatCurrency(t.net_pnl) }}</td>
-                  <td class="pt-reason">{{ t.exit_reason }}</td>
+                  <td class="pt-reason" :title="t.exit_reason || ''">{{ t.exit_reason }}</td>
                 </tr>
               </tbody>
             </table>
@@ -600,7 +602,9 @@
                 <tr v-for="(evt, i) in replayResult.risk_events" :key="i">
                   <td>{{ evt.event_type }}</td>
                   <td>{{ formatTime(evt.timestamp || evt.details?.bar_time) }}</td>
-                  <td class="pt-reason">{{ JSON.stringify(evt.details || {}) }}</td>
+                  <td class="pt-reason pt-detail-cell">
+                    <pre class="pt-detail-text">{{ formatDetails(evt.details) }}</pre>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1159,6 +1163,16 @@ function formatTime(val) {
   } catch { return val; }
 }
 
+function formatDetails(value) {
+  if (!value) return "{}";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function pnlClass(val) {
   if (val > 0) return "pt-positive";
   if (val < 0) return "pt-negative";
@@ -1437,6 +1451,7 @@ onUnmounted(() => {
   padding: 10px 12px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
   white-space: nowrap;
+  vertical-align: top;
 }
 
 /* ─── Badges ─────────────────────────────────────────────── */
@@ -1459,7 +1474,30 @@ onUnmounted(() => {
 /* ─── Colors ─────────────────────────────────────────────── */
 .pt-positive { color: #5dd39e; }
 .pt-negative { color: #ff5a5f; }
-.pt-reason { max-width: 240px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: rgba(196,211,226,0.6); }
+.pt-table td.pt-reason {
+  min-width: 280px;
+  max-width: 620px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 11px;
+  color: rgba(196,211,226,0.68);
+}
+.pt-table td.pt-detail-cell {
+  min-width: 420px;
+  max-width: 760px;
+}
+.pt-detail-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font: inherit;
+  color: inherit;
+}
 
 /* ─── Sub Section ────────────────────────────────────────── */
 .pt-sub-section { margin-top: 20px; }
