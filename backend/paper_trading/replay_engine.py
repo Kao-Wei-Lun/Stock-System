@@ -38,6 +38,7 @@ from paper_trading.simulation_broker import (
 from paper_trading.paper_account import PaperAccount, TradeRecord
 from paper_trading.strategy_engine import (
     INDICATOR_STRATEGY_TYPES,
+    TMF_KD_MACD_MA_STRATEGY_TYPES,
     StrategyConfig,
     StrategyEngine,
     Signal,
@@ -136,6 +137,9 @@ class ReplayEngine:
         if self.strategy_config.strategy_type == "v2":
             from paper_trading.strategy_v2 import StrategyEngineV2
             strategy = StrategyEngineV2(self.strategy_config)
+        elif self.strategy_config.strategy_type in TMF_KD_MACD_MA_STRATEGY_TYPES:
+            from paper_trading.tmf_kd_macd_ma_strategy import TmfKdMacdMaStrategyEngine
+            strategy = TmfKdMacdMaStrategyEngine(self.strategy_config)
         elif self.strategy_config.strategy_type in INDICATOR_STRATEGY_TYPES:
             from paper_trading.indicator_combo_strategy import IndicatorComboStrategyEngine
             strategy = IndicatorComboStrategyEngine(self.strategy_config)

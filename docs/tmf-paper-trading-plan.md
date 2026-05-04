@@ -1,10 +1,12 @@
-# 微型臺指期貨（TMF）模擬交易規劃 v1.2
+# 微型臺指期貨（TMF）模擬交易規劃 v1.4
 
-**產出時間**：2026-04-23  
+**產出時間**：2026-05-04
 **規劃目的**：先以「微型臺指期貨（TMF）」建立一套可實際運作的模擬交易（paper trading）閉環，驗證策略、風控、委託狀態流轉、資金控管與日內/短波段交易流程，之後再銜接富邦 API 真實帳戶。
 
 **本次更新重點**：
 
+- 依據 `2026-04-24 ~ 2026-05-04` 日盤 1m K 線統計，調整 KD/MACD 多空進場與多單轉弱防守出場
+- 補入 `1m KD + MACD + MA5/MA10/MA20` 多空反轉策略草案
 - 盤中判斷資料源明確收斂為 `富邦 API futopt quote / intraday candles`
 - 第一版即時判斷的核心條件調整為 `TX + TMF`，`TWII` 改列為日盤輔助參考，不列入 MVP 必要即時條件
 - 補入一版可以直接落成程式的 `MVP 訊號草案`
@@ -361,7 +363,11 @@ allow_qty = floor(min(
 第一版建議支援兩種模式：
 
 - `day_session_only`
+  - 第一版先作為正式回測與驗收模式
+  - 僅在 `08:45 ~ 13:45` 產生新進場訊號
+  - 不允許部位跨過日盤收盤
 - `day_and_night`
+  - 視為後續擴充或實驗模式，日盤與夜盤仍必須分別強制平倉或獨立驗收
 
 ### 6.3 持倉政策
 
@@ -380,6 +386,14 @@ allow_qty = floor(min(
 
 - 收盤前 `N` 分鐘禁止新倉
 - 收盤前 `M` 分鐘強制平倉
+- 目前第一版先採：
+  - `no_new_position_before_close_minutes = 15`
+  - `flatten_before_close_minutes = 5`
+- 以日盤為例：
+  - `13:30` 起不再開新倉
+  - `13:40` 起強制平倉
+  - 最晚必須在 `13:45` 日盤收盤前沒有任何留倉
+- 若為到期月份最後交易日，日盤收盤時間改以 `13:30` 計算，所有禁止新倉與強制平倉時間同步提前
 
 ### 6.5 接近結算日規則
 
@@ -541,7 +555,169 @@ allow_qty = floor(min(
 - 多套 regime 切換
 - 動態停利參數自動調整
 
-### 7.3 第一版不要做得太複雜
+### 7.3 1m KD + MACD + MA 策略草案
+
+這一版用 `TMF 1m candles` 做短線反轉訊號，核心是先用 MACD 的 DIF / Signal 線確認位於偏高或偏低區，再用 MACD 柱狀值與 KD 的連續 K 線轉向判斷動能是否開始反轉，最後用均線位置確認目前價格是在偏低或偏高的位置。
+
+#### A. 指標與欄位定義
+
+- K 線週期：`1m`
+- 成交商品：`TMF` 近月契約
+- 均線：`ma5`、`ma10`、`ma20`，全部用 `1m close` 計算
+- KD：第一版先用 `K value` 作為 `KD > / < threshold` 的判斷值，`D value` 一併寫入日誌供回測檢討
+- MACD：
+  - `dif_value`：DIF 線
+  - `signal_value`：Signal 線 / DEA 線
+  - `macd_value`：柱狀值，紅柱為正、綠柱為負
+  - `green_shrinking`：`macd_value < 0` 且 `macd_value > previous_macd_value`
+  - `turns_red`：`previous_macd_value <= 0` 且 `macd_value > 0`
+  - `red_shrinking`：`macd_value > 0` 且 `macd_value < previous_macd_value`
+  - `turns_green`：`previous_macd_value >= 0` 且 `macd_value < 0`
+- 若資料源把 `MACD` 命名為 signal 線而不是柱狀值，策略欄位需先轉成 `macd_value = dif_value - signal_value` 後再判斷紅綠柱
+- 價格位置：
+  - `K 在 MA20 之下`：`close < ma20`
+  - `K 在 MA5 之上`：`close > ma5`
+- 均線斜率：
+  - `ma5_slope3`：`ma5 - ma5_3_bars_ago`，用來判斷最近 3 根 `1m` 的 MA5 是否轉弱或轉強
+
+#### B. 做多進場條件
+
+所有條件同時成立才允許產生 `long_entry`：
+
+- MACD 位於偏空或過度偏空區：
+  - `dif_value < -20` 或 `signal_value < -20`
+- MACD 空方動能開始收斂或翻多：
+  - `green_shrinking` 或 `turns_red`
+- KD 從極弱區重新站回門檻：
+  - `previous_kd_k < 20` 且 `kd_k >= 20`
+- 價格仍在偏低位置：
+  - `close < ma20`
+
+#### C. 做空進場條件
+
+所有條件同時成立才允許產生 `short_entry`：
+
+- MACD 位於偏多或過度偏多區：
+  - `dif_value > 29` 或 `signal_value > 29`
+- MACD 多方動能開始收斂或翻空：
+  - `red_shrinking` 或 `turns_green`
+- KD 從高檔區開始轉弱：
+  - `previous_kd_k > 80` 且 `kd_k < previous_kd_k`
+- 價格在均線上方：
+  - `close > ma5`
+- 價格已開始轉弱：
+  - `close < previous_close`
+
+#### D. 強制獲利了結與停損
+
+多單持倉時，任一條件成立即產生 `close_long`：
+
+- `kd_k > 90`
+- `close < ma5` 且 `ma5_slope3 < 0` 且 `macd_value < previous_macd_value`
+- `ma5 < ma20` 且 `macd_value > 0` 且 `previous_close < previous_ma5`
+- `short_entry` 成立
+
+空單持倉時，任一條件成立即產生 `close_short`：
+
+- `kd_k < 10`
+- `macd_value < -35`
+- `ma5 > ma10` 且 `macd_value < 0` 且 `previous_close > previous_ma5`
+- `long_entry` 成立
+
+停損先用固定百分比：
+
+- 多單停損：`close <= entry_price * (1 - 0.03)`
+- 空單停損：`close >= entry_price * (1 + 0.03)`
+
+#### E. 訊號執行優先順序
+
+每根 `1m` 收盤後才確認訊號，下一根 `1m open` 依成交模型加上滑價進出場。
+
+優先順序建議如下：
+
+1. 先檢查停損
+2. 再檢查既有部位的強制獲利了結
+3. 再檢查是否已進入收盤前強制平倉區
+4. 空手且未進入禁止新倉區時才檢查新進場
+5. 若同一根同時出現 `long_entry` 與 `short_entry`，視為訊號衝突，不進場並寫入日誌
+6. 若反向進場條件在持倉中成立，第一版先只平倉，不同一根立即反手
+
+#### F. 初始參數
+
+```text
+timeframe = 1m
+session_mode = day_session_only
+no_new_position_before_close_minutes = 15
+flatten_before_close_minutes = 5
+ma_fast = 5
+ma_mid = 10
+ma_slow = 20
+kd_period = 9
+kd_k_smoothing = 3
+kd_d_smoothing = 3
+macd_fast = 12
+macd_slow = 26
+macd_signal = 9
+long_macd_line_low_threshold = -20
+short_macd_line_high_threshold = 29
+short_exit_macd_threshold = -35
+long_exit_ma_requires_macd_above_zero = true
+short_exit_ma_requires_macd_below_zero = true
+long_exit_ma_requires_previous_close_below_ma5 = true
+short_exit_ma_requires_previous_close_above_ma5 = true
+long_entry_requires_macd_hist_recovery = true
+long_kd_cross_up_threshold = 20
+short_kd_turn_down_threshold = 80
+short_entry_requires_close_down = true
+long_exit_weakness_ma_slope_bars = 3
+long_exit_weakness_requires_close_below_ma5 = true
+long_exit_weakness_requires_macd_hist_falling = true
+long_kd_take_profit_threshold = 90
+short_kd_take_profit_threshold = 10
+stop_loss_pct = 0.03
+```
+
+#### G. Bot 策略引擎選項
+
+`建立 Bot` 與 `回放策略引擎` 目前提供以下 4 個 KD/MACD/MA 策略選項：
+
+- `tmf_kd_macd_ma_v14`：v1.4 原始 1m 策略
+- `tmf_kd_macd_ma_v14_5m_kd`：v1.4 + 多單需 5m KD K 值上升
+- `tmf_kd_macd_ma_v14_15m_kd`：v1.4 + 多單需 15m KD K 值上升
+- `tmf_kd_macd_ma_v14_15m_macd`：v1.4 + 多單需 15m MACD 柱狀值上升
+
+這 4 個選項共用 v1.4 的空單條件；原因是目前統計結果顯示多時間週期濾網主要改善多單品質，空單先保留原始 v1.4 條件作為比較基準。Bot 風控試算與策略設定的預設停損點數先用 `80` 點。
+
+#### H. 回測時要特別觀察
+
+- 多單改成只接受 `green_shrinking` / `turns_red`，並要求 `kd_k >= 20`，觀察是否能降低假反彈進場
+- 空單加上 `close < previous_close`，觀察是否能保留高檔轉弱優勢並降低過早放空
+- 多單轉弱防守出場可能降低勝率但改善大虧，需同時觀察勝率與總淨損益
+- `short_exit macd_value < -35` 是否造成空單太晚平倉
+- `stop_loss_pct = 3%` 對 TMF 1m 是否過寬，後續可改成 `固定點數` 或 `ATR 倍數`
+- KD 轉向條件目前只看 `K value`，回測後可比較 `K 與 D 同時轉向` 是否更穩
+- 日盤與夜盤應分開統計勝率、平均持倉時間、最大逆行點數與滑價敏感度
+
+#### I. v1.4 回測結果
+
+回測範圍：`2026-04-24 ~ 2026-05-04` 完整日盤 `TMF 1m`，收盤前 `15` 分鐘不開新倉，`13:40` 後強制平倉。成交假設為訊號 K 收盤確認、下一根 `1m open` 成交，單邊手續費 `22`，滑價 `1` 點。
+
+| 分類 | 交易 | 勝率 | 淨損益 | 總點數 |
+| --- | ---: | ---: | ---: | ---: |
+| 全部 | 30 | 43.33% | +1,040 | +236 |
+| 多單 | 20 | 40.00% | -380 | +50 |
+| 空單 | 10 | 50.00% | +1,420 | +186 |
+
+主要出場原因統計：
+
+| 出場原因 | 交易 | 勝率 | 淨損益 |
+| --- | ---: | ---: | ---: |
+| `kd_k_gt_90` | 5 | 100.00% | +5,190 |
+| `long_weakness_exit_close_lt_ma5+ma5_slope3_lt_0+macd_hist_falling` | 13 | 7.69% | -5,722 |
+| `ma5_gt_ma10+macd_lt_0+prev_close_gt_prev_ma5` | 10 | 50.00% | +1,420 |
+| `ma5_lt_ma20+macd_gt_0+prev_close_lt_prev_ma5` | 2 | 100.00% | +152 |
+
+### 7.4 第一版不要做得太複雜
 
 第一版不建議一開始就塞入：
 
@@ -556,7 +732,7 @@ allow_qty = floor(min(
 - `固定停損 + 固定停利/移動停損`
 - `日內強制平倉`
 
-### 7.4 但參數不能把日盤與夜盤混成同一套
+### 7.5 但參數不能把日盤與夜盤混成同一套
 
 即使第一版策略邏輯保持簡單，也建議至少把以下參數分開：
 

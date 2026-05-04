@@ -3,9 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from paper_trading.cost_model import SessionType
+from paper_trading.bot_runner import PaperTradingBot
 from paper_trading.indicator_combo_strategy import IndicatorComboStrategyEngine
 from paper_trading.simulation_broker import Bar
-from paper_trading.strategy_engine import SignalAction, SignalDirection, StrategyConfig
+from paper_trading.strategy_engine import (
+    SignalAction,
+    SignalDirection,
+    StrategyConfig,
+    TMF_KD_MACD_MA_STRATEGY_TYPES,
+)
+from paper_trading.tmf_kd_macd_ma_strategy import TmfKdMacdMaStrategyEngine
 
 
 def _bar(start: datetime, index: int, close: float, *, spread: float = 1.0) -> Bar:
@@ -49,6 +56,32 @@ def test_indicator_strategy_presets_resolve_current_candidates() -> None:
     assert psar.to_dict()["indicator_kd_short_min"] == 25.0
     assert psar.to_dict()["indicator_atr_stop_mult"] == 1.2
     assert psar.to_dict()["indicator_atr_target_mult"] == 2.0
+
+
+def test_tmf_kd_macd_ma_bot_strategy_types_route_to_dedicated_engine() -> None:
+    expected = {
+        "tmf_kd_macd_ma_v14",
+        "tmf_kd_macd_ma_v14_5m_kd",
+        "tmf_kd_macd_ma_v14_15m_kd",
+        "tmf_kd_macd_ma_v14_15m_macd",
+    }
+
+    assert TMF_KD_MACD_MA_STRATEGY_TYPES == expected
+
+    for strategy_type in expected:
+        config = StrategyConfig.from_dict({
+            "strategy_type": strategy_type,
+            "day_regular_profile": {"stop_loss_points": 80},
+        })
+        bot = PaperTradingBot(bot_id=1, strategy_config=config)
+
+        assert isinstance(bot.strategy, TmfKdMacdMaStrategyEngine)
+        assert bot.strategy.config.strategy_type == strategy_type
+        assert bot.strategy.get_effective_stop_distances(
+            _bar(datetime(2026, 4, 20, 8, 45), 0, 20_000),
+            SessionType.DAY,
+            config.day_regular_profile,
+        ).initial_stop == 80
 
 
 def test_pullback_breakout_candidate_emits_long_entry() -> None:

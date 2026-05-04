@@ -128,6 +128,14 @@ INDICATOR_STRATEGY_TYPES = {
 }
 
 
+TMF_KD_MACD_MA_STRATEGY_TYPES = {
+    "tmf_kd_macd_ma_v14",
+    "tmf_kd_macd_ma_v14_5m_kd",
+    "tmf_kd_macd_ma_v14_15m_kd",
+    "tmf_kd_macd_ma_v14_15m_macd",
+}
+
+
 INDICATOR_STRATEGY_PRESETS = {
     "tmf_pullback_breakout": {
         "indicator_entry_timeframe_minutes": 1,
