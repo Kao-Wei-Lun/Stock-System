@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +27,8 @@ FUBON_HISTORY_INTERVALS = {
 }
 FUBON_HISTORY_START = date(2010, 1, 1)
 FUBON_HISTORY_MAX_RANGE_DAYS = 364
+FUBON_HISTORY_CHUNK_DELAY_SECONDS = 0.3
+FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS = (5.0, 15.0, 30.0)
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -113,6 +116,11 @@ def _is_fubon_not_found_error(exc: Exception) -> bool:
     return "Resource Not Found" in message or "Status: 404" in message or "statusCode\":404" in message
 
 
+def _is_fubon_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "Rate limit exceeded" in message or "Status: 429" in message or "statusCode\":429" in message
+
+
 class HybridDataFetcher:
     def __init__(self, yahoo_fetcher: DataFetcher, fubon_manager):
         self._yahoo = yahoo_fetcher
@@ -124,6 +132,7 @@ class HybridDataFetcher:
         period: str = "2y",
         interval: str = "1d",
         include_info: bool = False,
+        raise_on_error: bool = False,
     ) -> int:
         normalized_ticker = normalize_ticker(ticker)
         if is_taiwan_stock_ticker(normalized_ticker):
@@ -131,6 +140,8 @@ class HybridDataFetcher:
                 message = "Taiwan stock history is restricted to Fubon API and this interval is unsupported or Fubon is disconnected"
                 log.warning("%s: %s (%s)", message, normalized_ticker, interval)
                 await db.log_sync(normalized_ticker, "error", 0, message)
+                if raise_on_error:
+                    raise RuntimeError(message)
                 return 0
             try:
                 count = await self._fetch_and_store_fubon_stock(
@@ -150,6 +161,8 @@ class HybridDataFetcher:
                     exc,
                 )
                 await db.log_sync(normalized_ticker, "error", 0, message)
+                if raise_on_error:
+                    raise
                 return 0
         return await self._yahoo.fetch_and_store(
             normalized_ticker,
@@ -256,11 +269,38 @@ class HybridDataFetcher:
         cursor = start
         while cursor <= end:
             chunk_end = min(cursor + timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS), end)
+            response = await self._fetch_fubon_historical_candle_chunk(
+                symbol,
+                from_date=cursor.isoformat(),
+                to_date=chunk_end.isoformat(),
+                timeframe=timeframe,
+                adjusted=adjusted,
+                sort=sort,
+            )
+            if isinstance(response, dict):
+                rows.extend(response.get("data") or [])
+            cursor = chunk_end + timedelta(days=1)
+            if cursor <= end and FUBON_HISTORY_CHUNK_DELAY_SECONDS > 0:
+                await asyncio.sleep(FUBON_HISTORY_CHUNK_DELAY_SECONDS)
+        return {"symbol": symbol, "data": rows}
+
+    async def _fetch_fubon_historical_candle_chunk(
+        self,
+        symbol: str,
+        *,
+        from_date: str,
+        to_date: str,
+        timeframe: str,
+        adjusted: bool,
+        sort: str,
+    ) -> Optional[dict]:
+        attempt = 0
+        while True:
             try:
-                response = await self._fubon_manager.fetch_stock_historical_candles(
+                return await self._fubon_manager.fetch_stock_historical_candles(
                     symbol,
-                    from_date=cursor.isoformat(),
-                    to_date=chunk_end.isoformat(),
+                    from_date=from_date,
+                    to_date=to_date,
                     timeframe=timeframe,
                     adjusted=adjusted,
                     sort=sort,
@@ -270,13 +310,21 @@ class HybridDataFetcher:
                     log.debug(
                         "Fubon historical candle chunk returned 404 for %s %s-%s; continuing",
                         symbol,
-                        cursor.isoformat(),
-                        chunk_end.isoformat(),
+                        from_date,
+                        to_date,
                     )
-                    cursor = chunk_end + timedelta(days=1)
+                    return None
+                if _is_fubon_rate_limit_error(exc) and attempt < len(FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS):
+                    delay_seconds = FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
+                    attempt += 1
+                    log.warning(
+                        "Fubon historical candle chunk rate-limited for %s %s-%s; retrying in %.1fs",
+                        symbol,
+                        from_date,
+                        to_date,
+                        delay_seconds,
+                    )
+                    if delay_seconds > 0:
+                        await asyncio.sleep(delay_seconds)
                     continue
                 raise
-            if isinstance(response, dict):
-                rows.extend(response.get("data") or [])
-            cursor = chunk_end + timedelta(days=1)
-        return {"symbol": symbol, "data": rows}

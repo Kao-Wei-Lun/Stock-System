@@ -8,14 +8,14 @@ Full first-time backfill:
 
 ```bash
 cd backend
-python run_taiwan_history_backfill.py --force-full
+python run_taiwan_history_backfill.py --force-full --intervals 1d --delay-seconds 1 --ticker-delay-seconds 3
 ```
 
 Smoke test only a few symbols:
 
 ```bash
 cd backend
-python run_taiwan_history_backfill.py --force-full --max-tickers 5 --delay-seconds 0
+python run_taiwan_history_backfill.py --force-full --max-tickers 5 --intervals 1d --delay-seconds 1 --ticker-delay-seconds 3
 ```
 
 ## Manual API
@@ -41,5 +41,6 @@ TW_FULL_HISTORY_INTERVALS=1d,1wk,1mo
 TW_FULL_HISTORY_PERIOD=max
 TW_FULL_HISTORY_INCREMENTAL_PERIOD=5d
 TW_FULL_HISTORY_DELAY_SECONDS=0.8
+TW_FULL_HISTORY_TICKER_DELAY_SECONDS=2.0
 TW_FULL_HISTORY_INCLUDE_ETF=true
 ```

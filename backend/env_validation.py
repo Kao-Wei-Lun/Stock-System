@@ -164,6 +164,10 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     "TW_FULL_HISTORY_DELAY_SECONDS",
     lambda: read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0, env=source),
   )
+  capture(
+    "TW_FULL_HISTORY_TICKER_DELAY_SECONDS",
+    lambda: read_float_env("TW_FULL_HISTORY_TICKER_DELAY_SECONDS", "2.0", minimum=0, env=source),
+  )
 
   encrypt_key = _read_raw_value("APP_ENCRYPT_KEY", None, env=source)
   if not encrypt_key:

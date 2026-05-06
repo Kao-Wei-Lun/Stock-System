@@ -63,6 +63,7 @@ class TaiwanHistoryBackfillService:
     incremental_period: str = "5d"
     intervals: tuple[str, ...] = field(default_factory=lambda: ("1d", "1wk", "1mo"))
     request_delay_seconds: float = 0.8
+    ticker_delay_seconds: float = 2.0
     include_etf: bool = True
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
@@ -143,13 +144,14 @@ class TaiwanHistoryBackfillService:
         failures: List[Dict[str, Any]] = []
         skipped = 0
 
-        for ticker_row in tickers:
+        for ticker_index, ticker_row in enumerate(tickers):
             if stop_at is not None and datetime.now(self.app_tz) >= stop_at:
                 skipped += 1
                 break
             ticker = normalize_ticker(ticker_row.get("ticker"))
             if not ticker:
                 continue
+            self.logger.info("Taiwan history sync %s/%s: %s", ticker_index + 1, len(tickers), ticker)
             for interval in self.intervals:
                 if stop_at is not None and datetime.now(self.app_tz) >= stop_at:
                     skipped += 1
@@ -165,6 +167,8 @@ class TaiwanHistoryBackfillService:
                     failures.append(result)
                 if self.request_delay_seconds > 0:
                     await asyncio.sleep(self.request_delay_seconds)
+            if ticker_index < len(tickers) - 1 and self.ticker_delay_seconds > 0:
+                await asyncio.sleep(self.ticker_delay_seconds)
 
         coverage = await self.db.get_tw_universe_coverage("1d")
         return {
@@ -213,15 +217,14 @@ class TaiwanHistoryBackfillService:
         )
 
         try:
-            rows_synced = await self.fetcher.fetch_and_store(
+            rows_synced = await self._fetch_and_store_history(
                 normalized_ticker,
                 period=period,
                 interval=normalized_interval,
-                include_info=False,
             )
             latest_row = await self.db.get_latest_ohlcv(normalized_ticker, normalized_interval)
             latest_date = _latest_row_date(latest_row)
-            next_status = "success" if rows_synced or latest_date else "empty"
+            next_status = "success" if rows_synced or (latest_date and not force_full) else "empty"
             await self.db.record_tw_history_sync_status(
                 ticker=normalized_ticker,
                 interval=normalized_interval,
@@ -259,6 +262,25 @@ class TaiwanHistoryBackfillService:
                 "rows_synced": 0,
                 "message": message,
             }
+
+    async def _fetch_and_store_history(self, ticker: str, *, period: str, interval: str) -> int:
+        try:
+            return await self.fetcher.fetch_and_store(
+                ticker,
+                period=period,
+                interval=interval,
+                include_info=False,
+                raise_on_error=True,
+            )
+        except TypeError as exc:
+            if "raise_on_error" not in str(exc):
+                raise
+            return await self.fetcher.fetch_and_store(
+                ticker,
+                period=period,
+                interval=interval,
+                include_info=False,
+            )
 
     async def _prioritize_tickers_for_sync(self, tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:

@@ -41,7 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--delay-seconds",
         type=float,
         default=None,
-        help="Override the delay between Fubon history requests.",
+        help="Override the delay between intervals within the same ticker.",
+    )
+    parser.add_argument(
+        "--ticker-delay-seconds",
+        type=float,
+        default=None,
+        help="Override the delay after each ticker finishes.",
     )
     parser.add_argument(
         "--skip-universe-refresh",
@@ -68,6 +74,8 @@ async def run_backfill(args: argparse.Namespace) -> dict[str, Any]:
             tw_history_backfill_service.intervals = _normalize_intervals(args.intervals)
         if args.delay_seconds is not None:
             tw_history_backfill_service.request_delay_seconds = max(0.0, float(args.delay_seconds))
+        if args.ticker_delay_seconds is not None:
+            tw_history_backfill_service.ticker_delay_seconds = max(0.0, float(args.ticker_delay_seconds))
         if args.exclude_etf:
             tw_history_backfill_service.include_etf = False
 

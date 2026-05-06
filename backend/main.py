@@ -87,6 +87,7 @@ TW_FULL_HISTORY_PERIOD = read_text_env("TW_FULL_HISTORY_PERIOD", "max").strip().
 TW_FULL_HISTORY_INCREMENTAL_PERIOD = read_text_env("TW_FULL_HISTORY_INCREMENTAL_PERIOD", "5d").strip().lower() or "5d"
 TW_FULL_HISTORY_INTERVALS = _normalize_intervals(read_text_env("TW_FULL_HISTORY_INTERVALS", "1d,1wk,1mo"))
 TW_FULL_HISTORY_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0)
+TW_FULL_HISTORY_TICKER_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_TICKER_DELAY_SECONDS", "2.0", minimum=0)
 TW_FULL_HISTORY_INCLUDE_ETF = read_bool_env("TW_FULL_HISTORY_INCLUDE_ETF", True)
 ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
 ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
@@ -227,6 +228,7 @@ tw_history_backfill_service = TaiwanHistoryBackfillService(
     incremental_period=TW_FULL_HISTORY_INCREMENTAL_PERIOD,
     intervals=TW_FULL_HISTORY_INTERVALS,
     request_delay_seconds=TW_FULL_HISTORY_DELAY_SECONDS,
+    ticker_delay_seconds=TW_FULL_HISTORY_TICKER_DELAY_SECONDS,
     include_etf=TW_FULL_HISTORY_INCLUDE_ETF,
     logger=log,
 )

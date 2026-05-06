@@ -159,6 +159,7 @@ async def test_taiwan_history_backfill_syncs_universe_and_history():
         app_tz=timezone.utc,
         intervals=("1d", "1wk"),
         request_delay_seconds=0,
+        ticker_delay_seconds=0,
     )
 
     payload = await service.sync_history(reason="test")
@@ -178,3 +179,34 @@ async def test_taiwan_history_backfill_syncs_universe_and_history():
 
     assert payload["success_count"] == 4
     assert all(call["period"] == "5d" for call in fetcher.calls)
+
+
+class FailingFetcher:
+    async def fetch_and_store(self, ticker, period="1y", interval="1d", include_info=False, raise_on_error=False):
+        raise RuntimeError("Rate limit exceeded")
+
+
+@pytest.mark.anyio
+async def test_taiwan_history_backfill_marks_rate_limited_fetch_as_failed_even_with_existing_rows():
+    db = FakeDb()
+    db.latest_rows[("2330.TW", "1d")] = {"date": "2026-05-06"}
+    service = TaiwanHistoryBackfillService(
+        db=db,
+        fetcher=FailingFetcher(),
+        market_snapshot_provider=FakeSnapshotProvider(),
+        app_tz=timezone.utc,
+        intervals=("1d",),
+        request_delay_seconds=0,
+        ticker_delay_seconds=0,
+    )
+
+    result = await service.sync_ticker_interval(
+        "2330.TW",
+        interval="1d",
+        reason="test-rate-limit",
+        force_full=True,
+    )
+
+    assert result["status"] == "failed"
+    assert "Rate limit exceeded" in result["message"]
+    assert db.statuses[("2330.TW", "1d")]["status"] == "failed"
