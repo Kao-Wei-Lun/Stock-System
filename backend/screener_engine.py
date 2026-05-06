@@ -43,19 +43,53 @@ def _mean_close(rows: List[Dict[str, Any]], count: int) -> Optional[float]:
     return mean(valid)
 
 
+def _pct_change_over(rows: List[Dict[str, Any]], lookback: int) -> Optional[float]:
+    if len(rows) <= lookback:
+        return None
+    old_close = _safe_float(rows[-lookback - 1].get("close"))
+    latest_close = _safe_float(rows[-1].get("close"))
+    if old_close <= 0:
+        return None
+    return (latest_close - old_close) / old_close * 100.0
+
+
+def _range_pct(rows: List[Dict[str, Any]], lookback: int) -> Optional[float]:
+    if len(rows) < lookback:
+        return None
+    window = rows[-lookback:]
+    highs = [_safe_float(item.get("high")) for item in window]
+    lows = [_safe_float(item.get("low")) for item in window]
+    high = max(highs) if highs else 0
+    low = min(value for value in lows if value > 0) if any(value > 0 for value in lows) else 0
+    if low <= 0:
+        return None
+    return (high - low) / low * 100.0
+
+
+def _distance_pct(value: float, anchor: Optional[float]) -> Optional[float]:
+    if anchor in (None, 0):
+        return None
+    return (value - float(anchor)) / float(anchor) * 100.0
+
+
 def normalize_screener_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     source = dict(filters or {})
     market = str(source.get("market") or "ALL").upper()
     if market not in {"ALL", "US", "TW", "HK", "INDEX"}:
         market = "ALL"
+    setup_type = str(source.get("setup_type") or "any").lower()
+    if setup_type not in {"any", "accumulation"}:
+        setup_type = "any"
     return {
         "search": str(source.get("search") or "").strip(),
         "market": market,
         "sector": str(source.get("sector") or "").strip(),
+        "setup_type": setup_type,
         "min_price": _safe_float(source.get("min_price"), 0.0) or None,
         "max_price": _safe_float(source.get("max_price"), 0.0) or None,
         "min_volume_ratio": _safe_float(source.get("min_volume_ratio"), 0.0) or None,
         "min_setup_quality": _safe_int(source.get("min_setup_quality"), 0) or None,
+        "min_accumulation_score": _safe_int(source.get("min_accumulation_score"), 0) or None,
         "decision_verdict": str(source.get("decision_verdict") or "any").lower(),
         "max_pe_ratio": _safe_float(source.get("max_pe_ratio"), 0.0) or None,
         "min_dividend_yield": _safe_float(source.get("min_dividend_yield"), 0.0) or None,
@@ -88,6 +122,16 @@ def build_screener_presets() -> List[Dict[str, Any]]:
             "filters": {
                 "upcoming_event_days": 14,
                 "sort_by": "event_date",
+                "limit": 30,
+            },
+        },
+        {
+            "name": "潛伏起漲",
+            "description": "盤整收斂且法人籌碼開始累積",
+            "filters": {
+                "market": "TW",
+                "setup_type": "accumulation",
+                "sort_by": "accumulation_score",
                 "limit": 30,
             },
         },
@@ -153,6 +197,421 @@ def _setup_quality(
     quality += 1 if distance_to_high_pct is not None and distance_to_high_pct <= 5 else 0
     quality += 1 if change_pct > 0 else 0
     return quality
+
+
+def _chip_sum(points: List[Dict[str, Any]], key: str, window: int) -> int:
+    return sum(_safe_int(item.get(key)) for item in points[-window:])
+
+
+def _chip_streak(points: List[Dict[str, Any]], key: str) -> Dict[str, Any]:
+    direction = "neutral"
+    days = 0
+    for item in reversed(points):
+        value = _safe_int(item.get(key))
+        next_direction = "buy" if value > 0 else "sell" if value < 0 else "neutral"
+        if next_direction == "neutral":
+            if days == 0:
+                break
+            continue
+        if days == 0:
+            direction = next_direction
+            days = 1
+            continue
+        if next_direction != direction:
+            break
+        days += 1
+    return {"direction": direction, "days": days}
+
+
+def _normalize_chip_history(points: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    if not points:
+        return []
+    return sorted(
+        [dict(item) for item in points if isinstance(item, dict)],
+        key=lambda item: (str(item.get("snapshot_date") or ""), _safe_int(item.get("id"))),
+    )
+
+
+def _build_accumulation_profile(
+    *,
+    ticker: str,
+    market: str,
+    latest_close: float,
+    recent_rows: List[Dict[str, Any]],
+    ma20: Optional[float],
+    ma50: Optional[float],
+    chip_history: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    range20 = _range_pct(recent_rows, 20)
+    range60 = _range_pct(recent_rows, 60)
+    ret20 = _pct_change_over(recent_rows, 20)
+    ret60 = _pct_change_over(recent_rows, 60)
+    high20 = max((_safe_float(item.get("high")) for item in recent_rows[-20:]), default=0.0)
+    distance_to_20d_high = ((high20 - latest_close) / high20 * 100.0) if high20 > 0 else None
+    ma20_distance = _distance_pct(latest_close, ma20)
+    ma50_distance = _distance_pct(latest_close, ma50)
+
+    points = _normalize_chip_history(chip_history)
+    latest_chip = points[-1] if points else {}
+    institutional_5d = _chip_sum(points, "institutional_net_buy_sell", 5)
+    institutional_10d = _chip_sum(points, "institutional_net_buy_sell", 10)
+    foreign_5d = _chip_sum(points, "foreign_net_buy_sell", 5)
+    foreign_10d = _chip_sum(points, "foreign_net_buy_sell", 10)
+    trust_10d = _chip_sum(points, "investment_trust_net_buy_sell", 10)
+    institutional_streak = _chip_streak(points, "institutional_net_buy_sell")
+    foreign_streak = _chip_streak(points, "foreign_net_buy_sell")
+
+    score = 0
+    reasons: List[str] = []
+    flags: List[str] = []
+
+    if range20 is not None:
+        if range20 <= 10:
+            score += 20
+            reasons.append("20日區間高度收斂")
+        elif range20 <= 15:
+            score += 15
+            reasons.append("20日盤整區間偏窄")
+        elif range20 <= 22:
+            score += 8
+            reasons.append("仍在可接受盤整區間")
+        else:
+            flags.append("20日波動仍大")
+
+    if ma20_distance is not None:
+        if -3 <= ma20_distance <= 8:
+            score += 15
+            reasons.append("價格貼近 MA20")
+        elif ma20_distance > 18:
+            score -= 8
+            flags.append("短線離 MA20 過遠")
+    if ma50_distance is not None:
+        if ma50 is not None and latest_close >= ma50 * 0.98:
+            score += 10
+            reasons.append("守在 MA50 附近或之上")
+        else:
+            flags.append("尚未站回 MA50")
+    if ma20 is not None and ma50 is not None:
+        if ma20 >= ma50:
+            score += 10
+            reasons.append("MA20 已不弱於 MA50")
+        elif ma20 >= ma50 * 0.98:
+            score += 6
+            reasons.append("MA20 接近翻揚至 MA50")
+
+    if ret20 is not None:
+        if -8 <= ret20 <= 18:
+            score += 15
+            reasons.append("20日漲幅未過熱")
+        elif 18 < ret20 <= 30:
+            score += 5
+            flags.append("已有一段漲幅，追價需保守")
+        elif ret20 > 30:
+            score -= 15
+            flags.append("20日漲幅過熱，不屬於潛伏型")
+    if distance_to_20d_high is not None:
+        if 0 <= distance_to_20d_high <= 5:
+            score += 12
+            reasons.append("接近20日壓力區，具突破觀察價值")
+        elif distance_to_20d_high <= 10:
+            score += 8
+            reasons.append("距20日高點不遠")
+
+    chip_score = 0
+    if institutional_5d > 0:
+        chip_score += 10
+        reasons.append("法人5日累積買超")
+    if institutional_10d > 0:
+        chip_score += 10
+        reasons.append("法人10日累積買超")
+    if foreign_5d > 0:
+        chip_score += 8
+        reasons.append("外資5日累積買超")
+    if foreign_10d > 0:
+        chip_score += 6
+    if trust_10d > 0:
+        chip_score += 5
+    if institutional_streak["direction"] == "buy" and institutional_streak["days"] >= 3:
+        chip_score += 8
+        reasons.append(f"法人連{institutional_streak['days']}買")
+    if foreign_streak["direction"] == "buy" and foreign_streak["days"] >= 3:
+        chip_score += 8
+        reasons.append(f"外資連{foreign_streak['days']}買")
+    if latest_chip and _safe_int(latest_chip.get("institutional_net_buy_sell")) < 0:
+        chip_score -= 8
+        flags.append("最新一日法人轉賣")
+    score += min(35, chip_score)
+
+    if market == "TW" and points and chip_score <= 0:
+        flags.append("尚未看到法人累積買超")
+    if market == "TW" and not points:
+        flags.append("缺少台股籌碼歷史")
+
+    score = max(0, min(100, int(round(score))))
+    chip_confirmed = market != "TW" or (bool(points) and chip_score > 0)
+    not_overextended = ret20 is None or ret20 <= 30
+    compression_ok = range20 is not None and range20 <= 22
+    ma_support_ok = (
+        (ma20 is not None and latest_close >= ma20 * 0.97)
+        or (ma50 is not None and latest_close >= ma50 * 0.98)
+    )
+    qualified = score >= 58 and compression_ok and ma_support_ok and not_overextended and chip_confirmed
+    stage = "breakout_watch" if distance_to_20d_high is not None and distance_to_20d_high <= 5 else "base_building"
+    if ret20 is not None and ret20 > 30:
+        stage = "overextended"
+    elif not chip_confirmed:
+        stage = "waiting_for_chip_confirmation"
+    elif not compression_ok:
+        stage = "wide_base"
+
+    return {
+        "ticker": ticker,
+        "score": score,
+        "qualified": qualified,
+        "stage": stage,
+        "range20_pct": round(range20, 2) if range20 is not None else None,
+        "range60_pct": round(range60, 2) if range60 is not None else None,
+        "ret20_pct": round(ret20, 2) if ret20 is not None else None,
+        "ret60_pct": round(ret60, 2) if ret60 is not None else None,
+        "distance_to_20d_high_pct": round(distance_to_20d_high, 2) if distance_to_20d_high is not None else None,
+        "ma20_distance_pct": round(ma20_distance, 2) if ma20_distance is not None else None,
+        "ma50_distance_pct": round(ma50_distance, 2) if ma50_distance is not None else None,
+        "chip": {
+            "latest_date": latest_chip.get("snapshot_date"),
+            "institutional_5d_sum": institutional_5d,
+            "institutional_10d_sum": institutional_10d,
+            "foreign_5d_sum": foreign_5d,
+            "foreign_10d_sum": foreign_10d,
+            "investment_trust_10d_sum": trust_10d,
+            "institutional_streak": institutional_streak,
+            "foreign_streak": foreign_streak,
+            "score": chip_score,
+        },
+        "reasons": reasons[:8],
+        "flags": flags[:6],
+    }
+
+
+def _normalize_candle(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    close = _safe_float(row.get("close"))
+    if close <= 0:
+        return None
+    open_price = _safe_float(row.get("open"), close) or close
+    high = _safe_float(row.get("high"), max(open_price, close)) or max(open_price, close)
+    low = _safe_float(row.get("low"), min(open_price, close)) or min(open_price, close)
+    high = max(high, open_price, close)
+    low = min(low, open_price, close)
+    price_range = max(0.0, high - low)
+    body = abs(close - open_price)
+    upper_shadow = high - max(open_price, close)
+    lower_shadow = min(open_price, close) - low
+    body_pct = body / open_price * 100.0 if open_price > 0 else 0.0
+    close_position = (close - low) / price_range if price_range > 0 else 0.5
+    return {
+        "date": row.get("date") or row.get("timestamp"),
+        "open": open_price,
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": _safe_int(row.get("volume")),
+        "range": price_range,
+        "body": body,
+        "body_pct": body_pct,
+        "body_to_range": body / price_range if price_range > 0 else 0.0,
+        "upper_shadow": upper_shadow,
+        "lower_shadow": lower_shadow,
+        "upper_shadow_to_range": upper_shadow / price_range if price_range > 0 else 0.0,
+        "lower_shadow_to_range": lower_shadow / price_range if price_range > 0 else 0.0,
+        "close_position": close_position,
+        "direction": "bullish" if close > open_price else "bearish" if close < open_price else "neutral",
+    }
+
+
+def _build_candlestick_profile(
+    recent_rows: List[Dict[str, Any]],
+    *,
+    ma20: Optional[float],
+    volume_ratio: float,
+) -> Dict[str, Any]:
+    candles = [
+        candle
+        for candle in (_normalize_candle(item) for item in recent_rows[-25:])
+        if candle is not None
+    ]
+    if len(candles) < 2:
+        return {
+            "score": 0,
+            "bias": "insufficient_data",
+            "summary": "K線資料不足，暫不判讀型態",
+            "patterns": [],
+            "latest": None,
+            "flags": ["K線資料不足"],
+        }
+
+    last = candles[-1]
+    prev = candles[-2]
+    third = candles[-3] if len(candles) >= 3 else None
+    score = 0
+    patterns: List[Dict[str, Any]] = []
+    flags: List[str] = []
+
+    avg_volume = mean([item["volume"] for item in candles[-20:] if item["volume"] > 0]) if any(
+        item["volume"] > 0 for item in candles[-20:]
+    ) else 0
+    volume_expanded = bool(avg_volume and last["volume"] >= avg_volume * 1.25) or volume_ratio >= 1.25
+    near_ma20 = bool(
+        ma20
+        and (
+            abs(_distance_pct(last["close"], ma20) or 999.0) <= 3
+            or last["low"] <= ma20 <= last["high"]
+        )
+    )
+    previous_high = max((item["high"] for item in candles[-11:-1]), default=0.0)
+    recent_lows = [item["low"] for item in candles[-3:]]
+    recent_closes = [item["close"] for item in candles[-3:]]
+
+    def add_pattern(key: str, label: str, tone: str, impact: int, summary: str) -> None:
+        nonlocal score
+        score += impact
+        patterns.append(
+            {
+                "key": key,
+                "label": label,
+                "tone": tone,
+                "score": impact,
+                "summary": summary,
+            }
+        )
+
+    bullish_engulfing = (
+        last["direction"] == "bullish"
+        and prev["direction"] == "bearish"
+        and last["open"] <= prev["close"]
+        and last["close"] >= prev["open"]
+        and last["body"] >= prev["body"] * 0.85
+    )
+    bearish_engulfing = (
+        last["direction"] == "bearish"
+        and prev["direction"] == "bullish"
+        and last["open"] >= prev["close"]
+        and last["close"] <= prev["open"]
+        and last["body"] >= prev["body"] * 0.85
+    )
+    if bullish_engulfing:
+        add_pattern("bullish_engulfing", "多方吞噬", "positive", 28, "紅K吞噬前一根黑K，短線買盤轉強")
+    if bearish_engulfing:
+        add_pattern("bearish_engulfing", "空方吞噬", "risk", -28, "黑K吞噬前一根紅K，短線賣壓轉強")
+
+    if (
+        third
+        and third["direction"] == "bearish"
+        and prev["body_to_range"] <= 0.35
+        and last["direction"] == "bullish"
+        and last["close"] >= (third["open"] + third["close"]) / 2
+    ):
+        add_pattern("morning_star", "晨星反轉", "positive", 24, "三日型態出現止跌後轉強訊號")
+
+    hammer = (
+        last["range"] > 0
+        and last["lower_shadow"] >= max(last["body"] * 2, last["range"] * 0.35)
+        and last["upper_shadow_to_range"] <= 0.25
+        and last["close_position"] >= 0.55
+    )
+    if hammer:
+        impact = 22 if near_ma20 else 16
+        add_pattern(
+            "hammer",
+            "錘子線",
+            "positive",
+            impact,
+            "下影線明顯，低檔或均線附近有承接" if near_ma20 else "下影線明顯，盤中賣壓被承接",
+        )
+
+    shooting_star = (
+        last["range"] > 0
+        and last["upper_shadow"] >= max(last["body"] * 2, last["range"] * 0.35)
+        and last["lower_shadow_to_range"] <= 0.25
+        and last["close_position"] <= 0.45
+    )
+    if shooting_star:
+        add_pattern("shooting_star", "倒錘上影", "risk", -18, "上影線明顯，追價買盤受壓")
+
+    if last["body_to_range"] <= 0.15:
+        add_pattern("doji", "十字線", "neutral", 0, "多空拉鋸，需等待隔日方向確認")
+
+    if last["direction"] == "bullish" and last["body_to_range"] >= 0.45 and last["close_position"] >= 0.78:
+        impact = 20 if volume_expanded else 12
+        add_pattern(
+            "strong_bull_close",
+            "強勢紅K收高",
+            "positive",
+            impact,
+            "放量紅K收在相對高位" if volume_expanded else "紅K收在相對高位",
+        )
+    elif last["direction"] == "bearish" and last["body_to_range"] >= 0.45 and last["close_position"] <= 0.25:
+        impact = -22 if volume_expanded else -14
+        add_pattern(
+            "weak_bear_close",
+            "弱勢黑K收低",
+            "risk",
+            impact,
+            "放量黑K收在相對低位" if volume_expanded else "黑K收在相對低位",
+        )
+
+    if previous_high > 0 and last["close"] >= previous_high * 0.995:
+        add_pattern("breakout_attempt", "突破嘗試", "positive", 18, "收盤接近或突破近10日高點")
+
+    if last["high"] <= prev["high"] and last["low"] >= prev["low"]:
+        add_pattern("inside_bar", "母子收斂", "neutral", 6, "今日K線收在前一日區間內，等待區間表態")
+
+    if len(recent_lows) == 3 and recent_lows[0] < recent_lows[1] < recent_lows[2]:
+        add_pattern("higher_lows", "低點墊高", "positive", 8, "近三日低點逐步墊高")
+    if len(recent_closes) == 3 and recent_closes[0] < recent_closes[1] < recent_closes[2]:
+        add_pattern("higher_closes", "收盤轉強", "positive", 8, "近三日收盤價逐步走高")
+
+    if last["upper_shadow"] >= max(last["body"] * 1.6, last["range"] * 0.3) and last["close_position"] < 0.65:
+        flags.append("上影線偏長，突破前需確認賣壓消化")
+    if volume_expanded and last["direction"] == "bearish":
+        flags.append("放量黑K，隔日不宜追高")
+
+    score = max(-100, min(100, int(round(score))))
+    if score >= 35:
+        bias = "bullish"
+    elif score >= 15:
+        bias = "constructive"
+    elif score <= -25:
+        bias = "bearish"
+    else:
+        bias = "neutral"
+    if not patterns:
+        patterns.append(
+            {
+                "key": "no_clear_pattern",
+                "label": "未見明確型態",
+                "tone": "neutral",
+                "score": 0,
+                "summary": "近幾根K線尚未形成明確多空訊號",
+            }
+        )
+    summary = " / ".join(item["label"] for item in patterns[:4])
+    return {
+        "score": score,
+        "bias": bias,
+        "summary": summary,
+        "patterns": patterns[:8],
+        "latest": {
+            "date": last.get("date"),
+            "open": round(last["open"], 4),
+            "high": round(last["high"], 4),
+            "low": round(last["low"], 4),
+            "close": round(last["close"], 4),
+            "body_pct": round(last["body_pct"], 2),
+            "close_position": round(last["close_position"], 2),
+            "volume_expanded": volume_expanded,
+            "near_ma20": near_ma20,
+        },
+        "flags": flags[:4],
+    }
 
 
 def _macro_adjustment(
@@ -276,6 +735,8 @@ def _build_decision_card(
     institutional_signal: Optional[Dict[str, Any]],
     earliest_event: Optional[Dict[str, Any]],
     event_window_days: Optional[int],
+    accumulation_profile: Optional[Dict[str, Any]] = None,
+    candlestick_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     trend_score = 0
     trend_fragments: List[str] = []
@@ -378,6 +839,48 @@ def _build_decision_card(
     ]
 
     verdict_key, verdict, summary = _decision_verdict(score, posture)
+    accumulation_section = None
+    if accumulation_profile:
+        accumulation_bits = []
+        if accumulation_profile.get("stage"):
+            accumulation_bits.append(str(accumulation_profile["stage"]))
+        if accumulation_profile.get("range20_pct") is not None:
+            accumulation_bits.append(f"20日區間 {_format_pct(accumulation_profile.get('range20_pct'))}")
+        if accumulation_profile.get("ret20_pct") is not None:
+            accumulation_bits.append(f"20日漲幅 {_format_pct(accumulation_profile.get('ret20_pct'))}")
+        reasons = accumulation_profile.get("reasons") or []
+        flags = accumulation_profile.get("flags") or []
+        accumulation_bits.extend(str(item) for item in reasons[:3])
+        accumulation_bits.extend(str(item) for item in flags[:2])
+        accumulation_section = {
+            "key": "accumulation",
+            "label": "潛伏起漲",
+            "score": accumulation_profile.get("score") or 0,
+            "tone": "positive" if accumulation_profile.get("qualified") else "neutral",
+            "summary": " / ".join(accumulation_bits) or "尚未形成潛伏起漲型態",
+        }
+    candlestick_section = None
+    if candlestick_profile:
+        candlestick_bits = []
+        bias = candlestick_profile.get("bias")
+        if bias:
+            candlestick_bits.append(str(bias))
+        patterns = candlestick_profile.get("patterns") or []
+        candlestick_bits.extend(
+            f"{item.get('label')}: {item.get('summary')}"
+            for item in patterns[:3]
+            if isinstance(item, dict)
+        )
+        flags = candlestick_profile.get("flags") or []
+        candlestick_bits.extend(str(item) for item in flags[:2])
+        candlestick_score = _safe_int(candlestick_profile.get("score"))
+        candlestick_section = {
+            "key": "candlestick",
+            "label": "K線型態",
+            "score": candlestick_score,
+            "tone": "positive" if candlestick_score > 0 else "risk" if candlestick_score < 0 else "neutral",
+            "summary": " / ".join(candlestick_bits) or "K線尚未形成明確型態",
+        }
     sections = [
         {
             "key": "trend",
@@ -400,6 +903,7 @@ def _build_decision_card(
             "tone": _score_tone(volume_score),
             "summary": " / ".join(volume_fragments),
         },
+        *([candlestick_section] if candlestick_section else []),
         {
             "key": "confirmation",
             "label": "籌碼確認",
@@ -421,6 +925,7 @@ def _build_decision_card(
             "tone": fundamental_tone,
             "summary": " / ".join(fundamental_fragments),
         },
+        *([accumulation_section] if accumulation_section else []),
         {
             "key": "macro",
             "label": "市場風險",
@@ -464,6 +969,11 @@ class ScreenerEngine:
         results: List[Dict[str, Any]] = []
         today = date.today()
         date_to = (today + timedelta(days=normalized_filters["upcoming_event_days"] or 0)).isoformat()
+        needs_accumulation = (
+            normalized_filters["setup_type"] == "accumulation"
+            or normalized_filters["sort_by"] == "accumulation_score"
+            or normalized_filters["min_accumulation_score"] is not None
+        )
 
         for row in universe:
             ticker = normalize_ticker(row.get("ticker"))
@@ -520,6 +1030,23 @@ class ScreenerEngine:
                 if normalized_filters["near_52w_high_pct"] is not None and distance_to_high_pct > normalized_filters["near_52w_high_pct"]:
                     continue
 
+            accumulation_candidate = True
+            if needs_accumulation:
+                pre_range20 = _range_pct(recent_rows, 20)
+                pre_ret20 = _pct_change_over(recent_rows, 20)
+                pre_ma_support = (
+                    (ma20 is not None and latest_close >= ma20 * 0.97)
+                    or (ma50 is not None and latest_close >= ma50 * 0.98)
+                )
+                accumulation_candidate = (
+                    pre_range20 is not None
+                    and pre_range20 <= 22
+                    and (pre_ret20 is None or pre_ret20 <= 30)
+                    and pre_ma_support
+                )
+                if normalized_filters["setup_type"] == "accumulation" and not accumulation_candidate:
+                    continue
+
             events = []
             if normalized_filters["upcoming_event_days"] is not None:
                 events = await db.list_market_events(
@@ -537,9 +1064,40 @@ class ScreenerEngine:
             chip_bias = chip_summary.get("bias") if isinstance(chip_summary, dict) else None
             if normalized_filters["chip_bias"] in {"bullish", "bearish"} and chip_bias != normalized_filters["chip_bias"]:
                 continue
+            chip_history = []
+            if needs_accumulation and accumulation_candidate and market == "TW":
+                try:
+                    chip_history = await db.list_taiwan_chip_snapshots(ticker, limit=20)
+                except Exception:
+                    chip_history = []
 
             institutional_signal = await _institutional_signal_for_ticker(ticker)
             change_pct = _safe_float(row.get("quote_change_pct"))
+            candlestick_profile = _build_candlestick_profile(
+                recent_rows,
+                ma20=ma20,
+                volume_ratio=volume_ratio,
+            )
+            accumulation_profile = (
+                _build_accumulation_profile(
+                    ticker=ticker,
+                    market=market,
+                    latest_close=latest_close,
+                    recent_rows=recent_rows,
+                    ma20=ma20,
+                    ma50=ma50,
+                    chip_history=chip_history,
+                )
+                if needs_accumulation
+                else None
+            )
+            if (
+                normalized_filters["min_accumulation_score"] is not None
+                and (accumulation_profile or {}).get("score", 0) < normalized_filters["min_accumulation_score"]
+            ):
+                continue
+            if normalized_filters["setup_type"] == "accumulation" and not (accumulation_profile or {}).get("qualified"):
+                continue
             base_score = 0
             base_score += 25 if volume_ratio >= 1.5 else 10 if volume_ratio >= 1.0 else 0
             base_score += 20 if ma20 is not None and latest_close >= ma20 else 0
@@ -586,6 +1144,8 @@ class ScreenerEngine:
                 institutional_signal=institutional_signal,
                 earliest_event=earliest_event,
                 event_window_days=normalized_filters["upcoming_event_days"],
+                accumulation_profile=accumulation_profile,
+                candlestick_profile=candlestick_profile,
             )
             decision_card["setup_quality"] = setup_quality
             if normalized_filters["decision_verdict"] in {"priority", "watch", "wait"} and (
@@ -615,6 +1175,10 @@ class ScreenerEngine:
                     "macro_adjustment": macro_adjustment,
                     "macro_adjustment_reason": macro_adjustment_reason,
                     "setup_quality": setup_quality,
+                    "candlestick_score": (candlestick_profile or {}).get("score"),
+                    "candlestick_profile": candlestick_profile,
+                    "accumulation_score": (accumulation_profile or {}).get("score"),
+                    "accumulation_profile": accumulation_profile,
                     "score": score,
                     "decision_card": decision_card,
                     "next_event": earliest_event,
@@ -633,6 +1197,24 @@ class ScreenerEngine:
             results.sort(key=lambda item: (item.get("setup_quality") or 0, item.get("score") or 0), reverse=True)
         elif sort_by == "macro_adjustment":
             results.sort(key=lambda item: (item.get("macro_adjustment") or 0, item.get("score") or 0), reverse=True)
+        elif sort_by == "candlestick_score":
+            results.sort(
+                key=lambda item: (
+                    item.get("candlestick_score") or 0,
+                    item.get("score") or 0,
+                    item.get("change_pct") or 0,
+                ),
+                reverse=True,
+            )
+        elif sort_by == "accumulation_score":
+            results.sort(
+                key=lambda item: (
+                    item.get("accumulation_score") or 0,
+                    item.get("score") or 0,
+                    item.get("change_pct") or 0,
+                ),
+                reverse=True,
+            )
         elif sort_by == "event_date":
             results.sort(key=lambda item: (item.get("next_event") or {}).get("event_date") or "9999-12-31")
         else:

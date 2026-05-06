@@ -12,10 +12,12 @@ export function createDashboardScreener({
     search: "",
     market: "ALL",
     sector: "",
+    setup_type: "any",
     min_price: "",
     max_price: "",
     min_volume_ratio: "",
     min_setup_quality: "",
+    min_accumulation_score: "",
     decision_verdict: "any",
     max_pe_ratio: "",
     min_dividend_yield: "",
@@ -32,7 +34,7 @@ export function createDashboardScreener({
     const payload = {};
     Object.entries(screenerFilters).forEach(([key, value]) => {
       if (value === "" || value == null) return;
-      if (["min_price", "max_price", "min_volume_ratio", "min_setup_quality", "max_pe_ratio", "min_dividend_yield", "near_52w_high_pct", "upcoming_event_days", "limit"].includes(key)) {
+      if (["min_price", "max_price", "min_volume_ratio", "min_setup_quality", "min_accumulation_score", "max_pe_ratio", "min_dividend_yield", "near_52w_high_pct", "upcoming_event_days", "limit"].includes(key)) {
         payload[key] = Number(value);
         return;
       }

@@ -31,6 +31,13 @@
           <input :value="filters.sector" @input="$emit('update-filter', { key: 'sector', value: $event.target.value })" placeholder="Semiconductor" />
         </label>
         <label class="filter-row">
+          <span>型態</span>
+          <select :value="filters.setup_type" @change="$emit('update-filter', { key: 'setup_type', value: $event.target.value })">
+            <option value="any">不限</option>
+            <option value="accumulation">潛伏起漲</option>
+          </select>
+        </label>
+        <label class="filter-row">
           <span>最低價</span>
           <input type="number" :value="filters.min_price" @input="$emit('update-filter', { key: 'min_price', value: $event.target.value })" />
         </label>
@@ -41,6 +48,10 @@
         <label class="filter-row">
           <span>Setup 品質</span>
           <input type="number" step="1" min="1" max="5" :value="filters.min_setup_quality" @input="$emit('update-filter', { key: 'min_setup_quality', value: $event.target.value })" />
+        </label>
+        <label class="filter-row">
+          <span>起漲分數</span>
+          <input type="number" step="1" min="1" max="100" :value="filters.min_accumulation_score" @input="$emit('update-filter', { key: 'min_accumulation_score', value: $event.target.value })" />
         </label>
         <label class="filter-row">
           <span>Verdict</span>
@@ -87,6 +98,8 @@
           <select :value="filters.sort_by" @change="$emit('update-filter', { key: 'sort_by', value: $event.target.value })">
             <option value="score">綜合分數</option>
             <option value="setup_quality">Setup 品質</option>
+            <option value="candlestick_score">K線型態</option>
+            <option value="accumulation_score">潛伏起漲</option>
             <option value="macro_adjustment">市場調整</option>
             <option value="change_pct">漲跌幅</option>
             <option value="volume_ratio">量比</option>
