@@ -642,6 +642,50 @@ CREATE_TABLE_STATEMENTS = {
             KEY `idx_fubon_market_snapshots_date` (`snapshot_date`, `market`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    "tw_equity_universe": """
+        CREATE TABLE `tw_equity_universe` (
+            `ticker` VARCHAR(32) NOT NULL,
+            `symbol` VARCHAR(32) NOT NULL,
+            `market` VARCHAR(32) NOT NULL,
+            `name` VARCHAR(255) NULL,
+            `sector` VARCHAR(255) NULL,
+            `security_type` VARCHAR(64) NULL,
+            `is_etf` TINYINT NOT NULL DEFAULT 0,
+            `is_active` TINYINT NOT NULL DEFAULT 1,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'fubon_neo',
+            `latest_snapshot_date` DATE NULL,
+            `last_seen_at` DATETIME NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`ticker`),
+            KEY `idx_tw_equity_universe_market_active` (`market`, `is_active`, `ticker`),
+            KEY `idx_tw_equity_universe_active_updated` (`is_active`, `updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    "tw_history_sync_status": """
+        CREATE TABLE `tw_history_sync_status` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ticker` VARCHAR(32) NOT NULL,
+            `interval` VARCHAR(16) NOT NULL DEFAULT '1d',
+            `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+            `requested_start_date` DATE NULL,
+            `requested_end_date` DATE NULL,
+            `last_success_date` DATE NULL,
+            `last_attempt_at` DATETIME NULL,
+            `last_success_at` DATETIME NULL,
+            `rows_synced_total` BIGINT NOT NULL DEFAULT 0,
+            `last_rows_synced` BIGINT NOT NULL DEFAULT 0,
+            `attempts` INT NOT NULL DEFAULT 0,
+            `last_error` TEXT NULL,
+            `source` VARCHAR(64) NOT NULL DEFAULT 'fubon_neo',
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_tw_history_sync_status_ticker_interval` (`ticker`, `interval`),
+            KEY `idx_tw_history_sync_status_status` (`status`, `updated_at`),
+            KEY `idx_tw_history_sync_status_success_date` (`interval`, `last_success_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
     "screener_presets": """
         CREATE TABLE `screener_presets` (
             `id` BIGINT NOT NULL AUTO_INCREMENT,

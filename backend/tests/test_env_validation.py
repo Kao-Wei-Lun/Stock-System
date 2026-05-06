@@ -20,6 +20,11 @@ VALID_ENV = {
     "STARTUP_DOWNLOAD_ENABLED": "false",
     "INSTITUTIONAL_AUTO_SYNC_ENABLED": "true",
     "LATEST_DATA_SYNC_ON_STARTUP": "true",
+    "TW_FULL_HISTORY_SYNC_ENABLED": "false",
+    "TW_FULL_HISTORY_SYNC_START": "15:30",
+    "TW_FULL_HISTORY_SYNC_STOP": "08:00",
+    "TW_FULL_HISTORY_DELAY_SECONDS": "0.8",
+    "TW_FULL_HISTORY_INCLUDE_ETF": "true",
     "ALERT_EVALUATOR_ENABLED": "true",
     "ALERT_POLL_INTERVAL_SECONDS": "30",
     "MARKET_INTELLIGENCE_SYNC_ENABLED": "true",
@@ -45,6 +50,8 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
     assert validated["APP_PORT"] == 8001
     assert validated["FRONTEND_DEV_URL"] == "http://localhost:5173"
     assert validated["DAILY_LATEST_SYNC_TIME"] == "18:10"
+    assert validated["TW_FULL_HISTORY_SYNC_START"] == "15:30"
+    assert validated["TW_FULL_HISTORY_DELAY_SECONDS"] == 0.8
     assert validated["APP_ENCRYPT_KEY"] == "unit-test-encrypt-key"
 
 

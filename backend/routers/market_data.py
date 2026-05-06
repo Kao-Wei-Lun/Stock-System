@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 # These will be injected from main.py on startup
 _fetch_and_store_quote_snapshot = None
 _sync_tracked_market_data = None
+_sync_taiwan_full_history = None
 _needs_history_backfill = None
 _has_suspicious_daily_rows = None
 FULL_HISTORY_PERIODS = {"10y", "max"}
@@ -51,13 +52,15 @@ def configure(
     full_history_periods,
     latest_data_sync_period,
     latest_data_sync_interval,
+    sync_taiwan_full_history=None,
 ):
     """Inject helpers from main.py to avoid circular imports."""
-    global _fetch_and_store_quote_snapshot, _sync_tracked_market_data
+    global _fetch_and_store_quote_snapshot, _sync_tracked_market_data, _sync_taiwan_full_history
     global _needs_history_backfill, _has_suspicious_daily_rows
     global FULL_HISTORY_PERIODS, LATEST_DATA_SYNC_PERIOD, LATEST_DATA_SYNC_INTERVAL
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _sync_tracked_market_data = sync_tracked_market_data
+    _sync_taiwan_full_history = sync_taiwan_full_history
     _needs_history_backfill = needs_history_backfill
     _has_suspicious_daily_rows = has_suspicious_daily_rows
     FULL_HISTORY_PERIODS = full_history_periods
@@ -305,6 +308,102 @@ async def sync_all_tracked(
     interval: str = Query(LATEST_DATA_SYNC_INTERVAL, description="1d 1wk 1mo"),
 ):
     return await _sync_tracked_market_data(period=period, interval=interval, reason="manual-all")
+
+
+@router.get("/tw/universe")
+async def list_taiwan_universe(
+    active_only: bool = Query(True),
+    include_etf: bool = Query(True),
+    limit: int = Query(200, ge=1, le=5000),
+):
+    return {
+        "source": "fubon_neo",
+        "items": await db.list_tw_equity_universe(
+            active_only=active_only,
+            include_etf=include_etf,
+            limit=limit,
+        ),
+    }
+
+
+@router.get("/tw/universe/coverage")
+async def get_taiwan_universe_coverage(
+    interval: str = Query("1d", description="1d 1wk 1mo"),
+):
+    normalized_interval = interval.strip().lower()
+    if normalized_interval not in {"1d", "1wk", "1mo"}:
+        raise HTTPException(400, "interval must be one of: 1d, 1wk, 1mo")
+    return await db.get_tw_universe_coverage(normalized_interval)
+
+
+@router.get("/tw/history/status")
+async def list_taiwan_history_status(
+    interval: str | None = Query(None, description="1d 1wk 1mo"),
+    status: str | None = Query(None, description="pending running success empty failed"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    normalized_interval = interval.strip().lower() if interval else None
+    if normalized_interval and normalized_interval not in {"1d", "1wk", "1mo"}:
+        raise HTTPException(400, "interval must be one of: 1d, 1wk, 1mo")
+    normalized_status = status.strip().lower() if status else None
+    if normalized_status and normalized_status not in {"pending", "running", "success", "empty", "failed"}:
+        raise HTTPException(400, "status must be one of: pending, running, success, empty, failed")
+    return {
+        "source": "fubon_neo",
+        "items": await db.list_tw_history_sync_status(
+            interval=normalized_interval,
+            status=normalized_status,
+            limit=limit,
+        ),
+    }
+
+
+async def _run_taiwan_history_sync(*, max_tickers: int | None, force_universe: bool, force_full: bool):
+    if not callable(_sync_taiwan_full_history):
+        raise HTTPException(503, "Taiwan full history sync service is not configured")
+    return await _sync_taiwan_full_history(
+        reason="manual-tw-full-history",
+        force_universe=force_universe,
+        force_full=force_full,
+        max_tickers=max_tickers,
+    )
+
+
+@router.post("/tw/history/sync")
+async def sync_taiwan_full_history(
+    max_tickers: int | None = Query(None, ge=1, le=5000),
+    force_universe: bool = Query(True),
+    force_full: bool = Query(False),
+):
+    return await _run_taiwan_history_sync(
+        max_tickers=max_tickers,
+        force_universe=force_universe,
+        force_full=force_full,
+    )
+
+
+@router.post("/tw/history/backfill/full")
+async def backfill_taiwan_full_history(
+    max_tickers: int | None = Query(None, ge=1, le=5000),
+    force_universe: bool = Query(True),
+):
+    return await _run_taiwan_history_sync(
+        max_tickers=max_tickers,
+        force_universe=force_universe,
+        force_full=True,
+    )
+
+
+@router.post("/tw/history/backfill/missing")
+async def backfill_missing_taiwan_history(
+    max_tickers: int | None = Query(None, ge=1, le=5000),
+    force_universe: bool = Query(True),
+):
+    return await _run_taiwan_history_sync(
+        max_tickers=max_tickers,
+        force_universe=force_universe,
+        force_full=False,
+    )
 
 
 @router.get("/search")

@@ -330,12 +330,21 @@ async def test_screener_detects_accumulation_setup(monkeypatch):
     async def list_taiwan_chip_snapshots(ticker, limit=20):
         return _build_chip_snapshots(ticker, positive=ticker == "1234.TW")
 
+    async def get_tw_universe_coverage(interval="1d"):
+        return {
+            "interval": interval,
+            "universe_count": 2,
+            "covered_count": 2,
+            "coverage_pct": 100.0,
+        }
+
     monkeypatch.setattr(screener_engine.db, "list_macro_snapshots", list_macro_snapshots)
     monkeypatch.setattr(screener_engine.db, "list_screenable_tickers", list_screenable_tickers)
     monkeypatch.setattr(screener_engine.db, "get_recent_ohlcv_rows", get_recent_ohlcv_rows)
     monkeypatch.setattr(screener_engine.db, "list_market_events", list_market_events)
     monkeypatch.setattr(screener_engine.db, "get_taiwan_chip_snapshot", get_taiwan_chip_snapshot)
     monkeypatch.setattr(screener_engine.db, "list_taiwan_chip_snapshots", list_taiwan_chip_snapshots)
+    monkeypatch.setattr(screener_engine.db, "get_tw_universe_coverage", get_tw_universe_coverage)
 
     engine = ScreenerEngine()
     payload = await engine.run({"market": "TW", "setup_type": "accumulation", "sort_by": "accumulation_score"})
@@ -345,6 +354,7 @@ async def test_screener_detects_accumulation_setup(monkeypatch):
     assert payload["items"][0]["accumulation_score"] >= 58
     assert payload["items"][0]["accumulation_profile"]["qualified"] is True
     assert payload["items"][0]["candlestick_score"] > 0
+    assert payload["data_coverage"]["tw"]["coverage_pct"] == 100.0
     assert any(
         pattern["key"] == "bullish_engulfing"
         for pattern in payload["items"][0]["candlestick_profile"]["patterns"]

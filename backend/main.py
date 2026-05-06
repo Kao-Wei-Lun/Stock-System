@@ -25,6 +25,7 @@ from background_tasks import BackgroundTaskService
 from database import DEFAULT_OWNER_ID, db, init_db
 from env_validation import (
     read_bool_env,
+    read_float_env,
     read_hhmm_env,
     read_int_env,
     read_text_env,
@@ -56,6 +57,7 @@ from routers import alerts, assets, backtest, intelligence, journal, market_data
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
 from taifex_fetcher import taifex_fetcher
+from taiwan_history_backfill_service import TaiwanHistoryBackfillService, _normalize_intervals
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -78,6 +80,14 @@ TAIWAN_CHIP_AUTO_SYNC_ENABLED = read_bool_env("TAIWAN_CHIP_AUTO_SYNC_ENABLED", T
 LATEST_DATA_SYNC_PERIOD = read_text_env("LATEST_DATA_SYNC_PERIOD", "1y").strip().lower() or "1y"
 LATEST_DATA_SYNC_INTERVAL = read_text_env("LATEST_DATA_SYNC_INTERVAL", "1d").strip().lower() or "1d"
 LATEST_DATA_SYNC_ON_STARTUP = read_bool_env("LATEST_DATA_SYNC_ON_STARTUP", True)
+TW_FULL_HISTORY_SYNC_ENABLED = read_bool_env("TW_FULL_HISTORY_SYNC_ENABLED", False)
+TW_FULL_HISTORY_SYNC_START_RAW = read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "15:30")
+TW_FULL_HISTORY_SYNC_STOP_RAW = read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00")
+TW_FULL_HISTORY_PERIOD = read_text_env("TW_FULL_HISTORY_PERIOD", "max").strip().lower() or "max"
+TW_FULL_HISTORY_INCREMENTAL_PERIOD = read_text_env("TW_FULL_HISTORY_INCREMENTAL_PERIOD", "5d").strip().lower() or "5d"
+TW_FULL_HISTORY_INTERVALS = _normalize_intervals(read_text_env("TW_FULL_HISTORY_INTERVALS", "1d,1wk,1mo"))
+TW_FULL_HISTORY_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0)
+TW_FULL_HISTORY_INCLUDE_ETF = read_bool_env("TW_FULL_HISTORY_INCLUDE_ETF", True)
 ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
 ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
 MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
@@ -149,6 +159,8 @@ def _parse_daily_sync_time(value: str) -> time_of_day:
 
 
 DAILY_LATEST_SYNC_TIME = _parse_daily_sync_time(DAILY_LATEST_SYNC_TIME_RAW)
+TW_FULL_HISTORY_SYNC_START_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_START_RAW)
+TW_FULL_HISTORY_SYNC_STOP_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_STOP_RAW)
 
 
 def _row_date_to_datetime(row_date):
@@ -206,6 +218,18 @@ background_tasks = BackgroundTaskService(
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
     logger=log,
 )
+tw_history_backfill_service = TaiwanHistoryBackfillService(
+    db=db,
+    fetcher=fetcher,
+    market_snapshot_provider=fubon_market_snapshot_provider,
+    app_tz=APP_TZ,
+    history_period=TW_FULL_HISTORY_PERIOD,
+    incremental_period=TW_FULL_HISTORY_INCREMENTAL_PERIOD,
+    intervals=TW_FULL_HISTORY_INTERVALS,
+    request_delay_seconds=TW_FULL_HISTORY_DELAY_SECONDS,
+    include_etf=TW_FULL_HISTORY_INCLUDE_ETF,
+    logger=log,
+)
 
 get_tracked_sync_tickers = background_tasks.get_tracked_sync_tickers
 sync_tracked_market_data = background_tasks.sync_tracked_market_data
@@ -213,6 +237,7 @@ fetch_and_store_quote_snapshot = background_tasks.fetch_and_store_quote_snapshot
 store_realtime_quote = background_tasks.store_realtime_quote
 sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
 fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
+sync_taiwan_full_history = tw_history_backfill_service.sync_history
 fubon_realtime_pool.configure_store_quote(store_realtime_quote)
 futopt_candle_recorder = FutoptCandleRecorder(
     provider=fubon_futopt_provider,
@@ -250,6 +275,9 @@ background_scheduler = BackgroundScheduler(
         futopt_recorder_poll_seconds=FUTOPT_RECORDER_POLL_SECONDS,
         futopt_recorder_backfill_interval_seconds=FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS,
         paper_margin_auto_sync_enabled=PAPER_MARGIN_AUTO_SYNC_ENABLED,
+        tw_full_history_sync_enabled=TW_FULL_HISTORY_SYNC_ENABLED,
+        tw_full_history_sync_start_time=TW_FULL_HISTORY_SYNC_START_TIME,
+        tw_full_history_sync_stop_time=TW_FULL_HISTORY_SYNC_STOP_TIME,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -268,6 +296,7 @@ background_scheduler = BackgroundScheduler(
         archive_fubon_market_snapshot=fubon_market_snapshot_provider.archive_daily_snapshot,
         futopt_candle_recorder=futopt_candle_recorder,
         sync_paper_trading_margins=sync_paper_trading_margins,
+        sync_taiwan_full_history=sync_taiwan_full_history,
     ),
     logger=log,
 )
@@ -380,6 +409,7 @@ market_data.configure(
     full_history_periods=FULL_HISTORY_PERIODS,
     latest_data_sync_period=LATEST_DATA_SYNC_PERIOD,
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
+    sync_taiwan_full_history=sync_taiwan_full_history,
 )
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,

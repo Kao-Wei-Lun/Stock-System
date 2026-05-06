@@ -27,6 +27,9 @@ class SchedulerSettings:
     futopt_recorder_poll_seconds: int = 30
     futopt_recorder_backfill_interval_seconds: int = 300
     paper_margin_auto_sync_enabled: bool = True
+    tw_full_history_sync_enabled: bool = False
+    tw_full_history_sync_start_time: time_of_day = time_of_day(15, 30)
+    tw_full_history_sync_stop_time: time_of_day = time_of_day(8, 0)
 
 
 @dataclass(slots=True)
@@ -47,6 +50,7 @@ class SchedulerDependencies:
     archive_fubon_market_snapshot: Any = None
     futopt_candle_recorder: Any = None
     sync_paper_trading_margins: Any = None
+    sync_taiwan_full_history: Any = None
 
 
 async def startup_download(
@@ -186,6 +190,48 @@ async def daily_latest_sync_loop(
             await sync_tracked_market_data(reason="daily-latest")
         except Exception as exc:
             log.warning("Daily latest market sync failed: %s", exc)
+
+
+def _next_daily_window_start(now: datetime, start_time: time_of_day) -> datetime:
+    candidate = datetime.combine(now.date(), start_time, tzinfo=now.tzinfo)
+    if now >= candidate:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _window_stop_after(start_at: datetime, stop_time: time_of_day) -> datetime:
+    stop_at = datetime.combine(start_at.date(), stop_time, tzinfo=start_at.tzinfo)
+    if stop_at <= start_at:
+        stop_at += timedelta(days=1)
+    return stop_at
+
+
+async def taiwan_full_history_sync_loop(
+    sync_taiwan_full_history,
+    app_tz: tzinfo,
+    start_time: time_of_day,
+    stop_time: time_of_day,
+    logger: logging.Logger | None = None,
+) -> None:
+    log = logger or logging.getLogger(__name__)
+    await asyncio.sleep(35)
+
+    while True:
+        now = datetime.now(app_tz)
+        start_at = _next_daily_window_start(now, start_time)
+        sleep_seconds = max(60, int((start_at - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+
+        run_started_at = datetime.now(app_tz)
+        stop_at = _window_stop_after(run_started_at, stop_time)
+        try:
+            summary = await sync_taiwan_full_history(
+                reason="scheduled-tw-full-history",
+                stop_at=stop_at,
+            )
+            log.info("Taiwan full history sync finished: %s", summary)
+        except Exception as exc:
+            log.warning("Taiwan full history sync failed: %s", exc)
 
 
 async def daily_paper_margin_sync_loop(
@@ -612,6 +658,19 @@ class BackgroundScheduler:
                 logger=self._log,
             ),
         )
+        if self._settings.tw_full_history_sync_enabled and self._deps.sync_taiwan_full_history:
+            self._create_task(
+                "tw-full-history-sync",
+                taiwan_full_history_sync_loop(
+                    sync_taiwan_full_history=self._deps.sync_taiwan_full_history,
+                    app_tz=self._settings.app_tz,
+                    start_time=self._settings.tw_full_history_sync_start_time,
+                    stop_time=self._settings.tw_full_history_sync_stop_time,
+                    logger=self._log,
+                ),
+            )
+        else:
+            self._log.info("Taiwan full history sync skipped (TW_FULL_HISTORY_SYNC_ENABLED=false).")
         self._create_task(
             "realtime-polling",
             realtime_polling_loop(

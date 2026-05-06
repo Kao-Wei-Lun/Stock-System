@@ -965,7 +965,14 @@ class ScreenerEngine:
         if cached and now - cached[0] < SCREEN_CACHE_TTL_SECONDS:
             return cached[1]
 
-        universe = await db.list_screenable_tickers(limit=500)
+        universe_limit = 5000 if normalized_filters["market"] in {"TW", "ALL"} else 500
+        universe = await db.list_screenable_tickers(limit=universe_limit)
+        data_coverage: Dict[str, Any] = {}
+        if normalized_filters["market"] in {"TW", "ALL"}:
+            try:
+                data_coverage["tw"] = await db.get_tw_universe_coverage("1d")
+            except Exception:
+                data_coverage = {}
         results: List[Dict[str, Any]] = []
         today = date.today()
         date_to = (today + timedelta(days=normalized_filters["upcoming_event_days"] or 0)).isoformat()
@@ -1227,5 +1234,7 @@ class ScreenerEngine:
             "market_context": macro_summary,
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
+        if data_coverage:
+            payload["data_coverage"] = data_coverage
         _screen_cache[cache_key] = (now, payload)
         return payload

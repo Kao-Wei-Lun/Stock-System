@@ -55,6 +55,27 @@ def read_int_env(
   return value
 
 
+def read_float_env(
+  name: str,
+  default: str | float,
+  *,
+  minimum: float | None = None,
+  maximum: float | None = None,
+  env: Mapping[str, str] | None = None,
+) -> float:
+  raw_value = _read_raw_value(name, str(default), env=env)
+  try:
+    value = float(raw_value)
+  except (TypeError, ValueError) as exc:
+    raise RuntimeError(f"Invalid float for {name}: {raw_value}") from exc
+
+  if minimum is not None and value < minimum:
+    raise RuntimeError(f"{name} must be >= {minimum}")
+  if maximum is not None and value > maximum:
+    raise RuntimeError(f"{name} must be <= {maximum}")
+  return value
+
+
 def read_bool_env(name: str, default: bool = False, *, env: Mapping[str, str] | None = None) -> bool:
   raw_value = _read_raw_value(name, None, env=env)
   if not raw_value:
@@ -119,12 +140,16 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture("APP_PORT", lambda: read_int_env("APP_PORT", "8001", minimum=1, maximum=65535, env=source))
   capture("APP_TIMEZONE", lambda: read_timezone_env("APP_TIMEZONE", "Asia/Taipei", env=source))
   capture("DAILY_LATEST_SYNC_TIME", lambda: read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10", env=source))
+  capture("TW_FULL_HISTORY_SYNC_START", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "15:30", env=source))
+  capture("TW_FULL_HISTORY_SYNC_STOP", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00", env=source))
   capture("FRONTEND_DEV_URL", lambda: read_url_env("FRONTEND_DEV_URL", "http://localhost:5173", env=source))
 
   for key, default in (
     ("STARTUP_DOWNLOAD_ENABLED", False),
     ("INSTITUTIONAL_AUTO_SYNC_ENABLED", True),
     ("LATEST_DATA_SYNC_ON_STARTUP", True),
+    ("TW_FULL_HISTORY_SYNC_ENABLED", False),
+    ("TW_FULL_HISTORY_INCLUDE_ETF", True),
     ("ALERT_EVALUATOR_ENABLED", True),
     ("MARKET_INTELLIGENCE_SYNC_ENABLED", True),
     ("MARKET_INTELLIGENCE_STARTUP_SYNC", True),
@@ -134,6 +159,10 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture(
     "ALERT_POLL_INTERVAL_SECONDS",
     lambda: read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10, env=source),
+  )
+  capture(
+    "TW_FULL_HISTORY_DELAY_SECONDS",
+    lambda: read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0, env=source),
   )
 
   encrypt_key = _read_raw_value("APP_ENCRYPT_KEY", None, env=source)

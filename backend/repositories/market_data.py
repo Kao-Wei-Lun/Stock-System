@@ -101,17 +101,17 @@ class MarketDataMixin:
                 rows = await cur.fetchall()
         return list(rows)
 
-    async def get_latest_ohlcv(self, ticker: str) -> Optional[Dict]:
+    async def get_latest_ohlcv(self, ticker: str, interval: str = "1d") -> Optional[Dict]:
         sql = """
             SELECT *
             FROM `ohlcv`
-            WHERE `ticker`=%s AND `interval`='1d'
+            WHERE `ticker`=%s AND `interval`=%s
             ORDER BY `date` DESC
             LIMIT 1
         """
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, (ticker,))
+                await cur.execute(sql, (ticker, interval))
                 return await cur.fetchone()
 
     async def get_prev_close(self, ticker: str) -> Optional[float]:
@@ -179,8 +179,223 @@ class MarketDataMixin:
                 await cur.execute("SELECT * FROM `stock_info` WHERE `ticker`=%s", (ticker,))
                 return await cur.fetchone()
 
+    async def upsert_tw_equity_universe(self, rows: List[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+
+        sql = """
+            INSERT INTO `tw_equity_universe`
+                (`ticker`, `symbol`, `market`, `name`, `sector`, `security_type`, `is_etf`,
+                 `is_active`, `source`, `latest_snapshot_date`, `last_seen_at`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `symbol`=`incoming`.`symbol`,
+                `market`=`incoming`.`market`,
+                `name`=`incoming`.`name`,
+                `sector`=`incoming`.`sector`,
+                `security_type`=`incoming`.`security_type`,
+                `is_etf`=`incoming`.`is_etf`,
+                `is_active`=`incoming`.`is_active`,
+                `source`=`incoming`.`source`,
+                `latest_snapshot_date`=`incoming`.`latest_snapshot_date`,
+                `last_seen_at`=NOW()
+        """
+        params = [
+            (
+                row["ticker"],
+                row.get("symbol") or str(row["ticker"]).split(".", 1)[0],
+                row.get("market") or "TSE",
+                row.get("name"),
+                row.get("sector"),
+                row.get("security_type"),
+                1 if row.get("is_etf") else 0,
+                1 if row.get("is_active", True) else 0,
+                row.get("source") or "fubon_neo",
+                row.get("latest_snapshot_date"),
+            )
+            for row in rows
+            if row.get("ticker")
+        ]
+        if not params:
+            return 0
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(sql, params)
+        return len(params)
+
+    async def deactivate_stale_tw_equities(self, snapshot_date: str) -> int:
+        return await self._execute(
+            """
+            UPDATE `tw_equity_universe`
+            SET `is_active`=0
+            WHERE `source`='fubon_neo'
+              AND (`latest_snapshot_date` IS NULL OR `latest_snapshot_date`<>%s)
+            """,
+            (snapshot_date,),
+        )
+
+    async def list_tw_equity_universe(
+        self,
+        *,
+        active_only: bool = True,
+        include_etf: bool = True,
+        markets: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        conditions: List[str] = []
+        params: List[Any] = []
+        if active_only:
+            conditions.append("`is_active`=1")
+        if not include_etf:
+            conditions.append("`is_etf`=0")
+        if markets:
+            clean_markets = [str(item).strip().upper() for item in markets if str(item or "").strip()]
+            if clean_markets:
+                placeholders = ", ".join(["%s"] * len(clean_markets))
+                conditions.append(f"`market` IN ({placeholders})")
+                params.extend(clean_markets)
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT %s"
+            params.append(max(1, min(int(limit), 10000)))
+        return await self._fetchall(
+            f"""
+            SELECT *
+            FROM `tw_equity_universe`
+            {where_clause}
+            ORDER BY `market` ASC, `ticker` ASC
+            {limit_clause}
+            """,
+            tuple(params),
+        )
+
+    async def record_tw_history_sync_status(
+        self,
+        *,
+        ticker: str,
+        interval: str,
+        status: str,
+        requested_start_date: Optional[str] = None,
+        requested_end_date: Optional[str] = None,
+        last_success_date: Optional[str] = None,
+        rows_synced: int = 0,
+        error: Optional[str] = None,
+        source: str = "fubon_neo",
+    ) -> Dict[str, Any]:
+        await self._execute(
+            """
+            INSERT INTO `tw_history_sync_status`
+                (`ticker`, `interval`, `status`, `requested_start_date`, `requested_end_date`,
+                 `last_success_date`, `last_attempt_at`, `last_success_at`, `rows_synced_total`,
+                 `last_rows_synced`, `attempts`, `last_error`, `source`)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), IF(%s='success', NOW(), NULL), %s, %s, 1, %s, %s)
+            AS `incoming`
+            ON DUPLICATE KEY UPDATE
+                `status`=`incoming`.`status`,
+                `requested_start_date`=`incoming`.`requested_start_date`,
+                `requested_end_date`=`incoming`.`requested_end_date`,
+                `last_success_date`=IF(`incoming`.`last_success_date` IS NULL, `last_success_date`, `incoming`.`last_success_date`),
+                `last_attempt_at`=NOW(),
+                `last_success_at`=IF(`incoming`.`status`='success', NOW(), `last_success_at`),
+                `rows_synced_total`=`rows_synced_total` + `incoming`.`last_rows_synced`,
+                `last_rows_synced`=`incoming`.`last_rows_synced`,
+                `attempts`=`attempts` + 1,
+                `last_error`=IF(`incoming`.`status`='success', NULL, `incoming`.`last_error`),
+                `source`=`incoming`.`source`
+            """,
+            (
+                ticker,
+                interval,
+                status,
+                requested_start_date,
+                requested_end_date,
+                last_success_date,
+                status,
+                max(0, int(rows_synced or 0)),
+                max(0, int(rows_synced or 0)),
+                error[:2000] if error else None,
+                source,
+            ),
+        )
+        return await self.get_tw_history_sync_status(ticker, interval) or {
+            "ticker": ticker,
+            "interval": interval,
+            "status": status,
+        }
+
+    async def get_tw_history_sync_status(self, ticker: str, interval: str = "1d") -> Optional[Dict[str, Any]]:
+        return await self._fetchone(
+            """
+            SELECT *
+            FROM `tw_history_sync_status`
+            WHERE `ticker`=%s AND `interval`=%s
+            LIMIT 1
+            """,
+            (ticker, interval),
+        )
+
+    async def list_tw_history_sync_status(
+        self,
+        *,
+        interval: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        conditions: List[str] = []
+        params: List[Any] = []
+        if interval:
+            conditions.append("`interval`=%s")
+            params.append(interval)
+        if status:
+            conditions.append("`status`=%s")
+            params.append(status)
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(max(1, min(int(limit or 500), 5000)))
+        return await self._fetchall(
+            f"""
+            SELECT *
+            FROM `tw_history_sync_status`
+            {where_clause}
+            ORDER BY `updated_at` DESC, `ticker` ASC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+
+    async def get_tw_universe_coverage(self, interval: str = "1d") -> Dict[str, Any]:
+        row = await self._fetchone(
+            """
+            SELECT
+                COUNT(*) AS `universe_count`,
+                SUM(CASE WHEN latest.`ticker` IS NOT NULL THEN 1 ELSE 0 END) AS `covered_count`,
+                MIN(latest.`latest_date`) AS `oldest_latest_date`,
+                MAX(latest.`latest_date`) AS `newest_latest_date`,
+                SUM(COALESCE(latest.`row_count`, 0)) AS `ohlcv_rows`
+            FROM `tw_equity_universe` AS u
+            LEFT JOIN (
+                SELECT `ticker`, MAX(`date`) AS `latest_date`, COUNT(*) AS `row_count`
+                FROM `ohlcv`
+                WHERE `interval`=%s
+                GROUP BY `ticker`
+            ) AS latest ON latest.`ticker` = u.`ticker`
+            WHERE u.`is_active`=1
+            """,
+            (interval,),
+        )
+        payload = dict(row or {})
+        universe_count = int(payload.get("universe_count") or 0)
+        covered_count = int(payload.get("covered_count") or 0)
+        payload["universe_count"] = universe_count
+        payload["covered_count"] = covered_count
+        payload["coverage_pct"] = round(covered_count / universe_count * 100.0, 2) if universe_count else 0.0
+        payload["interval"] = interval
+        return payload
+
     async def list_screenable_tickers(self, limit: int = 400) -> List[Dict[str, Any]]:
-        clean_limit = max(1, min(limit, 1000))
+        clean_limit = max(1, min(limit, 5000))
         rows = await self._fetchall(
             """
             SELECT
