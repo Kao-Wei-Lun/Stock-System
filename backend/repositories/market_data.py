@@ -297,12 +297,16 @@ class MarketDataMixin:
                 `status`=`incoming`.`status`,
                 `requested_start_date`=`incoming`.`requested_start_date`,
                 `requested_end_date`=`incoming`.`requested_end_date`,
-                `last_success_date`=IF(`incoming`.`last_success_date` IS NULL, `last_success_date`, `incoming`.`last_success_date`),
+                `last_success_date`=IF(
+                    `incoming`.`last_success_date` IS NULL,
+                    `tw_history_sync_status`.`last_success_date`,
+                    `incoming`.`last_success_date`
+                ),
                 `last_attempt_at`=NOW(),
-                `last_success_at`=IF(`incoming`.`status`='success', NOW(), `last_success_at`),
-                `rows_synced_total`=`rows_synced_total` + `incoming`.`last_rows_synced`,
+                `last_success_at`=IF(`incoming`.`status`='success', NOW(), `tw_history_sync_status`.`last_success_at`),
+                `rows_synced_total`=`tw_history_sync_status`.`rows_synced_total` + `incoming`.`last_rows_synced`,
                 `last_rows_synced`=`incoming`.`last_rows_synced`,
-                `attempts`=`attempts` + 1,
+                `attempts`=`tw_history_sync_status`.`attempts` + 1,
                 `last_error`=IF(`incoming`.`status`='success', NULL, `incoming`.`last_error`),
                 `source`=`incoming`.`source`
             """,

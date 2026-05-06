@@ -108,6 +108,11 @@ def _rows_from_fubon_candles(payload: Optional[dict]) -> list[dict]:
     return rows
 
 
+def _is_fubon_not_found_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "Resource Not Found" in message or "Status: 404" in message or "statusCode\":404" in message
+
+
 class HybridDataFetcher:
     def __init__(self, yahoo_fetcher: DataFetcher, fubon_manager):
         self._yahoo = yahoo_fetcher
@@ -251,14 +256,26 @@ class HybridDataFetcher:
         cursor = start
         while cursor <= end:
             chunk_end = min(cursor + timedelta(days=FUBON_HISTORY_MAX_RANGE_DAYS), end)
-            response = await self._fubon_manager.fetch_stock_historical_candles(
-                symbol,
-                from_date=cursor.isoformat(),
-                to_date=chunk_end.isoformat(),
-                timeframe=timeframe,
-                adjusted=adjusted,
-                sort=sort,
-            )
+            try:
+                response = await self._fubon_manager.fetch_stock_historical_candles(
+                    symbol,
+                    from_date=cursor.isoformat(),
+                    to_date=chunk_end.isoformat(),
+                    timeframe=timeframe,
+                    adjusted=adjusted,
+                    sort=sort,
+                )
+            except Exception as exc:
+                if _is_fubon_not_found_error(exc):
+                    log.debug(
+                        "Fubon historical candle chunk returned 404 for %s %s-%s; continuing",
+                        symbol,
+                        cursor.isoformat(),
+                        chunk_end.isoformat(),
+                    )
+                    cursor = chunk_end + timedelta(days=1)
+                    continue
+                raise
             if isinstance(response, dict):
                 rows.extend(response.get("data") or [])
             cursor = chunk_end + timedelta(days=1)

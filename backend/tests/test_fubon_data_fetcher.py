@@ -81,6 +81,23 @@ class StubFubonManager:
         }
 
 
+class ListingAfterFirstChunkFubonManager(StubFubonManager):
+    async def fetch_stock_historical_candles(self, symbol, **kwargs):
+        self.history_calls.append({"symbol": symbol, **kwargs})
+        if len(self.history_calls) == 1:
+            raise RuntimeError(
+                "[Fugle API Error] Resource Not Found\n"
+                "Status: 404\n"
+                "Response: {\"statusCode\":404,\"message\":\"Resource Not Found\"}"
+            )
+        return {
+            "symbol": symbol,
+            "data": [
+                {"date": "2026-04-09", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 1234},
+            ],
+        }
+
+
 @pytest.mark.anyio
 async def test_hybrid_fetcher_uses_fubon_for_taiwan_daily_history(monkeypatch):
     yahoo = StubYahooFetcher()
@@ -222,3 +239,34 @@ async def test_hybrid_fetcher_chunks_fubon_history_for_periods_over_single_call_
     assert {call["symbol"] for call in manager.history_calls} == {"2330"}
     assert stored["upsert"][0] == "2330.TW"
     assert stored["upsert"][1] == "1d"
+
+
+@pytest.mark.anyio
+async def test_hybrid_fetcher_skips_404_history_chunks_for_newer_taiwan_listings(monkeypatch):
+    yahoo = StubYahooFetcher()
+    manager = ListingAfterFirstChunkFubonManager()
+    fetcher = HybridDataFetcher(yahoo, manager)
+    stored = {}
+
+    async def delete_ohlcv_range(ticker, interval, start_date, end_date):
+        stored["deleted"] = (ticker, interval, start_date, end_date)
+        return 0
+
+    async def upsert_ohlcv_batch(ticker, rows, interval):
+        stored["upsert"] = (ticker, interval, rows)
+        return len(rows)
+
+    async def log_sync(ticker, status, count, message):
+        stored["log"] = (ticker, status, count, message)
+
+    monkeypatch.setattr(fubon_data_fetcher.db, "delete_ohlcv_range", delete_ohlcv_range)
+    monkeypatch.setattr(fubon_data_fetcher.db, "upsert_ohlcv_batch", upsert_ohlcv_batch)
+    monkeypatch.setattr(fubon_data_fetcher.db, "log_sync", log_sync)
+    monkeypatch.setattr(fubon_data_fetcher, "FUBON_HISTORY_MAX_RANGE_DAYS", 1)
+
+    count = await fetcher.fetch_and_store("00400A.TW", period="1mo", interval="1d", include_info=False)
+
+    assert count >= 1
+    assert len(manager.history_calls) >= 2
+    assert stored["upsert"][0] == "00400A.TW"
+    assert stored["log"][1] == "ok"
