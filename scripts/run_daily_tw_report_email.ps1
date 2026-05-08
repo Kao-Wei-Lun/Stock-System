@@ -21,7 +21,7 @@ Set-Location $ProjectRoot
 $Arguments = @(
     "scripts\send_daily_tw_report_email.py",
     "--date", $ReportDate,
-    "--to", "weilunkao1013@gmail.com,heas54321@gmail.com",
+    "--to", "weilunkao1013@gmail.com,heas54321@gmail.com,poyen.justin@gmail.com",
     "--out", "log\ai_daily_tw_report_$ReportDate.md",
     "--html-out", "log\ai_daily_tw_report_$ReportDate.html",
     "--eml-out", "log\ai_daily_tw_report_$ReportDate.eml"
