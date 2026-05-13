@@ -174,9 +174,15 @@ class FubonRealtimeSubscriptionPool:
                 ticker = normalize_ticker(item.get("ticker"))
                 if ticker:
                     tickers.append(ticker)
-        await self.set_source_tickers(WATCHLIST_SOURCE, tickers)
+        await self.set_source_tickers(WATCHLIST_SOURCE, tickers, wait_for_assignments=False)
 
-    async def set_source_tickers(self, source: str, tickers: list[str] | set[str] | tuple[str, ...]) -> None:
+    async def set_source_tickers(
+        self,
+        source: str,
+        tickers: list[str] | set[str] | tuple[str, ...],
+        *,
+        wait_for_assignments: bool = True,
+    ) -> None:
         normalized_source = str(source or "").strip().lower() or WATCHLIST_SOURCE
         desired = {normalize_ticker(ticker) for ticker in tickers if normalize_ticker(ticker)}
         current = set(self._source_tickers.get(normalized_source, set()))
@@ -186,9 +192,15 @@ class FubonRealtimeSubscriptionPool:
         added = desired - current
 
         for ticker in sorted(removed):
-            await self._refresh_ticker_assignment(ticker)
+            if wait_for_assignments:
+                await self._refresh_ticker_assignment(ticker)
+            else:
+                self._schedule_task(ticker, self._refresh_ticker_assignment(ticker))
         for ticker in sorted(added):
-            await self._ensure_assignment(ticker)
+            if wait_for_assignments:
+                await self._ensure_assignment(ticker)
+            else:
+                self._schedule_task(ticker, self._ensure_assignment(ticker))
 
     def track_ticker(self, ticker: str, *, source: str = WS_SOURCE) -> None:
         normalized = normalize_ticker(ticker)

@@ -408,7 +408,7 @@ class MarketDataMixin:
                     AS `latest_covered_count`,
                 MIN(latest.`latest_date`) AS `oldest_latest_date`,
                 MAX(latest.`latest_date`) AS `newest_latest_date`,
-                market_latest.`latest_date` AS `expected_latest_date`,
+                MAX(market_latest.`latest_date`) AS `expected_latest_date`,
                 SUM(COALESCE(latest.`row_count`, 0)) AS `ohlcv_rows`
             FROM `tw_equity_universe` AS u
             CROSS JOIN (

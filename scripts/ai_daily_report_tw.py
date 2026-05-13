@@ -547,6 +547,264 @@ def _fetch_recent_daily_rows(base_url: str, ticker: str, *, period: str = "3mo")
     return valid_rows[-60:]
 
 
+def _env_flag_auto(name: str, *, default: str = "auto") -> str:
+    value = str(os.environ.get(name, default) or "").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return "true"
+    if value in {"0", "false", "no", "off"}:
+        return "false"
+    return "auto"
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(os.environ.get(name, default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _round_float(value: object, digits: int = 2) -> float | None:
+    numeric = _to_float(value)
+    return round(numeric, digits) if numeric is not None else None
+
+
+def _daily_rows_for_ai(rows: list[dict], *, history_days: int) -> list[dict]:
+    compact_rows: list[dict] = []
+    for row in rows[-history_days:]:
+        if not isinstance(row, dict):
+            continue
+        compact_rows.append(
+            {
+                "date": str(row.get("date") or "")[:10],
+                "open": _round_float(row.get("open")),
+                "high": _round_float(row.get("high")),
+                "low": _round_float(row.get("low")),
+                "close": _round_float(row.get("close")),
+                "volume": _round_float(row.get("volume"), 0),
+            }
+        )
+    return compact_rows
+
+
+def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_rows: list[dict]) -> dict:
+    ticker = str(item.get("ticker") or "").upper().strip()
+    validation = validation_by_ticker.get(ticker) or {}
+    ap = item.get("accumulation_profile") or {}
+    chip = ap.get("chip") or {}
+    cp = item.get("candlestick_profile") or {}
+    return {
+        "ticker": ticker,
+        "name": item.get("name"),
+        "instrument_type": _instrument_type(item),
+        "sector": item.get("sector") or item.get("industry"),
+        "total_score": item.get("total_score"),
+        "score_breakdown": {
+            "price_score": item.get("price_score"),
+            "breakout_score": item.get("breakout_score"),
+            "volume_score": item.get("volume_score"),
+            "institutional_score": item.get("institutional_score"),
+            "kline_score": item.get("kline_score"),
+        },
+        "signal_status": validation.get("signal_status") or item.get("signal_status"),
+        "latest_close": _round_float(validation.get("latest_close") or _candidate_latest_close(item)),
+        "breakout_price": _round_float(validation.get("breakout_price") or _candidate_breakout_price(item)),
+        "signal_low": _round_float(_candidate_signal_low(item)),
+        "return_1d": item.get("return_1d"),
+        "return_3d": item.get("return_3d"),
+        "return_5d": item.get("return_5d"),
+        "historical_hit_rate": item.get("historical_status_hit_rate"),
+        "kline_summary": cp.get("summary"),
+        "kline_detail": _k_text(item),
+        "chip": {
+            "institutional_5d_sum": chip.get("institutional_5d_sum"),
+            "foreign_5d_sum": chip.get("foreign_5d_sum"),
+            "investment_trust_10d_sum": chip.get("investment_trust_10d_sum"),
+            "dealer_5d_sum": chip.get("dealer_5d_sum"),
+        },
+        "news_event_digest": item.get("news_event_digest"),
+        "one_month_daily_bars": daily_rows,
+    }
+
+
+def _build_codex_analysis_context(
+    *,
+    base_url: str,
+    report_date: str,
+    coverage: dict,
+    status_counts: Counter,
+    market_context: dict,
+    taifex: dict | None,
+    structured: dict,
+    sector_rows: list[dict],
+    selected_stocks: list[dict],
+    selected_etfs: list[dict],
+    strong_stock_candidates: list[dict],
+    bullish_stock_candidates: list[dict],
+    ma5_walk_candidates: list[dict],
+    signal_validation_rows: list[dict],
+    signal_backtest_summary: dict,
+    news_records: list[dict],
+    market_news: list[dict],
+    validation_by_ticker: dict[str, dict],
+    max_tickers: int,
+    history_days: int,
+) -> dict:
+    ticker_pool = _dedupe_candidates(
+        selected_stocks[:12]
+        + selected_etfs[:6]
+        + strong_stock_candidates[:8]
+        + bullish_stock_candidates[:8]
+        + ma5_walk_candidates[:8]
+    )[:max_tickers]
+    candidates_for_ai: list[dict] = []
+    for item in ticker_pool:
+        ticker = str(item.get("ticker") or "").upper().strip()
+        rows = _fetch_recent_daily_rows(base_url, ticker, period="3mo") if ticker else []
+        candidates_for_ai.append(_candidate_for_ai(item, validation_by_ticker, _daily_rows_for_ai(rows, history_days=history_days)))
+
+    return {
+        "report_date": report_date,
+        "codex_analysis_output_path": str(_codex_automation_analysis_path(report_date)),
+        "data_policy": {
+            "history_days_per_candidate": history_days,
+            "note": "AI receives compact 1-month daily bars plus computed scores; raw screening remains deterministic.",
+        },
+        "coverage": coverage,
+        "history_status_counts": dict(status_counts),
+        "market_context": market_context,
+        "taifex_summary": {
+            "resolved_date": (taifex or {}).get("resolved_date") if isinstance(taifex, dict) else None,
+            "position_summary": _summarize_taifex_position(structured),
+        },
+        "sector_rotation": sector_rows[:8],
+        "signal_validation": signal_validation_rows[:15],
+        "signal_backtest_summary": signal_backtest_summary,
+        "candidates": candidates_for_ai,
+        "news_events": (market_news + news_records)[:24],
+    }
+
+
+def _codex_automation_analysis_path(report_date: str) -> Path:
+    raw_path = str(os.environ.get("DAILY_REPORT_CODEX_ANALYSIS_PATH") or "").strip()
+    if raw_path:
+        path = Path(raw_path.format(date=report_date))
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
+        return path
+    return _report_log_dir() / f"codex_ai_analysis_{report_date}.md"
+
+
+def _read_codex_automation_analysis(report_date: str) -> tuple[str | None, Path]:
+    path = _codex_automation_analysis_path(report_date)
+    if not path.exists():
+        return None, path
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except Exception as exc:  # noqa: BLE001
+        return f"Codex analysis file read failed: {type(exc).__name__}: {exc}", path
+    if not text:
+        return None, path
+    return text[:12000], path
+
+
+def _extract_openai_response_text(payload: dict) -> str:
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    chunks: list[str] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            text = content.get("text")
+            if isinstance(text, str) and text.strip():
+                chunks.append(text.strip())
+    return "\n\n".join(chunks).strip()
+
+
+def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | None]:
+    api_key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return None, "OPENAI_API_KEY is not set"
+    model = str(os.environ.get("DAILY_REPORT_AI_MODEL") or "gpt-5").strip()
+    max_output_tokens = _env_int("DAILY_REPORT_AI_MAX_OUTPUT_TOKENS", 2200, minimum=600, maximum=6000)
+    timeout_seconds = _env_int("DAILY_REPORT_AI_TIMEOUT_SECONDS", 90, minimum=20, maximum=300)
+    instructions = (
+        "你是保守、嚴謹的台股盤後交易策略分析助理。"
+        "只能根據輸入 JSON 的資料解讀，不得編造未提供的價格、新聞、財報或籌碼。"
+        "請使用繁體中文，輸出 Markdown，包含：大盤/風險、轉強族群、個股觀察、ETF觀察、隔日策略、風險提醒。"
+        "候選標的是觀察清單，不是買賣建議；避免保證式語氣。"
+    )
+    user_text = (
+        "請根據以下程式篩選後的候選標的與近一個月資料，寫出可放進每日報告的 Codex/AI 綜合分析。\n\n"
+        + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+    )
+    payload = {
+        "model": model,
+        "instructions": instructions,
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": user_text}]}],
+        "max_output_tokens": max_output_tokens,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        method="POST",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            result = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception as exc:  # noqa: BLE001
+        return None, f"{type(exc).__name__}: {exc}"
+    text = _extract_openai_response_text(result if isinstance(result, dict) else {})
+    if not text:
+        return None, "OpenAI response did not contain output text"
+    return text, None
+
+
+def _codex_analysis_section(context: dict) -> list[str]:
+    report_date = str(context.get("report_date") or _now_tw().strftime("%Y-%m-%d"))
+    automation_text, automation_path = _read_codex_automation_analysis(report_date)
+    if automation_text and not automation_text.startswith("Codex analysis file read failed:"):
+        return [
+            "## 1A) Codex/AI 綜合分析",
+            f"- 來源：Codex 自動化分析檔 `{automation_path}`",
+            "",
+            automation_text,
+            "",
+        ]
+
+    enabled = _env_flag_auto("DAILY_REPORT_AI_ANALYSIS_ENABLED", default="auto")
+    has_key = bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
+    if enabled == "false" or (enabled == "auto" and not has_key):
+        extra = (
+            f"- 尚未找到 Codex 自動化分析檔：`{automation_path}`。"
+            "Codex 自動化可先讀取 `codex_report_context_YYYY-MM-DD.json`，寫出此檔後再寄送正式報告。"
+        )
+        if automation_text:
+            extra = f"- {automation_text}"
+        return [
+            "## 1A) Codex/AI 綜合分析",
+            extra,
+            "- 若不使用 Codex 自動化，也可在 `.env` 設定 `OPENAI_API_KEY` 啟用 API 版 AI 解讀。",
+            "- 目前報告仍由程式規則完成：篩選、分數、訊號驗證、族群與新聞整理皆會正常輸出。",
+            "",
+        ]
+    text, error = _call_openai_for_codex_analysis(context)
+    if error:
+        return [
+            "## 1A) Codex/AI 綜合分析",
+            f"- AI 二次解讀失敗：{_table_cell(error, width=140)}",
+            "- 已改用程式規則報告；候選標的、分數、訊號驗證與新聞事件仍正常輸出。",
+            "",
+        ]
+    return ["## 1A) Codex/AI 綜合分析", text or "（AI 未回傳內容）", ""]
+
+
 def _simple_ma(values: list[float], window: int, *, end_index: int | None = None) -> float | None:
     end = len(values) if end_index is None else end_index
     start = end - window
@@ -891,15 +1149,16 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
         lines.append("- （本次沒有符合條件的標的）")
         lines.append("")
         return lines
+
+    # Gmail has a narrow reading pane and ignores some responsive CSS, so the
+    # candidate section is split into smaller bordered tables instead of one
+    # very wide table. This preserves every score/detail while avoiding overflow.
     lines.append(
-        "| 類型 | 代號 | 名稱 | 族群/產業 | total_score | price_score | breakout_score | volume_score | institutional_score | kline_score | 近1日績效 | 近3日績效 | 近5日績效 | 歷史同類型命中率 | API原始潛伏分 | K線分數 | AI篩選說明 | K線判讀 | 籌碼重點 | 新聞/事件 | 隔日策略 |"
+        "| 類型 | 代號 | 名稱 | 族群/產業 | total_score | 近1日績效 | 近3日績效 | 近5日績效 | 歷史同類型命中率 |"
     )
-    lines.append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---:|---:|---:|---:|---:|")
     for it in candidates:
-        cp = it.get("candlestick_profile") or {}
-        k_level = _classify_k(it.get("candlestick_score"), cp.get("bias"))
         sector = it.get("sector") or it.get("industry") or "—"
-        k_summary = f"{cp.get('summary') or '未見明確型態'}（{k_level}）"
         lines.append(
             "| "
             + " | ".join(
@@ -909,11 +1168,6 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
                     _table_cell(it.get("name")),
                     _table_cell(sector, width=18),
                     _table_cell(_fmt_int(it.get("total_score"))),
-                    _table_cell(_fmt_int(it.get("price_score"))),
-                    _table_cell(_fmt_int(it.get("breakout_score"))),
-                    _table_cell(_fmt_int(it.get("volume_score"))),
-                    _table_cell(_fmt_int(it.get("institutional_score"))),
-                    _table_cell(_fmt_int(it.get("kline_score"))),
                     _table_cell(_pct_text(it.get("return_1d"))),
                     _table_cell(_pct_text(it.get("return_3d"))),
                     _table_cell(_pct_text(it.get("return_5d"))),
@@ -925,8 +1179,48 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
                             else ""
                         )
                     ),
+                ]
+            )
+            + " |"
+        )
+
+    lines.append("")
+    lines.append("**分項分數**")
+    lines.append(
+        "| 代號 | price_score | breakout_score | volume_score | institutional_score | kline_score | API原始潛伏分 | K線分數 |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    for it in candidates:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _table_cell(it.get("ticker")),
+                    _table_cell(_fmt_int(it.get("price_score"))),
+                    _table_cell(_fmt_int(it.get("breakout_score"))),
+                    _table_cell(_fmt_int(it.get("volume_score"))),
+                    _table_cell(_fmt_int(it.get("institutional_score"))),
+                    _table_cell(_fmt_int(it.get("kline_score"))),
                     _table_cell(_fmt_int(it.get("accumulation_score"))),
                     _table_cell(_fmt_int(it.get("candlestick_score"))),
+                ]
+            )
+            + " |"
+        )
+
+    lines.append("")
+    lines.append("**觀察說明**")
+    lines.append("| 代號 | AI篩選說明 | K線判讀 | 籌碼重點 | 新聞/事件 | 隔日策略 |")
+    lines.append("|---|---|---|---|---|---|")
+    for it in candidates:
+        cp = it.get("candlestick_profile") or {}
+        k_level = _classify_k(it.get("candlestick_score"), cp.get("bias"))
+        k_summary = f"{cp.get('summary') or '未見明確型態'}（{k_level}）"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _table_cell(it.get("ticker")),
                     _table_cell(_candidate_reason(it), width=76),
                     _table_cell(k_summary + "；" + _k_text(it), width=92),
                     _table_cell(_chip_text(it), width=70),
@@ -1004,10 +1298,20 @@ EMAIL_STYLES = {
     "p": "margin:8px 0 12px;",
     "ul": "margin:8px 0 14px;padding-left:22px;",
     "li": "margin:4px 0;",
-    "table_wrap": "margin:12px 0 22px;background:#ffffff;",
-    "table": "border-collapse:collapse;width:100%;font-size:13px;border:1px solid #9ca3af;",
-    "th": "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;background:#eef2f7;color:#111827;font-weight:700;",
-    "td": "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;background:#ffffff;color:#1f2937;",
+    "table_wrap": "margin:12px 0 22px;background:#ffffff;max-width:100%;",
+    "table": (
+        "border-collapse:collapse;width:100%;max-width:100%;table-layout:fixed;"
+        "font-size:13px;border:1px solid #9ca3af;"
+    ),
+    "th": (
+        "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;"
+        "background:#eef2f7;color:#111827;font-weight:700;white-space:normal;"
+        "word-break:break-word;overflow-wrap:anywhere;"
+    ),
+    "td": (
+        "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;"
+        "background:#ffffff;color:#1f2937;white-space:normal;word-break:break-word;overflow-wrap:anywhere;"
+    ),
     "code": "background:#eef2f7;border-radius:4px;padding:1px 4px;font-family:Consolas,'Courier New',monospace;",
     "a": "color:#2563eb;text-decoration:none;",
 }
@@ -2153,6 +2457,37 @@ def build_report(*, base_url: str, report_date: str) -> str:
     selected_candidates = selected_stocks + selected_etfs
     news_records = _enrich_news_for_candidates(base_url, selected_candidates, refresh_limit=12)
     market_news = _market_news_records(sector_rows, report_date=report_date)
+    ai_max_tickers = _env_int("DAILY_REPORT_AI_MAX_TICKERS", 18, minimum=4, maximum=40)
+    ai_history_days = _env_int("DAILY_REPORT_AI_HISTORY_DAYS", 22, minimum=10, maximum=60)
+    codex_context = _build_codex_analysis_context(
+        base_url=base_url,
+        report_date=report_date,
+        coverage=cov,
+        status_counts=status_counts,
+        market_context=market_context,
+        taifex=taifex,
+        structured=structured,
+        sector_rows=sector_rows,
+        selected_stocks=selected_stocks,
+        selected_etfs=selected_etfs,
+        strong_stock_candidates=strong_stock_candidates,
+        bullish_stock_candidates=bullish_stock_candidates,
+        ma5_walk_candidates=ma5_walk_candidates,
+        signal_validation_rows=signal_validation_rows,
+        signal_backtest_summary=signal_backtest_summary,
+        news_records=news_records,
+        market_news=market_news,
+        validation_by_ticker=signal_validation_by_ticker,
+        max_tickers=ai_max_tickers,
+        history_days=ai_history_days,
+    )
+    codex_context_file: Path | None = None
+    codex_context_error: str | None = None
+    try:
+        codex_context_file = _report_log_dir() / f"codex_report_context_{report_date}.json"
+        codex_context_file.write_text(json.dumps(codex_context, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        codex_context_error = str(exc)
 
     # Institutional bullish (simple)
     inst_bullish: list[dict] = []
@@ -2196,6 +2531,10 @@ def build_report(*, base_url: str, report_date: str) -> str:
         lines.append(f"- 今日 signal JSON 已保存：`{signal_file}`")
     if signal_store_error:
         lines.append(f"- 今日 signal JSON 保存失敗：{_table_cell(signal_store_error, width=120)}")
+    if codex_context_file:
+        lines.append(f"- Codex/AI 分析輸入 JSON 已保存：`{codex_context_file}`")
+    if codex_context_error:
+        lines.append(f"- Codex/AI 分析輸入保存失敗：{_table_cell(codex_context_error, width=120)}")
     lines.append("")
 
     lines.append("## 1) 今日結論（可執行）")
@@ -2228,6 +2567,8 @@ def build_report(*, base_url: str, report_date: str) -> str:
     if data_pool_incomplete:
         lines.append("- 風險提醒：資料池尚未完整，候選僅視為觀察清單，交易前請以下單軟體再核對。")
     lines.append("")
+
+    lines.extend(_codex_analysis_section(codex_context))
 
     lines.append("## 2) 法人偏多候選（依標的類型分類）")
     lines.append("- 條件：法人5日>0 且外資5日>0；以下分為個股與 ETF/基金/REIT，避免不同工具混在同一張表。")

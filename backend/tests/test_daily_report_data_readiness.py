@@ -82,6 +82,45 @@ def test_check_data_readiness_rejects_stale_or_incomplete_data(monkeypatch):
     assert any("Analysis stock Kline coverage is 79.90%" in reason for reason in readiness.reasons)
 
 
+def test_check_data_readiness_uses_direct_analysis_coverage_fallback(monkeypatch):
+    def fake_http_json(url, **_kwargs):
+        path = url.replace("http://qv", "")
+        if path == "/api/health":
+            return {"status": "ok"}
+        if path == "/api/tw/universe/coverage?interval=1d":
+            return {"newest_latest_date": "2026-05-13"}
+        if path == "/api/tw/universe/analysis-coverage?interval=1d":
+            raise RuntimeError("route still running old SQL")
+        if "status=running" in path or "status=pending" in path:
+            return {"items": []}
+        if path == "/api/taifex/institutional?date=2026-05-13":
+            return {"resolved_date": "2026-05-13"}
+        if path == "/api/tw/chips/coverage?date=2026-05-13":
+            return {"resolved_date": "2026-05-13"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(report_email, "_http_json", fake_http_json)
+    monkeypatch.setattr(
+        report_email,
+        "_fetch_analysis_coverage_direct",
+        lambda interval, errors: {
+            "latest_coverage_pct": 94.6,
+            "latest_covered_count": 1836,
+            "universe_count": 1939,
+        },
+    )
+
+    readiness = report_email.check_data_readiness(
+        base_url="http://qv",
+        report_date="2026-05-13",
+        min_stock_kline_ready_pct=80.0,
+    )
+
+    assert readiness.ready is True
+    assert readiness.stock_kline_ready_pct == 94.6
+    assert readiness.errors == []
+
+
 def test_wait_for_data_ready_times_out_without_sleeping(monkeypatch):
     readiness = report_email.DataReadiness(
         ready=False,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import os
@@ -134,6 +135,28 @@ def _fetch_json(base_url: str, path: str, errors: list[str]) -> object | None:
         return None
 
 
+def _fetch_analysis_coverage_direct(interval: str, errors: list[str]) -> object | None:
+    """Fallback used when a stale running API still has a broken readiness route."""
+    backend_dir = PROJECT_ROOT / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+
+    async def _load() -> object:
+        from database import db  # Imported lazily so regular report rendering stays light.
+
+        await db.connect()
+        try:
+            return await db.get_tw_analysis_kline_coverage(interval)
+        finally:
+            await db.close()
+
+    try:
+        return asyncio.run(_load())
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"direct analysis coverage fallback: {type(exc).__name__}: {exc}")
+        return None
+
+
 def check_data_readiness(
     *,
     base_url: str,
@@ -148,7 +171,12 @@ def check_data_readiness(
 
     health = _fetch_json(base, "/api/health", errors)
     coverage = _fetch_json(base, "/api/tw/universe/coverage?interval=1d", errors)
-    analysis_coverage = _fetch_json(base, "/api/tw/universe/analysis-coverage?interval=1d", errors)
+    analysis_errors: list[str] = []
+    analysis_coverage = _fetch_json(base, "/api/tw/universe/analysis-coverage?interval=1d", analysis_errors)
+    if not isinstance(analysis_coverage, dict):
+        analysis_coverage = _fetch_analysis_coverage_direct("1d", analysis_errors)
+    if not isinstance(analysis_coverage, dict):
+        errors.extend(analysis_errors)
     running = _fetch_json(base, "/api/tw/history/status?interval=1d&status=running&limit=5000", errors)
     pending = _fetch_json(base, "/api/tw/history/status?interval=1d&status=pending&limit=5000", errors)
     taifex = _fetch_json(base, f"/api/taifex/institutional?date={expected_date}", errors)
@@ -377,6 +405,11 @@ def main() -> int:
     parser.add_argument("--subject", default="")
     parser.add_argument("--dry-run", action="store_true", help="Write .eml if requested but do not send")
     parser.add_argument(
+        "--context-only",
+        action="store_true",
+        help="Build the report context JSON/preview files and exit without requiring recipients or SMTP",
+    )
+    parser.add_argument(
         "--wait-for-data-ready",
         dest="wait_for_data_ready",
         action="store_true",
@@ -426,6 +459,9 @@ def main() -> int:
             min_stock_kline_ready_pct=args.min_stock_kline_ready_pct,
         )
 
+    if args.context_only:
+        os.environ["DAILY_REPORT_AI_ANALYSIS_ENABLED"] = "false"
+
     api = check_api(args.base)
     if not api.ok:
         report = (
@@ -441,6 +477,13 @@ def main() -> int:
     plain_text = markdown_to_plain_text(report)
     _write_text(md_path, report)
     _write_text(html_path, html_text)
+
+    if args.context_only:
+        print(f"Context-only preview written to: {md_path}")
+        print(f"HTML preview written to: {html_path}")
+        print(f"Codex context should be available at: {PROJECT_ROOT / 'log' / f'codex_report_context_{report_date}.json'}")
+        print(f"Codex analysis target path: {PROJECT_ROOT / 'log' / f'codex_ai_analysis_{report_date}.md'}")
+        return 0
 
     subject = args.subject or f"台股每日盤後 AI 交易策略報告｜{report_date}"
     to = args.to
