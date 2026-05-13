@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from database import db
 from data_fetcher import DataFetcher, normalize_ticker
+from env_validation import read_float_env, read_int_env, read_text_env
 from fubon_quote_provider import build_fubon_quote_payload
 from fubon_symbols import is_taiwan_stock_ticker, tw_ticker_to_fubon
 
@@ -26,9 +27,28 @@ FUBON_HISTORY_INTERVALS = {
     "1mo": "M",
 }
 FUBON_HISTORY_START = date(2010, 1, 1)
-FUBON_HISTORY_MAX_RANGE_DAYS = 364
-FUBON_HISTORY_CHUNK_DELAY_SECONDS = 0.3
-FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS = (5.0, 15.0, 30.0)
+FUBON_HISTORY_MAX_RANGE_DAYS = read_int_env("FUBON_HISTORY_MAX_RANGE_DAYS", "364", minimum=1)
+FUBON_HISTORY_CHUNK_DELAY_SECONDS = read_float_env("FUBON_HISTORY_CHUNK_DELAY_SECONDS", "0.3", minimum=0)
+
+
+def _read_retry_delays() -> tuple[float, ...]:
+    raw = read_text_env("FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS", "5,15,30")
+    delays: list[float] = []
+    for item in raw.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        try:
+            delay = float(text)
+        except ValueError:
+            log.warning("Ignoring invalid FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS value: %s", text)
+            continue
+        if delay >= 0:
+            delays.append(delay)
+    return tuple(delays or [5.0, 15.0, 30.0])
+
+
+FUBON_RATE_LIMIT_RETRY_DELAYS_SECONDS = _read_retry_delays()
 
 
 def _coerce_float(value: Any) -> Optional[float]:

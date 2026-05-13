@@ -71,7 +71,7 @@ load_dotenv()
 
 # ─── Configuration ───────────────────────────────────────────
 
-STARTUP_DOWNLOAD_DELAY_SECONDS = 2.5
+STARTUP_DOWNLOAD_DELAY_SECONDS = read_float_env("STARTUP_DOWNLOAD_DELAY_SECONDS", "2.5", minimum=0)
 APP_PORT = read_int_env("APP_PORT", "8001", minimum=1, maximum=65535)
 FRONTEND_DEV_URL = read_url_env("FRONTEND_DEV_URL", "http://localhost:5173")
 STARTUP_DOWNLOAD_ENABLED = read_bool_env("STARTUP_DOWNLOAD_ENABLED", False)
@@ -81,7 +81,7 @@ LATEST_DATA_SYNC_PERIOD = read_text_env("LATEST_DATA_SYNC_PERIOD", "1y").strip()
 LATEST_DATA_SYNC_INTERVAL = read_text_env("LATEST_DATA_SYNC_INTERVAL", "1d").strip().lower() or "1d"
 LATEST_DATA_SYNC_ON_STARTUP = read_bool_env("LATEST_DATA_SYNC_ON_STARTUP", True)
 TW_FULL_HISTORY_SYNC_ENABLED = read_bool_env("TW_FULL_HISTORY_SYNC_ENABLED", False)
-TW_FULL_HISTORY_SYNC_START_RAW = read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "15:30")
+TW_FULL_HISTORY_SYNC_START_RAW = read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "14:00")
 TW_FULL_HISTORY_SYNC_STOP_RAW = read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00")
 TW_FULL_HISTORY_PERIOD = read_text_env("TW_FULL_HISTORY_PERIOD", "max").strip().lower() or "max"
 TW_FULL_HISTORY_INCREMENTAL_PERIOD = read_text_env("TW_FULL_HISTORY_INCREMENTAL_PERIOD", "5d").strip().lower() or "5d"
@@ -93,6 +93,11 @@ ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
 ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
 MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
 MARKET_INTELLIGENCE_STARTUP_SYNC = read_bool_env("MARKET_INTELLIGENCE_STARTUP_SYNC", True)
+MARKET_INTELLIGENCE_SYNC_INTERVAL_SECONDS = read_int_env(
+    "MARKET_INTELLIGENCE_SYNC_INTERVAL_SECONDS",
+    "3600",
+    minimum=60,
+)
 FUTOPT_RECORDER_ENABLED = read_bool_env("FUTOPT_RECORDER_ENABLED", True)
 PAPER_MARGIN_AUTO_SYNC_ENABLED = read_bool_env("PAPER_MARGIN_AUTO_SYNC_ENABLED", True)
 FUTOPT_RECORDER_SYMBOLS_RAW = read_text_env("FUTOPT_RECORDER_SYMBOLS", "TXF,TMF")
@@ -104,6 +109,32 @@ FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
 FUTOPT_RECORDER_POLL_SECONDS = read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
+TRACKED_MARKET_SYNC_TIME_RAW = read_hhmm_env("TRACKED_MARKET_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
+TAIWAN_CHIP_SYNC_TIME_RAW = read_hhmm_env("TAIWAN_CHIP_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
+FUBON_MARKET_SNAPSHOT_SYNC_TIME_RAW = read_hhmm_env(
+    "FUBON_MARKET_SNAPSHOT_SYNC_TIME",
+    DAILY_LATEST_SYNC_TIME_RAW,
+)
+INSTITUTIONAL_SYNC_TIME_RAW = read_hhmm_env("INSTITUTIONAL_SYNC_TIME", "19:00")
+PAPER_MARGIN_SYNC_TIME_RAW = read_hhmm_env("PAPER_MARGIN_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
+REALTIME_POLL_INTERVAL_SECONDS = read_float_env("REALTIME_POLL_INTERVAL_SECONDS", "15", minimum=1)
+REALTIME_PER_TICKER_DELAY_SECONDS = read_float_env("REALTIME_PER_TICKER_DELAY_SECONDS", "0.2", minimum=0)
+FUBON_WS_SESSION_REFRESH_SECONDS = read_float_env("FUBON_WS_SESSION_REFRESH_SECONDS", "30", minimum=1)
+LATEST_SYNC_STARTUP_DELAY_SECONDS = read_float_env("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15", minimum=0)
+FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS = read_float_env(
+    "FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS",
+    "20",
+    minimum=0,
+)
+TW_FULL_HISTORY_STARTUP_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_STARTUP_DELAY_SECONDS", "35", minimum=0)
+PAPER_MARGIN_STARTUP_DELAY_SECONDS = read_float_env("PAPER_MARGIN_STARTUP_DELAY_SECONDS", "25", minimum=0)
+REALTIME_POLL_STARTUP_DELAY_SECONDS = read_float_env("REALTIME_POLL_STARTUP_DELAY_SECONDS", "5", minimum=0)
+ALERT_STARTUP_DELAY_SECONDS = read_float_env("ALERT_STARTUP_DELAY_SECONDS", "10", minimum=0)
+MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS = read_float_env(
+    "MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS",
+    "12",
+    minimum=0,
+)
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
@@ -160,6 +191,11 @@ def _parse_daily_sync_time(value: str) -> time_of_day:
 
 
 DAILY_LATEST_SYNC_TIME = _parse_daily_sync_time(DAILY_LATEST_SYNC_TIME_RAW)
+TRACKED_MARKET_SYNC_TIME = _parse_daily_sync_time(TRACKED_MARKET_SYNC_TIME_RAW)
+TAIWAN_CHIP_SYNC_TIME = _parse_daily_sync_time(TAIWAN_CHIP_SYNC_TIME_RAW)
+FUBON_MARKET_SNAPSHOT_SYNC_TIME = _parse_daily_sync_time(FUBON_MARKET_SNAPSHOT_SYNC_TIME_RAW)
+INSTITUTIONAL_SYNC_TIME = _parse_daily_sync_time(INSTITUTIONAL_SYNC_TIME_RAW)
+PAPER_MARGIN_SYNC_TIME = _parse_daily_sync_time(PAPER_MARGIN_SYNC_TIME_RAW)
 TW_FULL_HISTORY_SYNC_START_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_START_RAW)
 TW_FULL_HISTORY_SYNC_STOP_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_STOP_RAW)
 
@@ -272,6 +308,22 @@ background_scheduler = BackgroundScheduler(
         alert_poll_interval_seconds=ALERT_POLL_INTERVAL_SECONDS,
         app_tz=APP_TZ,
         daily_latest_sync_time=DAILY_LATEST_SYNC_TIME,
+        tracked_market_sync_time=TRACKED_MARKET_SYNC_TIME,
+        taiwan_chip_sync_time=TAIWAN_CHIP_SYNC_TIME,
+        fubon_market_snapshot_sync_time=FUBON_MARKET_SNAPSHOT_SYNC_TIME,
+        institutional_sync_time=INSTITUTIONAL_SYNC_TIME,
+        paper_margin_sync_time=PAPER_MARGIN_SYNC_TIME,
+        market_intelligence_sync_interval_seconds=MARKET_INTELLIGENCE_SYNC_INTERVAL_SECONDS,
+        realtime_poll_interval_seconds=REALTIME_POLL_INTERVAL_SECONDS,
+        realtime_per_ticker_delay_seconds=REALTIME_PER_TICKER_DELAY_SECONDS,
+        fubon_ws_session_refresh_seconds=FUBON_WS_SESSION_REFRESH_SECONDS,
+        latest_sync_startup_delay_seconds=LATEST_SYNC_STARTUP_DELAY_SECONDS,
+        fubon_market_snapshot_startup_delay_seconds=FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS,
+        tw_full_history_startup_delay_seconds=TW_FULL_HISTORY_STARTUP_DELAY_SECONDS,
+        paper_margin_startup_delay_seconds=PAPER_MARGIN_STARTUP_DELAY_SECONDS,
+        realtime_poll_startup_delay_seconds=REALTIME_POLL_STARTUP_DELAY_SECONDS,
+        alert_startup_delay_seconds=ALERT_STARTUP_DELAY_SECONDS,
+        market_intelligence_startup_delay_seconds=MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS,
         startup_download_delay_seconds=STARTUP_DOWNLOAD_DELAY_SECONDS,
         futopt_recorder_enabled=FUTOPT_RECORDER_ENABLED,
         futopt_recorder_poll_seconds=FUTOPT_RECORDER_POLL_SECONDS,

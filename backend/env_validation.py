@@ -140,25 +140,79 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture("APP_PORT", lambda: read_int_env("APP_PORT", "8001", minimum=1, maximum=65535, env=source))
   capture("APP_TIMEZONE", lambda: read_timezone_env("APP_TIMEZONE", "Asia/Taipei", env=source))
   capture("DAILY_LATEST_SYNC_TIME", lambda: read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10", env=source))
-  capture("TW_FULL_HISTORY_SYNC_START", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "15:30", env=source))
+  capture("TRACKED_MARKET_SYNC_TIME", lambda: read_hhmm_env("TRACKED_MARKET_SYNC_TIME", "18:10", env=source))
+  capture("TAIWAN_CHIP_SYNC_TIME", lambda: read_hhmm_env("TAIWAN_CHIP_SYNC_TIME", "18:10", env=source))
+  capture("FUBON_MARKET_SNAPSHOT_SYNC_TIME", lambda: read_hhmm_env("FUBON_MARKET_SNAPSHOT_SYNC_TIME", "18:10", env=source))
+  capture("INSTITUTIONAL_SYNC_TIME", lambda: read_hhmm_env("INSTITUTIONAL_SYNC_TIME", "19:00", env=source))
+  capture("PAPER_MARGIN_SYNC_TIME", lambda: read_hhmm_env("PAPER_MARGIN_SYNC_TIME", "18:10", env=source))
+  capture("TW_FULL_HISTORY_SYNC_START", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "14:00", env=source))
   capture("TW_FULL_HISTORY_SYNC_STOP", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00", env=source))
   capture("FRONTEND_DEV_URL", lambda: read_url_env("FRONTEND_DEV_URL", "http://localhost:5173", env=source))
 
   for key, default in (
     ("STARTUP_DOWNLOAD_ENABLED", False),
     ("INSTITUTIONAL_AUTO_SYNC_ENABLED", True),
+    ("TAIWAN_CHIP_AUTO_SYNC_ENABLED", True),
     ("LATEST_DATA_SYNC_ON_STARTUP", True),
     ("TW_FULL_HISTORY_SYNC_ENABLED", False),
     ("TW_FULL_HISTORY_INCLUDE_ETF", True),
     ("ALERT_EVALUATOR_ENABLED", True),
     ("MARKET_INTELLIGENCE_SYNC_ENABLED", True),
     ("MARKET_INTELLIGENCE_STARTUP_SYNC", True),
+    ("FUTOPT_RECORDER_ENABLED", True),
+    ("PAPER_MARGIN_AUTO_SYNC_ENABLED", True),
   ):
     capture(key, lambda key=key, default=default: read_bool_env(key, default, env=source))
 
   capture(
     "ALERT_POLL_INTERVAL_SECONDS",
     lambda: read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10, env=source),
+  )
+  capture(
+    "MARKET_INTELLIGENCE_SYNC_INTERVAL_SECONDS",
+    lambda: read_int_env("MARKET_INTELLIGENCE_SYNC_INTERVAL_SECONDS", "3600", minimum=60, env=source),
+  )
+  capture(
+    "STARTUP_DOWNLOAD_DELAY_SECONDS",
+    lambda: read_float_env("STARTUP_DOWNLOAD_DELAY_SECONDS", "2.5", minimum=0, env=source),
+  )
+  capture(
+    "REALTIME_POLL_INTERVAL_SECONDS",
+    lambda: read_float_env("REALTIME_POLL_INTERVAL_SECONDS", "15", minimum=1, env=source),
+  )
+  capture(
+    "REALTIME_PER_TICKER_DELAY_SECONDS",
+    lambda: read_float_env("REALTIME_PER_TICKER_DELAY_SECONDS", "0.2", minimum=0, env=source),
+  )
+  capture(
+    "FUBON_WS_SESSION_REFRESH_SECONDS",
+    lambda: read_float_env("FUBON_WS_SESSION_REFRESH_SECONDS", "30", minimum=1, env=source),
+  )
+  for key, default in (
+    ("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15"),
+    ("FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS", "20"),
+    ("TW_FULL_HISTORY_STARTUP_DELAY_SECONDS", "35"),
+    ("PAPER_MARGIN_STARTUP_DELAY_SECONDS", "25"),
+    ("REALTIME_POLL_STARTUP_DELAY_SECONDS", "5"),
+    ("ALERT_STARTUP_DELAY_SECONDS", "10"),
+    ("MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS", "12"),
+  ):
+    capture(key, lambda key=key, default=default: read_float_env(key, default, minimum=0, env=source))
+  capture(
+    "FUBON_HISTORY_MAX_RANGE_DAYS",
+    lambda: read_int_env("FUBON_HISTORY_MAX_RANGE_DAYS", "364", minimum=1, env=source),
+  )
+  capture(
+    "FUBON_HISTORY_CHUNK_DELAY_SECONDS",
+    lambda: read_float_env("FUBON_HISTORY_CHUNK_DELAY_SECONDS", "0.3", minimum=0, env=source),
+  )
+  capture(
+    "FUTOPT_RECORDER_POLL_SECONDS",
+    lambda: read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5, env=source),
+  )
+  capture(
+    "FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS",
+    lambda: read_int_env("FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS", "300", minimum=60, env=source),
   )
   capture(
     "TW_FULL_HISTORY_DELAY_SECONDS",

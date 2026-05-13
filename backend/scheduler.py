@@ -22,13 +22,29 @@ class SchedulerSettings:
     alert_poll_interval_seconds: int
     app_tz: tzinfo
     daily_latest_sync_time: time_of_day
+    tracked_market_sync_time: time_of_day | None = None
+    taiwan_chip_sync_time: time_of_day | None = None
+    fubon_market_snapshot_sync_time: time_of_day | None = None
+    institutional_sync_time: time_of_day | None = None
+    paper_margin_sync_time: time_of_day | None = None
+    market_intelligence_sync_interval_seconds: int = 6 * 60 * 60
+    realtime_poll_interval_seconds: float = 15.0
+    realtime_per_ticker_delay_seconds: float = 0.2
+    fubon_ws_session_refresh_seconds: float = 30.0
+    latest_sync_startup_delay_seconds: float = 15.0
+    fubon_market_snapshot_startup_delay_seconds: float = 20.0
+    tw_full_history_startup_delay_seconds: float = 35.0
+    paper_margin_startup_delay_seconds: float = 25.0
+    realtime_poll_startup_delay_seconds: float = 5.0
+    alert_startup_delay_seconds: float = 10.0
+    market_intelligence_startup_delay_seconds: float = 12.0
     startup_download_delay_seconds: float = 2.5
     futopt_recorder_enabled: bool = False
     futopt_recorder_poll_seconds: int = 30
     futopt_recorder_backfill_interval_seconds: int = 300
     paper_margin_auto_sync_enabled: bool = True
     tw_full_history_sync_enabled: bool = False
-    tw_full_history_sync_start_time: time_of_day = time_of_day(15, 30)
+    tw_full_history_sync_start_time: time_of_day = time_of_day(14, 0)
     tw_full_history_sync_stop_time: time_of_day = time_of_day(8, 0)
 
 
@@ -88,6 +104,35 @@ async def startup_institutional_snapshot(sync_snapshot, logger: logging.Logger |
         log.warning("Institutional snapshot sync failed: %s", exc)
 
 
+async def daily_institutional_sync_loop(
+    sync_snapshot,
+    app_tz: tzinfo,
+    daily_sync_time: time_of_day,
+    logger: logging.Logger | None = None,
+) -> None:
+    log = logger or logging.getLogger(__name__)
+    await startup_institutional_snapshot(sync_snapshot, log)
+
+    while True:
+        now = datetime.now(app_tz)
+        next_run_date = now.date()
+        next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        if now >= next_run:
+            next_run_date += timedelta(days=1)
+            next_run = datetime.combine(next_run_date, daily_sync_time, tzinfo=app_tz)
+        sleep_seconds = max(60, int((next_run - now).total_seconds()))
+        await asyncio.sleep(sleep_seconds)
+        try:
+            payload = await sync_snapshot()
+            log.info(
+                "Institutional snapshot daily sync finished: query=%s resolved=%s",
+                payload.get("query_date"),
+                payload.get("resolved_date"),
+            )
+        except Exception as exc:
+            log.warning("Daily institutional snapshot sync failed: %s", exc)
+
+
 async def daily_taiwan_chip_sync_loop(
     sync_snapshot,
     app_tz: tzinfo,
@@ -134,10 +179,11 @@ async def daily_market_snapshot_sync_loop(
     archive_snapshot,
     app_tz: tzinfo,
     daily_sync_time: time_of_day,
+    startup_delay_seconds: float = 20.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(20) # Start slightly after latest_sync
+    await asyncio.sleep(max(0, startup_delay_seconds))
 
     while True:
         now = datetime.now(app_tz)
@@ -167,10 +213,11 @@ async def daily_latest_sync_loop(
     app_tz: tzinfo,
     daily_latest_sync_time: time_of_day,
     latest_data_sync_on_startup: bool = True,
+    startup_delay_seconds: float = 15.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(15)
+    await asyncio.sleep(max(0, startup_delay_seconds))
     if latest_data_sync_on_startup:
         try:
             await sync_tracked_market_data(reason="startup-latest")
@@ -211,10 +258,11 @@ async def taiwan_full_history_sync_loop(
     app_tz: tzinfo,
     start_time: time_of_day,
     stop_time: time_of_day,
+    startup_delay_seconds: float = 35.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(35)
+    await asyncio.sleep(max(0, startup_delay_seconds))
 
     while True:
         now = datetime.now(app_tz)
@@ -238,10 +286,11 @@ async def daily_paper_margin_sync_loop(
     sync_paper_trading_margins,
     app_tz: tzinfo,
     daily_sync_time: time_of_day,
+    startup_delay_seconds: float = 25.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(25)
+    await asyncio.sleep(max(0, startup_delay_seconds))
     try:
         summary = await sync_paper_trading_margins(reason="startup-paper-margin")
         log.info("Paper trading margin startup sync finished: %s", summary)
@@ -350,6 +399,7 @@ async def fubon_ws_listener_loop(
     fubon_manager,
     broadcast_to_ticker,
     store_quote_to_db=None,
+    session_refresh_seconds: float = 30.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
@@ -377,7 +427,7 @@ async def fubon_ws_listener_loop(
 
         while True:
             refresh_sessions = getattr(fubon_manager, "refresh_session_assignments", None)
-            if callable(refresh_sessions) and time.monotonic() - last_session_refresh >= 30:
+            if callable(refresh_sessions) and time.monotonic() - last_session_refresh >= session_refresh_seconds:
                 try:
                     await refresh_sessions()
                 except Exception as exc:
@@ -497,10 +547,13 @@ async def realtime_polling_loop(
     *,
     use_fubon_ws: bool = False,
     skip_poll_for_ticker: Callable[[str], bool] | None = None,
+    poll_interval_seconds: float = 15.0,
+    per_ticker_delay_seconds: float = 0.2,
+    startup_delay_seconds: float = 5.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(5)
+    await asyncio.sleep(max(0, startup_delay_seconds))
     while True:
         subscribed = list(get_subscribed_tickers())
         if subscribed:
@@ -521,17 +574,18 @@ async def realtime_polling_loop(
                         )
                 except Exception as exc:
                     log.debug("quote error %s: %s", ticker, exc)
-                await asyncio.sleep(0.2)
-        await asyncio.sleep(15)
+                await asyncio.sleep(max(0, per_ticker_delay_seconds))
+        await asyncio.sleep(max(1, poll_interval_seconds))
 
 
 async def alert_evaluator_loop(
     evaluate_active_alerts,
     poll_interval_seconds: int,
+    startup_delay_seconds: float = 10.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(10)
+    await asyncio.sleep(max(0, startup_delay_seconds))
     while True:
         try:
             triggered = await evaluate_active_alerts()
@@ -545,10 +599,12 @@ async def alert_evaluator_loop(
 async def market_intelligence_sync_loop(
     sync_market_intelligence_snapshot,
     startup_sync_enabled: bool = True,
+    interval_seconds: int = 6 * 60 * 60,
+    startup_delay_seconds: float = 12.0,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
-    await asyncio.sleep(12)
+    await asyncio.sleep(max(0, startup_delay_seconds))
     if startup_sync_enabled:
         try:
             summary = await sync_market_intelligence_snapshot(reason="startup-market-intelligence")
@@ -556,7 +612,7 @@ async def market_intelligence_sync_loop(
         except Exception as exc:
             log.warning("Market intelligence startup sync failed: %s", exc)
     while True:
-        await asyncio.sleep(6 * 60 * 60)
+        await asyncio.sleep(max(60, int(interval_seconds)))
         try:
             summary = await sync_market_intelligence_snapshot(reason="scheduled-market-intelligence")
             log.info("Market intelligence scheduled sync finished: %s", summary)
@@ -615,9 +671,11 @@ class BackgroundScheduler:
 
         if self._settings.institutional_auto_sync_enabled:
             self._create_task(
-                "startup-institutional-sync",
-                startup_institutional_snapshot(
+                "institutional-sync",
+                daily_institutional_sync_loop(
                     sync_snapshot=self._deps.sync_institutional_snapshot,
+                    app_tz=self._settings.app_tz,
+                    daily_sync_time=self._settings.institutional_sync_time or self._settings.daily_latest_sync_time,
                     logger=self._log,
                 ),
             )
@@ -630,7 +688,7 @@ class BackgroundScheduler:
                 daily_taiwan_chip_sync_loop(
                     sync_snapshot=self._deps.sync_taiwan_chip_snapshot,
                     app_tz=self._settings.app_tz,
-                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    daily_sync_time=self._settings.taiwan_chip_sync_time or self._settings.daily_latest_sync_time,
                     logger=self._log,
                 ),
             )
@@ -643,7 +701,9 @@ class BackgroundScheduler:
                 daily_market_snapshot_sync_loop(
                     archive_snapshot=self._deps.archive_fubon_market_snapshot,
                     app_tz=self._settings.app_tz,
-                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    daily_sync_time=self._settings.fubon_market_snapshot_sync_time
+                    or self._settings.daily_latest_sync_time,
+                    startup_delay_seconds=self._settings.fubon_market_snapshot_startup_delay_seconds,
                     logger=self._log,
                 ),
             )
@@ -653,8 +713,10 @@ class BackgroundScheduler:
             daily_latest_sync_loop(
                 sync_tracked_market_data=self._deps.sync_tracked_market_data,
                 app_tz=self._settings.app_tz,
-                daily_latest_sync_time=self._settings.daily_latest_sync_time,
+                daily_latest_sync_time=self._settings.tracked_market_sync_time
+                or self._settings.daily_latest_sync_time,
                 latest_data_sync_on_startup=self._settings.latest_data_sync_on_startup,
+                startup_delay_seconds=self._settings.latest_sync_startup_delay_seconds,
                 logger=self._log,
             ),
         )
@@ -666,6 +728,7 @@ class BackgroundScheduler:
                     app_tz=self._settings.app_tz,
                     start_time=self._settings.tw_full_history_sync_start_time,
                     stop_time=self._settings.tw_full_history_sync_stop_time,
+                    startup_delay_seconds=self._settings.tw_full_history_startup_delay_seconds,
                     logger=self._log,
                 ),
             )
@@ -679,6 +742,9 @@ class BackgroundScheduler:
                 broadcast_to_ticker=self._deps.broadcast_to_ticker,
                 use_fubon_ws=bool(self._deps.fubon_manager),
                 skip_poll_for_ticker=self._deps.skip_poll_for_ticker,
+                poll_interval_seconds=self._settings.realtime_poll_interval_seconds,
+                per_ticker_delay_seconds=self._settings.realtime_per_ticker_delay_seconds,
+                startup_delay_seconds=self._settings.realtime_poll_startup_delay_seconds,
                 logger=self._log,
             ),
         )
@@ -689,7 +755,8 @@ class BackgroundScheduler:
                 daily_paper_margin_sync_loop(
                     sync_paper_trading_margins=self._deps.sync_paper_trading_margins,
                     app_tz=self._settings.app_tz,
-                    daily_sync_time=self._settings.daily_latest_sync_time,
+                    daily_sync_time=self._settings.paper_margin_sync_time or self._settings.daily_latest_sync_time,
+                    startup_delay_seconds=self._settings.paper_margin_startup_delay_seconds,
                     logger=self._log,
                 ),
             )
@@ -703,6 +770,7 @@ class BackgroundScheduler:
                     fubon_manager=self._deps.fubon_manager,
                     broadcast_to_ticker=self._deps.broadcast_to_ticker,
                     store_quote_to_db=self._deps.store_quote_to_db,
+                    session_refresh_seconds=self._settings.fubon_ws_session_refresh_seconds,
                     logger=self._log,
                 ),
             )
@@ -725,6 +793,7 @@ class BackgroundScheduler:
                 alert_evaluator_loop(
                     evaluate_active_alerts=self._deps.evaluate_active_alerts,
                     poll_interval_seconds=self._settings.alert_poll_interval_seconds,
+                    startup_delay_seconds=self._settings.alert_startup_delay_seconds,
                     logger=self._log,
                 ),
             )
@@ -737,6 +806,8 @@ class BackgroundScheduler:
                 market_intelligence_sync_loop(
                     sync_market_intelligence_snapshot=self._deps.sync_market_intelligence_snapshot,
                     startup_sync_enabled=self._settings.market_intelligence_startup_sync,
+                    interval_seconds=self._settings.market_intelligence_sync_interval_seconds,
+                    startup_delay_seconds=self._settings.market_intelligence_startup_delay_seconds,
                     logger=self._log,
                 ),
             )
