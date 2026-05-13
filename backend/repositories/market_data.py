@@ -398,6 +398,50 @@ class MarketDataMixin:
         payload["interval"] = interval
         return payload
 
+    async def get_tw_analysis_kline_coverage(self, interval: str = "1d") -> Dict[str, Any]:
+        row = await self._fetchone(
+            """
+            SELECT
+                COUNT(*) AS `universe_count`,
+                SUM(CASE WHEN latest.`ticker` IS NOT NULL THEN 1 ELSE 0 END) AS `covered_count`,
+                SUM(CASE WHEN latest.`latest_date` = market_latest.`latest_date` THEN 1 ELSE 0 END)
+                    AS `latest_covered_count`,
+                MIN(latest.`latest_date`) AS `oldest_latest_date`,
+                MAX(latest.`latest_date`) AS `newest_latest_date`,
+                market_latest.`latest_date` AS `expected_latest_date`,
+                SUM(COALESCE(latest.`row_count`, 0)) AS `ohlcv_rows`
+            FROM `tw_equity_universe` AS u
+            CROSS JOIN (
+                SELECT MAX(`date`) AS `latest_date`
+                FROM `ohlcv`
+                WHERE `interval`=%s
+            ) AS market_latest
+            LEFT JOIN (
+                SELECT `ticker`, MAX(`date`) AS `latest_date`, COUNT(*) AS `row_count`
+                FROM `ohlcv`
+                WHERE `interval`=%s
+                GROUP BY `ticker`
+            ) AS latest ON latest.`ticker` = u.`ticker`
+            WHERE u.`is_active`=1
+              AND u.`is_etf`=0
+              AND u.`symbol` REGEXP '^[0-9]{4}$'
+            """,
+            (interval, interval),
+        )
+        payload = dict(row or {})
+        universe_count = int(payload.get("universe_count") or 0)
+        covered_count = int(payload.get("covered_count") or 0)
+        latest_covered_count = int(payload.get("latest_covered_count") or 0)
+        payload["universe_count"] = universe_count
+        payload["covered_count"] = covered_count
+        payload["latest_covered_count"] = latest_covered_count
+        payload["coverage_pct"] = round(covered_count / universe_count * 100.0, 2) if universe_count else 0.0
+        payload["latest_coverage_pct"] = (
+            round(latest_covered_count / universe_count * 100.0, 2) if universe_count else 0.0
+        )
+        payload["interval"] = interval
+        return payload
+
     async def list_screenable_tickers(self, limit: int = 400) -> List[Dict[str, Any]]:
         clean_limit = max(1, min(limit, 5000))
         rows = await self._fetchall(

@@ -24,7 +24,11 @@ $Arguments = @(
     "--to", "weilunkao1013@gmail.com,heas54321@gmail.com,poyen.justin@gmail.com",
     "--out", "log\ai_daily_tw_report_$ReportDate.md",
     "--html-out", "log\ai_daily_tw_report_$ReportDate.html",
-    "--eml-out", "log\ai_daily_tw_report_$ReportDate.eml"
+    "--eml-out", "log\ai_daily_tw_report_$ReportDate.eml",
+    "--wait-for-data-ready",
+    "--data-ready-timeout-minutes", "180",
+    "--data-ready-check-interval-seconds", "300",
+    "--min-stock-kline-ready-pct", "80"
 )
 
 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting daily TW report email" | Out-File -FilePath $RunLog -Encoding utf8

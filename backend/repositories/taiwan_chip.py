@@ -440,6 +440,52 @@ class TaiwanChipMixin:
             return None
         return _date_to_iso(row.get("snapshot_date"))
 
+    async def get_taiwan_chip_coverage(self, on_or_before: Optional[str] = None) -> Dict[str, Any]:
+        latest_date = await self.get_latest_taiwan_chip_snapshot_date(on_or_before)
+        if not latest_date:
+            return {
+                "latest_date": None,
+                "resolved_date": None,
+                "universe_count": 0,
+                "latest_covered_count": 0,
+                "coverage_pct": 0.0,
+                "row_count": 0,
+                "source_counts": {},
+            }
+
+        row = await self._fetchone(
+            f"""
+            SELECT
+                COUNT(*) AS `universe_count`,
+                SUM(CASE WHEN latest_chips.`ticker` IS NOT NULL THEN 1 ELSE 0 END)
+                    AS `latest_covered_count`
+            FROM `tw_equity_universe` AS u
+            LEFT JOIN (
+                SELECT DISTINCT `ticker`
+                FROM `taiwan_chip_snapshots`
+                WHERE `snapshot_date`=%s
+                  AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
+            ) AS latest_chips ON latest_chips.`ticker` = u.`ticker`
+            WHERE u.`is_active`=1
+              AND u.`is_etf`=0
+              AND u.`symbol` REGEXP '^[0-9]{{4}}$'
+            """,
+            (latest_date, *OFFICIAL_TAIWAN_CHIP_SOURCES),
+        )
+        payload = dict(row or {})
+        universe_count = int(payload.get("universe_count") or 0)
+        latest_covered_count = int(payload.get("latest_covered_count") or 0)
+        payload["latest_date"] = latest_date
+        payload["resolved_date"] = latest_date
+        payload["universe_count"] = universe_count
+        payload["latest_covered_count"] = latest_covered_count
+        payload["coverage_pct"] = (
+            round(latest_covered_count / universe_count * 100.0, 2) if universe_count else 0.0
+        )
+        payload["row_count"] = await self.get_taiwan_chip_snapshot_count(latest_date)
+        payload["source_counts"] = await self.get_taiwan_chip_snapshot_source_counts(latest_date)
+        return payload
+
     async def list_taiwan_chip_snapshots(
         self,
         ticker: Optional[str] = None,

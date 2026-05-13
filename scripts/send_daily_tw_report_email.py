@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 import os
+import re
 import socket
 import smtplib
 import sys
+import time
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from ai_daily_report_tw import (
+    _http_json,
     _now_tw,
     build_report,
     check_api,
@@ -40,6 +45,203 @@ def _bool_env(name: str, default: bool) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value.strip())
+    except ValueError:
+        return default
+
+
+@dataclass
+class DataReadiness:
+    ready: bool
+    timed_out: bool
+    expected_date: str
+    checked_at: str
+    api_ok: bool
+    running_count: int | None
+    pending_count: int | None
+    taifex_resolved_date: str | None
+    kline_newest_latest_date: str | None
+    chip_resolved_date: str | None
+    stock_kline_ready_pct: float
+    stock_kline_latest_covered_count: int
+    stock_kline_universe_count: int
+    reasons: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        return (
+            f"ready={self.ready} expected={self.expected_date} api_ok={self.api_ok} "
+            f"kline={self.kline_newest_latest_date} chip={self.chip_resolved_date} "
+            f"taifex={self.taifex_resolved_date} running={self.running_count} "
+            f"pending={self.pending_count} stock_kline={self.stock_kline_ready_pct:.2f}%"
+        )
+
+
+def _expected_latest_date(report_date: str) -> str:
+    current = datetime.strptime(report_date, "%Y-%m-%d").date()
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current.isoformat()
+
+
+def _items_count(payload: object) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    items = payload.get("items")
+    if isinstance(items, list):
+        return len(items)
+    total = payload.get("count")
+    try:
+        return int(total)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_date_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.match(r"^\d{4}-\d{2}-\d{2}", text)
+    return match.group(0) if match else text
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _as_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fetch_json(base_url: str, path: str, errors: list[str]) -> object | None:
+    try:
+        return _http_json(f"{base_url}{path}", timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"{path}: {type(exc).__name__}: {exc}")
+        return None
+
+
+def check_data_readiness(
+    *,
+    base_url: str,
+    report_date: str,
+    min_stock_kline_ready_pct: float,
+) -> DataReadiness:
+    base = base_url.rstrip("/")
+    expected_date = _expected_latest_date(report_date)
+    checked_at = _now_tw().isoformat()
+    errors: list[str] = []
+    reasons: list[str] = []
+
+    health = _fetch_json(base, "/api/health", errors)
+    coverage = _fetch_json(base, "/api/tw/universe/coverage?interval=1d", errors)
+    analysis_coverage = _fetch_json(base, "/api/tw/universe/analysis-coverage?interval=1d", errors)
+    running = _fetch_json(base, "/api/tw/history/status?interval=1d&status=running&limit=5000", errors)
+    pending = _fetch_json(base, "/api/tw/history/status?interval=1d&status=pending&limit=5000", errors)
+    taifex = _fetch_json(base, f"/api/taifex/institutional?date={expected_date}", errors)
+    chips = _fetch_json(base, f"/api/tw/chips/coverage?date={expected_date}", errors)
+
+    api_ok = isinstance(health, dict) and str(health.get("status") or "").lower() == "ok"
+    running_count = _items_count(running)
+    pending_count = _items_count(pending)
+    kline_newest = _as_date_text((coverage or {}).get("newest_latest_date") if isinstance(coverage, dict) else None)
+    taifex_date = _as_date_text((taifex or {}).get("resolved_date") if isinstance(taifex, dict) else None)
+    chip_raw_date = None
+    if isinstance(chips, dict):
+        chip_raw_date = chips.get("resolved_date") or chips.get("latest_date")
+    chip_date = _as_date_text(chip_raw_date)
+    stock_pct = 0.0
+    stock_latest_count = 0
+    stock_universe_count = 0
+    if isinstance(analysis_coverage, dict):
+        stock_pct = _as_float(analysis_coverage.get("latest_coverage_pct") or analysis_coverage.get("coverage_pct"))
+        stock_latest_count = _as_int(
+            analysis_coverage.get("latest_covered_count") or analysis_coverage.get("covered_count")
+        )
+        stock_universe_count = _as_int(analysis_coverage.get("universe_count"))
+
+    if not api_ok:
+        reasons.append("API health is not ok")
+    if running_count != 0:
+        reasons.append(f"running count is {running_count}")
+    if pending_count != 0:
+        reasons.append(f"pending count is {pending_count}")
+    if taifex_date != expected_date:
+        reasons.append(f"TAIFEX date is {taifex_date}, expected {expected_date}")
+    if kline_newest != expected_date:
+        reasons.append(f"Kline newest date is {kline_newest}, expected {expected_date}")
+    if chip_date != expected_date:
+        reasons.append(f"Chip date is {chip_date}, expected {expected_date}")
+    if stock_pct < min_stock_kline_ready_pct:
+        reasons.append(f"Analysis stock Kline coverage is {stock_pct:.2f}%, expected >= {min_stock_kline_ready_pct:.2f}%")
+
+    return DataReadiness(
+        ready=not reasons and not errors,
+        timed_out=False,
+        expected_date=expected_date,
+        checked_at=checked_at,
+        api_ok=api_ok,
+        running_count=running_count,
+        pending_count=pending_count,
+        taifex_resolved_date=taifex_date,
+        kline_newest_latest_date=kline_newest,
+        chip_resolved_date=chip_date,
+        stock_kline_ready_pct=stock_pct,
+        stock_kline_latest_covered_count=stock_latest_count,
+        stock_kline_universe_count=stock_universe_count,
+        reasons=reasons,
+        errors=errors,
+    )
+
+
+def wait_for_data_ready(
+    *,
+    base_url: str,
+    report_date: str,
+    timeout_minutes: float,
+    check_interval_seconds: float,
+    min_stock_kline_ready_pct: float,
+) -> DataReadiness:
+    deadline = time.monotonic() + max(0.0, timeout_minutes) * 60.0
+    interval = max(1.0, check_interval_seconds)
+
+    while True:
+        readiness = check_data_readiness(
+            base_url=base_url,
+            report_date=report_date,
+            min_stock_kline_ready_pct=min_stock_kline_ready_pct,
+        )
+        print(f"Data readiness check: {readiness.summary()}")
+        if readiness.ready:
+            print("Data readiness satisfied; generating report.")
+            return readiness
+
+        if readiness.reasons:
+            print("Not ready: " + "; ".join(readiness.reasons))
+        if readiness.errors:
+            print("Readiness check errors: " + "; ".join(readiness.errors))
+
+        remaining = deadline - time.monotonic()
+        if timeout_minutes <= 0 or remaining <= 0:
+            print("Data readiness wait timed out; generating report with available data.")
+            return replace(readiness, timed_out=True)
+
+        sleep_seconds = min(interval, max(1.0, remaining))
+        print(f"Waiting {sleep_seconds:.0f}s before next readiness check.")
+        time.sleep(sleep_seconds)
 
 
 def _smtp_config() -> dict[str, object]:
@@ -174,6 +376,34 @@ def main() -> int:
     parser.add_argument("--to", default=os.environ.get("DAILY_REPORT_EMAIL_TO", "").strip())
     parser.add_argument("--subject", default="")
     parser.add_argument("--dry-run", action="store_true", help="Write .eml if requested but do not send")
+    parser.add_argument(
+        "--wait-for-data-ready",
+        dest="wait_for_data_ready",
+        action="store_true",
+        default=_bool_env("DAILY_REPORT_WAIT_FOR_DATA_READY", True),
+        help="Poll market-data readiness before generating the report",
+    )
+    parser.add_argument(
+        "--skip-data-ready-wait",
+        dest="wait_for_data_ready",
+        action="store_false",
+        help="Generate immediately without readiness polling",
+    )
+    parser.add_argument(
+        "--data-ready-timeout-minutes",
+        type=float,
+        default=_float_env("DAILY_REPORT_DATA_READY_TIMEOUT_MINUTES", 180.0),
+    )
+    parser.add_argument(
+        "--data-ready-check-interval-seconds",
+        type=float,
+        default=_float_env("DAILY_REPORT_DATA_READY_CHECK_INTERVAL_SECONDS", 300.0),
+    )
+    parser.add_argument(
+        "--min-stock-kline-ready-pct",
+        type=float,
+        default=_float_env("DAILY_REPORT_MIN_STOCK_KLINE_READY_PCT", 80.0),
+    )
     args = parser.parse_args()
 
     report_date = args.date
@@ -186,6 +416,15 @@ def main() -> int:
         html_path = PROJECT_ROOT / html_path
     if not eml_path.is_absolute():
         eml_path = PROJECT_ROOT / eml_path
+
+    if args.wait_for_data_ready:
+        wait_for_data_ready(
+            base_url=args.base,
+            report_date=report_date,
+            timeout_minutes=args.data_ready_timeout_minutes,
+            check_interval_seconds=args.data_ready_check_interval_seconds,
+            min_stock_kline_ready_pct=args.min_stock_kline_ready_pct,
+        )
 
     api = check_api(args.base)
     if not api.ok:

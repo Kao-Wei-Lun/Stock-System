@@ -354,6 +354,19 @@ async def get_fundamental_events(
 
 # ─── Taiwan Chips ────────────────────────────────────────────
 
+@router.get("/tw/chips/coverage")
+async def get_taiwan_chip_coverage(
+    date: str | None = Query(None, description="YYYY-MM-DD"),
+):
+    target_date = None
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(400, "date must use YYYY-MM-DD") from exc
+    return await db.get_taiwan_chip_coverage(target_date.isoformat() if target_date else None)
+
+
 @router.get("/tw/chips/{ticker}")
 async def get_taiwan_chip_detail(
     ticker: str,

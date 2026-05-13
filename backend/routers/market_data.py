@@ -336,6 +336,16 @@ async def get_taiwan_universe_coverage(
     return await db.get_tw_universe_coverage(normalized_interval)
 
 
+@router.get("/tw/universe/analysis-coverage")
+async def get_taiwan_analysis_kline_coverage(
+    interval: str = Query("1d", description="1d 1wk 1mo"),
+):
+    normalized_interval = interval.strip().lower()
+    if normalized_interval not in {"1d", "1wk", "1mo"}:
+        raise HTTPException(400, "interval must be one of: 1d, 1wk, 1mo")
+    return await db.get_tw_analysis_kline_coverage(normalized_interval)
+
+
 @router.get("/tw/history/status")
 async def list_taiwan_history_status(
     interval: str | None = Query(None, description="1d 1wk 1mo"),
