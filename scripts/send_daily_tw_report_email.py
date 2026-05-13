@@ -27,6 +27,17 @@ from ai_daily_report_tw import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _configure_console_encoding() -> None:
+    """Keep Windows console logging from failing on Traditional Chinese text."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_console_encoding()
+
+
 def _load_dotenv(path: Path) -> None:
     if not path.exists():
         return
