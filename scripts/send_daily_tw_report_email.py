@@ -403,6 +403,43 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _context_preview_path(report_date: str) -> Path:
+    return PROJECT_ROOT / "log" / f"ai_daily_tw_report_{report_date}.context-preview.md"
+
+
+def _codex_analysis_path(report_date: str) -> Path:
+    return PROJECT_ROOT / "log" / f"codex_ai_analysis_{report_date}.md"
+
+
+def _report_from_context_preview(report_date: str) -> tuple[str | None, str | None]:
+    """Reuse context-only output for the final automation send step."""
+
+    preview_path = _context_preview_path(report_date)
+    analysis_path = _codex_analysis_path(report_date)
+    if not preview_path.exists() or not analysis_path.exists():
+        return None, None
+
+    preview = preview_path.read_text(encoding="utf-8")
+    analysis = analysis_path.read_text(encoding="utf-8").strip()
+    if not analysis:
+        return None, None
+
+    start = preview.find("## 1A)")
+    if start < 0:
+        return None, f"Context preview exists but section 1A was not found: {preview_path}"
+    next_heading = preview.find("\n## 2)", start)
+    if next_heading < 0:
+        return None, f"Context preview exists but section 2 was not found after 1A: {preview_path}"
+
+    section = (
+        "## 1A) Codex/AI 綜合分析\n"
+        f"- 來源：Codex 自動化分析檔 `{analysis_path}`\n\n"
+        + analysis
+        + "\n\n"
+    )
+    return preview[:start] + section + preview[next_heading + 1 :], f"Reused context preview: {preview_path}"
+
+
 def main() -> int:
     _load_dotenv(PROJECT_ROOT / ".env")
 
@@ -473,8 +510,15 @@ def main() -> int:
     if args.context_only:
         os.environ["DAILY_REPORT_AI_ANALYSIS_ENABLED"] = "false"
 
+    report = None
+    reuse_note = None
+    if not args.context_only:
+        report, reuse_note = _report_from_context_preview(report_date)
+
     api = check_api(args.base)
-    if not api.ok:
+    if report is not None:
+        pass
+    elif not api.ok:
         report = (
             f"# 每日盤後 AI 交易策略報告（台股）｜{report_date}\n\n"
             "## API 連線失敗\n"
@@ -497,6 +541,9 @@ def main() -> int:
         return 0
 
     subject = args.subject or f"台股每日盤後 AI 交易策略報告｜{report_date}"
+    if reuse_note:
+        print(reuse_note)
+
     to = args.to
     if not to:
         raise RuntimeError("Missing recipient. Set DAILY_REPORT_EMAIL_TO or pass --to.")
