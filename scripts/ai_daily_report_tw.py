@@ -327,7 +327,148 @@ def _is_relevant_news_title(ticker: str, name: str, title: object) -> bool:
     return False
 
 
-def _news_event_digest(base_url: str, ticker: str, *, name: str = "", refresh: bool = False) -> tuple[str, list[dict]]:
+def _display_ticker(record: dict) -> str:
+    payload = record.get("payload")
+    if isinstance(payload, dict):
+        display = str(payload.get("display_ticker") or "").strip()
+        if display:
+            return display
+    return str(record.get("ticker") or "—")
+
+
+def _record_published_at(record: dict, *, report_date: str) -> str:
+    published = str(record.get("published_at") or "").strip()
+    if published:
+        return published
+    date_text = str(record.get("date") or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_text):
+        return f"{date_text}T12:00:00+08:00"
+    return f"{report_date}T12:00:00+08:00"
+
+
+def _news_article_payloads_from_records(records: list[dict], *, report_date: str) -> list[dict]:
+    articles: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for record in records:
+        if str(record.get("type") or "") != "新聞":
+            continue
+        title = str(record.get("title") or "").strip()
+        if not title:
+            continue
+        ticker = str(record.get("ticker") or "MARKET").strip()[:32] or "MARKET"
+        published_at = _record_published_at(record, report_date=report_date)
+        key = (ticker, published_at, title)
+        if key in seen:
+            continue
+        seen.add(key)
+        payload = dict(record.get("payload") or {})
+        if record.get("query") and "query" not in payload:
+            payload["query"] = record.get("query")
+        display_ticker = str(record.get("display_ticker") or "").strip()
+        if display_ticker:
+            payload["display_ticker"] = display_ticker
+        articles.append(
+            {
+                "ticker": ticker,
+                "market": record.get("market") or "TW",
+                "title": title,
+                "summary": record.get("summary") or record.get("query") or record.get("source"),
+                "published_at": published_at,
+                "source": record.get("source") or "news",
+                "url": record.get("url") or "",
+                "sentiment": record.get("sentiment"),
+                "payload": payload,
+            }
+        )
+    return articles
+
+
+def _store_news_records(base_url: str, records: list[dict], *, report_date: str) -> int:
+    articles = _news_article_payloads_from_records(records, report_date=report_date)
+    if not articles:
+        return 0
+    # Persist Google RSS records in the same DB-backed news pool used by the API.
+    try:
+        response = _http_json(
+            f"{base_url}/api/news/articles",
+            method="POST",
+            json_body={"items": articles},
+            timeout=30,
+        )
+    except Exception:
+        return 0
+    if isinstance(response, dict):
+        try:
+            return int(response.get("stored") or 0)
+        except Exception:
+            return 0
+    return 0
+
+
+def _article_to_news_record(article: dict) -> dict:
+    published_at = str(article.get("published_at") or "")
+    payload = article.get("payload") if isinstance(article.get("payload"), dict) else {}
+    return {
+        "ticker": payload.get("display_ticker") or article.get("ticker") or "—",
+        "type": "新聞",
+        "date": published_at[:10] if published_at else "—",
+        "title": article.get("title") or "",
+        "source": article.get("source") or article.get("summary") or "news",
+        "url": article.get("url") or "",
+        "published_at": published_at,
+        "payload": payload,
+    }
+
+
+def _fetch_db_news_records(
+    base_url: str,
+    *,
+    report_date: str,
+    date_window_days: int = 3,
+    limit: int = 24,
+) -> list[dict]:
+    try:
+        target_date = datetime.strptime(report_date, "%Y-%m-%d").date()
+    except ValueError:
+        target_date = _now_tw().date()
+    date_from = (target_date - timedelta(days=date_window_days)).isoformat()
+    query = urllib.parse.urlencode(
+        {
+            "market": "TW",
+            "date_from": date_from,
+            "date_to": target_date.isoformat(),
+            "limit": str(limit),
+        }
+    )
+    payload = _fetch_optional_json(f"{base_url}/api/news?{query}", timeout=25)
+    return [_article_to_news_record(item) for item in payload.get("items") or [] if isinstance(item, dict)]
+
+
+def _dedupe_news_records(records: list[dict], *, limit: int | None = None) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for record in records:
+        title = str(record.get("title") or "").strip()
+        if not title:
+            continue
+        key = (str(record.get("date") or ""), title)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(record)
+        if limit is not None and len(rows) >= limit:
+            break
+    return rows
+
+
+def _news_event_digest(
+    base_url: str,
+    ticker: str,
+    *,
+    name: str = "",
+    report_date: str = "",
+    refresh: bool = False,
+) -> tuple[str, list[dict]]:
     encoded = urllib.parse.quote(ticker)
     refresh_text = "true" if refresh else "false"
     news_payload = _fetch_optional_json(
@@ -360,6 +501,20 @@ def _news_event_digest(base_url: str, ticker: str, *, name: str = "", refresh: b
                 "url": item.get("url") or "",
             }
         )
+    if not any(record.get("type") == "新聞" for record in records) and report_date:
+        google_records = _fetch_google_news_records(
+            f"{name} {ticker} 台股",
+            report_date=report_date,
+            limit=2,
+            ticker=ticker,
+            display_ticker=f"{ticker} {name}".strip(),
+        )
+        for record in google_records[:2]:
+            title = record.get("title")
+            if not title:
+                continue
+            fragments.append(f"新聞：{title}（{record.get('source') or 'Google News'} {record.get('date') or '—'}）")
+            records.append(record)
     for item in event_items[:2]:
         title = item.get("title") or item.get("event_type")
         if not title:
@@ -380,7 +535,13 @@ def _news_event_digest(base_url: str, ticker: str, *, name: str = "", refresh: b
     return ("；".join(fragments) if fragments else "暫無重大新聞/事件", records)
 
 
-def _enrich_news_for_candidates(base_url: str, candidates: list[dict], *, refresh_limit: int = 12) -> list[dict]:
+def _enrich_news_for_candidates(
+    base_url: str,
+    candidates: list[dict],
+    *,
+    report_date: str,
+    refresh_limit: int = 12,
+) -> list[dict]:
     all_records: list[dict] = []
     seen: set[str] = set()
     for index, item in enumerate(candidates):
@@ -392,10 +553,12 @@ def _enrich_news_for_candidates(base_url: str, candidates: list[dict], *, refres
             base_url,
             ticker,
             name=str(item.get("name") or ""),
+            report_date=report_date,
             refresh=index < refresh_limit,
         )
         item["news_event_digest"] = digest
         all_records.extend(records)
+    _store_news_records(base_url, all_records, report_date=report_date)
     return all_records
 
 
@@ -406,7 +569,14 @@ def _parse_rss_date(value: str) -> datetime | None:
         return None
 
 
-def _fetch_google_news_records(query: str, *, report_date: str, limit: int = 4) -> list[dict]:
+def _fetch_google_news_records(
+    query: str,
+    *,
+    report_date: str,
+    limit: int = 4,
+    ticker: str = "MARKET",
+    display_ticker: str = "市場/族群",
+) -> list[dict]:
     encoded = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     try:
@@ -443,13 +613,21 @@ def _fetch_google_news_records(query: str, *, report_date: str, limit: int = 4) 
             continue
         records.append(
             {
-                "ticker": "市場/族群",
+                "ticker": ticker,
+                "display_ticker": display_ticker,
+                "market": "TW",
                 "type": "新聞",
                 "date": published_date.isoformat() if published_date else "—",
                 "title": title,
                 "source": source,
                 "url": link,
+                "published_at": published_dt.isoformat() if published_dt else "",
                 "query": query,
+                "payload": {
+                    "query": query,
+                    "display_ticker": display_ticker,
+                    "google_news_rss": True,
+                },
             }
         )
     return records
@@ -681,7 +859,7 @@ def _build_codex_analysis_context(
         "signal_validation": signal_validation_rows[:15],
         "signal_backtest_summary": signal_backtest_summary,
         "candidates": candidates_for_ai,
-        "news_events": (market_news + news_records)[:24],
+        "news_events": _dedupe_news_records(market_news + news_records, limit=24),
     }
 
 
@@ -2455,8 +2633,18 @@ def build_report(*, base_url: str, report_date: str) -> str:
         signal_validation_by_ticker,
     )
     selected_candidates = selected_stocks + selected_etfs
-    news_records = _enrich_news_for_candidates(base_url, selected_candidates, refresh_limit=12)
-    market_news = _market_news_records(sector_rows, report_date=report_date)
+    news_records = _enrich_news_for_candidates(
+        base_url,
+        selected_candidates,
+        report_date=report_date,
+        refresh_limit=12,
+    )
+    generated_market_news = _market_news_records(sector_rows, report_date=report_date)
+    _store_news_records(base_url, generated_market_news, report_date=report_date)
+    market_news = _dedupe_news_records(
+        _fetch_db_news_records(base_url, report_date=report_date, limit=24) + generated_market_news,
+        limit=24,
+    )
     ai_max_tickers = _env_int("DAILY_REPORT_AI_MAX_TICKERS", 18, minimum=4, maximum=40)
     ai_history_days = _env_int("DAILY_REPORT_AI_HISTORY_DAYS", 22, minimum=10, maximum=60)
     codex_context = _build_codex_analysis_context(
@@ -2625,7 +2813,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.extend(_candidate_table_lines("## 8) ETF / 基金 / REIT 候選（Top 10）", selected_etfs))
 
     lines.append("## 9) 新聞與事件雷達")
-    all_news_records = market_news + news_records
+    all_news_records = _dedupe_news_records(market_news + news_records, limit=28)
     lines.append("| 標的 | 類型 | 日期 | 標題/事件 | 來源 | 連結 |")
     lines.append("|---|---|---|---|---|---|")
     if not all_news_records:
@@ -2638,7 +2826,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
                 "| "
                 + " | ".join(
                     [
-                        _table_cell(record.get("ticker")),
+                        _table_cell(_display_ticker(record)),
                         _table_cell(record.get("type")),
                         _table_cell(record.get("date")),
                         _table_cell(record.get("title"), width=82),

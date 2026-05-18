@@ -219,6 +219,9 @@ class IntelligenceMixin:
         self,
         *,
         ticker: Optional[str] = None,
+        market: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         clean_limit = max(1, min(limit, 200))
@@ -227,6 +230,16 @@ class IntelligenceMixin:
         if ticker:
             filters.append("`ticker`=%s")
             params.append(ticker)
+        if market:
+            filters.append("`market`=%s")
+            params.append(market)
+        if date_from:
+            filters.append("`published_at`>=%s")
+            params.append(_parse_datetime_value(date_from) or date_from)
+        if date_to:
+            filters.append("`published_at`<=%s")
+            end_value = f"{date_to} 23:59:59" if len(str(date_to)) == 10 else date_to
+            params.append(_parse_datetime_value(end_value) or end_value)
         rows = await self._fetchall(
             f"""
             SELECT *

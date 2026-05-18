@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from data_fetcher import normalize_ticker
@@ -281,9 +281,42 @@ async def get_ticker_events(
 @router.get("/news")
 async def get_news_feed(
     limit: int = Query(20, ge=1, le=100),
+    ticker: str | None = Query(None),
+    market: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
 ):
-    items = await db.list_news_articles(limit=limit)
+    query_args = {"limit": limit}
+    if ticker:
+        query_args["ticker"] = normalize_ticker(ticker)
+    if market:
+        query_args["market"] = market
+    if date_from:
+        query_args["date_from"] = date_from
+    if date_to:
+        query_args["date_to"] = date_to
+    items = await db.list_news_articles(**query_args)
     return {"items": items}
+
+
+@router.post("/news/articles")
+async def upsert_news_articles(
+    payload: list[dict] | dict = Body(...),
+):
+    if isinstance(payload, dict):
+        raw_items = payload.get("items")
+    else:
+        raw_items = payload
+    if not isinstance(raw_items, list):
+        raise HTTPException(status_code=400, detail="payload must be a list or an object with items")
+    items = [item for item in raw_items if isinstance(item, dict)]
+    if not items:
+        return {"stored": 0}
+    try:
+        stored = await db.upsert_news_articles(items)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"stored": stored}
 
 
 @router.get("/news/{ticker}")

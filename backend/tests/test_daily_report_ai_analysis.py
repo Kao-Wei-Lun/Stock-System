@@ -115,3 +115,48 @@ def test_candidate_tables_are_split_for_email_readability():
     html = report_tw.markdown_to_email_html("\n".join(lines))
     assert "table-layout:fixed" in html
     assert "overflow-wrap:anywhere" in html
+
+
+def test_google_news_records_are_db_article_payloads():
+    records = [
+        {
+            "ticker": "MARKET",
+            "display_ticker": "市場/族群",
+            "market": "TW",
+            "type": "新聞",
+            "date": "2026-05-18",
+            "title": "台股盤後焦點",
+            "source": "Google News",
+            "url": "https://example.com/news",
+            "query": "台股 盤後 2026-05-18",
+            "payload": {"display_ticker": "市場/族群"},
+        }
+    ]
+
+    payloads = report_tw._news_article_payloads_from_records(records, report_date="2026-05-18")
+
+    assert payloads == [
+        {
+            "ticker": "MARKET",
+            "market": "TW",
+            "title": "台股盤後焦點",
+            "summary": "台股 盤後 2026-05-18",
+            "published_at": "2026-05-18T12:00:00+08:00",
+            "source": "Google News",
+            "url": "https://example.com/news",
+            "sentiment": None,
+            "payload": {"display_ticker": "市場/族群", "query": "台股 盤後 2026-05-18"},
+        }
+    ]
+
+
+def test_news_record_dedupe_uses_date_and_title():
+    rows = report_tw._dedupe_news_records(
+        [
+            {"ticker": "MARKET", "date": "2026-05-18", "title": "同一則新聞"},
+            {"ticker": "2330.TW 台積電", "date": "2026-05-18", "title": "同一則新聞"},
+            {"ticker": "MARKET", "date": "2026-05-18", "title": "另一則新聞"},
+        ]
+    )
+
+    assert [row["title"] for row in rows] == ["同一則新聞", "另一則新聞"]
