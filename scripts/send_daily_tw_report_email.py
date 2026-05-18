@@ -25,6 +25,7 @@ if str(BACKEND_DIR) not in sys.path:
 from ai_daily_report_tw import (
     _http_json,
     _now_tw,
+    _sanitize_codex_analysis_text,
     build_report,
     check_api,
     markdown_to_email_html,
@@ -342,7 +343,8 @@ def _report_from_context_preview(report_date: str) -> tuple[str | None, str | No
         return None, None
 
     preview = preview_path.read_text(encoding="utf-8")
-    analysis = analysis_path.read_text(encoding="utf-8").strip()
+    raw_analysis = analysis_path.read_text(encoding="utf-8").strip()
+    analysis, _removed_sections = _sanitize_codex_analysis_text(raw_analysis)
     if not analysis:
         return None, None
 

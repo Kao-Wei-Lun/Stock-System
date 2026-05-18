@@ -461,6 +461,136 @@ def _dedupe_news_records(records: list[dict], *, limit: int | None = None) -> li
     return rows
 
 
+def _news_category(record: dict) -> str:
+    ticker = str(record.get("ticker") or "").upper().strip()
+    display = _display_ticker(record).upper()
+    title = str(record.get("title") or "")
+    query = str(record.get("query") or (record.get("payload") or {}).get("query") or "")
+    text = f"{title} {query}".lower()
+    if ticker in {"MARKET", "^TWII", "^TWOII"} or "市場" in display:
+        return "market"
+    if any(keyword.lower() in text for keyword in ["vix", "nvidia", "walmart", "美元", "美債", "費半", "nasdaq", "dow", "sox"]):
+        return "global_macro"
+    if any(keyword in query for keyword in ["族群", "轉強", "半導體", "ai 伺服器"]):
+        return "sector"
+    if ticker and ticker not in {"MARKET"}:
+        return "candidate"
+    return "other"
+
+
+def _news_relevance(record: dict, *, candidate_tickers: set[str], sectors: set[str]) -> tuple[int, str]:
+    ticker = str(record.get("ticker") or "").upper().strip()
+    title = str(record.get("title") or "")
+    query = str(record.get("query") or (record.get("payload") or {}).get("query") or "")
+    text = f"{title} {query}"
+    if ticker in candidate_tickers:
+        return 95, "新聞直接對應候選標的"
+    for sector in sectors:
+        if sector and sector in text:
+            return 80, f"新聞提及候選族群：{sector}"
+    if any(keyword in text for keyword in ["台股", "盤後", "法人", "期貨", "選擇權", "費半", "美元", "美債", "VIX"]):
+        return 65, "市場或風險因子相關"
+    if any(keyword.lower() in text.lower() for keyword in ["nvidia", "walmart", "sox", "nasdaq"]):
+        return 55, "國際事件可能影響風險偏好"
+    return 25, "與候選標的或族群連結較弱，僅作事件備查"
+
+
+def _news_record_for_ai(record: dict, *, candidate_tickers: set[str], sectors: set[str]) -> dict:
+    relevance_score, relevance_reason = _news_relevance(record, candidate_tickers=candidate_tickers, sectors=sectors)
+    return {
+        "ticker": record.get("ticker"),
+        "display_ticker": _display_ticker(record),
+        "category": _news_category(record),
+        "date": record.get("date"),
+        "published_at": record.get("published_at"),
+        "title": record.get("title"),
+        "source": record.get("source"),
+        "url": record.get("url"),
+        "relevance_score": relevance_score,
+        "relevance_reason": relevance_reason,
+        "query": record.get("query") or (record.get("payload") or {}).get("query"),
+    }
+
+
+def _news_packet_for_ai(
+    *,
+    candidates: list[dict],
+    sector_rows: list[dict],
+    news_records: list[dict],
+    market_news: list[dict],
+    limit: int = 40,
+) -> dict:
+    candidate_tickers = {str(item.get("ticker") or "").upper().strip() for item in candidates if item.get("ticker")}
+    sectors = {str(item.get("sector") or item.get("industry") or "").strip() for item in candidates}
+    sectors.update(str(row.get("sector") or "").strip() for row in sector_rows)
+    sectors.discard("")
+    rows = [
+        _news_record_for_ai(record, candidate_tickers=candidate_tickers, sectors=sectors)
+        for record in _dedupe_news_records(market_news + news_records, limit=limit)
+    ]
+    rows.sort(key=lambda row: (row.get("relevance_score") or 0, str(row.get("published_at") or row.get("date") or "")), reverse=True)
+    grouped: dict[str, list[dict]] = {
+        "candidate_news": [],
+        "sector_news": [],
+        "market_news": [],
+        "global_macro_news": [],
+        "low_relevance_news": [],
+    }
+    for row in rows:
+        category = row.get("category")
+        relevance = int(row.get("relevance_score") or 0)
+        if relevance < 40:
+            grouped["low_relevance_news"].append(row)
+        elif category == "candidate":
+            grouped["candidate_news"].append(row)
+        elif category == "sector":
+            grouped["sector_news"].append(row)
+        elif category == "global_macro":
+            grouped["global_macro_news"].append(row)
+        else:
+            grouped["market_news"].append(row)
+    return {
+        "policy": "AI should interpret high/medium relevance news and leave low relevance items as appendix-only evidence.",
+        "items": rows,
+        **grouped,
+    }
+
+
+def _data_quality_flags_for_ai(*, coverage: dict, status_counts: Counter, taifex: dict | None) -> list[dict]:
+    flags: list[dict] = []
+    cov_pct = _to_float(coverage.get("coverage_pct")) or 0.0
+    if cov_pct < 95:
+        flags.append(
+            {
+                "level": "warning",
+                "label": "台股日K資料池未完整",
+                "detail": f"coverage={_fmt_num(cov_pct, 2)}%，AI 對低流動性或缺資料標的需降權。",
+            }
+        )
+    non_success = sum(int(v or 0) for key, v in status_counts.items() if key != "success")
+    if non_success:
+        flags.append(
+            {
+                "level": "warning",
+                "label": "仍有未成功同步標的",
+                "detail": "；".join(f"{key}={_fmt_int(value)}" for key, value in sorted(status_counts.items()) if key != "success"),
+            }
+        )
+    if isinstance(taifex, dict):
+        for ticker, threshold in {"^TWII": 10.0, "^TWOII": 15.0}.items():
+            card = _get_spot_card(taifex, ticker)
+            change_pct = _to_float((card or {}).get("change_pct")) if isinstance(card, dict) else None
+            if change_pct is not None and abs(change_pct) >= threshold:
+                flags.append(
+                    {
+                        "level": "warning",
+                        "label": f"{ticker} 指數漲跌幅疑似異常",
+                        "detail": f"change_pct={_fmt_num(change_pct, 2)}%，AI 不應將此數字單獨視為市場常態訊號。",
+                    }
+                )
+    return flags
+
+
 def _news_event_digest(
     base_url: str,
     ticker: str,
@@ -765,17 +895,214 @@ def _daily_rows_for_ai(rows: list[dict], *, history_days: int) -> list[dict]:
     return compact_rows
 
 
+def _last_float_values(rows: list[dict], key: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = _to_float(row.get(key))
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _average(values: list[float]) -> float | None:
+    usable = [value for value in values if value is not None]
+    return sum(usable) / len(usable) if usable else None
+
+
+def _round_unique_levels(levels: list[float | None], *, limit: int = 3) -> list[float]:
+    rounded: list[float] = []
+    for level in levels:
+        if level is None or level <= 0:
+            continue
+        value = round(float(level), 2)
+        if any(abs(value - existing) <= max(0.02, existing * 0.001) for existing in rounded):
+            continue
+        rounded.append(value)
+        if len(rounded) >= limit:
+            break
+    return rounded
+
+
+def _one_month_trend_state(*, close: float | None, ma5: float | None, ma10: float | None, ma20: float | None, month_return: float | None) -> str:
+    if close is None:
+        return "insufficient_data"
+    if ma5 is not None and ma10 is not None and ma20 is not None:
+        if close >= ma5 >= ma10 >= ma20:
+            return "short_term_uptrend"
+        if close >= ma20 and ma5 is not None and ma10 is not None and ma5 >= ma10:
+            return "constructive_above_ma20"
+        if close < ma20:
+            return "below_ma20"
+    if month_return is not None and month_return > 8:
+        return "one_month_momentum"
+    if month_return is not None and month_return < -5:
+        return "one_month_weak"
+    return "sideways_to_breakout"
+
+
+def _technical_risk_notes(
+    *,
+    item: dict,
+    latest_row: dict,
+    close: float | None,
+    ma20: float | None,
+    volume_ratio_20d: float | None,
+    breakout_price: float | None,
+) -> list[str]:
+    notes: list[str] = []
+    if str(item.get("signal_status") or "").lower() == "invalidated":
+        notes.append("訊號狀態已失效，需等待重新轉強")
+    high = _to_float(latest_row.get("high"))
+    low = _to_float(latest_row.get("low"))
+    if high is not None and low is not None and close is not None and high > low:
+        upper_shadow_ratio = (high - close) / (high - low)
+        if upper_shadow_ratio >= 0.45:
+            notes.append("上影線偏長，追價風險較高")
+    if close is not None and ma20 is not None and ma20 > 0 and (close / ma20 - 1) * 100 >= 12:
+        notes.append("短線離 MA20 偏遠，回測風險升高")
+    if breakout_price is not None and close is not None and close < breakout_price and volume_ratio_20d is not None and volume_ratio_20d < 0.8:
+        notes.append("尚未突破且量能不足")
+    return notes[:3]
+
+
+def _technical_profile_for_ai(item: dict, daily_rows: list[dict]) -> dict:
+    rows = [row for row in daily_rows if isinstance(row, dict)]
+    closes = _last_float_values(rows, "close")
+    highs = _last_float_values(rows, "high")
+    lows = _last_float_values(rows, "low")
+    volumes = _last_float_values(rows, "volume")
+    latest_row = rows[-1] if rows else {}
+    latest_close = closes[-1] if closes else _candidate_latest_close(item)
+    ma5 = _simple_ma(closes, 5) if len(closes) >= 5 else None
+    ma10 = _simple_ma(closes, 10) if len(closes) >= 10 else None
+    ma20 = _simple_ma(closes, 20) if len(closes) >= 20 else None
+    prev_ma5 = _simple_ma(closes, 5, end_index=len(closes) - 1) if len(closes) >= 6 else None
+    ma5_slope = ((ma5 / prev_ma5) - 1) * 100 if ma5 is not None and prev_ma5 and prev_ma5 > 0 else None
+    avg_vol_5 = _average(volumes[-6:-1]) if len(volumes) >= 6 else _average(volumes[:-1])
+    avg_vol_20 = _average(volumes[-21:-1]) if len(volumes) >= 21 else _average(volumes[:-1])
+    latest_volume = volumes[-1] if volumes else None
+    volume_ratio_5 = latest_volume / avg_vol_5 if latest_volume is not None and avg_vol_5 and avg_vol_5 > 0 else None
+    volume_ratio_20 = latest_volume / avg_vol_20 if latest_volume is not None and avg_vol_20 and avg_vol_20 > 0 else None
+    month_return = ((latest_close / closes[0]) - 1) * 100 if latest_close is not None and closes and closes[0] else None
+    high_20 = max(highs[-20:]) if highs else None
+    low_20 = min(lows[-20:]) if lows else None
+    high_5 = max(highs[-5:]) if highs else None
+    low_5 = min(lows[-5:]) if lows else None
+    breakout_price = _candidate_breakout_price(item)
+    signal_low = _candidate_signal_low(item)
+
+    support_levels = _round_unique_levels(
+        sorted(
+            [
+                signal_low,
+                low_5,
+                ma5 if ma5 is not None and latest_close is not None and ma5 <= latest_close else None,
+                ma10 if ma10 is not None and latest_close is not None and ma10 <= latest_close else None,
+                ma20 if ma20 is not None and latest_close is not None and ma20 <= latest_close else None,
+                low_20,
+            ],
+            key=lambda value: abs((latest_close or 0) - (value or 0)) if value is not None else float("inf"),
+        ),
+        limit=4,
+    )
+    resistance_levels = _round_unique_levels(
+        sorted(
+            [
+                breakout_price,
+                high_5,
+                high_20,
+                ma5 if ma5 is not None and latest_close is not None and ma5 > latest_close else None,
+                ma10 if ma10 is not None and latest_close is not None and ma10 > latest_close else None,
+                ma20 if ma20 is not None and latest_close is not None and ma20 > latest_close else None,
+            ],
+            key=lambda value: abs((latest_close or 0) - (value or 0)) if value is not None else float("inf"),
+        ),
+        limit=4,
+    )
+    trend_state = _one_month_trend_state(
+        close=latest_close,
+        ma5=ma5,
+        ma10=ma10,
+        ma20=ma20,
+        month_return=month_return,
+    )
+    technical_risks = _technical_risk_notes(
+        item=item,
+        latest_row=latest_row,
+        close=latest_close,
+        ma20=ma20,
+        volume_ratio_20d=volume_ratio_20,
+        breakout_price=breakout_price,
+    )
+    return {
+        "daily_bar_count": len(rows),
+        "as_of_date": str(latest_row.get("date") or "")[:10] if latest_row else None,
+        "latest_close": _round_float(latest_close),
+        "ma5": _round_float(ma5),
+        "ma10": _round_float(ma10),
+        "ma20": _round_float(ma20),
+        "ma5_slope_pct": _round_float(ma5_slope),
+        "close_vs_ma5_pct": _round_float(((latest_close / ma5) - 1) * 100 if latest_close is not None and ma5 else None),
+        "close_vs_ma20_pct": _round_float(((latest_close / ma20) - 1) * 100 if latest_close is not None and ma20 else None),
+        "one_month_return_pct": _round_float(month_return),
+        "month_high": _round_float(high_20),
+        "month_low": _round_float(low_20),
+        "five_day_high": _round_float(high_5),
+        "five_day_low": _round_float(low_5),
+        "volume_avg_5d": _round_float(avg_vol_5, 0),
+        "volume_avg_20d": _round_float(avg_vol_20, 0),
+        "volume_ratio_5d": _round_float(volume_ratio_5),
+        "volume_ratio_20d": _round_float(volume_ratio_20),
+        "one_month_trend": trend_state,
+        "candle_pattern": ((item.get("candlestick_profile") or {}).get("summary") or ""),
+        "support_levels": support_levels,
+        "resistance_levels": resistance_levels,
+        "breakout_trigger": _round_float(breakout_price),
+        "failure_level": _round_float(signal_low or low_5 or ma20),
+        "continuation_condition": (
+            f"突破並收盤站上 {_fmt_num(breakout_price, 2)}，且量比20日不低於1"
+            if breakout_price is not None
+            else "量價同步轉強且收盤站回短期均線"
+        ),
+        "invalidation_condition": (
+            f"跌破 {_fmt_num(signal_low or low_5 or ma20, 2)}"
+            if (signal_low or low_5 or ma20) is not None
+            else "跌破最近有效低點"
+        ),
+        "technical_risk": "；".join(technical_risks) if technical_risks else "等待突破與量能確認",
+    }
+
+
+def _primary_role_for_ai(item: dict, validation: dict) -> str:
+    status = str(validation.get("signal_status") or item.get("signal_status") or "").lower()
+    if status == "confirmed_uptrend":
+        return "validation_followup"
+    if status in {"failed_breakout", "invalidated"}:
+        return "risk_watch"
+    if _is_etf_like(item):
+        return "etf_tool"
+    if _has_breakout_signal(item):
+        return "technical_breakout"
+    if _positive_chip(item):
+        return "institutional_accumulation"
+    return "appendix_only"
+
+
 def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_rows: list[dict]) -> dict:
     ticker = str(item.get("ticker") or "").upper().strip()
     validation = validation_by_ticker.get(ticker) or {}
     ap = item.get("accumulation_profile") or {}
     chip = ap.get("chip") or {}
     cp = item.get("candlestick_profile") or {}
+    technical_profile = _technical_profile_for_ai(item, daily_rows)
     return {
         "ticker": ticker,
         "name": item.get("name"),
         "instrument_type": _instrument_type(item),
         "sector": item.get("sector") or item.get("industry"),
+        "primary_role": _primary_role_for_ai(item, validation),
         "total_score": item.get("total_score"),
         "score_breakdown": {
             "price_score": item.get("price_score"),
@@ -802,6 +1129,22 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
         },
         "news_event_digest": item.get("news_event_digest"),
         "one_month_daily_bars": daily_rows,
+        "daily_bars_1m": daily_rows,
+        "technical_profile": technical_profile,
+        "support_resistance": {
+            "support_levels": technical_profile.get("support_levels"),
+            "resistance_levels": technical_profile.get("resistance_levels"),
+            "breakout_trigger": technical_profile.get("breakout_trigger"),
+            "failure_level": technical_profile.get("failure_level"),
+            "continuation_condition": technical_profile.get("continuation_condition"),
+            "invalidation_condition": technical_profile.get("invalidation_condition"),
+        },
+        "volume_profile": {
+            "volume_avg_5d": technical_profile.get("volume_avg_5d"),
+            "volume_avg_20d": technical_profile.get("volume_avg_20d"),
+            "volume_ratio_5d": technical_profile.get("volume_ratio_5d"),
+            "volume_ratio_20d": technical_profile.get("volume_ratio_20d"),
+        },
     }
 
 
@@ -839,17 +1182,37 @@ def _build_codex_analysis_context(
     for item in ticker_pool:
         ticker = str(item.get("ticker") or "").upper().strip()
         rows = _fetch_recent_daily_rows(base_url, ticker, period="3mo") if ticker else []
-        candidates_for_ai.append(_candidate_for_ai(item, validation_by_ticker, _daily_rows_for_ai(rows, history_days=history_days)))
+        daily_rows = _daily_rows_for_ai(rows, history_days=history_days)
+        candidates_for_ai.append(_candidate_for_ai(item, validation_by_ticker, daily_rows))
 
     return {
         "report_date": report_date,
         "codex_analysis_output_path": str(_codex_automation_analysis_path(report_date)),
+        "ai_output_contract": {
+            "allowed_sections": [
+                "AI 今日主結論",
+                "新聞與事件解讀",
+                "技術面重點",
+                "優先觀察清單",
+                "降權與排除",
+                "隔日操作條件",
+            ],
+            "avoid_duplicate_sections": [
+                "可能轉強族群",
+                "ETF / 基金 / REIT 候選",
+                "新聞與事件雷達",
+                "隔日三情境交易策略",
+                "完整候選表",
+            ],
+            "note": "AI section is a decision synthesis. Deterministic tables remain the single source of tabular truth later in the report.",
+        },
         "data_policy": {
             "history_days_per_candidate": history_days,
-            "note": "AI receives compact 1-month daily bars plus computed scores; raw screening remains deterministic.",
+            "note": "AI receives at least one month of compact daily bars, technical profiles, news packet, and computed scores; raw screening remains deterministic.",
         },
         "coverage": coverage,
         "history_status_counts": dict(status_counts),
+        "data_quality_flags": _data_quality_flags_for_ai(coverage=coverage, status_counts=status_counts, taifex=taifex),
         "market_context": market_context,
         "taifex_summary": {
             "resolved_date": (taifex or {}).get("resolved_date") if isinstance(taifex, dict) else None,
@@ -859,7 +1222,14 @@ def _build_codex_analysis_context(
         "signal_validation": signal_validation_rows[:15],
         "signal_backtest_summary": signal_backtest_summary,
         "candidates": candidates_for_ai,
-        "news_events": _dedupe_news_records(market_news + news_records, limit=24),
+        "news_packet": _news_packet_for_ai(
+            candidates=ticker_pool,
+            sector_rows=sector_rows,
+            news_records=news_records,
+            market_news=market_news,
+            limit=40,
+        ),
+        "news_events": _dedupe_news_records(market_news + news_records, limit=40),
     }
 
 
@@ -903,6 +1273,52 @@ def _extract_openai_response_text(payload: dict) -> str:
     return "\n\n".join(chunks).strip()
 
 
+_DUPLICATE_AI_SECTION_KEYWORDS = (
+    "可能轉強族群",
+    "個股觀察清單",
+    "ETF / 基金 / REIT 觀察",
+    "ETF / 基金 / REIT 候選",
+    "新聞與事件雷達",
+    "隔日三情境交易策略",
+    "訊號後績效驗證摘要",
+    "法人偏多候選",
+    "強勢股 / 多頭股",
+    "完整候選表",
+)
+
+
+def _sanitize_codex_analysis_text(text: str) -> tuple[str, list[str]]:
+    """Keep Codex/AI output focused on synthesis and remove duplicate report tables."""
+
+    removed: list[str] = []
+    kept: list[str] = []
+    skipping = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        heading = re.match(r"^(#{1,4})\s+(.+?)\s*$", line)
+        if heading:
+            title = heading.group(2).strip()
+            if title.lower().startswith("codex/ai"):
+                skipping = False
+                continue
+            duplicate = next((keyword for keyword in _DUPLICATE_AI_SECTION_KEYWORDS if keyword in title), None)
+            if duplicate:
+                removed.append(title)
+                skipping = True
+                continue
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    sanitized = "\n".join(kept).strip()
+    if removed:
+        sanitized += (
+            "\n\n> 已省略 AI 檔內與正式資料表重複的章節："
+            + "、".join(dict.fromkeys(removed))
+            + "。完整表格請以下方程式產生區塊為準。"
+        )
+    return sanitized, removed
+
+
 def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | None]:
     api_key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
@@ -913,7 +1329,11 @@ def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | No
     instructions = (
         "你是保守、嚴謹的台股盤後交易策略分析助理。"
         "只能根據輸入 JSON 的資料解讀，不得編造未提供的價格、新聞、財報或籌碼。"
-        "請使用繁體中文，輸出 Markdown，包含：大盤/風險、轉強族群、個股觀察、ETF觀察、隔日策略、風險提醒。"
+        "請使用繁體中文，輸出 Markdown。"
+        "AI 段落只能做決策綜合，不要重複輸出正式報告後段已有的完整資料表。"
+        "必須包含以下小節：AI 今日主結論、新聞與事件解讀、技術面重點、優先觀察清單、降權與排除、隔日操作條件。"
+        "新聞解讀需使用 news_packet，區分高相關、中相關與低相關；低相關新聞只做附錄提醒。"
+        "技術分析必須根據 daily_bars_1m 與 technical_profile，說明 K 線型態、支撐、壓力、續強條件與失敗條件。"
         "候選標的是觀察清單，不是買賣建議；避免保證式語氣。"
     )
     user_text = (
@@ -948,11 +1368,12 @@ def _codex_analysis_section(context: dict) -> list[str]:
     report_date = str(context.get("report_date") or _now_tw().strftime("%Y-%m-%d"))
     automation_text, automation_path = _read_codex_automation_analysis(report_date)
     if automation_text and not automation_text.startswith("Codex analysis file read failed:"):
+        sanitized_text, _removed = _sanitize_codex_analysis_text(automation_text)
         return [
             "## 1A) Codex/AI 綜合分析",
             f"- 來源：Codex 自動化分析檔 `{automation_path}`",
             "",
-            automation_text,
+            sanitized_text or "（Codex/AI 分析檔沒有可放入主報告的摘要內容。）",
             "",
         ]
 
@@ -980,7 +1401,8 @@ def _codex_analysis_section(context: dict) -> list[str]:
             "- 已改用程式規則報告；候選標的、分數、訊號驗證與新聞事件仍正常輸出。",
             "",
         ]
-    return ["## 1A) Codex/AI 綜合分析", text or "（AI 未回傳內容）", ""]
+    sanitized_text, _removed = _sanitize_codex_analysis_text(text or "")
+    return ["## 1A) Codex/AI 綜合分析", sanitized_text or "（AI 未回傳內容）", ""]
 
 
 def _simple_ma(values: list[float], window: int, *, end_index: int | None = None) -> float | None:
@@ -2646,7 +3068,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         limit=24,
     )
     ai_max_tickers = _env_int("DAILY_REPORT_AI_MAX_TICKERS", 18, minimum=4, maximum=40)
-    ai_history_days = _env_int("DAILY_REPORT_AI_HISTORY_DAYS", 22, minimum=10, maximum=60)
+    ai_history_days = _env_int("DAILY_REPORT_AI_HISTORY_DAYS", 30, minimum=22, maximum=60)
     codex_context = _build_codex_analysis_context(
         base_url=base_url,
         report_date=report_date,
