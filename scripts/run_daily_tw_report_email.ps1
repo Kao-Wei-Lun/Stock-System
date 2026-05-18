@@ -25,6 +25,7 @@ $Arguments = @(
     "--out", "log\ai_daily_tw_report_$ReportDate.md",
     "--html-out", "log\ai_daily_tw_report_$ReportDate.html",
     "--eml-out", "log\ai_daily_tw_report_$ReportDate.eml",
+    "--send-mode", "backend",
     "--wait-for-data-ready",
     "--data-ready-timeout-minutes", "180",
     "--data-ready-check-interval-seconds", "300",

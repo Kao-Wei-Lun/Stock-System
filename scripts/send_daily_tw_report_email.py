@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import os
@@ -11,8 +12,15 @@ import smtplib
 import sys
 import time
 from email.message import EmailMessage
-from email.utils import formatdate, make_msgid
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_DIR = PROJECT_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from ai_daily_report_tw import (
     _http_json,
@@ -22,9 +30,14 @@ from ai_daily_report_tw import (
     markdown_to_email_html,
     markdown_to_plain_text,
 )
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from email_delivery import (
+    build_message as _shared_build_message,
+    load_smtp_config as _shared_smtp_config,
+    send_with_smtp as _shared_send_with_smtp,
+    smtp_attempts as _shared_smtp_attempts,
+    smtp_failure_message as _shared_smtp_failure_message,
+    socket_probe as _shared_socket_probe,
+)
 
 
 def _configure_console_encoding() -> None:
@@ -284,118 +297,27 @@ def wait_for_data_ready(
 
 
 def _smtp_config() -> dict[str, object]:
-    host = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip()
-    port = int(os.environ.get("SMTP_PORT", "587").strip())
-    username = os.environ.get("SMTP_USERNAME", "").strip()
-    password = "".join(os.environ.get("SMTP_PASSWORD", "").split())
-    sender = os.environ.get("SMTP_FROM", username).strip()
-    starttls = _bool_env("SMTP_STARTTLS", True)
-    ssl = _bool_env("SMTP_SSL", False)
-    if not username:
-        raise RuntimeError("Missing SMTP_USERNAME in .env")
-    if not password:
-        raise RuntimeError("Missing SMTP_PASSWORD in .env")
-    if not sender:
-        raise RuntimeError("Missing SMTP_FROM in .env")
-    return {
-        "host": host,
-        "port": port,
-        "username": username,
-        "password": password,
-        "sender": sender,
-        "starttls": starttls,
-        "ssl": ssl,
-    }
+    return _shared_smtp_config()
 
 
 def _smtp_attempts(config: dict[str, object]) -> list[dict[str, object]]:
-    host = str(config["host"])
-    primary = dict(config)
-    attempts = [primary]
-    fallback_ports = os.environ.get("SMTP_FALLBACK_PORTS", "").strip()
-    if fallback_ports:
-        for raw_port in fallback_ports.split(","):
-            raw_port = raw_port.strip()
-            if not raw_port:
-                continue
-            port = int(raw_port)
-            attempts.append({**config, "port": port, "starttls": port == 587, "ssl": port == 465})
-    elif host.lower() == "smtp.gmail.com":
-        attempts.append({**config, "port": 465, "starttls": False, "ssl": True})
-        attempts.append({**config, "port": 587, "starttls": True, "ssl": False})
-
-    deduped: list[dict[str, object]] = []
-    seen: set[tuple[str, int, bool, bool]] = set()
-    for attempt in attempts:
-        key = (
-            str(attempt["host"]),
-            int(attempt["port"]),
-            bool(attempt.get("starttls")),
-            bool(attempt.get("ssl")),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(attempt)
-    return deduped
+    return _shared_smtp_attempts(config)
 
 
 def _socket_probe(host: str, port: int) -> str:
-    try:
-        with socket.create_connection((host, port), timeout=10) as sock:
-            return f"socket ok peer={sock.getpeername()}"
-    except Exception as exc:  # noqa: BLE001
-        return f"socket failed: {type(exc).__name__}: {exc}"
+    return _shared_socket_probe(host, port)
 
 
 def _send_with_smtp(message: EmailMessage, config: dict[str, object]) -> None:
-    host = str(config["host"])
-    port = int(config["port"])
-    username = str(config["username"])
-    password = str(config["password"])
-    use_ssl = bool(config.get("ssl"))
-    use_starttls = bool(config.get("starttls")) and not use_ssl
-
-    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
-    with smtp_cls(host, port, timeout=60) as smtp:
-        smtp.ehlo()
-        if use_starttls:
-            smtp.starttls()
-            smtp.ehlo()
-        smtp.login(username, password)
-        smtp.send_message(message)
+    _shared_send_with_smtp(message, config)
 
 
 def _smtp_failure_message(errors: list[tuple[dict[str, object], BaseException]]) -> str:
-    details: list[str] = []
-    for config, exc in errors:
-        host = str(config["host"])
-        port = int(config["port"])
-        starttls = bool(config.get("starttls")) and not bool(config.get("ssl"))
-        use_ssl = bool(config.get("ssl"))
-        details.append(
-            f"- host={host}, port={port}, starttls={starttls}, ssl={use_ssl}, "
-            f"{_socket_probe(host, port)}, error={type(exc).__name__}: {exc}"
-        )
-    return (
-        "SMTP send failed after all attempts.\n"
-        f"Python executable: {sys.executable}\n"
-        + "\n".join(details)
-        + "\nNext steps: if socket failed with WinError 10013, allow this python.exe outbound TCP "
-        "in Windows Firewall / endpoint policy, or run the Windows Scheduled Task created for this project."
-    )
+    return _shared_smtp_failure_message(errors)
 
 
 def _build_message(*, sender: str, to: str, subject: str, plain_text: str, html_text: str) -> EmailMessage:
-    msg = EmailMessage()
-    msg["From"] = sender
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain="quantvision.local")
-    msg.set_content(plain_text, subtype="plain", charset="utf-8")
-    msg.add_alternative(html_text, subtype="html", charset="utf-8")
-    return msg
+    return _shared_build_message(sender=sender, to=to, subject=subject, plain_text=plain_text, html_text=html_text)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -440,6 +362,48 @@ def _report_from_context_preview(report_date: str) -> tuple[str | None, str | No
     return preview[:start] + section + preview[next_heading + 1 :], f"Reused context preview: {preview_path}"
 
 
+def _recipient_list(to: str) -> list[str]:
+    return [part.strip() for part in to.replace(";", ",").split(",") if part.strip()]
+
+
+def _backend_email_url(base_url: str) -> str:
+    explicit = os.environ.get("DAILY_REPORT_BACKEND_EMAIL_URL", "").strip()
+    if explicit:
+        return explicit
+    return f"{base_url.rstrip('/')}/api/reports/daily-tw/email"
+
+
+def _send_via_backend_email_api(*, base_url: str, report_date: str, to: str, subject: str) -> dict[str, object]:
+    payload = {
+        "report_date": report_date,
+        "to": _recipient_list(to),
+        "subject": subject,
+    }
+    if not payload["to"]:
+        raise RuntimeError("Missing recipient. Set DAILY_REPORT_EMAIL_TO or pass --to.")
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        _backend_email_url(base_url),
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    token = os.environ.get("REPORT_EMAIL_API_TOKEN", "").strip()
+    if token:
+        request.add_header("X-Report-Email-Token", token)
+
+    try:
+        with urlopen(request, timeout=120) as response:
+            text = response.read().decode("utf-8")
+            return json.loads(text) if text else {}
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Backend email API failed: HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Backend email API unavailable: {exc.reason}") from exc
+
+
 def main() -> int:
     _load_dotenv(PROJECT_ROOT / ".env")
 
@@ -452,6 +416,12 @@ def main() -> int:
     parser.add_argument("--to", default=os.environ.get("DAILY_REPORT_EMAIL_TO", "").strip())
     parser.add_argument("--subject", default="")
     parser.add_argument("--dry-run", action="store_true", help="Write .eml if requested but do not send")
+    parser.add_argument(
+        "--send-mode",
+        choices=("auto", "backend", "direct"),
+        default=os.environ.get("DAILY_REPORT_SEND_MODE", "auto").strip().lower() or "auto",
+        help="Email delivery mode: auto tries backend API then direct SMTP; backend uses the local API only; direct sends SMTP from this process.",
+    )
     parser.add_argument(
         "--context-only",
         action="store_true",
@@ -557,6 +527,33 @@ def main() -> int:
         print(f"Markdown written to: {md_path}")
         print(f"HTML written to: {html_path}")
         return 0
+
+    if args.send_mode in {"auto", "backend"}:
+        try:
+            result = _send_via_backend_email_api(
+                base_url=args.base,
+                report_date=report_date,
+                to=to,
+                subject=subject,
+            )
+            smtp = result.get("smtp") if isinstance(result, dict) else {}
+            print(f"Email sent via backend API to: {to}")
+            if isinstance(smtp, dict) and smtp:
+                print(
+                    "Backend SMTP used: "
+                    f"{smtp.get('host')}:{smtp.get('port')} "
+                    f"ssl={bool(smtp.get('ssl'))} starttls={bool(smtp.get('starttls'))}"
+                )
+            print(f"Markdown written to: {md_path}")
+            print(f"HTML written to: {html_path}")
+            if args.eml_out:
+                eml_value = result.get("eml_path") if isinstance(result, dict) else None
+                print(f"EML written to: {eml_value or eml_path}")
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            if args.send_mode == "backend":
+                raise
+            print(f"Backend email API failed; falling back to direct SMTP: {exc}", file=sys.stderr)
 
     config = _smtp_config()
     message = _build_message(
