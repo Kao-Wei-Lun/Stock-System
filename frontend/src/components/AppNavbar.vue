@@ -249,7 +249,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .app-navbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1.15fr) minmax(420px, 1fr);
+  grid-template-areas: "brand nav tools";
+  grid-template-columns: auto minmax(680px, 1.15fr) minmax(520px, max-content);
   gap: 18px;
   align-items: center;
   padding: 14px 20px;
@@ -258,9 +259,11 @@ onBeforeUnmount(() => {
 }
 
 .brand-block {
+  grid-area: brand;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 250px;
 }
 
 .brand-kicker {
@@ -286,14 +289,17 @@ onBeforeUnmount(() => {
 }
 
 .workspace-nav {
-  display: flex;
+  grid-area: nav;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(88px, 1fr));
   gap: 10px;
+  width: 100%;
   min-width: 0;
 }
 
 .workspace-nav-btn {
-  flex: 1 1 0;
   min-width: 0;
+  min-height: 66px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
@@ -302,8 +308,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
   gap: 4px;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .workspace-nav-btn.active {
@@ -314,27 +322,39 @@ onBeforeUnmount(() => {
 
 .workspace-nav-label {
   font-weight: 700;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspace-nav-hint {
   font-size: 11px;
   color: rgba(196, 211, 226, 0.72);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .navbar-tools {
+  grid-area: tools;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
   min-width: 0;
+  flex-wrap: wrap;
+  justify-self: end;
 }
 
 .search-wrap {
   position: relative;
   display: block;
-  min-width: 260px;
+  flex: 1 1 280px;
+  min-width: min(280px, 100%);
   max-width: 340px;
-  width: 340px;
+  width: min(340px, 100%);
   height: auto;
   padding: 0;
   border: 0;
@@ -433,6 +453,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .tf-btn,
@@ -445,6 +466,8 @@ onBeforeUnmount(() => {
   color: rgba(230, 241, 255, 0.82);
   padding: 8px 10px;
   cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .tf-btn.active,
@@ -504,18 +527,51 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1500px) {
   .app-navbar {
-    grid-template-columns: 1fr;
+    grid-template-areas:
+      "brand"
+      "nav"
+      "tools";
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .workspace-nav,
   .navbar-tools {
-    flex-wrap: wrap;
     justify-content: flex-start;
+    justify-self: stretch;
+  }
+
+  .workspace-nav {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+}
+
+@media (max-width: 1900px) and (min-width: 1501px) {
+  .app-navbar {
+    grid-template-areas:
+      "brand tools"
+      "nav nav";
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .navbar-tools {
+    justify-self: end;
+  }
+
+  .workspace-nav {
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
   }
 }
 
 @media (max-width: 900px) {
+  .brand-block {
+    min-width: 0;
+  }
+
+  .workspace-nav {
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  }
+
   .search-wrap {
+    flex-basis: 100%;
     min-width: 0;
     max-width: none;
     width: 100%;
