@@ -317,6 +317,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .institutional-inline-loading,.institutional-inline-error{margin:0 16px 12px;padding:10px 12px;border-radius:8px;border:1px solid var(--border2);background:rgba(13,20,32,.96);font-size:11px;color:var(--text2);}
 .institutional-inline-error{border-color:rgba(255,77,106,.35);color:var(--red);}
 .institutional-trend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.institutional-trend-grid>.trend-card-wide{grid-column:1 / -1;}
 .institutional-ranking-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .institutional-kpi-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px;}
 .institutional-range-select{min-width:120px;}

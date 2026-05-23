@@ -419,16 +419,12 @@ function buildBoundsForKeys(keys) {
   if (!values.length) return { min: 0, max: 1 };
   let min = Math.min(...values);
   let max = Math.max(...values);
-  if (props.showZeroLine) {
-    min = Math.min(min, 0);
-    max = Math.max(max, 0);
-  }
   if (min === max) {
     const padding = Math.max(Math.abs(min) * 0.08, 1);
     min -= padding;
     max += padding;
   } else {
-    const padding = Math.max((max - min) * 0.14, Math.abs(max) * 0.035, 1);
+    const padding = Math.max((max - min) * 0.06, 1);
     min -= padding;
     max += padding;
   }
