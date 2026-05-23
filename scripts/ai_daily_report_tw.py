@@ -131,6 +131,144 @@ def _is_etf_like(item: dict) -> bool:
     return _instrument_type(item) in {"ETF/ETN", "REIT/受益證券"}
 
 
+THEME_TICKER_TAGS: dict[str, tuple[str, ...]] = {
+    # Optical communication / CPO / silicon photonics watchlist.
+    "3081": ("矽光通訊/CPO", "光通訊"),
+    "3163": ("矽光通訊/CPO", "光通訊"),
+    "3363": ("矽光通訊/CPO", "光通訊"),
+    "3450": ("矽光通訊/CPO", "光通訊"),
+    "4908": ("矽光通訊/CPO", "光通訊"),
+    "4977": ("光通訊",),
+    "4979": ("矽光通訊/CPO", "光通訊"),
+    "6426": ("光通訊",),
+    "6442": ("光通訊",),
+    "6530": ("光通訊",),
+    "6863": ("光通訊",),
+    # Passive components.
+    "2327": ("被動元件",),
+    "2375": ("被動元件",),
+    "2428": ("被動元件",),
+    "2456": ("被動元件",),
+    "2478": ("被動元件",),
+    "2492": ("被動元件",),
+    "3026": ("被動元件",),
+    "3042": ("被動元件",),
+    "6173": ("被動元件",),
+    "6207": ("被動元件",),
+    # PCB / ABF / CCL.
+    "2313": ("PCB",),
+    "2368": ("PCB", "AI Server"),
+    "2383": ("PCB", "AI Server"),
+    "2402": ("PCB",),
+    "3037": ("ABF/載板", "PCB"),
+    "3044": ("PCB",),
+    "3189": ("ABF/載板", "PCB"),
+    "4958": ("PCB",),
+    "5469": ("PCB",),
+    "6153": ("PCB",),
+    "6191": ("PCB",),
+    "6213": ("PCB",),
+    "6274": ("PCB",),
+    "8046": ("ABF/載板", "PCB"),
+    "8358": ("CCL", "PCB"),
+    "8933": ("CCL", "PCB"),
+    # LED / optics.
+    "2340": ("LED",),
+    "2448": ("LED",),
+    "2466": ("LED",),
+    "2486": ("LED",),
+    "3031": ("LED",),
+    "3038": ("光電/LED", "LED"),
+    "3591": ("LED",),
+    "3714": ("LED",),
+    "4935": ("LED",),
+    "5230": ("LED",),
+    "5243": ("LED",),
+    "6278": ("LED",),
+    # AI server / thermal / power.
+    "2308": ("電源/重電",),
+    "2317": ("AI Server", "其他電子"),
+    "2356": ("AI Server", "電腦週邊"),
+    "2376": ("AI Server", "電腦週邊"),
+    "2377": ("AI Server", "電腦週邊"),
+    "2382": ("AI Server", "電腦週邊"),
+    "2395": ("AI Server", "電腦週邊"),
+    "3013": ("機殼/散熱", "AI Server"),
+    "3231": ("AI Server", "電腦週邊"),
+    "3324": ("機殼/散熱", "AI Server"),
+    "3653": ("AI Server", "電腦週邊"),
+    "3706": ("AI Server", "電腦週邊"),
+    "6117": ("機殼/散熱", "AI Server"),
+    "6669": ("機殼/散熱", "AI Server"),
+    # Transportation and other common topical groups.
+    "1503": ("重電",),
+    "1513": ("重電",),
+    "1514": ("重電",),
+    "1605": ("電線電纜",),
+    "1609": ("電線電纜",),
+    "1611": ("電線電纜",),
+    "2603": ("航運",),
+    "2609": ("航運",),
+    "2615": ("航運",),
+    "5607": ("航運",),
+}
+
+
+THEME_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("矽光", ("矽光通訊/CPO",)),
+    ("CPO", ("矽光通訊/CPO",)),
+    ("光通訊", ("光通訊",)),
+    ("被動元件", ("被動元件",)),
+    ("國巨", ("被動元件",)),
+    ("華新科", ("被動元件",)),
+    ("PCB", ("PCB",)),
+    ("印刷電路板", ("PCB",)),
+    ("ABF", ("ABF/載板",)),
+    ("載板", ("ABF/載板",)),
+    ("銅箔基板", ("CCL", "PCB")),
+    ("CCL", ("CCL", "PCB")),
+    ("LED", ("LED",)),
+    ("光電", ("光電/LED",)),
+    ("AI伺服器", ("AI Server",)),
+    ("AI Server", ("AI Server",)),
+    ("伺服器", ("AI Server",)),
+    ("散熱", ("機殼/散熱",)),
+    ("機殼", ("機殼/散熱",)),
+    ("重電", ("重電",)),
+    ("電線電纜", ("電線電纜",)),
+    ("航運", ("航運",)),
+)
+
+
+def _theme_tags_for_item(item: dict) -> list[str]:
+    """Return focused topical tags for daily rotation analysis."""
+
+    ticker_root = _ticker_root(item.get("ticker"))
+    tags: list[str] = list(THEME_TICKER_TAGS.get(ticker_root, ()))
+    haystack = " ".join(
+        str(item.get(key) or "")
+        for key in ("ticker", "name", "sector", "industry", "theme", "themes", "tags", "news_event_digest")
+    )
+    haystack_lower = haystack.lower()
+    for keyword, keyword_tags in THEME_KEYWORD_RULES:
+        if keyword.lower() in haystack_lower:
+            tags.extend(keyword_tags)
+    return list(dict.fromkeys(tag for tag in tags if tag))
+
+
+def _with_theme_tags(item: dict) -> dict:
+    row = dict(item)
+    row["theme_tags"] = _theme_tags_for_item(row)
+    return row
+
+
+def _theme_text(item: dict) -> str:
+    tags = item.get("theme_tags")
+    if not isinstance(tags, list):
+        tags = _theme_tags_for_item(item)
+    return "、".join(str(tag) for tag in tags if tag) or "—"
+
+
 def _classify_k(candlestick_score: float | int | None, bias: str | None) -> str:
     score = float(candlestick_score or 0)
     b = (bias or "").lower()
@@ -227,6 +365,9 @@ def _candidate_reason(item: dict) -> str:
         reasons.append(f"潛伏總分{_fmt_int(item.get('total_score'))}")
     elif item.get("accumulation_score") is not None:
         reasons.append(f"原始潛伏分數{_fmt_int(item.get('accumulation_score'))}")
+    theme = _theme_text(item)
+    if theme != "—":
+        reasons.append(f"主題：{theme}")
     if cp.get("summary"):
         reasons.append(f"K線：{cp.get('summary')}")
     if latest.get("volume_expanded"):
@@ -770,7 +911,7 @@ def _market_news_records(sector_rows: list[dict], *, report_date: str, limit: in
         f"台股 半導體 AI 伺服器 {report_date}",
     ]
     for row in sector_rows[:4]:
-        sector = str(row.get("sector") or "").strip()
+        sector = str(row.get("theme") or row.get("sector") or "").strip()
         if sector and sector not in {"其他", "未分類"}:
             queries.append(f"台股 {sector} 轉強 {report_date}")
 
@@ -835,6 +976,75 @@ def _sector_rotation_rows(candidates: list[dict], *, limit: int = 8) -> list[dic
             }
         )
     return sorted(rows, key=lambda row: row["rotation_score"], reverse=True)[:limit]
+
+
+def _theme_rotation_rows(candidates: list[dict], *, limit: int = 10, min_count: int = 2) -> list[dict]:
+    buckets: dict[str, list[dict]] = {}
+    for item in candidates:
+        if not _is_common_stock(item):
+            continue
+        for tag in _theme_tags_for_item(item):
+            buckets.setdefault(tag, []).append(item)
+
+    rows: list[dict] = []
+    for theme, items in buckets.items():
+        if len(items) < min_count:
+            continue
+        acc_values = [
+            float(item.get("total_score") if item.get("total_score") is not None else item.get("accumulation_score") or 0)
+            for item in items
+        ]
+        k_values = [float(item.get("candlestick_score") or 0) for item in items]
+        momentum_values = [_strong_stock_score(item) for item in items]
+        chip_count = sum(1 for item in items if _positive_chip(item))
+        breakout_count = sum(1 for item in items if _has_breakout_signal(item))
+        volume_count = sum(1 for item in items if _volume_expanded(item))
+        ma20_count = 0
+        for item in items:
+            close = _recent_metric(item, "latest_close", "close")
+            ma20 = _recent_metric(item, "ma20")
+            if close is not None and ma20 is not None and close >= ma20:
+                ma20_count += 1
+        avg_acc = sum(acc_values) / len(acc_values)
+        avg_k = sum(k_values) / len(k_values)
+        avg_momentum = sum(momentum_values) / len(momentum_values)
+        strength_score = (
+            avg_momentum * 0.35
+            + avg_acc * 0.25
+            + avg_k * 0.15
+            + chip_count / len(items) * 12
+            + breakout_count / len(items) * 10
+            + volume_count / len(items) * 8
+            + ma20_count / len(items) * 8
+        )
+        reps = sorted(
+            items,
+            key=lambda item: (
+                _strong_stock_score(item),
+                item.get("total_score") if item.get("total_score") is not None else item.get("accumulation_score") or 0,
+                item.get("candlestick_score") or 0,
+            ),
+            reverse=True,
+        )[:5]
+        rows.append(
+            {
+                "theme": theme,
+                "strength_score": round(strength_score, 1),
+                "count": len(items),
+                "avg_momentum": round(avg_momentum, 1),
+                "avg_acc": round(avg_acc, 1),
+                "avg_k": round(avg_k, 1),
+                "chip_count": chip_count,
+                "breakout_count": breakout_count,
+                "volume_count": volume_count,
+                "ma20_count": ma20_count,
+                "representatives": "、".join(f"{r.get('ticker')} {r.get('name')}" for r in reps),
+                "watch": (
+                    f"觀察{theme}代表股是否同步站上短中期均線；若代表股跌破當日低點或量能退潮，先降為觀察。"
+                ),
+            }
+        )
+    return sorted(rows, key=lambda row: row["strength_score"], reverse=True)[:limit]
 
 
 def _fetch_recent_daily_rows(base_url: str, ticker: str, *, period: str = "3mo") -> list[dict]:
@@ -1102,6 +1312,7 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
         "name": item.get("name"),
         "instrument_type": _instrument_type(item),
         "sector": item.get("sector") or item.get("industry"),
+        "theme_tags": _theme_tags_for_item(item),
         "primary_role": _primary_role_for_ai(item, validation),
         "total_score": item.get("total_score"),
         "score_breakdown": {
@@ -1158,6 +1369,7 @@ def _build_codex_analysis_context(
     taifex: dict | None,
     structured: dict,
     sector_rows: list[dict],
+    theme_rows: list[dict],
     selected_stocks: list[dict],
     selected_etfs: list[dict],
     strong_stock_candidates: list[dict],
@@ -1218,6 +1430,7 @@ def _build_codex_analysis_context(
             "resolved_date": (taifex or {}).get("resolved_date") if isinstance(taifex, dict) else None,
             "position_summary": _summarize_taifex_position(structured),
         },
+        "theme_rotation": theme_rows[:10],
         "sector_rotation": sector_rows[:8],
         "signal_validation": signal_validation_rows[:15],
         "signal_backtest_summary": signal_backtest_summary,
@@ -1275,6 +1488,7 @@ def _extract_openai_response_text(payload: dict) -> str:
 
 _DUPLICATE_AI_SECTION_KEYWORDS = (
     "可能轉強族群",
+    "主題族群雷達",
     "個股觀察清單",
     "ETF / 基金 / REIT 觀察",
     "ETF / 基金 / REIT 候選",
@@ -1759,6 +1973,9 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
     lines.append("|---|---|---|---|---:|---:|---:|---:|---:|")
     for it in candidates:
         sector = it.get("sector") or it.get("industry") or "—"
+        theme = _theme_text(it)
+        if theme != "—":
+            sector = f"{sector} / {theme}"
         lines.append(
             "| "
             + " | ".join(
@@ -1766,7 +1983,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
                     _table_cell(_instrument_type(it)),
                     _table_cell(it.get("ticker")),
                     _table_cell(it.get("name")),
-                    _table_cell(sector, width=18),
+                    _table_cell(sector, width=32),
                     _table_cell(_fmt_int(it.get("total_score"))),
                     _table_cell(_pct_text(it.get("return_1d"))),
                     _table_cell(_pct_text(it.get("return_3d"))),
@@ -2916,7 +3133,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
             timeout=180,
         )
         ms = momentum_screener if isinstance(momentum_screener, dict) else {}
-        momentum_candidates = _candidates_with_names(base_url, ms.get("items") or [])
+        momentum_candidates = [_with_theme_tags(item) for item in _candidates_with_names(base_url, ms.get("items") or [])]
     except Exception:
         momentum_candidates = []
 
@@ -2948,7 +3165,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     twoii = _get_spot_card(taifex or {}, "^TWOII") if taifex else None
 
     # Candidates + name fixup
-    candidates = _candidates_with_names(base_url, candidates_raw)
+    candidates = [_with_theme_tags(item) for item in _candidates_with_names(base_url, candidates_raw)]
     candidates = _sort_candidates_by_total_score(_attach_candidate_scores(candidates))
     momentum_pool = _dedupe_candidates(momentum_candidates + candidates)
     if not momentum_pool:
@@ -2995,6 +3212,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         _attach_candidate_scores(ma5_walk_candidates, signal_validation_by_ticker),
         signal_validation_by_ticker,
     )
+    theme_rows = _theme_rotation_rows(profiled_common_pool)
     sector_rows = _sector_rotation_rows(candidates)
     daily_signal_candidates = _dedupe_candidates(
         selected_stocks + selected_etfs + strong_stock_candidates + bullish_stock_candidates + ma5_walk_candidates
@@ -3061,7 +3279,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         report_date=report_date,
         refresh_limit=12,
     )
-    generated_market_news = _market_news_records(sector_rows, report_date=report_date)
+    generated_market_news = _market_news_records(theme_rows + sector_rows, report_date=report_date)
     _store_news_records(base_url, generated_market_news, report_date=report_date)
     market_news = _dedupe_news_records(
         _fetch_db_news_records(base_url, report_date=report_date, limit=24) + generated_market_news,
@@ -3078,6 +3296,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         taifex=taifex,
         structured=structured,
         sector_rows=sector_rows,
+        theme_rows=theme_rows,
         selected_stocks=selected_stocks,
         selected_etfs=selected_etfs,
         strong_stock_candidates=strong_stock_candidates,
@@ -3204,7 +3423,39 @@ def build_report(*, base_url: str, report_date: str) -> str:
         )
     )
 
-    lines.append("## 6) 可能轉強族群")
+    lines.append("## 6) 主題族群雷達（細分）")
+    lines.append(
+        "- 這一節以主題/供應鏈標籤計算，例如矽光通訊/CPO、被動元件、ABF/載板、PCB、LED、AI Server 等；來源涵蓋較大的強勢股池，不只限於潛伏候選。"
+    )
+    lines.append("| 主題族群 | 強度分數 | 樣本數 | 動能均分 | 平均潛伏總分 | 平均K線分數 | 法人/外資偏多數 | 突破/轉強數 | 量能放大數 | 站上MA20數 | 代表標的 | 觀察重點 |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|")
+    if not theme_rows:
+        lines.append("| — | — | 0 | — | — | — | 0 | 0 | 0 | 0 | — | （目前主題標籤樣本不足，暫無可用細分族群統計） |")
+    else:
+        for row in theme_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _table_cell(row["theme"]),
+                        _table_cell(_fmt_num(row["strength_score"], 1)),
+                        _table_cell(_fmt_int(row["count"])),
+                        _table_cell(_fmt_num(row["avg_momentum"], 1)),
+                        _table_cell(_fmt_num(row["avg_acc"], 1)),
+                        _table_cell(_fmt_num(row["avg_k"], 1)),
+                        _table_cell(_fmt_int(row["chip_count"])),
+                        _table_cell(_fmt_int(row["breakout_count"])),
+                        _table_cell(_fmt_int(row["volume_count"])),
+                        _table_cell(_fmt_int(row["ma20_count"])),
+                        _table_cell(row["representatives"], width=72),
+                        _table_cell(row["watch"], width=78),
+                    ]
+                )
+                + " |"
+            )
+    lines.append("")
+
+    lines.append("## 6B) 可能轉強族群（交易所產業）")
     lines.append("| 族群 | 轉強分數 | 候選數 | 平均潛伏總分 | 平均K線分數 | 法人/外資偏多數 | 突破/轉強型態數 | 量能放大數 | 代表標的 | 觀察重點 |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---|---|")
     if not sector_rows:

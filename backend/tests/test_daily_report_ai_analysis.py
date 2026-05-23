@@ -71,6 +71,52 @@ def test_technical_profile_for_ai_calculates_one_month_levels():
     assert "突破" in profile["continuation_condition"]
 
 
+def test_theme_tags_and_rotation_use_focused_supply_chain_groups():
+    passive_a = {
+        "ticker": "2492.TW",
+        "name": "華新科",
+        "sector": "電子零組件業",
+        "total_score": 70,
+        "candlestick_score": 45,
+        "score": 80,
+        "candlestick_profile": {"latest": {"volume_expanded": True}, "summary": "突破嘗試"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 1000, "foreign_5d_sum": 1000}},
+        "recent_profile": {"latest_close": 292.5, "ma20": 240, "ma50": 230, "change_pct": 9.0, "volume_ratio": 2.1, "distance_to_recent_high_pct": 0.0},
+    }
+    passive_b = {
+        "ticker": "2327.TW",
+        "name": "國巨",
+        "sector": "電子零組件業",
+        "total_score": 65,
+        "candlestick_score": 42,
+        "score": 75,
+        "candlestick_profile": {"latest": {"volume_expanded": True}, "summary": "轉強"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 800, "foreign_5d_sum": 500}},
+        "recent_profile": {"latest_close": 629, "ma20": 580, "ma50": 560, "change_pct": 8.0, "volume_ratio": 1.7, "distance_to_recent_high_pct": 0.0},
+    }
+    pcb = {
+        "ticker": "3037.TW",
+        "name": "欣興",
+        "sector": "電子零組件業",
+        "total_score": 62,
+        "candlestick_score": 38,
+        "score": 70,
+        "candlestick_profile": {"latest": {"volume_expanded": False}, "summary": "低點墊高"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 100, "foreign_5d_sum": 50}},
+        "recent_profile": {"latest_close": 180, "ma20": 170, "ma50": 165, "change_pct": 3.0, "volume_ratio": 1.0, "distance_to_recent_high_pct": 4.0},
+    }
+
+    assert report_tw._theme_tags_for_item(passive_a) == ["被動元件"]
+    assert report_tw._theme_tags_for_item(pcb) == ["ABF/載板", "PCB"]
+
+    rows = report_tw._theme_rotation_rows([passive_a, passive_b, pcb], min_count=2)
+
+    assert rows[0]["theme"] == "被動元件"
+    assert rows[0]["count"] == 2
+    assert rows[0]["chip_count"] == 2
+    assert "2492.TW" in rows[0]["representatives"]
+
+
 def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     candidate = {
         "ticker": "2330.TW",
@@ -102,6 +148,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         taifex=None,
         structured={"futures": {"items": []}, "options": {"items": []}},
         sector_rows=[{"sector": "半導體業"}],
+        theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2}],
         selected_stocks=[candidate],
         selected_etfs=[],
         strong_stock_candidates=[],
@@ -135,6 +182,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
 
     assert context["ai_output_contract"]["allowed_sections"]
     assert context["data_quality_flags"]
+    assert context["theme_rotation"][0]["theme"] == "AI Server"
     assert context["news_packet"]["items"]
     assert context["news_packet"]["candidate_news"][0]["relevance_score"] == 95
     assert len(context["candidates"][0]["daily_bars_1m"]) == 30
