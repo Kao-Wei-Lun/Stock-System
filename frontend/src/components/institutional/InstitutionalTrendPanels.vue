@@ -7,9 +7,11 @@
     <div class="institutional-trend-grid">
       <InstitutionalTrendChart
         title="期貨未平倉淨口數"
-        :subtitle="selectedFuturesCommodity"
+        :subtitle="`${selectedFuturesCommodity} / 分法人絕對口數`"
         :points="insights?.history?.futures_oi || []"
         :series="trendSeries"
+        split-series
+        show-zero-line
       />
       <InstitutionalTrendChart
         title="期貨交易淨口數"

@@ -20,6 +20,109 @@
 
     <div v-if="!points.length" class="institutional-empty">尚無趨勢資料</div>
     <div
+      v-else-if="splitSeriesEnabled"
+      ref="chartWrapRef"
+      class="trend-chart-wrap trend-facet-wrap"
+      @mousemove="handleMouseMove"
+      @mouseleave="clearHover"
+    >
+      <div class="trend-facet-grid">
+        <div v-for="series in visibleSeries" :key="`facet-${series.key}`" class="trend-facet-pane">
+          <div class="trend-facet-head">
+            <span>
+              <span class="trend-legend-dot" :style="{ background: series.color }"></span>
+              {{ series.label }}
+            </span>
+            <strong>{{ formatValue(latestValues[series.key]) }}</strong>
+          </div>
+
+          <svg class="trend-chart trend-facet-chart" viewBox="0 0 640 160" preserveAspectRatio="none">
+            <line
+              v-for="tick in facetGridTicks(series.key)"
+              :key="`facet-grid-${series.key}-${tick}`"
+              x1="44"
+              :y1="facetScaleY(series.key, tick)"
+              x2="620"
+              :y2="facetScaleY(series.key, tick)"
+              class="trend-grid"
+            />
+
+            <line
+              v-if="showZeroLine && shouldShowFacetZeroLine(series.key)"
+              x1="44"
+              :y1="facetScaleY(series.key, 0)"
+              x2="620"
+              :y2="facetScaleY(series.key, 0)"
+              class="trend-zero-line"
+            />
+
+            <text
+              v-for="tick in facetGridTicks(series.key)"
+              :key="`facet-label-${series.key}-${tick}`"
+              x="4"
+              :y="facetScaleY(series.key, tick) + 4"
+              class="trend-axis-text"
+            >
+              {{ formatValue(tick) }}
+            </text>
+
+            <path
+              :d="facetLinePath(series.key)"
+              class="trend-line"
+              :style="{ stroke: series.color }"
+            />
+
+            <g v-if="hoverIndex != null">
+              <line
+                :x1="scaleX(hoverIndex)"
+                y1="14"
+                :x2="scaleX(hoverIndex)"
+                y2="132"
+                class="trend-hover-line"
+              />
+              <circle
+                v-if="hoverValue(series.key) != null"
+                :cx="scaleX(hoverIndex)"
+                :cy="facetScaleY(series.key, hoverValue(series.key))"
+                r="3.5"
+                class="trend-hover-dot"
+                :style="{ fill: series.color }"
+              />
+            </g>
+
+            <g v-for="mark in dateMarks" :key="`facet-mark-${series.key}-${mark.index}`">
+              <line
+                :x1="scaleX(mark.index)"
+                y1="14"
+                :x2="scaleX(mark.index)"
+                y2="132"
+                class="trend-grid trend-grid-vertical"
+              />
+              <text
+                :x="scaleX(mark.index)"
+                y="150"
+                class="trend-date-text"
+                text-anchor="middle"
+              >
+                {{ mark.label }}
+              </text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div v-if="hoverPoint" class="trend-tooltip" :style="tooltipStyle">
+        <div class="trend-tooltip-title">{{ hoverPoint.date }}</div>
+        <div v-for="series in visibleSeries" :key="`facet-tip-${series.key}`" class="trend-tooltip-row">
+          <span>
+            <span class="trend-legend-dot" :style="{ background: series.color }"></span>
+            {{ series.label }}
+          </span>
+          <strong>{{ formatValue(hoverPoint[series.key]) }}</strong>
+        </div>
+      </div>
+    </div>
+    <div
       v-else
       ref="chartWrapRef"
       class="trend-chart-wrap"
@@ -41,6 +144,15 @@
         x2="620"
         :y2="scaleY(tick)"
         class="trend-grid"
+      />
+
+      <line
+        v-if="showZeroLine && shouldShowZeroLine"
+        x1="44"
+        :y1="scaleY(0)"
+        x2="620"
+        :y2="scaleY(0)"
+        class="trend-zero-line"
       />
 
       <text
@@ -134,6 +246,8 @@ const props = defineProps({
   bandMinKey: { type: String, default: "" },
   bandMaxKey: { type: String, default: "" },
   valueFormat: { type: String, default: "number" },
+  splitSeries: { type: Boolean, default: false },
+  showZeroLine: { type: Boolean, default: false },
 });
 
 const chartWrapRef = ref(null);
@@ -144,12 +258,16 @@ const CHART_LEFT = 44;
 const CHART_RIGHT = 620;
 const CHART_TOP = 16;
 const CHART_BOTTOM = 192;
+const FACET_TOP = 14;
+const FACET_BOTTOM = 132;
 
 const visibleSeries = computed(() =>
   (props.series || []).filter((series) =>
     props.points.some((point) => Number.isFinite(Number(point?.[series.key]))),
   ),
 );
+
+const splitSeriesEnabled = computed(() => props.splitSeries && visibleSeries.value.length > 1);
 
 const valueBounds = computed(() => {
   const values = [];
@@ -181,6 +299,14 @@ const valueBounds = computed(() => {
   }
   return { min, max };
 });
+
+const facetBounds = computed(() => Object.fromEntries(
+  visibleSeries.value.map((series) => [series.key, buildBoundsForKeys([series.key])]),
+));
+
+const shouldShowZeroLine = computed(() => (
+  valueBounds.value.min < 0 && valueBounds.value.max > 0
+));
 
 const gridTicks = computed(() => {
   const { min, max } = valueBounds.value;
@@ -249,21 +375,74 @@ function scaleX(index) {
 }
 
 function scaleY(value) {
-  const { min, max } = valueBounds.value;
+  return scaleYWithBounds(value, valueBounds.value, CHART_TOP, CHART_BOTTOM);
+}
+
+function scaleYWithBounds(value, bounds, top, bottom) {
+  const { min, max } = bounds;
   const ratio = (Number(value) - min) / (max - min || 1);
-  return CHART_BOTTOM - ratio * (CHART_BOTTOM - CHART_TOP);
+  return bottom - ratio * (bottom - top);
 }
 
 function linePath(key) {
+  return buildLinePath(key, valueBounds.value, CHART_TOP, CHART_BOTTOM);
+}
+
+function facetScaleY(key, value) {
+  return scaleYWithBounds(value, facetBounds.value[key] || { min: 0, max: 1 }, FACET_TOP, FACET_BOTTOM);
+}
+
+function facetLinePath(key) {
+  return buildLinePath(key, facetBounds.value[key] || { min: 0, max: 1 }, FACET_TOP, FACET_BOTTOM);
+}
+
+function buildLinePath(key, bounds, top, bottom) {
   const segments = [];
   let started = false;
   props.points.forEach((point, index) => {
     const value = Number(point?.[key]);
     if (!Number.isFinite(value)) return;
-    segments.push(`${started ? "L" : "M"} ${scaleX(index)} ${scaleY(value)}`);
+    segments.push(`${started ? "L" : "M"} ${scaleX(index)} ${scaleYWithBounds(value, bounds, top, bottom)}`);
     started = true;
   });
   return segments.join(" ");
+}
+
+function buildBoundsForKeys(keys) {
+  const values = [];
+  for (const point of props.points) {
+    for (const key of keys) {
+      const value = Number(point?.[key]);
+      if (Number.isFinite(value)) values.push(value);
+    }
+  }
+  if (!values.length) return { min: 0, max: 1 };
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (props.showZeroLine) {
+    min = Math.min(min, 0);
+    max = Math.max(max, 0);
+  }
+  if (min === max) {
+    const padding = Math.max(Math.abs(min) * 0.08, 1);
+    min -= padding;
+    max += padding;
+  } else {
+    const padding = Math.max((max - min) * 0.14, Math.abs(max) * 0.035, 1);
+    min -= padding;
+    max += padding;
+  }
+  return { min, max };
+}
+
+function facetGridTicks(key) {
+  const bounds = facetBounds.value[key] || { min: 0, max: 1 };
+  return [bounds.max, (bounds.max + bounds.min) / 2, bounds.min];
+}
+
+function shouldShowFacetZeroLine(key) {
+  const bounds = facetBounds.value[key] || { min: 0, max: 1 };
+  return bounds.min < 0 && bounds.max > 0;
 }
 
 function hoverValue(key) {

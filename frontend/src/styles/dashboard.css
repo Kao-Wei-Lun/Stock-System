@@ -355,8 +355,16 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .trend-legend-dot{width:8px;height:8px;border-radius:50%;}
 .trend-chart-wrap{position:relative;}
 .trend-chart{width:100%;height:210px;border-radius:8px;background:linear-gradient(180deg,rgba(8,12,18,.98) 0%,rgba(9,15,24,.98) 100%);}
+.trend-facet-wrap{display:flex;flex-direction:column;gap:8px;}
+.trend-facet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.trend-facet-pane{min-width:0;border:1px solid rgba(36,52,71,.7);border-radius:8px;background:rgba(8,12,18,.52);padding:8px;}
+.trend-facet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:10px;color:var(--text2);}
+.trend-facet-head span{display:inline-flex;align-items:center;gap:6px;min-width:0;}
+.trend-facet-head strong{color:var(--text);white-space:nowrap;}
+.trend-facet-chart{height:150px;}
 .trend-grid{stroke:rgba(36,52,71,.66);stroke-width:1;}
 .trend-grid-vertical{stroke-dasharray:4 4;}
+.trend-zero-line{stroke:rgba(224,234,248,.42);stroke-width:1.2;stroke-dasharray:6 4;}
 .trend-axis-text,.trend-date-text{fill:var(--text3);font-size:10px;font-family:'JetBrains Mono',monospace;}
 .trend-line{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}
 .trend-band{fill:rgba(59,139,255,.14);stroke:rgba(59,139,255,.55);stroke-width:1.2;}
