@@ -211,6 +211,92 @@ THEME_TICKER_TAGS: dict[str, tuple[str, ...]] = {
     "2609": ("航運",),
     "2615": ("航運",),
     "5607": ("航運",),
+    # Semiconductor chain.
+    "2330": ("晶圓代工", "先進封裝/CoWoS"),
+    "2303": ("晶圓代工",),
+    "5347": ("晶圓代工",),
+    "2454": ("IC設計",),
+    "2379": ("IC設計",),
+    "3035": ("IC設計", "ASIC/IP"),
+    "3443": ("IC設計", "ASIC/IP"),
+    "3661": ("ASIC/IP", "IC設計"),
+    "5274": ("IC設計",),
+    "6415": ("IC設計",),
+    "6531": ("IC設計",),
+    "2451": ("記憶體/HBM",),
+    "2344": ("記憶體/HBM",),
+    "2408": ("記憶體/HBM",),
+    "3006": ("記憶體/HBM",),
+    "3260": ("記憶體/HBM",),
+    "8299": ("記憶體/HBM",),
+    "3711": ("封測", "先進封裝/CoWoS"),
+    "2449": ("封測",),
+    "3264": ("封測",),
+    "6239": ("封測",),
+    "6257": ("封測",),
+    "3131": ("半導體設備",),
+    "3413": ("半導體設備",),
+    "3583": ("半導體設備",),
+    "6187": ("半導體設備",),
+    "6196": ("半導體設備",),
+    "6640": ("半導體設備",),
+    "7556": ("半導體設備",),
+    # Networking / IPC / distribution.
+    "2345": ("網通",),
+    "2419": ("網通",),
+    "3025": ("網通",),
+    "3380": ("網通",),
+    "3596": ("網通",),
+    "3704": ("網通",),
+    "4906": ("網通",),
+    "6285": ("網通", "低軌衛星"),
+    "6416": ("網通",),
+    "2395": ("工業電腦", "AI Server"),
+    "3088": ("工業電腦",),
+    "3213": ("工業電腦", "電腦週邊"),
+    "3416": ("工業電腦",),
+    "3479": ("工業電腦",),
+    "3577": ("工業電腦",),
+    "6414": ("工業電腦",),
+    "6577": ("工業電腦",),
+    "8114": ("工業電腦",),
+    "2347": ("電子通路",),
+    "2459": ("電子通路",),
+    "3036": ("電子通路",),
+    "3702": ("電子通路",),
+    "5434": ("電子通路",),
+    "8112": ("電子通路",),
+    # Display, consumer electronics, connectors, automation.
+    "2409": ("面板",),
+    "3481": ("面板",),
+    "6116": ("面板",),
+    "3008": ("消費電子/蘋概", "感測/鏡頭"),
+    "3406": ("消費電子/蘋概", "感測/鏡頭"),
+    "2474": ("消費電子/蘋概",),
+    "4938": ("消費電子/蘋概",),
+    "3023": ("連接器/線束",),
+    "3321": ("連接器/線束",),
+    "5457": ("連接器/線束",),
+    "6205": ("連接器/線束",),
+    "6217": ("連接器/線束",),
+    "8039": ("連接器/線束",),
+    "2359": ("車用電子",),
+    "3605": ("車用電子",),
+    "3665": ("車用電子",),
+    "3669": ("車用電子",),
+    "6279": ("車用電子", "連接器/線束"),
+    "1590": ("機器人/自動化",),
+    "2049": ("機器人/自動化",),
+    "2354": ("機器人/自動化",),
+    "2464": ("機器人/自動化",),
+    "3379": ("機器人/自動化",),
+    "6180": ("機器人/自動化",),
+    "6207": ("被動元件",),
+    "3356": ("安控",),
+    "3454": ("安控",),
+    "3293": ("軍工電子/無人機",),
+    "4916": ("軍工電子/無人機",),
+    "8033": ("軍工電子/無人機",),
 }
 
 
@@ -237,7 +323,69 @@ THEME_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("重電", ("重電",)),
     ("電線電纜", ("電線電纜",)),
     ("航運", ("航運",)),
+    ("晶圓代工", ("晶圓代工",)),
+    ("IC設計", ("IC設計",)),
+    ("ASIC", ("ASIC/IP",)),
+    ("記憶體", ("記憶體/HBM",)),
+    ("HBM", ("記憶體/HBM",)),
+    ("封測", ("封測",)),
+    ("先進封裝", ("先進封裝/CoWoS",)),
+    ("CoWoS", ("先進封裝/CoWoS",)),
+    ("半導體設備", ("半導體設備",)),
+    ("網通", ("網通",)),
+    ("低軌", ("低軌衛星",)),
+    ("衛星", ("低軌衛星",)),
+    ("工業電腦", ("工業電腦",)),
+    ("電子通路", ("電子通路",)),
+    ("面板", ("面板",)),
+    ("蘋概", ("消費電子/蘋概",)),
+    ("鏡頭", ("感測/鏡頭",)),
+    ("感測", ("感測/鏡頭",)),
+    ("連接器", ("連接器/線束",)),
+    ("線束", ("連接器/線束",)),
+    ("車用", ("車用電子",)),
+    ("機器人", ("機器人/自動化",)),
+    ("自動化", ("機器人/自動化",)),
+    ("安控", ("安控",)),
+    ("軍工", ("軍工電子/無人機",)),
+    ("無人機", ("軍工電子/無人機",)),
 )
+
+
+ELECTRONIC_THEME_TAGS: set[str] = {
+    "AI Server",
+    "PCB",
+    "ABF/載板",
+    "CCL",
+    "被動元件",
+    "矽光通訊/CPO",
+    "光通訊",
+    "LED",
+    "光電/LED",
+    "機殼/散熱",
+    "電源/重電",
+    "半導體設備",
+    "先進封裝/CoWoS",
+    "ASIC/IP",
+    "IC設計",
+    "記憶體/HBM",
+    "晶圓代工",
+    "封測",
+    "面板",
+    "網通",
+    "低軌衛星",
+    "工業電腦",
+    "電子通路",
+    "安控",
+    "車用電子",
+    "機器人/自動化",
+    "軍工電子/無人機",
+    "消費電子/蘋概",
+    "連接器/線束",
+    "感測/鏡頭",
+    "電腦週邊",
+    "其他電子",
+}
 
 
 def _theme_tags_for_item(item: dict) -> list[str]:
@@ -1044,7 +1192,35 @@ def _theme_rotation_rows(candidates: list[dict], *, limit: int = 10, min_count: 
                 ),
             }
         )
+    for row in rows:
+        row["state"] = _theme_state(row)
     return sorted(rows, key=lambda row: row["strength_score"], reverse=True)[:limit]
+
+
+def _theme_state(row: dict) -> str:
+    count = max(1, int(row.get("count") or 1))
+    strength = _to_float(row.get("strength_score")) or 0
+    breakout_ratio = (int(row.get("breakout_count") or 0)) / count
+    volume_ratio = (int(row.get("volume_count") or 0)) / count
+    ma20_ratio = (int(row.get("ma20_count") or 0)) / count
+    chip_ratio = (int(row.get("chip_count") or 0)) / count
+    if count <= 2 and strength >= 85 and max(breakout_ratio, volume_ratio) >= 0.5:
+        return "單點/小群強勢"
+    if strength >= 95 and ma20_ratio >= 0.6 and (breakout_ratio >= 0.5 or volume_ratio >= 0.5):
+        return "主線延續"
+    if breakout_ratio >= 0.5 and volume_ratio >= 0.4 and ma20_ratio >= 0.5:
+        return "轉強確認"
+    if chip_ratio >= 0.5 and ma20_ratio >= 0.5:
+        return "法人支撐"
+    if strength >= 70:
+        return "題材雷達"
+    return "補漲觀察"
+
+
+def _electronic_theme_rotation_rows(candidates: list[dict], *, limit: int = 8) -> list[dict]:
+    rows = _theme_rotation_rows(candidates, limit=40, min_count=2)
+    electronic_rows = [row for row in rows if row.get("theme") in ELECTRONIC_THEME_TAGS]
+    return electronic_rows[:limit]
 
 
 def _fetch_recent_daily_rows(base_url: str, ticker: str, *, period: str = "3mo") -> list[dict]:
@@ -1370,6 +1546,7 @@ def _build_codex_analysis_context(
     structured: dict,
     sector_rows: list[dict],
     theme_rows: list[dict],
+    electronic_theme_rows: list[dict],
     selected_stocks: list[dict],
     selected_etfs: list[dict],
     strong_stock_candidates: list[dict],
@@ -1430,6 +1607,7 @@ def _build_codex_analysis_context(
             "resolved_date": (taifex or {}).get("resolved_date") if isinstance(taifex, dict) else None,
             "position_summary": _summarize_taifex_position(structured),
         },
+        "electronic_theme_rotation": electronic_theme_rows[:8],
         "theme_rotation": theme_rows[:10],
         "sector_rotation": sector_rows[:8],
         "signal_validation": signal_validation_rows[:15],
@@ -3212,6 +3390,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         _attach_candidate_scores(ma5_walk_candidates, signal_validation_by_ticker),
         signal_validation_by_ticker,
     )
+    electronic_theme_rows = _electronic_theme_rotation_rows(profiled_common_pool)
     theme_rows = _theme_rotation_rows(profiled_common_pool)
     sector_rows = _sector_rotation_rows(candidates)
     daily_signal_candidates = _dedupe_candidates(
@@ -3279,7 +3458,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         report_date=report_date,
         refresh_limit=12,
     )
-    generated_market_news = _market_news_records(theme_rows + sector_rows, report_date=report_date)
+    generated_market_news = _market_news_records(electronic_theme_rows + theme_rows + sector_rows, report_date=report_date)
     _store_news_records(base_url, generated_market_news, report_date=report_date)
     market_news = _dedupe_news_records(
         _fetch_db_news_records(base_url, report_date=report_date, limit=24) + generated_market_news,
@@ -3297,6 +3476,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         structured=structured,
         sector_rows=sector_rows,
         theme_rows=theme_rows,
+        electronic_theme_rows=electronic_theme_rows,
         selected_stocks=selected_stocks,
         selected_etfs=selected_etfs,
         strong_stock_candidates=strong_stock_candidates,
@@ -3423,7 +3603,38 @@ def build_report(*, base_url: str, report_date: str) -> str:
         )
     )
 
-    lines.append("## 6) 主題族群雷達（細分）")
+    lines.append("## 6) 電子主題強弱雷達")
+    lines.append(
+        "- 這一節只看電子大族群內的細分供應鏈，優先回答：電子股裡今天資金集中在哪些主題。"
+    )
+    lines.append("| 電子主題 | 狀態 | 強度分數 | 樣本數 | 動能均分 | 法人/外資偏多數 | 突破/轉強數 | 量能放大數 | 站上MA20數 | 代表標的 | 觀察重點 |")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|")
+    if not electronic_theme_rows:
+        lines.append("| — | — | — | 0 | — | 0 | 0 | 0 | 0 | — | （目前電子細分主題樣本不足，暫無可用統計） |")
+    else:
+        for row in electronic_theme_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _table_cell(row["theme"]),
+                        _table_cell(row.get("state")),
+                        _table_cell(_fmt_num(row["strength_score"], 1)),
+                        _table_cell(_fmt_int(row["count"])),
+                        _table_cell(_fmt_num(row["avg_momentum"], 1)),
+                        _table_cell(_fmt_int(row["chip_count"])),
+                        _table_cell(_fmt_int(row["breakout_count"])),
+                        _table_cell(_fmt_int(row["volume_count"])),
+                        _table_cell(_fmt_int(row["ma20_count"])),
+                        _table_cell(row["representatives"], width=72),
+                        _table_cell(row["watch"], width=78),
+                    ]
+                )
+                + " |"
+            )
+    lines.append("")
+
+    lines.append("## 6A) 主題族群雷達（全市場細分）")
     lines.append(
         "- 這一節以主題/供應鏈標籤計算，例如矽光通訊/CPO、被動元件、ABF/載板、PCB、LED、AI Server 等；來源涵蓋較大的強勢股池，不只限於潛伏候選。"
     )

@@ -112,9 +112,52 @@ def test_theme_tags_and_rotation_use_focused_supply_chain_groups():
     rows = report_tw._theme_rotation_rows([passive_a, passive_b, pcb], min_count=2)
 
     assert rows[0]["theme"] == "被動元件"
+    assert rows[0]["state"] in {"主線延續", "轉強確認", "單點/小群強勢", "法人支撐", "題材雷達"}
     assert rows[0]["count"] == 2
     assert rows[0]["chip_count"] == 2
     assert "2492.TW" in rows[0]["representatives"]
+
+
+def test_electronic_theme_rotation_filters_electronic_topics():
+    ai_server = {
+        "ticker": "3231.TW",
+        "name": "緯創",
+        "sector": "電腦及週邊設備業",
+        "total_score": 70,
+        "candlestick_score": 40,
+        "score": 82,
+        "candlestick_profile": {"latest": {"volume_expanded": True}, "summary": "突破嘗試"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 1000, "foreign_5d_sum": 800}},
+        "recent_profile": {"latest_close": 144.5, "ma20": 130, "ma50": 125, "change_pct": 5.0, "volume_ratio": 1.8, "distance_to_recent_high_pct": 1.0},
+    }
+    thermal = {
+        "ticker": "3013.TW",
+        "name": "晟銘電",
+        "sector": "電子工業",
+        "total_score": 70,
+        "candlestick_score": 42,
+        "score": 80,
+        "candlestick_profile": {"latest": {"volume_expanded": True}, "summary": "收盤轉強"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 500, "foreign_5d_sum": 400}},
+        "recent_profile": {"latest_close": 110.5, "ma20": 106, "ma50": 100, "change_pct": 6.0, "volume_ratio": 1.6, "distance_to_recent_high_pct": 0.5},
+    }
+    shipping = {
+        "ticker": "2603.TW",
+        "name": "長榮",
+        "sector": "航運業",
+        "total_score": 70,
+        "candlestick_score": 40,
+        "score": 80,
+        "candlestick_profile": {"latest": {"volume_expanded": True}, "summary": "突破嘗試"},
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 1000, "foreign_5d_sum": 1000}},
+        "recent_profile": {"latest_close": 219, "ma20": 207, "ma50": 200, "change_pct": 3.0, "volume_ratio": 2.0, "distance_to_recent_high_pct": 0.0},
+    }
+
+    rows = report_tw._electronic_theme_rotation_rows([ai_server, thermal, shipping])
+
+    assert rows
+    assert {row["theme"] for row in rows}.issubset(report_tw.ELECTRONIC_THEME_TAGS)
+    assert "航運" not in {row["theme"] for row in rows}
 
 
 def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
@@ -149,6 +192,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         structured={"futures": {"items": []}, "options": {"items": []}},
         sector_rows=[{"sector": "半導體業"}],
         theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2}],
+        electronic_theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2, "state": "主線延續"}],
         selected_stocks=[candidate],
         selected_etfs=[],
         strong_stock_candidates=[],
@@ -182,6 +226,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
 
     assert context["ai_output_contract"]["allowed_sections"]
     assert context["data_quality_flags"]
+    assert context["electronic_theme_rotation"][0]["state"] == "主線延續"
     assert context["theme_rotation"][0]["theme"] == "AI Server"
     assert context["news_packet"]["items"]
     assert context["news_packet"]["candidate_news"][0]["relevance_score"] == 95
