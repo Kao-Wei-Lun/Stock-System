@@ -1489,6 +1489,12 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
         "instrument_type": _instrument_type(item),
         "sector": item.get("sector") or item.get("industry"),
         "theme_tags": _theme_tags_for_item(item),
+        "candidate_grade": item.get("candidate_grade"),
+        "candidate_priority_score": item.get("candidate_priority_score"),
+        "risk_flags": item.get("risk_flags") or [],
+        "grade_reason": item.get("grade_reason"),
+        "primary_theme": item.get("primary_theme"),
+        "primary_theme_strength": item.get("primary_theme_strength"),
         "primary_role": _primary_role_for_ai(item, validation),
         "total_score": item.get("total_score"),
         "score_breakdown": {
@@ -1547,6 +1553,7 @@ def _build_codex_analysis_context(
     sector_rows: list[dict],
     theme_rows: list[dict],
     electronic_theme_rows: list[dict],
+    graded_candidates: list[dict],
     selected_stocks: list[dict],
     selected_etfs: list[dict],
     strong_stock_candidates: list[dict],
@@ -1567,9 +1574,12 @@ def _build_codex_analysis_context(
         + bullish_stock_candidates[:8]
         + ma5_walk_candidates[:8]
     )[:max_tickers]
+    graded_by_ticker = {str(item.get("ticker") or "").upper().strip(): item for item in graded_candidates}
     candidates_for_ai: list[dict] = []
     for item in ticker_pool:
         ticker = str(item.get("ticker") or "").upper().strip()
+        if ticker in graded_by_ticker:
+            item = {**item, **graded_by_ticker[ticker]}
         rows = _fetch_recent_daily_rows(base_url, ticker, period="3mo") if ticker else []
         daily_rows = _daily_rows_for_ai(rows, history_days=history_days)
         candidates_for_ai.append(_candidate_for_ai(item, validation_by_ticker, daily_rows))
@@ -1612,6 +1622,23 @@ def _build_codex_analysis_context(
         "sector_rotation": sector_rows[:8],
         "signal_validation": signal_validation_rows[:15],
         "signal_backtest_summary": signal_backtest_summary,
+        "graded_candidates": [
+            {
+                "ticker": item.get("ticker"),
+                "name": item.get("name"),
+                "instrument_type": _instrument_type(item),
+                "sector": item.get("sector") or item.get("industry"),
+                "theme_tags": _theme_tags_for_item(item),
+                "primary_theme": item.get("primary_theme"),
+                "candidate_grade": item.get("candidate_grade"),
+                "candidate_priority_score": item.get("candidate_priority_score"),
+                "risk_flags": item.get("risk_flags") or [],
+                "grade_reason": item.get("grade_reason"),
+                "breakout_price": _round_float(_candidate_breakout_price(item)),
+                "signal_low": _round_float(_candidate_signal_low(item)),
+            }
+            for item in graded_candidates[:15]
+        ],
         "candidates": candidates_for_ai,
         "news_packet": _news_packet_for_ai(
             candidates=ticker_pool,
@@ -2221,6 +2248,48 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
                     _table_cell(_chip_text(it), width=70),
                     _table_cell(it.get("news_event_digest") or "暫無重大新聞/事件", width=80),
                     _table_cell(_k_trade_plan(it), width=54),
+                ]
+            )
+            + " |"
+        )
+    lines.append("")
+    return lines
+
+
+def _graded_candidate_table_lines(title: str, candidates: list[dict], *, limit: int = 12) -> list[str]:
+    lines = [title]
+    if not candidates:
+        lines.append("- （目前沒有可分級的候選標的。）")
+        lines.append("")
+        return lines
+
+    visible = [item for item in candidates if item.get("candidate_grade") != "X"][:limit]
+    if not visible:
+        visible = candidates[: min(limit, len(candidates))]
+    x_count = sum(1 for item in candidates if item.get("candidate_grade") == "X")
+    lines.append(
+        f"- 依主題強度、量價、法人、訊號驗證與風險旗標重新排序；X 級 {x_count} 檔僅保留在後方完整表格或附錄觀察。"
+    )
+    lines.append("| 等級 | 類型 | 代號 | 名稱 | 主題 | 優先分 | 觸發價 | 失敗線 | 觀察理由 | 風險旗標 |")
+    lines.append("|---|---|---|---|---|---:|---:|---:|---|---|")
+    for item in visible:
+        trigger = _candidate_breakout_price(item)
+        failure = _candidate_signal_low(item)
+        flags = item.get("risk_flags") if isinstance(item.get("risk_flags"), list) else []
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _table_cell(item.get("candidate_grade")),
+                    _table_cell(_instrument_type(item)),
+                    _table_cell(item.get("ticker")),
+                    _table_cell(item.get("name")),
+                    _table_cell(item.get("primary_theme") or _theme_text(item), width=26),
+                    _table_cell(_fmt_num(item.get("candidate_priority_score"), 1)),
+                    _table_cell(_fmt_num(trigger, 2)),
+                    _table_cell(_fmt_num(failure, 2)),
+                    _table_cell(item.get("grade_reason"), width=86),
+                    _table_cell("、".join(str(flag) for flag in flags) or "—", width=48),
                 ]
             )
             + " |"
@@ -2843,6 +2912,164 @@ def _sort_candidates_by_total_score(
     return [candidate for _, candidate in sorted(enumerate(candidates), key=rank)]
 
 
+def _theme_strength_lookup(*rows_groups: list[dict]) -> dict[str, dict]:
+    lookup: dict[str, dict] = {}
+    for rows in rows_groups:
+        for row in rows:
+            theme = str(row.get("theme") or "").strip()
+            if not theme:
+                continue
+            current = lookup.get(theme)
+            if current is None or float(row.get("strength_score") or 0) > float(current.get("strength_score") or 0):
+                lookup[theme] = row
+    return lookup
+
+
+def _candidate_theme_row(item: dict, theme_lookup: dict[str, dict]) -> dict:
+    best: dict = {}
+    for tag in _theme_tags_for_item(item):
+        row = theme_lookup.get(tag) or {}
+        if float(row.get("strength_score") or 0) > float(best.get("strength_score") or 0):
+            best = row
+    return best
+
+
+def _candidate_risk_flags(item: dict, validation: dict, theme_row: dict) -> list[str]:
+    flags: list[str] = []
+    status = str(validation.get("signal_status") or item.get("signal_status") or "").lower()
+    if status in {"failed_breakout", "invalidated"}:
+        flags.append("failed_recent_signal")
+
+    close = _candidate_latest_close(item)
+    ma5 = _recent_metric(item, "ma5")
+    ma20 = _recent_metric(item, "ma20") or _to_float(item.get("ma20"))
+    if close is not None and ma5 is not None and ma5 > 0 and (close - ma5) / ma5 * 100 >= 8:
+        flags.append("overextended_ma5")
+    if close is not None and ma20 is not None and ma20 > 0 and (close - ma20) / ma20 * 100 >= 15:
+        flags.append("overextended_ma20")
+
+    latest = (item.get("candlestick_profile") or {}).get("latest") or {}
+    high = _to_float(latest.get("high"))
+    open_ = _to_float(latest.get("open"))
+    close_latest = _to_float(latest.get("close"))
+    if high is not None and open_ is not None and close_latest is not None:
+        body = abs(close_latest - open_)
+        upper = high - max(close_latest, open_)
+        if upper > max(body * 1.5, close_latest * 0.01):
+            flags.append("long_upper_shadow")
+
+    if not _volume_expanded(item) and float(item.get("volume_score") or 0) < 12:
+        flags.append("thin_volume")
+
+    if str(theme_row.get("state") or "") == "單點/小群強勢":
+        flags.append("single_stock_theme")
+
+    hit_rate = _to_float(item.get("historical_type_hit_rate"))
+    sample_size = _to_float(item.get("historical_type_sample_size")) or 0
+    if hit_rate is not None and sample_size >= 20 and hit_rate < 35:
+        flags.append("low_hit_rate_type")
+
+    if not _theme_tags_for_item(item):
+        flags.append("no_focused_theme")
+
+    return list(dict.fromkeys(flags))
+
+
+def _grade_from_priority(priority_score: float, risk_flags: list[str], validation: dict) -> str:
+    status = str(validation.get("signal_status") or "").lower()
+    blocking = {"failed_recent_signal", "long_upper_shadow"}
+    if status in {"failed_breakout", "invalidated"} or blocking.intersection(risk_flags):
+        return "X"
+    if priority_score >= 78 and len(risk_flags) <= 1:
+        return "A"
+    if priority_score >= 64 and len(risk_flags) <= 3:
+        return "B"
+    if priority_score >= 48:
+        return "C"
+    return "X"
+
+
+def _grade_reason(item: dict, grade: str, theme_row: dict, risk_flags: list[str]) -> str:
+    reasons: list[str] = []
+    theme_text = _theme_text(item)
+    if theme_text != "—":
+        theme_score = theme_row.get("strength_score")
+        if theme_score is not None:
+            reasons.append(f"主題{theme_text}強度{_fmt_num(theme_score, 1)}")
+        else:
+            reasons.append(f"主題{theme_text}")
+    if _has_breakout_signal(item):
+        reasons.append("型態轉強/突破嘗試")
+    if _volume_expanded(item):
+        reasons.append("量能放大")
+    if _positive_chip(item):
+        reasons.append("法人籌碼偏多")
+    if risk_flags:
+        reasons.append("風險：" + "、".join(risk_flags[:3]))
+    if not reasons:
+        reasons.append("條件未完整，先列雷達觀察")
+    return f"{grade}級：" + "；".join(reasons[:4])
+
+
+def _attach_candidate_grades(
+    candidates: list[dict],
+    *,
+    theme_lookup: dict[str, dict],
+    validation_by_ticker: dict[str, dict],
+) -> list[dict]:
+    rows: list[dict] = []
+    for item in candidates:
+        row = dict(item)
+        ticker = str(row.get("ticker") or "").upper().strip()
+        validation = validation_by_ticker.get(ticker) or {}
+        theme_row = _candidate_theme_row(row, theme_lookup)
+        theme_score = min(float(theme_row.get("strength_score") or 0), 120.0) / 120.0 * 100.0
+        base_score = float(row.get("total_score") or row.get("accumulation_score") or 0)
+        momentum_score = min(max(_strong_stock_score(row), 0.0), 220.0) / 220.0 * 100.0
+        volume_score = min(float(row.get("volume_score") or 0), 20.0) / 20.0 * 100.0
+        institutional_score = min(float(row.get("institutional_score") or 0), 15.0) / 15.0 * 100.0
+        validation_score = 50.0
+        status = str(validation.get("signal_status") or row.get("signal_status") or "").lower()
+        if status == "confirmed_uptrend":
+            validation_score = 85.0
+        elif status == "new_breakout":
+            validation_score = 75.0
+        elif status == "watch_only":
+            validation_score = 55.0
+        elif status in {"failed_breakout", "invalidated"}:
+            validation_score = 10.0
+
+        risk_flags = _candidate_risk_flags(row, validation, theme_row)
+        risk_penalty = min(28.0, len(risk_flags) * 7.0)
+        priority_score = (
+            base_score * 0.35
+            + theme_score * 0.2
+            + momentum_score * 0.15
+            + volume_score * 0.1
+            + institutional_score * 0.1
+            + validation_score * 0.1
+            - risk_penalty
+        )
+        grade = _grade_from_priority(priority_score, risk_flags, validation)
+        row["candidate_priority_score"] = round(priority_score, 1)
+        row["candidate_grade"] = grade
+        row["risk_flags"] = risk_flags
+        row["grade_reason"] = _grade_reason(row, grade, theme_row, risk_flags)
+        row["primary_theme"] = str(theme_row.get("theme") or (_theme_tags_for_item(row) or [""])[0] or "")
+        row["primary_theme_strength"] = theme_row.get("strength_score")
+        rows.append(row)
+
+    grade_rank = {"A": 0, "B": 1, "C": 2, "X": 3}
+    return sorted(
+        rows,
+        key=lambda row: (
+            grade_rank.get(str(row.get("candidate_grade") or "X"), 9),
+            -float(row.get("candidate_priority_score") or 0),
+            str(row.get("ticker") or ""),
+        ),
+    )
+
+
 def _signal_record_from_candidate(report_date: str, item: dict, validation: dict | None = None) -> dict | None:
     ticker = str(item.get("ticker") or "").upper().strip()
     if not ticker:
@@ -3451,6 +3678,18 @@ def build_report(*, base_url: str, report_date: str) -> str:
         status_hit_rates,
         signal_validation_by_ticker,
     )
+    theme_lookup = _theme_strength_lookup(electronic_theme_rows, theme_rows)
+    graded_candidates = _attach_candidate_grades(
+        _dedupe_candidates(
+            selected_stocks
+            + selected_etfs
+            + strong_stock_candidates
+            + bullish_stock_candidates
+            + ma5_walk_candidates
+        ),
+        theme_lookup=theme_lookup,
+        validation_by_ticker=signal_validation_by_ticker,
+    )
     selected_candidates = selected_stocks + selected_etfs
     news_records = _enrich_news_for_candidates(
         base_url,
@@ -3477,6 +3716,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
         sector_rows=sector_rows,
         theme_rows=theme_rows,
         electronic_theme_rows=electronic_theme_rows,
+        graded_candidates=graded_candidates,
         selected_stocks=selected_stocks,
         selected_etfs=selected_etfs,
         strong_stock_candidates=strong_stock_candidates,
@@ -3576,6 +3816,8 @@ def build_report(*, base_url: str, report_date: str) -> str:
     if data_pool_incomplete:
         lines.append("- 風險提醒：資料池尚未完整，候選僅視為觀察清單，交易前請以下單軟體再核對。")
     lines.append("")
+
+    lines.extend(_graded_candidate_table_lines("## 1B) 今日優先觀察清單（A/B/C 分級）", graded_candidates))
 
     lines.extend(_codex_analysis_section(codex_context))
 

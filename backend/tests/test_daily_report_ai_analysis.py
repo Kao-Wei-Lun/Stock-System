@@ -160,6 +160,40 @@ def test_electronic_theme_rotation_filters_electronic_topics():
     assert "航運" not in {row["theme"] for row in rows}
 
 
+def test_candidate_grading_prioritizes_theme_and_risk_flags():
+    theme_lookup = {
+        "AI Server": {"theme": "AI Server", "strength_score": 105.0, "count": 5, "state": "主線延續"},
+    }
+    candidate = {
+        "ticker": "3231.TW",
+        "name": "緯創",
+        "sector": "電子工業",
+        "theme_tags": ["AI Server"],
+        "total_score": 70,
+        "volume_score": 20,
+        "institutional_score": 15,
+        "candlestick_score": 45,
+        "score": 82,
+        "candlestick_profile": {
+            "latest": {"open": 140, "high": 146, "low": 139, "close": 144.5, "volume_expanded": True},
+            "summary": "突破嘗試 / 收盤轉強",
+        },
+        "accumulation_profile": {"chip": {"institutional_5d_sum": 1000, "foreign_5d_sum": 800}},
+        "recent_profile": {"latest_close": 144.5, "ma5": 140, "ma20": 130, "ma50": 125, "change_pct": 5.0, "volume_ratio": 1.8, "distance_to_recent_high_pct": 1.0},
+    }
+
+    rows = report_tw._attach_candidate_grades(
+        [candidate],
+        theme_lookup=theme_lookup,
+        validation_by_ticker={"3231.TW": {"signal_status": "new_breakout"}},
+    )
+
+    assert rows[0]["candidate_grade"] in {"A", "B"}
+    assert rows[0]["primary_theme"] == "AI Server"
+    assert rows[0]["candidate_priority_score"] > 60
+    assert "主題" in rows[0]["grade_reason"]
+
+
 def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     candidate = {
         "ticker": "2330.TW",
@@ -193,6 +227,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         sector_rows=[{"sector": "半導體業"}],
         theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2}],
         electronic_theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2, "state": "主線延續"}],
+        graded_candidates=[{**candidate, "candidate_grade": "B", "candidate_priority_score": 66.5, "risk_flags": [], "grade_reason": "B級：主題支撐"}],
         selected_stocks=[candidate],
         selected_etfs=[],
         strong_stock_candidates=[],
@@ -228,6 +263,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert context["data_quality_flags"]
     assert context["electronic_theme_rotation"][0]["state"] == "主線延續"
     assert context["theme_rotation"][0]["theme"] == "AI Server"
+    assert context["graded_candidates"][0]["candidate_grade"] == "B"
     assert context["news_packet"]["items"]
     assert context["news_packet"]["candidate_news"][0]["relevance_score"] == 95
     assert len(context["candidates"][0]["daily_bars_1m"]) == 30
