@@ -36,7 +36,7 @@
             <strong>{{ formatValue(latestValues[series.key]) }}</strong>
           </div>
 
-          <svg class="trend-chart trend-facet-chart" viewBox="0 0 640 160" preserveAspectRatio="none">
+          <svg class="trend-chart trend-facet-chart" viewBox="0 0 640 300" preserveAspectRatio="none">
             <line
               v-for="tick in facetGridTicks(series.key)"
               :key="`facet-grid-${series.key}-${tick}`"
@@ -75,9 +75,9 @@
             <g v-if="hoverIndex != null">
               <line
                 :x1="scaleX(hoverIndex)"
-                y1="14"
+                :y1="FACET_TOP"
                 :x2="scaleX(hoverIndex)"
-                y2="132"
+                :y2="FACET_BOTTOM"
                 class="trend-hover-line"
               />
               <circle
@@ -93,14 +93,14 @@
             <g v-for="mark in dateMarks" :key="`facet-mark-${series.key}-${mark.index}`">
               <line
                 :x1="scaleX(mark.index)"
-                y1="14"
+                :y1="FACET_TOP"
                 :x2="scaleX(mark.index)"
-                y2="132"
+                :y2="FACET_BOTTOM"
                 class="trend-grid trend-grid-vertical"
               />
               <text
                 :x="scaleX(mark.index)"
-                y="150"
+                y="286"
                 class="trend-date-text"
                 text-anchor="middle"
               >
@@ -258,8 +258,8 @@ const CHART_LEFT = 44;
 const CHART_RIGHT = 620;
 const CHART_TOP = 16;
 const CHART_BOTTOM = 192;
-const FACET_TOP = 14;
-const FACET_BOTTOM = 132;
+const FACET_TOP = 18;
+const FACET_BOTTOM = 260;
 
 const visibleSeries = computed(() =>
   (props.series || []).filter((series) =>
@@ -470,10 +470,13 @@ function formatValue(value) {
 function handleMouseMove(event) {
   const chart = chartWrapRef.value;
   if (!chart || !props.points.length) return;
-  const rect = chart.getBoundingClientRect();
-  const ratio = Math.min(Math.max((event.clientX - rect.left) / Math.max(rect.width, 1), 0), 1);
+  const target = event.target instanceof Element ? event.target : null;
+  const facetPane = splitSeriesEnabled.value ? target?.closest(".trend-facet-pane") : null;
+  const sourceRect = facetPane?.getBoundingClientRect?.() || chart.getBoundingClientRect();
+  const wrapRect = chart.getBoundingClientRect();
+  const ratio = Math.min(Math.max((event.clientX - sourceRect.left) / Math.max(sourceRect.width, 1), 0), 1);
   hoverIndex.value = Math.min(props.points.length - 1, Math.max(0, Math.round(ratio * (props.points.length - 1))));
-  hoverLeft.value = event.clientX - rect.left;
+  hoverLeft.value = event.clientX - wrapRect.left;
 }
 
 function clearHover() {
