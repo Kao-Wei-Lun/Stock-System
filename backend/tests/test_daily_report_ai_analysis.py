@@ -220,7 +220,7 @@ def test_data_status_warnings_include_stale_or_running_data():
     )
 
     assert any("日K最新日期" in reason for reason in reasons)
-    assert any("pending/running" in reason for reason in reasons)
+    assert any("等待中/同步中" in reason for reason in reasons)
 
 
 def test_candidate_grading_prioritizes_theme_and_risk_flags():
@@ -443,7 +443,8 @@ def test_codex_analysis_section_localizes_internal_terms(monkeypatch, tmp_path):
         "### 主線排序\n"
         "| 主線 | 依據 |\n"
         "|---|---|\n"
-        "| AI Server | strength_score 107.1、count 3、near_20d_high、breakout_with_volume、low_hit_rate_type |\n",
+        "| AI Server | strength_score 107.1、count 3、near_20d_high、breakout_with_volume、low_hit_rate_type |\n"
+        "| 風險 | overall_risk medium、regime neutral、trade_posture balanced、failed_breakout_ratio 39.66% |\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -456,10 +457,16 @@ def test_codex_analysis_section_localizes_internal_terms(monkeypatch, tmp_path):
     assert "接近20日高點" in joined
     assert "放量挑戰突破" in joined
     assert "歷史命中率偏低" in joined
+    assert "整體風險 中等" in joined
+    assert "盤勢 中性" in joined
+    assert "操作姿態 均衡" in joined
+    assert "突破失敗比例 39.66%" in joined
     assert "strength_score" not in joined
     assert "breakout_with_volume" not in joined
     assert "near_20d_high" not in joined
     assert "low_hit_rate_type" not in joined
+    assert "overall_risk" not in joined
+    assert "failed_breakout_ratio" not in joined
 
 
 def test_codex_analysis_section_uses_model_when_enabled(monkeypatch):
@@ -503,14 +510,56 @@ def test_candidate_tables_are_split_for_email_readability():
     lines = report_tw._candidate_table_lines("## 7) 個股潛伏起漲候選（Top 20）", [candidate])
     table_headers = [line for line in lines if line.startswith("|") and not line.startswith("|---")]
 
-    assert any("total_score" in line for line in table_headers)
-    assert any("price_score" in line and "kline_score" in line for line in table_headers)
+    assert any("潛伏總分" in line for line in table_headers)
+    assert any("價格分" in line and "K線分" in line for line in table_headers)
     assert any("AI篩選說明" in line and "隔日策略" in line for line in table_headers)
     assert all(len(report_tw._split_markdown_table_row(line)) <= 9 for line in table_headers)
 
     html = report_tw.markdown_to_email_html("\n".join(lines))
     assert "table-layout:fixed" in html
     assert "overflow-wrap:anywhere" in html
+
+
+def test_signal_validation_status_labels_are_localized():
+    rows = [
+        {
+            "ticker": "2330.TW",
+            "name": "台積電",
+            "sector": "半導體",
+            "signal_days_3": 1,
+            "signal_days_5": 2,
+            "first_signal_date": "2026-05-21",
+            "latest_close": 1000,
+            "breakout_price": 980,
+            "price_change_since_first_signal": 2.1,
+            "max_gain_after_signal": 3.2,
+            "drawdown_after_signal": -1.0,
+            "signal_status": "confirmed_uptrend",
+            "observation": "續強優先觀察",
+        },
+        {
+            "ticker": "3231.TW",
+            "name": "緯創",
+            "sector": "電腦週邊",
+            "signal_days_3": 1,
+            "signal_days_5": 1,
+            "first_signal_date": "2026-05-21",
+            "latest_close": 144.5,
+            "breakout_price": 146,
+            "price_change_since_first_signal": -1.0,
+            "max_gain_after_signal": 1.0,
+            "drawdown_after_signal": -2.0,
+            "signal_status": "new_breakout",
+            "observation": "剛突破，隔日需確認",
+        },
+    ]
+
+    joined = "\n".join(report_tw._signal_validation_table_lines("## 4) 近 5 日訊號驗證", rows))
+
+    assert "已確認上升趨勢" in joined
+    assert "新突破待確認" in joined
+    assert "confirmed_uptrend" not in joined
+    assert "new_breakout" not in joined
 
 
 def test_google_news_records_are_db_article_payloads():

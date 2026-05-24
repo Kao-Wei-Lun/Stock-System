@@ -458,9 +458,9 @@ def _k_text(item: dict) -> str:
         lower = min(o_f, c_f) - l_f
 
     parts = [
-        f"O/H/L/C {f(o)}/{f(h)}/{f(l)}/{f(c)}",
+        f"開/高/低/收 {f(o)}/{f(h)}/{f(l)}/{f(c)}",
         f"實體={_fmt_num(body, 2)} 上影={_fmt_num(upper, 2)} 下影={_fmt_num(lower, 2)}",
-        f"收盤位置={_fmt_num(close_pos, 2)} 實體%={_fmt_num(body_pct, 2)}",
+        f"收盤位置={_fmt_num(close_pos, 2)} 實體比例={_fmt_num(body_pct, 2)}%",
         f"量能={'放大' if vol_expanded else '未放大'}",
         f"均線位置={'貼近/站上MA20' if near_ma20 else '未貼近MA20'}",
         f"型態={summary}",
@@ -493,9 +493,9 @@ def _chip_text(item: dict) -> str:
     it10 = chip.get("investment_trust_10d_sum")
     inst_streak = chip.get("institutional_streak") or {}
     fore_streak = chip.get("foreign_streak") or {}
-    inst_dir = inst_streak.get("direction") or "—"
+    inst_dir = _chip_direction_label(inst_streak.get("direction") or "—")
     inst_days = inst_streak.get("days")
-    fore_dir = fore_streak.get("direction") or "—"
+    fore_dir = _chip_direction_label(fore_streak.get("direction") or "—")
     fore_days = fore_streak.get("days")
     return (
         f"法人5日{_fmt_int(inst5)} / 外資5日{_fmt_int(fore5)} / 投信10日{_fmt_int(it10)}；"
@@ -853,7 +853,7 @@ def _data_quality_flags_for_ai(*, coverage: dict, status_counts: Counter, taifex
             {
                 "level": "warning",
                 "label": "台股日K資料池未完整",
-                "detail": f"coverage={_fmt_num(cov_pct, 2)}%，AI 對低流動性或缺資料標的需降權。",
+                "detail": f"覆蓋率={_fmt_num(cov_pct, 2)}%，AI 對低流動性或缺資料標的需降權。",
             }
         )
     non_success = sum(int(v or 0) for key, v in status_counts.items() if key != "success")
@@ -862,7 +862,11 @@ def _data_quality_flags_for_ai(*, coverage: dict, status_counts: Counter, taifex
             {
                 "level": "warning",
                 "label": "仍有未成功同步標的",
-                "detail": "；".join(f"{key}={_fmt_int(value)}" for key, value in sorted(status_counts.items()) if key != "success"),
+                "detail": "；".join(
+                    f"{_history_status_label(key)}={_fmt_int(value)}"
+                    for key, value in sorted(status_counts.items())
+                    if key != "success"
+                ),
             }
         )
     if isinstance(taifex, dict):
@@ -874,7 +878,7 @@ def _data_quality_flags_for_ai(*, coverage: dict, status_counts: Counter, taifex
                     {
                         "level": "warning",
                         "label": f"{ticker} 指數漲跌幅疑似異常",
-                        "detail": f"change_pct={_fmt_num(change_pct, 2)}%，AI 不應將此數字單獨視為市場常態訊號。",
+                        "detail": f"漲跌幅={_fmt_num(change_pct, 2)}%，AI 不應將此數字單獨視為市場常態訊號。",
                     }
                 )
     return flags
@@ -1236,15 +1240,15 @@ def _data_status_warning_reasons(
     if newest_text and newest_text < expected_latest_date:
         reasons.append(f"日K最新日期={newest_text}，低於報告日期{expected_latest_date}")
     if cov_pct < 85.0:
-        reasons.append(f"coverage={_fmt_num(cov_pct, 2)}%")
+        reasons.append(f"覆蓋率={_fmt_num(cov_pct, 2)}%")
     if status_counts.get("pending", 0) or status_counts.get("running", 0):
         reasons.append(
-            f"仍有 pending/running={_fmt_int(status_counts.get('pending', 0))}/{_fmt_int(status_counts.get('running', 0))}"
+            f"仍有等待中/同步中={_fmt_int(status_counts.get('pending', 0))}/{_fmt_int(status_counts.get('running', 0))}"
         )
     failed_count = int(status_counts.get("failed", 0) or 0)
     failed_warning_threshold = max(10, int(universe_count * 0.005)) if universe_count > 0 else 10
     if failed_count > failed_warning_threshold:
-        reasons.append(f"failed={_fmt_int(failed_count)}")
+        reasons.append(f"失敗={_fmt_int(failed_count)}")
     return reasons
 
 
@@ -1391,6 +1395,51 @@ _RISK_FLAG_LABELS = {
 }
 
 
+_MARKET_RISK_LABELS = {
+    "low": "低",
+    "medium": "中等",
+    "high": "高",
+    "unknown": "未知",
+}
+
+
+_MARKET_REGIME_LABELS = {
+    "bullish": "偏多",
+    "bearish": "偏空",
+    "neutral": "中性",
+    "risk_on": "風險偏好",
+    "risk_off": "風險趨避",
+    "unknown": "未知",
+}
+
+
+_TRADE_POSTURE_LABELS = {
+    "aggressive": "積極",
+    "balanced": "均衡",
+    "defensive": "防守",
+    "conservative": "保守",
+    "wait": "觀望",
+    "unknown": "未知",
+}
+
+
+_HISTORY_STATUS_LABELS = {
+    "success": "成功",
+    "empty": "無資料",
+    "failed": "失敗",
+    "pending": "等待中",
+    "running": "同步中",
+}
+
+
+_CHIP_DIRECTION_LABELS = {
+    "buy": "買超",
+    "sell": "賣超",
+    "neutral": "持平",
+    "none": "無明確方向",
+}
+
+
 def _label_from_map(value: object, labels: dict[str, str]) -> str:
     key = str(value or "").strip()
     return labels.get(key, key)
@@ -1407,6 +1456,19 @@ def _risk_flag_labels(flags: list[object]) -> list[str]:
 def _risk_flag_text(flags: list[object]) -> str:
     labels = _risk_flag_labels(flags)
     return "、".join(labels) if labels else "—"
+
+
+def _chip_direction_label(value: object) -> str:
+    return _label_from_map(value, _CHIP_DIRECTION_LABELS)
+
+
+def _history_status_label(value: object) -> str:
+    return _label_from_map(value, _HISTORY_STATUS_LABELS)
+
+
+def _market_context_value_label(value: object, labels: dict[str, str]) -> str:
+    text = str(value or "unknown").strip()
+    return labels.get(text, text if text else "未知")
 
 
 _USER_FACING_REPORT_TERM_LABELS = {
@@ -1439,6 +1501,35 @@ _USER_FACING_REPORT_TERM_LABELS = {
     "graded_candidates": "分級候選",
     "ai_candidate_tickers": "AI深度分析標的",
     "ai_candidate_ticker_count": "AI深度分析檔數",
+    "failed_breakout_ratio": "突破失敗比例",
+    "avg_hit_1d": "1日平均命中率",
+    "avg_hit_3d": "3日平均命中率",
+    "avg_hit_5d": "5日平均命中率",
+    "today_signal_count": "今日訊號數",
+    "evaluated_signal_count": "已驗證訊號數",
+    "lookback_signal_days": "回看訊號交易日",
+    "confirmed_uptrend": "已確認上升趨勢",
+    "failed_breakout": "突破失敗",
+    "new_breakout": "新突破",
+    "watch_only": "觀察中",
+    "invalidated": "已失效",
+    "overall_risk": "整體風險",
+    "regime": "盤勢",
+    "trade_posture": "操作姿態",
+    "medium": "中等",
+    "neutral": "中性",
+    "balanced": "均衡",
+    "warning": "警示",
+    "volume_expanded": "量能放大",
+    "coverage": "覆蓋率",
+    "change_pct": "漲跌幅",
+    "empty": "無資料",
+    "failed": "失敗",
+    "success": "成功",
+    "pending": "等待中",
+    "running": "同步中",
+    "Top graded": "分級前段標的",
+    "JSON 依據": "資料依據",
     "count": "檔數",
 }
 
@@ -2545,7 +2636,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
     # candidate section is split into smaller bordered tables instead of one
     # very wide table. This preserves every score/detail while avoiding overflow.
     lines.append(
-        "| 類型 | 代號 | 名稱 | 族群/產業 | total_score | 近1日績效 | 近3日績效 | 近5日績效 | 歷史同類型命中率 |"
+        "| 類型 | 代號 | 名稱 | 族群/產業 | 潛伏總分 | 近1日績效 | 近3日績效 | 近5日績效 | 歷史同類型命中率 |"
     )
     lines.append("|---|---|---|---|---:|---:|---:|---:|---:|")
     for it in candidates:
@@ -2568,7 +2659,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
                     _table_cell(
                         f"{_pct_text(it.get('historical_type_hit_rate'))}"
                         + (
-                            f" / n={_fmt_int(it.get('historical_type_sample_size'))}"
+                            f" / 樣本數={_fmt_int(it.get('historical_type_sample_size'))}"
                             if it.get("historical_type_sample_size")
                             else ""
                         )
@@ -2581,7 +2672,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
     lines.append("")
     lines.append("**分項分數**")
     lines.append(
-        "| 代號 | price_score | breakout_score | volume_score | institutional_score | kline_score | API原始潛伏分 | K線分數 |"
+        "| 代號 | 價格分 | 突破分 | 量能分 | 法人籌碼分 | K線分 | API原始潛伏分 | K線分數 |"
     )
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for it in candidates:
@@ -3521,7 +3612,7 @@ def _signal_backtest_summary_lines(title: str, summary: dict, *, error: str | No
         lines.append("")
         return lines
     lines.append(
-        "| 今日候選數 | 近20日樣本交易日 | 已驗證訊號數 | 近20日平均1日命中率 | 近20日平均3日命中率 | 近20日平均5日命中率 | confirmed_uptrend平均報酬 | failed_breakout比例 |"
+        "| 今日候選數 | 近20日樣本交易日 | 已驗證訊號數 | 近20日平均1日命中率 | 近20日平均3日命中率 | 近20日平均5日命中率 | 已確認上升趨勢平均報酬 | 突破失敗比例 |"
     )
     lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|")
     lines.append(
@@ -3579,13 +3670,13 @@ def _ma_from_rows(rows: list[dict], end_index: int, window: int) -> float | None
 
 def _signal_status_label(status: str) -> str:
     labels = {
-        "confirmed_uptrend": "confirmed_uptrend",
-        "new_breakout": "new_breakout",
-        "watch_only": "watch_only",
-        "failed_breakout": "failed_breakout",
-        "invalidated": "invalidated",
+        "confirmed_uptrend": "已確認上升趨勢",
+        "new_breakout": "新突破待確認",
+        "watch_only": "觀察中",
+        "failed_breakout": "突破失敗",
+        "invalidated": "已失效",
     }
-    return labels.get(status, status or "watch_only")
+    return labels.get(status, status or "觀察中")
 
 
 def _signal_observation(status: str, row: dict) -> str:
@@ -4153,7 +4244,10 @@ def build_report(*, base_url: str, report_date: str) -> str:
     else:
         lines.append("- 資料狀態：正常；完整 API / 資料池檢查請見文末附錄。")
     lines.append(
-        f"- 市場風險={market_context.get('overall_risk','—')} / regime={market_context.get('regime','—')} / posture={market_context.get('trade_posture','—')}"
+        "- 市場狀態："
+        f"風險={_market_context_value_label(market_context.get('overall_risk'), _MARKET_RISK_LABELS)}；"
+        f"盤勢={_market_context_value_label(market_context.get('regime'), _MARKET_REGIME_LABELS)}；"
+        f"操作姿態={_market_context_value_label(market_context.get('trade_posture'), _TRADE_POSTURE_LABELS)}"
     )
     drivers = market_context.get("drivers") or []
     if isinstance(drivers, list) and drivers:
@@ -4166,7 +4260,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     if twii:
         lines.append(
             f"- 大盤（^TWII）收={_fmt_num(twii.get('price'),2)}，漲跌={_fmt_num(twii.get('change'),2)}（{_fmt_num(twii.get('change_pct'),2)}%），"
-            f"O/H/L={_fmt_num(twii.get('open'),2)}/{_fmt_num(twii.get('high'),2)}/{_fmt_num(twii.get('low'),2)}"
+            f"開/高/低={_fmt_num(twii.get('open'),2)}/{_fmt_num(twii.get('high'),2)}/{_fmt_num(twii.get('low'),2)}"
         )
         lines.append(
             f"  - 參考支撐/壓力：支撐先看今日低點 {_fmt_num(twii.get('low'),2)}；壓力先看今日高點 {_fmt_num(twii.get('high'),2)}"
@@ -4335,7 +4429,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
 
     lines.append("## 10) 隔日三情境交易策略")
     lines.append("### A. 進攻（突破續強）")
-    lines.append("- 進場：候選股「突破今日高點」且量能不縮（volume_expanded=true 更佳）")
+    lines.append("- 進場：候選股「突破今日高點」且量能不縮（若系統判定量能放大更佳）")
     lines.append("- 停損：跌破 MA20 或跌破今日低點（以較高者為準）")
     lines.append("- 停利：分批（1R 先回收、2R 再減碼），或跌破5日/10日線再退出")
     lines.append("- 資金控管：單筆風險 0.3%~0.8% 資金；高相關 ETF 限制同向曝險")
@@ -4355,12 +4449,12 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.append("## 附錄 A) API / 資料池檢查")
     lines.append(f"- API Base: {base_url}")
     lines.append(
-        f"- GET /api/tw/universe/coverage?interval=1d：coverage={_fmt_num(cov_pct,2)}%（{covered_count}/{universe_count}），"
-        f"oldest_latest_date/newest_latest_date={oldest_latest} → {newest_latest}"
+        f"- GET /api/tw/universe/coverage?interval=1d：覆蓋率={_fmt_num(cov_pct,2)}%（{covered_count}/{universe_count}），"
+        f"最舊/最新資料日期={oldest_latest} → {newest_latest}"
     )
     lines.append(
         "- GET /api/tw/history/status："
-        + "；".join(f"{k}={_fmt_int(v)}" for k, v in sorted(status_counts.items()))
+        + "；".join(f"{_history_status_label(k)}={_fmt_int(v)}" for k, v in sorted(status_counts.items()))
     )
     lines.append("- 資料狀態：" + ("警示；" + "；".join(data_warning_reasons) if data_pool_incomplete else "正常"))
     lines.append(
