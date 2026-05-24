@@ -160,6 +160,31 @@ def test_electronic_theme_rotation_filters_electronic_topics():
     assert "航運" not in {row["theme"] for row in rows}
 
 
+def test_data_status_warnings_ignore_minor_empty_or_failed_counts():
+    reasons = report_tw._data_status_warning_reasons(
+        cov_pct=89.0,
+        universe_count=3000,
+        newest_latest="2026-05-22",
+        expected_latest_date="2026-05-22",
+        status_counts=Counter({"success": 2600, "empty": 350, "failed": 6}),
+    )
+
+    assert reasons == []
+
+
+def test_data_status_warnings_include_stale_or_running_data():
+    reasons = report_tw._data_status_warning_reasons(
+        cov_pct=99.0,
+        universe_count=3000,
+        newest_latest="2026-05-21",
+        expected_latest_date="2026-05-22",
+        status_counts=Counter({"success": 2600, "running": 1}),
+    )
+
+    assert any("日K最新日期" in reason for reason in reasons)
+    assert any("pending/running" in reason for reason in reasons)
+
+
 def test_candidate_grading_prioritizes_theme_and_risk_flags():
     theme_lookup = {
         "AI Server": {"theme": "AI Server", "strength_score": 105.0, "count": 5, "state": "主線延續"},

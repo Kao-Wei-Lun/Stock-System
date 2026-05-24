@@ -1223,6 +1223,31 @@ def _electronic_theme_rotation_rows(candidates: list[dict], *, limit: int = 8) -
     return electronic_rows[:limit]
 
 
+def _data_status_warning_reasons(
+    *,
+    cov_pct: float,
+    universe_count: int,
+    newest_latest: object,
+    expected_latest_date: str,
+    status_counts: Counter,
+) -> list[str]:
+    reasons: list[str] = []
+    newest_text = str(newest_latest or "").strip()
+    if newest_text and newest_text < expected_latest_date:
+        reasons.append(f"日K最新日期={newest_text}，低於報告日期{expected_latest_date}")
+    if cov_pct < 85.0:
+        reasons.append(f"coverage={_fmt_num(cov_pct, 2)}%")
+    if status_counts.get("pending", 0) or status_counts.get("running", 0):
+        reasons.append(
+            f"仍有 pending/running={_fmt_int(status_counts.get('pending', 0))}/{_fmt_int(status_counts.get('running', 0))}"
+        )
+    failed_count = int(status_counts.get("failed", 0) or 0)
+    failed_warning_threshold = max(10, int(universe_count * 0.005)) if universe_count > 0 else 10
+    if failed_count > failed_warning_threshold:
+        reasons.append(f"failed={_fmt_int(failed_count)}")
+    return reasons
+
+
 def _fetch_recent_daily_rows(base_url: str, ticker: str, *, period: str = "3mo") -> list[dict]:
     encoded = urllib.parse.quote(ticker, safe="")
     payload = _fetch_optional_json(f"{base_url}/api/kline/{encoded}?period={period}&interval=1d", timeout=30)
@@ -3503,7 +3528,14 @@ def build_report(*, base_url: str, report_date: str) -> str:
     oldest_latest = cov.get("oldest_latest_date")
     newest_latest = cov.get("newest_latest_date")
 
-    data_pool_incomplete = cov_pct < 95.0 or non_success > 0
+    data_warning_reasons = _data_status_warning_reasons(
+        cov_pct=cov_pct,
+        universe_count=universe_count,
+        newest_latest=newest_latest,
+        expected_latest_date=report_date,
+        status_counts=status_counts,
+    )
+    data_pool_incomplete = bool(data_warning_reasons)
 
     screener = _http_json(
         f"{base_url}/api/screener/run",
@@ -3761,32 +3793,18 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.append(f"生成時間（台北）：{dt_tw}")
     lines.append("")
 
-    lines.append("## 0) API / 資料池檢查（必讀）")
-    lines.append(f"- API Base: {base_url}")
-    lines.append(
-        f"- GET /api/tw/universe/coverage?interval=1d：coverage={_fmt_num(cov_pct,2)}%（{covered_count}/{universe_count}），"
-        f"oldest_latest_date/newest_latest_date={oldest_latest} → {newest_latest}"
-    )
-    lines.append(
-        "- GET /api/tw/history/status："
-        + "；".join(f"{k}={_fmt_int(v)}" for k, v in sorted(status_counts.items()))
-    )
     if data_pool_incomplete:
-        lines.append("- **資料池仍在補齊中**（coverage < 95% 或仍有 pending/running/empty/failed）")
-    lines.append(
-        "- 台股歷史資料僅視為本機資料庫中的 **Fubon API（fubon_neo）** 同步結果；不使用 Yahoo 或其他來源補台股歷史。"
-    )
-    if signal_file:
-        lines.append(f"- 今日 signal JSON 已保存：`{signal_file}`")
-    if signal_store_error:
-        lines.append(f"- 今日 signal JSON 保存失敗：{_table_cell(signal_store_error, width=120)}")
-    if codex_context_file:
-        lines.append(f"- Codex/AI 分析輸入 JSON 已保存：`{codex_context_file}`")
-    if codex_context_error:
-        lines.append(f"- Codex/AI 分析輸入保存失敗：{_table_cell(codex_context_error, width=120)}")
-    lines.append("")
+        lines.append("## 0) 資料狀態警示")
+        lines.append("- 資料狀態：警示；候選清單需降權觀察。")
+        lines.append("- 警示原因：" + "；".join(data_warning_reasons))
+        lines.append("- 完整 API / 資料池檢查已移至文末附錄。")
+        lines.append("")
 
     lines.append("## 1) 今日結論（可執行）")
+    if data_pool_incomplete:
+        lines.append("- 資料狀態：警示；" + "；".join(data_warning_reasons))
+    else:
+        lines.append("- 資料狀態：正常；完整 API / 資料池檢查請見文末附錄。")
     lines.append(
         f"- 市場風險={market_context.get('overall_risk','—')} / regime={market_context.get('regime','—')} / posture={market_context.get('trade_posture','—')}"
     )
@@ -3983,8 +4001,32 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.append("- 資金控管：降低槓桿、分批進出")
     lines.append("")
     lines.append("### C. 觀望（假突破/風險升溫）")
-    lines.append("- 不交易條件：大盤跌破今日低點、外資期貨 OI 淨空單擴大且價格轉弱、或資料池仍大幅 incomplete")
+    lines.append("- 不交易條件：大盤跌破今日低點、外資期貨 OI 淨空單擴大且價格轉弱、或資料狀態出現重大警示")
     lines.append("- 行動：只保留觀察清單，等待「突破確認」或「回測不破」再出手")
+    lines.append("")
+
+    lines.append("## 附錄 A) API / 資料池檢查")
+    lines.append(f"- API Base: {base_url}")
+    lines.append(
+        f"- GET /api/tw/universe/coverage?interval=1d：coverage={_fmt_num(cov_pct,2)}%（{covered_count}/{universe_count}），"
+        f"oldest_latest_date/newest_latest_date={oldest_latest} → {newest_latest}"
+    )
+    lines.append(
+        "- GET /api/tw/history/status："
+        + "；".join(f"{k}={_fmt_int(v)}" for k, v in sorted(status_counts.items()))
+    )
+    lines.append("- 資料狀態：" + ("警示；" + "；".join(data_warning_reasons) if data_pool_incomplete else "正常"))
+    lines.append(
+        "- 台股歷史資料僅視為本機資料庫中的 **Fubon API（fubon_neo）** 同步結果；不使用 Yahoo 或其他來源補台股歷史。"
+    )
+    if signal_file:
+        lines.append(f"- 今日 signal JSON 已保存：`{signal_file}`")
+    if signal_store_error:
+        lines.append(f"- 今日 signal JSON 保存失敗：{_table_cell(signal_store_error, width=120)}")
+    if codex_context_file:
+        lines.append(f"- Codex/AI 分析輸入 JSON 已保存：`{codex_context_file}`")
+    if codex_context_error:
+        lines.append(f"- Codex/AI 分析輸入保存失敗：{_table_cell(codex_context_error, width=120)}")
 
     return "\n".join(lines).strip() + "\n"
 
