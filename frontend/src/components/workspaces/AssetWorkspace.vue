@@ -2,17 +2,26 @@
   <section class="workspace-page asset-page">
     <div class="workspace-hero">
       <div>
-        <div class="workspace-kicker">Personal Assets</div>
-        <h1>把持倉、現金流、估值與對帳放進同一個日常資產工作台。</h1>
+        <div class="workspace-kicker">Personal Wealth</div>
+        <h1>個人資產總覽</h1>
+        <p>追蹤淨值、現金流、持股與投資績效</p>
       </div>
       <div class="workspace-hero-meta">
         <div class="hero-stat">
-          <span>目前標的</span>
-          <strong>{{ currentTicker }}</strong>
+          <span>最後更新</span>
+          <strong>{{ lastUpdatedLabel }}</strong>
         </div>
-        <button class="hero-action" type="button" @click="$emit('open-terminal')">
-          回到終端
-        </button>
+        <div class="asset-hero-actions">
+          <button class="asset-action-btn secondary" type="button" :disabled="assetLoading" @click="$emit('reload-asset-data')">
+            {{ assetLoading ? "同步中" : "同步資料" }}
+          </button>
+          <button class="asset-action-btn" type="button" :disabled="assetLoading" @click="$emit('recompute-asset-tracking')">
+            重算資產
+          </button>
+          <button class="asset-action-btn ghost" type="button" @click="$emit('open-terminal')">
+            回到終端
+          </button>
+        </div>
       </div>
     </div>
 
@@ -32,6 +41,8 @@
       <div class="asset-main-card">
         <AssetOverviewPanel
           v-if="activeTab === 'overview'"
+          :asset-loading="assetLoading"
+          :asset-error="assetError"
           :asset-performance-range="assetPerformanceRange"
           :asset-base-currency="assetBaseCurrency"
           :asset-summary="assetSummary"
@@ -173,29 +184,16 @@
         </div>
       </div>
 
-      <aside class="asset-side-card">
-        <div class="asset-side-kicker">Daily Focus</div>
-        <div class="asset-side-title">{{ sideTitle }}</div>
-        <p class="asset-side-copy">
-          {{ sideCopy }}
-        </p>
-        <div class="asset-side-metric">
-          <span>基準幣別</span>
-          <strong>{{ assetBaseCurrency }}</strong>
-        </div>
-        <div class="asset-side-metric">
-          <span>追蹤帳戶</span>
-          <strong>{{ assetAccountsSummary.length }}</strong>
-        </div>
-        <div class="asset-side-metric">
-          <span>目前持倉</span>
-          <strong>{{ assetHoldings.length }}</strong>
-        </div>
-        <div class="asset-side-metric">
-          <span>待處理提醒</span>
-          <strong>{{ assetIssueCount }}</strong>
-        </div>
-      </aside>
+      <AssetInsightPanel
+        class="asset-side-card"
+        :asset-base-currency="assetBaseCurrency"
+        :asset-summary="assetSummary"
+        :asset-holdings="assetHoldings"
+        :asset-warnings="assetWarnings"
+        :asset-quote-gaps="assetQuoteGaps"
+        :asset-reconciliation="assetReconciliation"
+        :asset-alerts="assetAlerts"
+      />
     </div>
   </section>
 </template>
@@ -204,12 +202,14 @@
 import { computed, nextTick, ref } from "vue";
 
 import AssetHoldingsFlowsPanel from "../assets/AssetHoldingsFlowsPanel.vue";
+import AssetInsightPanel from "../assets/AssetInsightPanel.vue";
 import AssetOverviewPanel from "../assets/AssetOverviewPanel.vue";
 import AssetTrackingPanel from "../AssetTrackingPanel.vue";
 
 const props = defineProps({
   currentTicker: { type: String, required: true },
   assetLoading: { type: Boolean, required: true },
+  assetError: { type: String, default: "" },
   assetPerformanceRange: { type: String, default: "1y" },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
@@ -324,6 +324,12 @@ const assetIssueCount = computed(() => {
   return props.assetWarnings.length + props.assetQuoteGaps.length + props.assetAlerts.length + gapCount;
 });
 
+const lastUpdatedLabel = computed(() => (
+  formatDateTime(props.assetLastRecompute?.generated_at)
+  || formatDateTime(props.assetPerformanceSummary?.latest_snapshot_date)
+  || "尚無資料"
+));
+
 const sideTitle = computed(() => ({
   overview: "資產總覽",
   holdings: "持倉與流水",
@@ -384,6 +390,20 @@ async function focusMaintenance(sectionKey = "") {
     scrollMaintenanceSection(sectionKey);
   }
 }
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString("zh-TW", {
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 </script>
 
 <style scoped>
@@ -394,9 +414,21 @@ async function focusMaintenance(sectionKey = "") {
 }
 
 .asset-page {
+  --asset-bg: #0b111a;
+  --asset-card-bg: #111827;
+  --asset-card-bg-soft: #0f172a;
+  --asset-border: #1f2937;
+  --asset-text-primary: #e5e7eb;
+  --asset-text-secondary: #94a3b8;
+  --asset-text-muted: #64748b;
+  --asset-positive: #ef4444;
+  --asset-negative: #22c55e;
+  --asset-warning: #f59e0b;
+  --asset-info: #2563eb;
   background:
-    radial-gradient(circle at top right, rgba(93, 211, 158, 0.1), transparent 28%),
-    linear-gradient(180deg, rgba(8, 14, 22, 0.98), rgba(9, 15, 24, 0.98));
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 30%),
+    linear-gradient(180deg, rgba(11, 17, 26, 0.98), rgba(9, 15, 24, 0.98));
+  color: var(--asset-text-primary);
 }
 
 .workspace-hero {
@@ -404,27 +436,34 @@ async function focusMaintenance(sectionKey = "") {
   align-items: flex-end;
   justify-content: space-between;
   gap: 18px;
-  padding: 20px 22px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(16, 28, 43, 0.92), rgba(8, 18, 29, 0.92));
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+  padding: 22px 24px;
+  border: 1px solid var(--asset-border);
+  border-radius: 20px;
+  background: rgba(17, 24, 39, 0.88);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
 }
 
 .workspace-kicker {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: rgba(147, 232, 193, 0.78);
+  letter-spacing: 0.14em;
+  color: var(--asset-text-muted);
   margin-bottom: 8px;
 }
 
 .workspace-hero h1 {
   margin: 0;
   max-width: 760px;
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.18;
-  color: #f4fbff;
+  color: var(--asset-text-primary);
+}
+
+.workspace-hero p {
+  margin: 8px 0 0;
+  color: var(--asset-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .workspace-hero-meta {
@@ -438,11 +477,12 @@ async function focusMaintenance(sectionKey = "") {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 140px;
+  min-width: 190px;
   padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(231, 243, 255, 0.84);
+  border: 1px solid var(--asset-border);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.74);
+  color: var(--asset-text-secondary);
 }
 
 .hero-stat span {
@@ -452,17 +492,42 @@ async function focusMaintenance(sectionKey = "") {
 }
 
 .hero-stat strong {
-  font-size: 18px;
+  color: var(--asset-text-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
-.hero-action {
-  border: 1px solid rgba(147, 232, 193, 0.4);
-  background: linear-gradient(135deg, rgba(93, 211, 158, 0.22), rgba(17, 92, 63, 0.16));
-  color: #f5fffa;
-  padding: 10px 14px;
-  border-radius: 999px;
+.asset-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.asset-action-btn {
+  border: 1px solid rgba(37, 99, 235, 0.42);
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--asset-text-primary);
+  padding: 9px 13px;
+  border-radius: 10px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.asset-action-btn.secondary {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.76);
+}
+
+.asset-action-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--asset-text-secondary);
+}
+
+.asset-action-btn:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .asset-stage {
@@ -481,25 +546,25 @@ async function focusMaintenance(sectionKey = "") {
 
 .asset-tab {
   padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(219, 229, 240, 0.82);
+  border: 1px solid var(--asset-border);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+  color: var(--asset-text-secondary);
   cursor: pointer;
 }
 
 .asset-tab.active {
-  border-color: rgba(147, 232, 193, 0.44);
-  background: rgba(93, 211, 158, 0.14);
-  color: #f5fffa;
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--asset-text-primary);
 }
 
 .asset-main-card,
 .asset-side-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--asset-border);
   border-radius: 20px;
-  background: rgba(7, 14, 22, 0.92);
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.2);
+  background: var(--asset-card-bg);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16);
 }
 
 .asset-main-card :deep(.asset-shell) {
@@ -550,9 +615,20 @@ async function focusMaintenance(sectionKey = "") {
 }
 
 .asset-side-card {
-  padding: 18px;
   position: sticky;
   top: 18px;
+}
+
+.asset-page :deep(.up) {
+  color: var(--asset-positive) !important;
+}
+
+.asset-page :deep(.dn) {
+  color: var(--asset-negative) !important;
+}
+
+.asset-page :deep(.neutral) {
+  color: var(--asset-text-primary) !important;
 }
 
 .asset-side-kicker {

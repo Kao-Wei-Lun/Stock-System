@@ -1381,19 +1381,19 @@ function holdingWeight(holding) {
 }
 
 .asset-heatmap-cell.up {
-  background: rgba(0, 217, 163, 0.12);
+  background: rgba(255, 77, 106, 0.12);
 }
 
 .asset-heatmap-cell.strong-up {
-  background: rgba(0, 217, 163, 0.22);
+  background: rgba(255, 77, 106, 0.22);
 }
 
 .asset-heatmap-cell.dn {
-  background: rgba(255, 77, 106, 0.1);
+  background: rgba(0, 217, 163, 0.1);
 }
 
 .asset-heatmap-cell.strong-dn {
-  background: rgba(255, 77, 106, 0.2);
+  background: rgba(0, 217, 163, 0.2);
 }
 
 .asset-import-textarea {
@@ -1409,11 +1409,11 @@ function holdingWeight(holding) {
 }
 
 .up {
-  color: var(--green);
+  color: var(--red);
 }
 
 .dn {
-  color: var(--red);
+  color: var(--green);
 }
 
 .neutral {

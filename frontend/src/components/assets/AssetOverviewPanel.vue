@@ -41,113 +41,38 @@
       </button>
     </div>
 
-    <div class="asset-range-row">
-      <button
-        v-for="item in performanceRangeOptions"
-        :key="item.value"
-        class="asset-range-btn"
-        :class="{ active: assetPerformanceRange === item.value }"
-        type="button"
-        @click="$emit('set-asset-performance-range', item.value)"
-      >
-        {{ item.label }}
-      </button>
+    <div v-if="assetError" class="asset-error-state">
+      <strong>資產資料載入異常</strong>
+      <span>{{ assetError }}</span>
     </div>
 
-    <div class="asset-summary-grid">
-      <button
-        v-for="card in summaryCards"
-        :key="card.key"
-        class="asset-summary-card asset-summary-action"
-        :class="{ active: activeChartMode === card.chartMode }"
-        type="button"
-        @click="setActiveChartMode(card.chartMode)"
-      >
-        <span>{{ card.label }}</span>
-        <strong :class="card.tone">{{ card.value }}</strong>
-        <small>{{ card.helper }}</small>
-      </button>
-    </div>
+    <AssetKpiGrid
+      :asset-loading="assetLoading"
+      :asset-performance-range="assetPerformanceRange"
+      :asset-base-currency="assetBaseCurrency"
+      :asset-summary="assetSummary"
+      :asset-performance-summary="assetPerformanceSummary"
+      :asset-performance-series="assetPerformanceSeries"
+      :asset-holdings="assetHoldings"
+    />
 
-    <section class="asset-card asset-card-wide">
-      <div class="asset-card-head">
-        <div>
-          <div class="asset-card-title">資產曲線</div>
-          <div class="bt-trade-sub">
-            {{ assetPerformanceSeries.length }} 個觀察點 · 目前聚焦 {{ selectedSnapshotLabel }}
-          </div>
-        </div>
-        <div class="asset-chart-mode-row">
-          <button
-            v-for="mode in performanceModeOptions"
-            :key="mode.value"
-            class="asset-inline-btn"
-            :class="{ active: activeChartMode === mode.value }"
-            type="button"
-            @click="setActiveChartMode(mode.value)"
-          >
-            {{ mode.label }}
-          </button>
-        </div>
-      </div>
+    <AssetPerformanceSection
+      :asset-loading="assetLoading"
+      :asset-performance-range="assetPerformanceRange"
+      :asset-base-currency="assetBaseCurrency"
+      :asset-summary="assetSummary"
+      :asset-performance-summary="assetPerformanceSummary"
+      :asset-performance-series="assetPerformanceSeries"
+      @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
+    />
 
-      <div v-if="performanceChartReady" class="asset-performance-grid asset-performance-grid-chart">
-        <div class="asset-curve-card asset-curve-card-chart">
-          <div class="asset-curve-metrics">
-            <div class="asset-mini-block">
-              <span>區間起點</span>
-              <strong>{{ formatCurrency(assetPerformanceSummary.start_value_base) }}</strong>
-            </div>
-            <div class="asset-mini-block">
-              <span>期間淨流入</span>
-              <strong>{{ formatSignedCurrency(selectedPoint.net_flow_base, assetBaseCurrency) }}</strong>
-            </div>
-            <div class="asset-mini-block">
-              <span>聚焦日期</span>
-              <strong>{{ selectedSnapshotLabel }}</strong>
-            </div>
-          </div>
-          <DeferredVChart
-            class="asset-chart asset-chart-performance"
-            :option="performanceChartOption"
-            autoresize
-            @click="handlePerformanceChartClick"
-          />
-        </div>
-
-        <div class="asset-side-analytics asset-side-analytics-chart">
-          <div class="asset-mini-block">
-            <span>選定資產值</span>
-            <strong>{{ formatCurrency(selectedPoint.total_asset_value_base) }}</strong>
-          </div>
-          <div class="asset-mini-block">
-            <span>選定現金</span>
-            <strong>{{ formatCurrency(selectedPoint.cash_total_base) }}</strong>
-          </div>
-          <div class="asset-mini-block">
-            <span>選定持倉市值</span>
-            <strong>{{ formatCurrency(selectedPoint.market_value_total_base) }}</strong>
-          </div>
-          <div class="asset-mini-block">
-            <span>選定真實績效</span>
-            <strong :class="Number(selectedPoint.true_performance_base || 0) >= 0 ? 'up' : 'dn'">
-              {{ formatSignedCurrency(selectedPoint.true_performance_base, assetBaseCurrency) }}
-            </strong>
-          </div>
-          <div class="asset-mini-block">
-            <span>高水位</span>
-            <strong>{{ formatCurrency(assetPerformanceSummary.high_water_mark_base) }}</strong>
-          </div>
-          <div class="asset-mini-block">
-            <span>最大回撤</span>
-            <strong :class="Number(assetPerformanceSummary.max_drawdown_pct || 0) >= 0 ? 'neutral' : 'dn'">
-              {{ formatPercent(assetPerformanceSummary.max_drawdown_pct) }}
-            </strong>
-          </div>
-        </div>
-      </div>
-      <div v-else class="bt-history-empty">目前沒有足夠的歷史快照可繪製資產曲線。</div>
-    </section>
+    <AssetHoldingsTable
+      :asset-loading="assetLoading"
+      :asset-base-currency="assetBaseCurrency"
+      :asset-summary="assetSummary"
+      :asset-holdings="assetHoldings"
+      @focus-holding="focusHoldings({ ticker: $event })"
+    />
 
     <div class="asset-overview-secondary-grid">
       <section class="asset-card">
@@ -348,18 +273,28 @@
     </div>
 
     <div class="asset-analytics-grid">
-      <section class="asset-card">
+      <section class="asset-card asset-card-wide asset-allocation-card">
         <div class="asset-card-head">
           <div>
-            <div class="asset-card-title">帳戶配置</div>
-            <div class="bt-trade-sub">點擊任一帳戶可直接查看該帳戶持倉與流水</div>
+            <div class="asset-card-title">資產配置</div>
+            <div class="bt-trade-sub">第一階段先整理帳戶與市場配置，其他維度待資料支援後啟用</div>
           </div>
-          <div class="asset-list-metrics">
-            <span>{{ assetAccountAllocation.length }}</span>
-            <small>帳戶</small>
+          <div class="asset-allocation-tabs">
+            <button
+              v-for="tab in allocationTabs"
+              :key="tab.key"
+              class="asset-inline-btn"
+              :class="{ active: allocationTab === tab.key }"
+              type="button"
+              :disabled="tab.disabled"
+              @click="allocationTab = tab.key"
+            >
+              {{ tab.label }}
+            </button>
           </div>
         </div>
-        <div v-if="assetAccountAllocation.length" class="asset-donut-card">
+
+        <div v-if="allocationTab === 'account' && assetAccountAllocation.length" class="asset-donut-card">
           <DeferredVChart
             class="asset-chart asset-chart-donut"
             :option="accountAllocationChartOption"
@@ -380,21 +315,7 @@
             </button>
           </div>
         </div>
-        <div v-else class="bt-history-empty">尚無配置資料。</div>
-      </section>
-
-      <section class="asset-card">
-        <div class="asset-card-head">
-          <div>
-            <div class="asset-card-title">市場配置</div>
-            <div class="bt-trade-sub">點擊市場分布後，持倉頁只看對應市場</div>
-          </div>
-          <div class="asset-list-metrics">
-            <span>{{ assetMarketAllocation.length }}</span>
-            <small>市場</small>
-          </div>
-        </div>
-        <div v-if="assetMarketAllocation.length" class="asset-donut-card">
+        <div v-else-if="allocationTab === 'market' && assetMarketAllocation.length" class="asset-donut-card">
           <DeferredVChart
             class="asset-chart asset-chart-donut"
             :option="marketAllocationChartOption"
@@ -415,7 +336,9 @@
             </button>
           </div>
         </div>
-        <div v-else class="bt-history-empty">目前沒有持股市值。</div>
+        <div v-else class="asset-allocation-empty">
+          {{ allocationEmptyMessage }}
+        </div>
       </section>
 
       <section class="asset-card">
@@ -441,35 +364,7 @@
       </section>
     </div>
 
-    <div class="asset-preview-grid">
-      <section class="asset-card">
-        <div class="asset-card-head">
-          <div class="asset-card-title">持倉預覽</div>
-          <button class="asset-inline-btn" type="button" @click="$emit('open-tab', 'holdings')">查看全部</button>
-        </div>
-        <div v-if="assetHoldings.length" class="asset-list">
-          <button
-            v-for="holding in assetHoldings.slice(0, 5)"
-            :key="`${holding.account_id}-${holding.ticker}`"
-            class="asset-list-item"
-            type="button"
-            @click="focusHoldings({ ticker: holding.ticker })"
-          >
-            <div>
-              <strong>{{ holding.ticker }}</strong>
-              <div class="bt-trade-sub">{{ holding.account_name }}</div>
-            </div>
-            <div class="asset-list-metrics">
-              <span>{{ formatCurrency(holding.market_value_base) }}</span>
-              <small :class="Number(holding.unrealized_pnl_base || 0) >= 0 ? 'up' : 'dn'">
-                {{ formatSignedCurrency(holding.unrealized_pnl_base, assetBaseCurrency) }}
-              </small>
-            </div>
-          </button>
-        </div>
-        <div v-else class="bt-history-empty">尚無持倉。</div>
-      </section>
-
+    <div class="asset-preview-grid asset-preview-grid-single">
       <section class="asset-card">
         <div class="asset-card-head">
           <div class="asset-card-title">最近流水</div>
@@ -513,6 +408,9 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { THEME_KEY } from "vue-echarts";
+import AssetHoldingsTable from "./AssetHoldingsTable.vue";
+import AssetKpiGrid from "./AssetKpiGrid.vue";
+import AssetPerformanceSection from "./AssetPerformanceSection.vue";
 import DeferredVChart from "../DeferredVChart.vue";
 
 use([
@@ -532,6 +430,8 @@ use([
 provide(THEME_KEY, "dark");
 
 const props = defineProps({
+  assetLoading: { type: Boolean, default: false },
+  assetError: { type: String, default: "" },
   assetPerformanceRange: { type: String, default: "1y" },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
@@ -568,12 +468,12 @@ const performanceRangeOptions = [
 
 const performanceModeOptions = [
   { value: "total_asset_value_base", label: "總資產", color: "#7be7ff" },
-  { value: "true_performance_base", label: "純績效", color: "#6ef0a7" },
+  { value: "true_performance_base", label: "純績效", color: "#ef4444" },
   { value: "cash_total_base", label: "現金", color: "#ffcf78" },
-  { value: "market_value_total_base", label: "持倉市值", color: "#ff7f9d" },
+  { value: "market_value_total_base", label: "持倉市值", color: "#60a5fa" },
 ];
 
-const palette = ["#7be7ff", "#6ef0a7", "#ffcf78", "#ff7f9d", "#8d92ff", "#73b8ff", "#9ef7d6"];
+const palette = ["#60a5fa", "#94a3b8", "#f59e0b", "#ef4444", "#22c55e", "#a78bfa", "#14b8a6"];
 const emptyFlowBreakdown = Object.freeze({
   deposit_base: 0,
   withdraw_base: 0,
@@ -595,6 +495,14 @@ const activeChartMode = ref("total_asset_value_base");
 const changeBreakdownView = ref("story");
 const selectedDate = ref("");
 const selectedMonth = ref("");
+const allocationTab = ref("account");
+
+const allocationTabs = [
+  { key: "account", label: "帳戶配置", disabled: false },
+  { key: "market", label: "市場配置", disabled: false },
+  { key: "sector", label: "產業配置", disabled: true },
+  { key: "currency", label: "幣別配置", disabled: true },
+];
 
 const hasWarnings = computed(() => (
   props.assetWarnings.length
@@ -894,6 +802,13 @@ const monthlyHeatmapCells = computed(() => (
 const performanceChartReady = computed(() => performanceRows.value.length >= 2);
 const waterfallChartReady = computed(() => performanceRows.value.length >= 1);
 const monthlyHeatmapReady = computed(() => (props.assetMonthlyHeatmap || []).length > 0);
+
+const allocationEmptyMessage = computed(() => ({
+  account: "尚無帳戶配置資料。",
+  market: "目前沒有可用的市場配置資料。",
+  sector: "目前資料尚未提供產業配置，待後續資料欄位支援。",
+  currency: "目前資料尚未提供幣別配置，待後續資料欄位支援。",
+}[allocationTab.value] || "尚無配置資料。"));
 
 const summaryCards = computed(() => [
   {
@@ -1250,7 +1165,7 @@ const monthlyHeatmapOption = computed(() => {
       bottom: 16,
       textStyle: { color: "rgba(219, 229, 240, 0.66)" },
       inRange: {
-        color: ["#ff5f7e", "#292f3f", "#6ef0a7"],
+        color: ["#22c55e", "#292f3f", "#ef4444"],
       },
     },
     series: [
@@ -1323,7 +1238,7 @@ const contributorChartOption = computed(() => ({
         value: item.value,
         ticker: item.ticker,
         itemStyle: {
-          color: item.value >= 0 ? "#6ef0a7" : "#ff7f9d",
+          color: item.value >= 0 ? "#ef4444" : "#22c55e",
         },
       })),
       label: {
@@ -1488,8 +1403,8 @@ function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
 
   let running = startValue;
   [
-    { label: "淨流入", value: netFlow, positiveColor: "#ffcf78", negativeColor: "#ff7f9d" },
-    { label: "真實績效", value: performance, positiveColor: "#6ef0a7", negativeColor: "#ff5f7e" },
+    { label: "淨流入", value: netFlow, positiveColor: "#ef4444", negativeColor: "#22c55e" },
+    { label: "真實績效", value: performance, positiveColor: "#ef4444", negativeColor: "#22c55e" },
   ].forEach((item) => {
     if (Math.abs(item.value) < 0.01) return;
     const next = running + item.value;
@@ -1708,6 +1623,21 @@ function tradeSideLabel(value) {
   width: 100%;
 }
 
+.asset-error-state {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--asset-text-secondary, rgba(219, 229, 240, 0.82));
+}
+
+.asset-error-state strong {
+  color: var(--asset-warning, #f59e0b);
+}
+
 .asset-summary-action {
   width: 100%;
   padding: 14px;
@@ -1819,11 +1749,11 @@ function tradeSideLabel(value) {
 }
 
 .asset-change-step.up {
-  border-color: rgba(110, 240, 167, 0.18);
+  border-color: rgba(239, 68, 68, 0.22);
 }
 
 .asset-change-step.dn {
-  border-color: rgba(255, 95, 126, 0.22);
+  border-color: rgba(34, 197, 94, 0.2);
 }
 
 .asset-change-step.accent {
@@ -1847,11 +1777,11 @@ function tradeSideLabel(value) {
 }
 
 .asset-change-step.up strong {
-  color: #6ef0a7;
+  color: var(--asset-positive, #ef4444);
 }
 
 .asset-change-step.dn strong {
-  color: #ff7f9d;
+  color: var(--asset-negative, #22c55e);
 }
 
 .asset-change-step.accent strong {
@@ -1971,11 +1901,11 @@ function tradeSideLabel(value) {
 }
 
 .asset-breakdown-bar-fill.up {
-  background: linear-gradient(90deg, rgba(110, 240, 167, 0.58), rgba(110, 240, 167, 0.94));
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.54), rgba(239, 68, 68, 0.9));
 }
 
 .asset-breakdown-bar-fill.dn {
-  background: linear-gradient(90deg, rgba(255, 95, 126, 0.58), rgba(255, 95, 126, 0.94));
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.5), rgba(34, 197, 94, 0.88));
 }
 
 .asset-breakdown-bar-fill.neutral {
@@ -2055,13 +1985,13 @@ function tradeSideLabel(value) {
 }
 
 .asset-change-pill.success {
-  border-color: rgba(110, 240, 167, 0.2);
-  background: rgba(110, 240, 167, 0.1);
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .asset-change-pill.risk {
-  border-color: rgba(255, 95, 126, 0.22);
-  background: rgba(255, 95, 126, 0.1);
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.1);
 }
 
 .asset-change-pill.accent {
@@ -2100,9 +2030,37 @@ function tradeSideLabel(value) {
   gap: 12px;
 }
 
+.asset-allocation-card {
+  grid-column: 1 / -1;
+}
+
+.asset-allocation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.asset-allocation-tabs .asset-inline-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.asset-allocation-empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  border: 1px dashed var(--asset-border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  color: var(--asset-text-secondary, rgba(219, 229, 240, 0.72));
+  text-align: center;
+}
+
 .asset-donut-card {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(260px, 1fr);
+  gap: 16px;
+  align-items: center;
 }
 
 .asset-donut-legend {
@@ -2144,6 +2102,10 @@ function tradeSideLabel(value) {
   gap: 18px;
 }
 
+.asset-preview-grid-single {
+  grid-template-columns: 1fr;
+}
+
 :deep(.asset-tooltip-title) {
   margin-bottom: 8px;
   color: #f5fbff;
@@ -2157,6 +2119,7 @@ function tradeSideLabel(value) {
   .asset-change-insight-grid,
   .asset-overview-secondary-grid,
   .asset-preview-grid,
+  .asset-donut-card,
   .asset-side-analytics-chart {
     grid-template-columns: 1fr;
   }

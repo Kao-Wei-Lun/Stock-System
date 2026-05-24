@@ -249,6 +249,7 @@
         v-else-if="activeWorkspacePage === 'assets'"
         :current-ticker="currentTicker"
         :asset-loading="assetLoading"
+        :asset-error="assetError"
         :asset-performance-range="assetPerformanceRange"
         :asset-base-currency="assetBaseCurrency"
         :asset-summary="assetSummary"
@@ -590,6 +591,7 @@ const {
   journalFilterScope,
   journalFilters,
   assetLoading,
+  assetError,
   assetPerformanceRange,
   assetAccounts,
   assetCashEntries,

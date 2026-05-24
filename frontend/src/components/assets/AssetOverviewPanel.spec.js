@@ -192,18 +192,17 @@ function buildProps() {
 }
 
 describe("AssetOverviewPanel", () => {
-  it("switches the main chart metric from summary cards", async () => {
+  it("renders the KPI grid and the main performance chart", () => {
     const wrapper = mount(AssetOverviewPanel, {
       props: buildProps(),
     });
 
+    expect(wrapper.text()).toContain("總資產");
+    expect(wrapper.text()).toContain("近一日淨值變化");
+    expect(wrapper.text()).toContain("最大回撤");
+
     const charts = findCharts(wrapper);
     expect(charts[0].props("option").series[0].name).toBe("總資產");
-
-    const cashCard = wrapper.findAll(".asset-summary-action").find((item) => item.text().includes("現金總額"));
-    await cashCard.trigger("click");
-
-    expect(findCharts(wrapper)[0].props("option").series[0].name).toBe("現金");
   });
 
   it("emits holdings drilldown from interactive charts", async () => {
@@ -217,7 +216,7 @@ describe("AssetOverviewPanel", () => {
 
     charts[2].vm.$emit("click", { data: { month: "2026-04", hasData: true } });
     charts[3].vm.$emit("click", { data: { name: "Broker A" } });
-    charts[5].vm.$emit("click", { data: { ticker: "AAPL" } });
+    charts[4].vm.$emit("click", { data: { ticker: "AAPL" } });
 
     expect(wrapper.emitted("focus-holdings")).toEqual([
       [{ accountKey: "", marketKey: "", ticker: "", month: "2026-04" }],

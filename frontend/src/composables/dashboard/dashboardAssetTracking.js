@@ -31,6 +31,7 @@ export function createDashboardAssetTracking({
   getCurrentDateTimeInputValue,
 }) {
   const assetLoading = ref(false);
+  const assetError = ref("");
   const assetPerformanceRange = ref("1y");
   const assetAccounts = ref([]);
   const assetCashEntries = ref([]);
@@ -363,6 +364,7 @@ export function createDashboardAssetTracking({
 
   async function loadAssetTrackingData({ refresh = true, silent = true } = {}) {
     assetLoading.value = !silent;
+    assetError.value = "";
     try {
       const [
         accountsResponse,
@@ -395,6 +397,7 @@ export function createDashboardAssetTracking({
       ensureAssetFormAccountDefaults();
     } catch (error) {
       console.error(error);
+      assetError.value = error.message || "資產資料載入失敗";
       if (!silent) {
         pushNotification({
           icon: "⚠️",
@@ -1059,16 +1062,19 @@ export function createDashboardAssetTracking({
 
   async function setAssetPerformanceRange(range) {
     assetPerformanceRange.value = String(range || "1y");
+    assetError.value = "";
     try {
       await loadAssetPerformance({ refresh: false });
     } catch (error) {
       console.error(error);
+      assetError.value = error.message || "績效資料載入失敗";
       pushNotification({ icon: "⚠️", title: "績效資料載入失敗", msg: error.message || "請稍後再試", type: "error" });
     }
   }
 
   return {
     assetLoading,
+    assetError,
     assetPerformanceRange,
     assetAccounts,
     assetCashEntries,
