@@ -71,6 +71,39 @@ def test_technical_profile_for_ai_calculates_one_month_levels():
     assert "突破" in profile["continuation_condition"]
 
 
+def test_kline_structure_for_ai_classifies_shape_and_risk_flags():
+    candidate = {
+        "ticker": "2330.TW",
+        "name": "台積電",
+        "candlestick_profile": {
+            "summary": "放量紅K / 突破嘗試",
+            "latest": {"high": 64.4, "low": 62.8, "close": 63.6},
+        },
+    }
+    rows = report_tw._daily_rows_for_ai(_sample_daily_rows(), history_days=30)
+    profile = report_tw._technical_profile_for_ai(candidate, rows)
+
+    structure = report_tw._kline_structure_for_ai(candidate, rows, profile)
+
+    assert structure["structure_type"] in {
+        "platform_breakout_attempt",
+        "trend_continuation",
+        "pullback_reclaim",
+        "box_range",
+        "overextended_surge",
+        "false_breakout_risk",
+        "watch_only_structure",
+    }
+    assert structure["trend_quality"]
+    assert structure["high_low_structure"]["five_day_high"] is not None
+    assert structure["support_zone"]
+    assert structure["resistance_zone"]
+    assert structure["breakout_trigger"] == 64.4
+    assert structure["failure_level"] == 62.8
+    assert structure["continuation_condition"] == profile["continuation_condition"]
+    assert structure["ai_prompt_hint"]
+
+
 def test_theme_tags_and_rotation_use_focused_supply_chain_groups():
     passive_a = {
         "ticker": "2492.TW",
@@ -284,7 +317,11 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         history_days=30,
     )
 
-    assert context["ai_output_contract"]["allowed_sections"]
+    assert "K線結構判讀" in context["ai_output_contract"]["allowed_sections"]
+    assert "今日不做什麼" in context["ai_output_contract"]["allowed_sections"]
+    assert context["ai_output_contract"]["decision_limits"]["max_stocks"] == 5
+    assert "candidates.kline_structure" in context["ai_output_contract"]["primary_evidence"]
+    assert context["memo_policy"]["watchlist_only"]
     assert context["data_quality_flags"]
     assert context["electronic_theme_rotation"][0]["state"] == "主線延續"
     assert context["theme_rotation"][0]["theme"] == "AI Server"
@@ -293,6 +330,8 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert context["news_packet"]["candidate_news"][0]["relevance_score"] == 95
     assert len(context["candidates"][0]["daily_bars_1m"]) == 30
     assert context["candidates"][0]["technical_profile"]["ma20"] is not None
+    assert context["candidates"][0]["kline_structure"]["structure_type"]
+    assert context["candidates"][0]["kline_structure"]["support_zone"]
     assert context["candidates"][0]["support_resistance"]["breakout_trigger"] == 64.4
 
 

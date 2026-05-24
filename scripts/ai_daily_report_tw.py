@@ -1378,6 +1378,173 @@ def _technical_risk_notes(
     return notes[:3]
 
 
+def _kline_structure_for_ai(item: dict, daily_rows: list[dict], technical_profile: dict) -> dict:
+    rows = [row for row in daily_rows if isinstance(row, dict)]
+    closes = _last_float_values(rows, "close")
+    highs = _last_float_values(rows, "high")
+    lows = _last_float_values(rows, "low")
+    latest_row = rows[-1] if rows else {}
+    latest_close = closes[-1] if closes else _candidate_latest_close(item)
+    latest_high = highs[-1] if highs else _to_float(latest_row.get("high"))
+    latest_low = lows[-1] if lows else _to_float(latest_row.get("low"))
+    latest_open = _to_float(latest_row.get("open"))
+    breakout_price = _to_float(technical_profile.get("breakout_trigger")) or _candidate_breakout_price(item)
+    failure_level = _to_float(technical_profile.get("failure_level")) or _candidate_signal_low(item)
+    ma5 = _to_float(technical_profile.get("ma5"))
+    ma10 = _to_float(technical_profile.get("ma10"))
+    ma20 = _to_float(technical_profile.get("ma20"))
+    ma5_slope = _to_float(technical_profile.get("ma5_slope_pct"))
+    close_vs_ma5 = _to_float(technical_profile.get("close_vs_ma5_pct"))
+    close_vs_ma20 = _to_float(technical_profile.get("close_vs_ma20_pct"))
+    volume_ratio_20d = _to_float(technical_profile.get("volume_ratio_20d"))
+    volume_ratio_5d = _to_float(technical_profile.get("volume_ratio_5d"))
+    high_20 = max(highs[-20:]) if highs else None
+    low_20 = min(lows[-20:]) if lows else None
+    high_5 = max(highs[-5:]) if len(highs) >= 5 else None
+    low_5 = min(lows[-5:]) if len(lows) >= 5 else None
+    prev_high_5 = max(highs[-10:-5]) if len(highs) >= 10 else None
+    prev_low_5 = min(lows[-10:-5]) if len(lows) >= 10 else None
+    higher_high_5d = bool(high_5 is not None and prev_high_5 is not None and high_5 > prev_high_5)
+    higher_low_5d = bool(low_5 is not None and prev_low_5 is not None and low_5 > prev_low_5)
+    range_position = (
+        (latest_close - low_20) / (high_20 - low_20)
+        if latest_close is not None and high_20 is not None and low_20 is not None and high_20 > low_20
+        else None
+    )
+    upper_shadow_ratio = (
+        (latest_high - latest_close) / (latest_high - latest_low)
+        if latest_high is not None and latest_low is not None and latest_close is not None and latest_high > latest_low
+        else None
+    )
+    body_position = (
+        (latest_close - latest_open) / latest_open * 100
+        if latest_close is not None and latest_open is not None and latest_open > 0
+        else None
+    )
+    prev_close = closes[-2] if len(closes) >= 2 else None
+    prev_ma5 = _simple_ma(closes, 5, end_index=len(closes) - 1) if len(closes) >= 6 else None
+
+    if volume_ratio_20d is None and volume_ratio_5d is None:
+        volume_signature = "no_volume_data"
+    elif breakout_price is not None and latest_close is not None and latest_close >= breakout_price * 0.995 and (volume_ratio_20d or 0) >= 1.2:
+        volume_signature = "breakout_with_volume"
+    elif (volume_ratio_20d or volume_ratio_5d or 0) >= 1.4:
+        volume_signature = "volume_expansion"
+    elif (volume_ratio_20d or volume_ratio_5d or 0) < 0.8:
+        volume_signature = "volume_insufficient"
+    else:
+        volume_signature = "volume_neutral"
+
+    if range_position is None:
+        close_location = "unknown"
+    elif range_position >= 0.82:
+        close_location = "near_20d_high"
+    elif range_position <= 0.25:
+        close_location = "near_20d_low"
+    else:
+        close_location = "mid_range"
+
+    risk_flags: list[str] = []
+    if close_vs_ma5 is not None and close_vs_ma5 >= 8:
+        risk_flags.append("close_far_above_ma5")
+    if close_vs_ma20 is not None and close_vs_ma20 >= 15:
+        risk_flags.append("close_far_above_ma20")
+    if upper_shadow_ratio is not None and upper_shadow_ratio >= 0.45:
+        risk_flags.append("long_upper_shadow")
+    if volume_signature == "volume_insufficient":
+        risk_flags.append("volume_not_confirmed")
+    if breakout_price is not None and latest_high is not None and latest_close is not None and latest_high >= breakout_price and latest_close < breakout_price:
+        risk_flags.append("failed_to_close_above_breakout")
+    if failure_level is not None and latest_close is not None and latest_close < failure_level:
+        risk_flags.append("below_failure_level")
+
+    reclaim_ma5 = bool(
+        prev_close is not None
+        and prev_ma5 is not None
+        and ma5 is not None
+        and latest_close is not None
+        and prev_close < prev_ma5
+        and latest_close >= ma5
+    )
+    uptrend_alignment = bool(latest_close is not None and ma5 is not None and ma10 is not None and ma20 is not None and latest_close >= ma5 >= ma10 >= ma20)
+    breakout_attempt = bool(breakout_price is not None and latest_close is not None and latest_close >= breakout_price * 0.995)
+    false_breakout = "failed_to_close_above_breakout" in risk_flags or "below_failure_level" in risk_flags
+
+    if len(rows) < 12:
+        structure_type = "insufficient_bars"
+        structure_label = "K線資料不足"
+    elif false_breakout:
+        structure_type = "false_breakout_risk"
+        structure_label = "假突破風險"
+    elif close_vs_ma5 is not None and close_vs_ma5 >= 8 and close_vs_ma20 is not None and close_vs_ma20 >= 14:
+        structure_type = "overextended_surge"
+        structure_label = "短線乖離偏大"
+    elif breakout_attempt:
+        structure_type = "platform_breakout_attempt"
+        structure_label = "平台突破嘗試"
+    elif reclaim_ma5:
+        structure_type = "pullback_reclaim"
+        structure_label = "回測後站回短均"
+    elif uptrend_alignment and higher_low_5d and (ma5_slope is None or ma5_slope >= 0):
+        structure_type = "trend_continuation"
+        structure_label = "趨勢延續"
+    elif close_location == "mid_range" and not breakout_attempt:
+        structure_type = "box_range"
+        structure_label = "箱型整理"
+    else:
+        structure_type = "watch_only_structure"
+        structure_label = "觀察型態"
+
+    if higher_high_5d and higher_low_5d:
+        trend_quality = "higher_high_higher_low"
+    elif uptrend_alignment:
+        trend_quality = "constructive_uptrend"
+    elif close_location == "near_20d_high":
+        trend_quality = "near_high_but_needs_confirmation"
+    elif latest_close is not None and ma20 is not None and latest_close < ma20:
+        trend_quality = "below_ma20"
+    else:
+        trend_quality = "sideways_or_mixed"
+
+    hint_parts = [structure_label]
+    if close_location != "unknown":
+        hint_parts.append(f"收盤位置={close_location}")
+    if volume_signature != "no_volume_data":
+        hint_parts.append(f"量能={volume_signature}")
+    if risk_flags:
+        hint_parts.append("風險=" + "/".join(risk_flags[:3]))
+    ai_prompt_hint = "；".join(hint_parts)
+
+    return {
+        "structure_type": structure_type,
+        "structure_label": structure_label,
+        "trend_quality": trend_quality,
+        "high_low_structure": {
+            "higher_high_5d_vs_prev": higher_high_5d,
+            "higher_low_5d_vs_prev": higher_low_5d,
+            "five_day_high": _round_float(high_5),
+            "five_day_low": _round_float(low_5),
+            "previous_five_day_high": _round_float(prev_high_5),
+            "previous_five_day_low": _round_float(prev_low_5),
+        },
+        "close_location": close_location,
+        "range_position_pct": _round_float(range_position * 100 if range_position is not None else None),
+        "volume_signature": volume_signature,
+        "latest_candle": {
+            "body_change_pct": _round_float(body_position),
+            "upper_shadow_ratio": _round_float(upper_shadow_ratio),
+        },
+        "support_zone": technical_profile.get("support_levels") or [],
+        "resistance_zone": technical_profile.get("resistance_levels") or [],
+        "breakout_trigger": _round_float(breakout_price),
+        "failure_level": _round_float(failure_level),
+        "risk_flags": risk_flags[:5],
+        "continuation_condition": technical_profile.get("continuation_condition"),
+        "invalidation_condition": technical_profile.get("invalidation_condition"),
+        "ai_prompt_hint": ai_prompt_hint,
+    }
+
+
 def _technical_profile_for_ai(item: dict, daily_rows: list[dict]) -> dict:
     rows = [row for row in daily_rows if isinstance(row, dict)]
     closes = _last_float_values(rows, "close")
@@ -1508,6 +1675,7 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
     chip = ap.get("chip") or {}
     cp = item.get("candlestick_profile") or {}
     technical_profile = _technical_profile_for_ai(item, daily_rows)
+    kline_structure = _kline_structure_for_ai(item, daily_rows, technical_profile)
     return {
         "ticker": ticker,
         "name": item.get("name"),
@@ -1549,6 +1717,7 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
         "one_month_daily_bars": daily_rows,
         "daily_bars_1m": daily_rows,
         "technical_profile": technical_profile,
+        "kline_structure": kline_structure,
         "support_resistance": {
             "support_levels": technical_profile.get("support_levels"),
             "resistance_levels": technical_profile.get("resistance_levels"),
@@ -1614,12 +1783,13 @@ def _build_codex_analysis_context(
         "codex_analysis_output_path": str(_codex_automation_analysis_path(report_date)),
         "ai_output_contract": {
             "allowed_sections": [
-                "AI 今日主結論",
-                "新聞與事件解讀",
-                "技術面重點",
-                "優先觀察清單",
-                "降權與排除",
-                "隔日操作條件",
+                "一句話結論",
+                "主線排序",
+                "K線結構判讀",
+                "優先觀察標的",
+                "反證與降權",
+                "明日盯盤劇本",
+                "今日不做什麼",
             ],
             "avoid_duplicate_sections": [
                 "可能轉強族群",
@@ -1628,11 +1798,33 @@ def _build_codex_analysis_context(
                 "隔日三情境交易策略",
                 "完整候選表",
             ],
-            "note": "AI section is a decision synthesis. Deterministic tables remain the single source of tabular truth later in the report.",
+            "decision_limits": {
+                "max_themes": 3,
+                "max_stocks": 5,
+                "max_etf_fund_reit": 3,
+                "max_rejection_points": 5,
+            },
+            "primary_evidence": [
+                "graded_candidates",
+                "electronic_theme_rotation",
+                "theme_rotation",
+                "candidates.kline_structure",
+                "candidates.technical_profile",
+                "candidates.daily_bars_1m",
+                "signal_backtest_summary",
+                "news_packet",
+            ],
+            "note": "AI section is a decision memo: rank, select, reject, and define invalidation. Deterministic tables remain the single source of tabular truth later in the report.",
         },
         "data_policy": {
             "history_days_per_candidate": history_days,
             "note": "AI receives at least one month of compact daily bars, technical profiles, news packet, and computed scores; raw screening remains deterministic.",
+        },
+        "memo_policy": {
+            "style": "盤後決策 Memo，不重述表格，不寫固定模板句。",
+            "must_explain": ["為什麼列入", "如果判斷錯了看什麼反證", "隔日只觀察哪些價格或條件"],
+            "watchlist_only": "候選標的是觀察清單，不是買賣建議。",
+            "kline_rule": "K線型態只能根據 kline_structure、technical_profile 與 daily_bars_1m 判讀，不可自行補價格。",
         },
         "coverage": coverage,
         "history_status_counts": dict(status_counts),
@@ -1774,14 +1966,19 @@ def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | No
         "你是保守、嚴謹的台股盤後交易策略分析助理。"
         "只能根據輸入 JSON 的資料解讀，不得編造未提供的價格、新聞、財報或籌碼。"
         "請使用繁體中文，輸出 Markdown。"
-        "AI 段落只能做決策綜合，不要重複輸出正式報告後段已有的完整資料表。"
-        "必須包含以下小節：AI 今日主結論、新聞與事件解讀、技術面重點、優先觀察清單、降權與排除、隔日操作條件。"
-        "新聞解讀需使用 news_packet，區分高相關、中相關與低相關；低相關新聞只做附錄提醒。"
-        "技術分析必須根據 daily_bars_1m 與 technical_profile，說明 K 線型態、支撐、壓力、續強條件與失敗條件。"
+        "請把輸出寫成『Codex/AI 盤後決策 Memo』，不是一般摘要。"
+        "AI 段落只能做決策綜合：必須排序、選擇、降權與排除，不要重複輸出正式報告後段已有的完整資料表。"
+        "必須使用以下小節標題：### 一句話結論、### 主線排序、### K線結構判讀、### 優先觀察標的、### 反證與降權、### 明日盯盤劇本、### 今日不做什麼。"
+        "請優先使用 graded_candidates；若你的排序不同於 candidate_grade 或 candidate_priority_score，必須說明差異原因。"
+        "主線最多列 3 個，個股最多列 5 檔，ETF/基金/REIT 最多列 3 檔；其餘只放入降權或不處理原因。"
+        "K線結構判讀必須根據每檔候選的 kline_structure、daily_bars_1m 與 technical_profile，分類為平台突破嘗試、趨勢延續、回測後站回短均、箱型整理、短線乖離偏大或假突破風險。"
+        "支撐、壓力、突破價、失敗價只能引用 JSON 中 support_resistance、kline_structure 或 technical_profile 已提供的數字。"
+        "每個被選入的主線或標的都要寫『因為』與『如果錯了怎麼辦』；避免只寫突破確認、量能不縮這類沒有價格或條件的空泛句。"
+        "新聞解讀需使用 news_packet，區分高相關、中相關與低相關；低相關新聞只做風險或背景提醒。"
         "候選標的是觀察清單，不是買賣建議；避免保證式語氣。"
     )
     user_text = (
-        "請根據以下程式篩選後的候選標的與近一個月資料，寫出可放進每日報告的 Codex/AI 綜合分析。\n\n"
+        "請根據以下程式篩選後的候選標的與近一個月資料，寫出可放進每日報告的 Codex/AI 盤後決策 Memo。\n\n"
         + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
     )
     payload = {
