@@ -99,6 +99,37 @@ async def test_fubon_quote_provider_fetches_taiwan_stock_quote():
 
 
 @pytest.mark.anyio
+async def test_fubon_quote_provider_fetches_taiwan_index_quote():
+    manager = StubFubonManager(
+        {
+            "symbol": "IX0043",
+            "market": "OTC",
+            "exchange": "TPEx",
+            "type": "INDEX",
+            "name": "櫃買指數",
+            "previousClose": 409.8,
+            "openPrice": 411.78,
+            "highPrice": 423.25,
+            "lowPrice": 411.78,
+            "closePrice": 423.25,
+            "change": 13.45,
+            "changePercent": 3.28,
+            "lastUpdated": 1779437400000000,
+        }
+    )
+    provider = FubonQuoteProvider(manager)
+
+    quote = await provider.fetch_quote("^TWOII")
+
+    assert manager.calls == ["IX0043"]
+    assert quote["ticker"] == "^TWOII"
+    assert quote["resolved_symbol"] == "IX0043"
+    assert quote["source"] == "fubon_neo"
+    assert quote["price"] == 423.25
+    assert quote["change_pct"] == pytest.approx(3.28)
+
+
+@pytest.mark.anyio
 async def test_hybrid_quote_provider_does_not_fallback_to_yahoo_for_taiwan_quote():
     fubon_manager = StubFubonManager(None)
     fubon_provider = FubonQuoteProvider(fubon_manager)
@@ -116,6 +147,27 @@ async def test_hybrid_quote_provider_does_not_fallback_to_yahoo_for_taiwan_quote
     quote = await provider.fetch_quote("2330")
 
     assert fubon_manager.calls == ["2330"]
+    assert yahoo_fetcher.calls == []
+    assert quote is None
+
+
+@pytest.mark.anyio
+async def test_hybrid_quote_provider_does_not_fallback_to_yahoo_for_taiwan_index_quote():
+    fubon_manager = StubFubonManager(None)
+    fubon_provider = FubonQuoteProvider(fubon_manager)
+    yahoo_fetcher = StubFetcher(
+        {
+            "ticker": "^TWOII",
+            "price": 269.45,
+            "source": "yahoo_finance",
+        }
+    )
+    yahoo_provider = YahooFinanceQuoteProvider(yahoo_fetcher)
+    provider = HybridQuoteProvider(fubon_provider, yahoo_provider)
+
+    quote = await provider.fetch_quote("^TWOII")
+
+    assert fubon_manager.calls == ["IX0043"]
     assert yahoo_fetcher.calls == []
     assert quote is None
 

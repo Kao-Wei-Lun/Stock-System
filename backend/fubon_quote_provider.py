@@ -5,8 +5,10 @@ from typing import Any, Dict, Optional
 
 from data_fetcher import normalize_ticker
 from fubon_symbols import (
+    fubon_index_ticker_to_symbol,
     fubon_market_to_ticker,
     is_taiwan_stock_ticker,
+    is_taiwan_market_index_ticker,
     tw_ticker_to_fubon,
 )
 from quote_provider import QuoteProvider
@@ -176,7 +178,7 @@ class FubonQuoteProvider(QuoteProvider):
 
     async def fetch_quote(self, ticker: str) -> Optional[Dict[str, Any]]:
         normalized_ticker = normalize_ticker(ticker)
-        symbol = tw_ticker_to_fubon(normalized_ticker)
+        symbol = fubon_index_ticker_to_symbol(normalized_ticker) or tw_ticker_to_fubon(normalized_ticker)
         if not symbol:
             return None
 
@@ -209,7 +211,7 @@ class HybridQuoteProvider(QuoteProvider):
 
     async def fetch_quote(self, ticker: str) -> Optional[Dict[str, Any]]:
         normalized_ticker = normalize_ticker(ticker)
-        if is_taiwan_stock_ticker(normalized_ticker):
+        if is_taiwan_stock_ticker(normalized_ticker) or is_taiwan_market_index_ticker(normalized_ticker):
             fubon_quote = await self._fubon.fetch_quote(normalized_ticker)
             return fubon_quote
         return await self._yahoo.fetch_quote(normalized_ticker)

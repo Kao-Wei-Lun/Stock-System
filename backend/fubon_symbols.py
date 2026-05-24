@@ -16,6 +16,18 @@ _FUTOPT_BASE_ALIASES = {
     "MXF": "MXF",
     "TMF": "TMF",
 }
+_FUBON_INDEX_SYMBOLS = {
+    "^TWII": "IX0001",
+    "^TWOII": "IX0043",
+}
+
+
+def is_taiwan_market_index_ticker(ticker: str) -> bool:
+    return normalize_ticker(ticker) in _FUBON_INDEX_SYMBOLS
+
+
+def fubon_index_ticker_to_symbol(ticker: str) -> Optional[str]:
+    return _FUBON_INDEX_SYMBOLS.get(normalize_ticker(ticker))
 
 
 def _resolve_taiwan_stock_ticker(ticker: str) -> Optional[str]:
@@ -33,7 +45,7 @@ def is_taiwan_stock_ticker(ticker: str) -> bool:
 
 
 def supports_fubon_stock_realtime_ticker(ticker: str) -> bool:
-    return is_taiwan_stock_ticker(ticker)
+    return is_taiwan_stock_ticker(ticker) or is_taiwan_market_index_ticker(ticker)
 
 
 def tw_ticker_to_fubon(ticker: str) -> Optional[str]:

@@ -9,7 +9,12 @@ from database import db
 from data_fetcher import DataFetcher, normalize_ticker
 from env_validation import read_float_env, read_int_env, read_text_env
 from fubon_quote_provider import build_fubon_quote_payload
-from fubon_symbols import is_taiwan_stock_ticker, tw_ticker_to_fubon
+from fubon_symbols import (
+    fubon_index_ticker_to_symbol,
+    is_taiwan_market_index_ticker,
+    is_taiwan_stock_ticker,
+    tw_ticker_to_fubon,
+)
 
 log = logging.getLogger(__name__)
 
@@ -193,14 +198,14 @@ class HybridDataFetcher:
 
     async def fetch_realtime_quote(self, ticker: str) -> Optional[Dict]:
         normalized_ticker = normalize_ticker(ticker)
-        if is_taiwan_stock_ticker(normalized_ticker):
+        if is_taiwan_stock_ticker(normalized_ticker) or is_taiwan_market_index_ticker(normalized_ticker):
             if not self._fubon_manager.connected:
                 log.warning(
-                    "Fubon realtime quote unavailable for %s; Yahoo fallback is disabled for Taiwan stocks",
+                    "Fubon realtime quote unavailable for %s; Yahoo fallback is disabled for Taiwan stocks/indexes",
                     normalized_ticker,
                 )
                 return None
-            symbol = tw_ticker_to_fubon(normalized_ticker)
+            symbol = fubon_index_ticker_to_symbol(normalized_ticker) or tw_ticker_to_fubon(normalized_ticker)
             if not symbol:
                 return None
             response = await self._fubon_manager.fetch_stock_quote(symbol)

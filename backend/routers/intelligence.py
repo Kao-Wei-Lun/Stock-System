@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from data_fetcher import normalize_ticker
 from database import db
 from fundamentals_provider import build_fundamental_summary
+from fubon_symbols import is_taiwan_market_index_ticker
 from macro_regime import build_macro_dashboard_payload
 from providers import (
     fundamentals_provider,
@@ -647,7 +648,11 @@ async def get_taifex_institutional(
     for item in TAIFEX_SPOT_REFERENCE:
         quote = await _fetch_and_store_quote_snapshot(item["ticker"])
         if not quote:
-            quote = await db.get_market_quote(item["ticker"])
+            stored_quote = await db.get_market_quote(item["ticker"])
+            # Taiwan market indexes must come from Fubon. This prevents stale Yahoo
+            # index snapshots from being reused in risk-sensitive daily reports.
+            if not is_taiwan_market_index_ticker(item["ticker"]) or (stored_quote or {}).get("source") == "fubon_neo":
+                quote = stored_quote
         if not quote:
             continue
         spot_cards.append(

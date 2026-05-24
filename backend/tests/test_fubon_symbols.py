@@ -46,6 +46,14 @@ def test_unknown_pure_english_symbol_is_not_treated_as_taiwan_stock(monkeypatch)
     assert fubon_symbols.tw_ticker_to_fubon("AAPL") is None
 
 
+def test_taiwan_market_indexes_are_supported_by_fubon_symbols():
+    assert fubon_symbols.is_taiwan_market_index_ticker("^TWII") is True
+    assert fubon_symbols.is_taiwan_market_index_ticker("^TWOII") is True
+    assert fubon_symbols.fubon_index_ticker_to_symbol("^TWII") == "IX0001"
+    assert fubon_symbols.fubon_index_ticker_to_symbol("^TWOII") == "IX0043"
+    assert fubon_symbols.supports_fubon_stock_realtime_ticker("^TWOII") is True
+
+
 def test_futopt_symbol_helpers_support_future_and_option_contracts():
     assert fubon_symbols.is_exact_futopt_contract("TXFE6") is True
     assert fubon_symbols.is_exact_futopt_contract("TXO20000E4") is True
