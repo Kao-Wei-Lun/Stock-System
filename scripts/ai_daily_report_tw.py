@@ -1409,6 +1409,49 @@ def _risk_flag_text(flags: list[object]) -> str:
     return "、".join(labels) if labels else "—"
 
 
+_USER_FACING_REPORT_TERM_LABELS = {
+    **_KLINE_STRUCTURE_LABELS,
+    **_KLINE_TREND_QUALITY_LABELS,
+    **_KLINE_CLOSE_LOCATION_LABELS,
+    **_KLINE_VOLUME_SIGNATURE_LABELS,
+    **_RISK_FLAG_LABELS,
+    "strength_score": "主題強度",
+    "candidate_priority_score": "優先分",
+    "candidate_grade": "分級",
+    "risk_flags": "風險旗標",
+    "risk_flag_labels": "風險說明",
+    "structure_type": "K線結構代碼",
+    "structure_label": "K線結構",
+    "trend_quality": "趨勢品質代碼",
+    "trend_quality_label": "趨勢品質",
+    "close_location": "收盤位置代碼",
+    "close_location_label": "收盤位置",
+    "volume_signature": "量能狀態代碼",
+    "volume_signature_label": "量能狀態",
+    "support_zone": "支撐區",
+    "resistance_zone": "壓力區",
+    "breakout_trigger": "突破觸發價",
+    "failure_level": "失敗價",
+    "daily_bars_1m": "近一個月日K",
+    "one_month_daily_bars": "近一個月日K",
+    "technical_profile": "技術輪廓",
+    "kline_structure": "K線結構",
+    "graded_candidates": "分級候選",
+    "ai_candidate_tickers": "AI深度分析標的",
+    "ai_candidate_ticker_count": "AI深度分析檔數",
+    "count": "檔數",
+}
+
+
+def _localize_user_facing_report_terms(text: str) -> str:
+    """Translate internal metric names/enums before text reaches the user-facing report."""
+
+    localized = text
+    for raw, label in sorted(_USER_FACING_REPORT_TERM_LABELS.items(), key=lambda pair: len(pair[0]), reverse=True):
+        localized = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(raw)}(?![A-Za-z0-9_])", label, localized)
+    return localized
+
+
 def _one_month_trend_state(*, close: float | None, ma5: float | None, ma10: float | None, ma20: float | None, month_return: float | None) -> str:
     if close is None:
         return "insufficient_data"
@@ -2058,7 +2101,7 @@ def _sanitize_codex_analysis_text(text: str) -> tuple[str, list[str]]:
             + "、".join(dict.fromkeys(removed))
             + "。完整表格請以下方程式產生區塊為準。"
         )
-    return sanitized, removed
+    return _localize_user_facing_report_terms(sanitized), removed
 
 
 def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | None]:
@@ -2078,7 +2121,7 @@ def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | No
         "請優先使用 graded_candidates；若你的排序不同於 candidate_grade 或 candidate_priority_score，必須說明差異原因。"
         "主線最多列 3 個，個股最多列 5 檔，ETF/基金/REIT 最多列 3 檔；其餘只放入降權或不處理原因。"
         "K線結構判讀必須根據每檔候選的 kline_structure、daily_bars_1m 與 technical_profile，分類為平台突破嘗試、趨勢延續、回測後站回短均、箱型整理、短線乖離偏大或假突破風險。"
-        "輸出時請優先使用 structure_label、trend_quality_label、close_location_label、volume_signature_label 與 risk_flag_labels；不得直接輸出 false_breakout_risk、breakout_with_volume、low_hit_rate_type 這類工程 enum。"
+        "輸出時請優先使用中文說明，不得直接輸出 strength_score、count、structure_label、trend_quality_label、close_location_label、volume_signature_label、risk_flag_labels、false_breakout_risk、breakout_with_volume、near_20d_high、low_hit_rate_type 這類欄位名或工程 enum。"
         "支撐、壓力、突破價、失敗價只能引用 JSON 中 support_resistance、kline_structure 或 technical_profile 已提供的數字。"
         "每個被選入的主線或標的都要寫『因為』與『如果錯了怎麼辦』；避免只寫突破確認、量能不縮這類沒有價格或條件的空泛句。"
         "新聞解讀需使用 news_packet，區分高相關、中相關與低相關；低相關新聞只做風險或背景提醒。"

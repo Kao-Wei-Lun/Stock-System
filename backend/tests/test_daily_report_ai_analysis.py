@@ -437,6 +437,31 @@ def test_codex_analysis_section_removes_duplicate_report_sections(monkeypatch, t
     assert "已省略 AI 檔內與正式資料表重複的章節" in joined
 
 
+def test_codex_analysis_section_localizes_internal_terms(monkeypatch, tmp_path):
+    analysis_path = tmp_path / "codex_ai_analysis_2026-05-13.md"
+    analysis_path.write_text(
+        "### 主線排序\n"
+        "| 主線 | 依據 |\n"
+        "|---|---|\n"
+        "| AI Server | strength_score 107.1、count 3、near_20d_high、breakout_with_volume、low_hit_rate_type |\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("DAILY_REPORT_CODEX_ANALYSIS_PATH", str(analysis_path))
+
+    lines = report_tw._codex_analysis_section({"report_date": "2026-05-13"})
+    joined = "\n".join(lines)
+
+    assert "主題強度 107.1、檔數 3" in joined
+    assert "接近20日高點" in joined
+    assert "放量挑戰突破" in joined
+    assert "歷史命中率偏低" in joined
+    assert "strength_score" not in joined
+    assert "breakout_with_volume" not in joined
+    assert "near_20d_high" not in joined
+    assert "low_hit_rate_type" not in joined
+
+
 def test_codex_analysis_section_uses_model_when_enabled(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("DAILY_REPORT_AI_ANALYSIS_ENABLED", "true")
