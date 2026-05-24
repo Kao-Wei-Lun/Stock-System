@@ -95,6 +95,9 @@ def test_kline_structure_for_ai_classifies_shape_and_risk_flags():
         "watch_only_structure",
     }
     assert structure["trend_quality"]
+    assert structure["trend_quality_label"]
+    assert structure["close_location_label"]
+    assert structure["volume_signature_label"]
     assert structure["high_low_structure"]["five_day_high"] is not None
     assert structure["support_zone"]
     assert structure["resistance_zone"]
@@ -102,6 +105,8 @@ def test_kline_structure_for_ai_classifies_shape_and_risk_flags():
     assert structure["failure_level"] == 62.8
     assert structure["continuation_condition"] == profile["continuation_condition"]
     assert structure["ai_prompt_hint"]
+    assert "breakout_with_volume" not in structure["ai_prompt_hint"]
+    assert "false_breakout_risk" not in structure["ai_prompt_hint"]
 
 
 def test_theme_tags_and_rotation_use_focused_supply_chain_groups():
@@ -250,6 +255,8 @@ def test_candidate_grading_prioritizes_theme_and_risk_flags():
     assert rows[0]["primary_theme"] == "AI Server"
     assert rows[0]["candidate_priority_score"] > 60
     assert "主題" in rows[0]["grade_reason"]
+    assert "low_hit_rate_type" not in rows[0]["grade_reason"]
+    assert report_tw._risk_flag_text(["low_hit_rate_type", "single_stock_theme"]) == "歷史命中率偏低、族群廣度不足"
 
 
 def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
@@ -331,6 +338,8 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert len(context["candidates"][0]["daily_bars_1m"]) == 30
     assert context["candidates"][0]["technical_profile"]["ma20"] is not None
     assert context["candidates"][0]["kline_structure"]["structure_type"]
+    assert context["candidates"][0]["kline_structure"]["structure_label"]
+    assert context["candidates"][0]["kline_structure"]["volume_signature_label"]
     assert context["candidates"][0]["kline_structure"]["support_zone"]
     assert context["candidates"][0]["support_resistance"]["breakout_trigger"] == 64.4
 

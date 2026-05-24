@@ -1336,6 +1336,79 @@ def _round_unique_levels(levels: list[float | None], *, limit: int = 3) -> list[
     return rounded
 
 
+_KLINE_STRUCTURE_LABELS = {
+    "insufficient_bars": "K線資料不足",
+    "false_breakout_risk": "假突破風險",
+    "overextended_surge": "短線乖離偏大",
+    "platform_breakout_attempt": "平台突破嘗試",
+    "pullback_reclaim": "回測後站回短均",
+    "trend_continuation": "趨勢延續",
+    "box_range": "箱型整理",
+    "watch_only_structure": "觀察型態",
+}
+
+
+_KLINE_TREND_QUALITY_LABELS = {
+    "higher_high_higher_low": "高低點同步墊高",
+    "constructive_uptrend": "均線多方排列",
+    "near_high_but_needs_confirmation": "接近波段高點但需確認",
+    "below_ma20": "收盤低於月線",
+    "sideways_or_mixed": "整理或多空混合",
+}
+
+
+_KLINE_CLOSE_LOCATION_LABELS = {
+    "unknown": "位置不明",
+    "near_20d_high": "接近20日高點",
+    "mid_range": "區間中上緣",
+    "near_20d_low": "接近20日低點",
+}
+
+
+_KLINE_VOLUME_SIGNATURE_LABELS = {
+    "no_volume_data": "量能資料不足",
+    "breakout_with_volume": "放量挑戰突破",
+    "volume_expansion": "量能放大",
+    "volume_insufficient": "量能不足",
+    "volume_neutral": "量能中性",
+}
+
+
+_RISK_FLAG_LABELS = {
+    "failed_recent_signal": "近期訊號轉弱",
+    "overextended_ma5": "短線乖離5日線",
+    "overextended_ma20": "短線乖離月線",
+    "long_upper_shadow": "上影線偏長",
+    "thin_volume": "量能偏薄",
+    "single_stock_theme": "族群廣度不足",
+    "low_hit_rate_type": "歷史命中率偏低",
+    "no_focused_theme": "缺少明確主題",
+    "close_far_above_ma5": "收盤遠離5日線",
+    "close_far_above_ma20": "收盤遠離月線",
+    "volume_not_confirmed": "量能未確認",
+    "failed_to_close_above_breakout": "未收過突破價",
+    "below_failure_level": "跌破失敗價",
+}
+
+
+def _label_from_map(value: object, labels: dict[str, str]) -> str:
+    key = str(value or "").strip()
+    return labels.get(key, key)
+
+
+def _risk_flag_label(flag: object) -> str:
+    return _label_from_map(flag, _RISK_FLAG_LABELS)
+
+
+def _risk_flag_labels(flags: list[object]) -> list[str]:
+    return [_risk_flag_label(flag) for flag in flags if str(flag or "").strip()]
+
+
+def _risk_flag_text(flags: list[object]) -> str:
+    labels = _risk_flag_labels(flags)
+    return "、".join(labels) if labels else "—"
+
+
 def _one_month_trend_state(*, close: float | None, ma5: float | None, ma10: float | None, ma20: float | None, month_return: float | None) -> str:
     if close is None:
         return "insufficient_data"
@@ -1472,28 +1545,21 @@ def _kline_structure_for_ai(item: dict, daily_rows: list[dict], technical_profil
 
     if len(rows) < 12:
         structure_type = "insufficient_bars"
-        structure_label = "K線資料不足"
     elif false_breakout:
         structure_type = "false_breakout_risk"
-        structure_label = "假突破風險"
     elif close_vs_ma5 is not None and close_vs_ma5 >= 8 and close_vs_ma20 is not None and close_vs_ma20 >= 14:
         structure_type = "overextended_surge"
-        structure_label = "短線乖離偏大"
     elif breakout_attempt:
         structure_type = "platform_breakout_attempt"
-        structure_label = "平台突破嘗試"
     elif reclaim_ma5:
         structure_type = "pullback_reclaim"
-        structure_label = "回測後站回短均"
     elif uptrend_alignment and higher_low_5d and (ma5_slope is None or ma5_slope >= 0):
         structure_type = "trend_continuation"
-        structure_label = "趨勢延續"
     elif close_location == "mid_range" and not breakout_attempt:
         structure_type = "box_range"
-        structure_label = "箱型整理"
     else:
         structure_type = "watch_only_structure"
-        structure_label = "觀察型態"
+    structure_label = _label_from_map(structure_type, _KLINE_STRUCTURE_LABELS)
 
     if higher_high_5d and higher_low_5d:
         trend_quality = "higher_high_higher_low"
@@ -1508,17 +1574,18 @@ def _kline_structure_for_ai(item: dict, daily_rows: list[dict], technical_profil
 
     hint_parts = [structure_label]
     if close_location != "unknown":
-        hint_parts.append(f"收盤位置={close_location}")
+        hint_parts.append(f"收盤位置={_label_from_map(close_location, _KLINE_CLOSE_LOCATION_LABELS)}")
     if volume_signature != "no_volume_data":
-        hint_parts.append(f"量能={volume_signature}")
+        hint_parts.append(f"量能={_label_from_map(volume_signature, _KLINE_VOLUME_SIGNATURE_LABELS)}")
     if risk_flags:
-        hint_parts.append("風險=" + "/".join(risk_flags[:3]))
+        hint_parts.append("風險=" + "、".join(_risk_flag_labels(risk_flags[:3])))
     ai_prompt_hint = "；".join(hint_parts)
 
     return {
         "structure_type": structure_type,
         "structure_label": structure_label,
         "trend_quality": trend_quality,
+        "trend_quality_label": _label_from_map(trend_quality, _KLINE_TREND_QUALITY_LABELS),
         "high_low_structure": {
             "higher_high_5d_vs_prev": higher_high_5d,
             "higher_low_5d_vs_prev": higher_low_5d,
@@ -1528,8 +1595,10 @@ def _kline_structure_for_ai(item: dict, daily_rows: list[dict], technical_profil
             "previous_five_day_low": _round_float(prev_low_5),
         },
         "close_location": close_location,
+        "close_location_label": _label_from_map(close_location, _KLINE_CLOSE_LOCATION_LABELS),
         "range_position_pct": _round_float(range_position * 100 if range_position is not None else None),
         "volume_signature": volume_signature,
+        "volume_signature_label": _label_from_map(volume_signature, _KLINE_VOLUME_SIGNATURE_LABELS),
         "latest_candle": {
             "body_change_pct": _round_float(body_position),
             "upper_shadow_ratio": _round_float(upper_shadow_ratio),
@@ -1539,6 +1608,7 @@ def _kline_structure_for_ai(item: dict, daily_rows: list[dict], technical_profil
         "breakout_trigger": _round_float(breakout_price),
         "failure_level": _round_float(failure_level),
         "risk_flags": risk_flags[:5],
+        "risk_flag_labels": _risk_flag_labels(risk_flags[:5]),
         "continuation_condition": technical_profile.get("continuation_condition"),
         "invalidation_condition": technical_profile.get("invalidation_condition"),
         "ai_prompt_hint": ai_prompt_hint,
@@ -1685,6 +1755,7 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
         "candidate_grade": item.get("candidate_grade"),
         "candidate_priority_score": item.get("candidate_priority_score"),
         "risk_flags": item.get("risk_flags") or [],
+        "risk_flag_labels": _risk_flag_labels(item.get("risk_flags") or []),
         "grade_reason": item.get("grade_reason"),
         "primary_theme": item.get("primary_theme"),
         "primary_theme_strength": item.get("primary_theme_strength"),
@@ -1824,7 +1895,7 @@ def _build_codex_analysis_context(
             "style": "盤後決策 Memo，不重述表格，不寫固定模板句。",
             "must_explain": ["為什麼列入", "如果判斷錯了看什麼反證", "隔日只觀察哪些價格或條件"],
             "watchlist_only": "候選標的是觀察清單，不是買賣建議。",
-            "kline_rule": "K線型態只能根據 kline_structure、technical_profile 與 daily_bars_1m 判讀，不可自行補價格。",
+            "kline_rule": "K線型態只能根據 kline_structure、technical_profile 與 daily_bars_1m 判讀，不可自行補價格；輸出時優先使用 *_label 與 risk_flag_labels，不要把工程 enum 直接寫進報告。",
         },
         "coverage": coverage,
         "history_status_counts": dict(status_counts),
@@ -1850,6 +1921,7 @@ def _build_codex_analysis_context(
                 "candidate_grade": item.get("candidate_grade"),
                 "candidate_priority_score": item.get("candidate_priority_score"),
                 "risk_flags": item.get("risk_flags") or [],
+                "risk_flag_labels": _risk_flag_labels(item.get("risk_flags") or []),
                 "grade_reason": item.get("grade_reason"),
                 "breakout_price": _round_float(_candidate_breakout_price(item)),
                 "signal_low": _round_float(_candidate_signal_low(item)),
@@ -1972,6 +2044,7 @@ def _call_openai_for_codex_analysis(context: dict) -> tuple[str | None, str | No
         "請優先使用 graded_candidates；若你的排序不同於 candidate_grade 或 candidate_priority_score，必須說明差異原因。"
         "主線最多列 3 個，個股最多列 5 檔，ETF/基金/REIT 最多列 3 檔；其餘只放入降權或不處理原因。"
         "K線結構判讀必須根據每檔候選的 kline_structure、daily_bars_1m 與 technical_profile，分類為平台突破嘗試、趨勢延續、回測後站回短均、箱型整理、短線乖離偏大或假突破風險。"
+        "輸出時請優先使用 structure_label、trend_quality_label、close_location_label、volume_signature_label 與 risk_flag_labels；不得直接輸出 false_breakout_risk、breakout_with_volume、low_hit_rate_type 這類工程 enum。"
         "支撐、壓力、突破價、失敗價只能引用 JSON 中 support_resistance、kline_structure 或 technical_profile 已提供的數字。"
         "每個被選入的主線或標的都要寫『因為』與『如果錯了怎麼辦』；避免只寫突破確認、量能不縮這類沒有價格或條件的空泛句。"
         "新聞解讀需使用 news_packet，區分高相關、中相關與低相關；低相關新聞只做風險或背景提醒。"
@@ -2511,7 +2584,7 @@ def _graded_candidate_table_lines(title: str, candidates: list[dict], *, limit: 
                     _table_cell(_fmt_num(trigger, 2)),
                     _table_cell(_fmt_num(failure, 2)),
                     _table_cell(item.get("grade_reason"), width=86),
-                    _table_cell("、".join(str(flag) for flag in flags) or "—", width=48),
+                    _table_cell(_risk_flag_text(flags), width=48),
                 ]
             )
             + " |"
@@ -3227,7 +3300,7 @@ def _grade_reason(item: dict, grade: str, theme_row: dict, risk_flags: list[str]
     if _positive_chip(item):
         reasons.append("法人籌碼偏多")
     if risk_flags:
-        reasons.append("風險：" + "、".join(risk_flags[:3]))
+        reasons.append("風險：" + _risk_flag_text(risk_flags[:3]))
     if not reasons:
         reasons.append("條件未完整，先列雷達觀察")
     return f"{grade}級：" + "；".join(reasons[:4])
@@ -4032,9 +4105,9 @@ def build_report(*, base_url: str, report_date: str) -> str:
         lines.append("- 風險提醒：資料池尚未完整，候選僅視為觀察清單，交易前請以下單軟體再核對。")
     lines.append("")
 
-    lines.extend(_graded_candidate_table_lines("## 1B) 今日優先觀察清單（A/B/C 分級）", graded_candidates))
-
     lines.extend(_codex_analysis_section(codex_context))
+
+    lines.extend(_graded_candidate_table_lines("## 1B) 今日優先觀察清單（A/B/C 分級）", graded_candidates))
 
     lines.append("## 2) 法人偏多候選（依標的類型分類）")
     lines.append("- 條件：法人5日>0 且外資5日>0；以下分為個股與 ETF/基金/REIT，避免不同工具混在同一張表。")

@@ -351,9 +351,11 @@ def _report_from_context_preview(report_date: str) -> tuple[str | None, str | No
     start = preview.find("## 1A)")
     if start < 0:
         return None, f"Context preview exists but section 1A was not found: {preview_path}"
-    next_heading = preview.find("\n## 2)", start)
+    next_heading = preview.find("\n## 1B)", start)
     if next_heading < 0:
-        return None, f"Context preview exists but section 2 was not found after 1A: {preview_path}"
+        next_heading = preview.find("\n## 2)", start)
+    if next_heading < 0:
+        return None, f"Context preview exists but section 1B/2 was not found after 1A: {preview_path}"
 
     section = (
         "## 1A) Codex/AI 綜合分析\n"

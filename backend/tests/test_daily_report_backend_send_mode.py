@@ -14,6 +14,44 @@ for path in (str(PROJECT_ROOT), str(SCRIPTS_DIR)):
 from scripts import send_daily_tw_report_email as report_email  # noqa: E402
 
 
+def test_report_from_context_preview_preserves_priority_table_after_ai_section(tmp_path, monkeypatch):
+    monkeypatch.setattr(report_email, "PROJECT_ROOT", tmp_path)
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    (log_dir / "ai_daily_tw_report_2026-05-18.context-preview.md").write_text(
+        "\n".join(
+            [
+                "# report",
+                "",
+                "## 1) 今日結論",
+                "結論",
+                "",
+                "## 1A) Codex/AI 綜合分析",
+                "舊 AI 內容",
+                "",
+                "## 1B) 今日優先觀察清單（A/B/C 分級）",
+                "| 代號 | 名稱 |",
+                "|---|---|",
+                "| 2330.TW | 台積電 |",
+                "",
+                "## 2) 法人偏多候選（依標的類型分類）",
+                "法人內容",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (log_dir / "codex_ai_analysis_2026-05-18.md").write_text("### 一句話結論\n新 AI 內容", encoding="utf-8")
+
+    report, note = report_email._report_from_context_preview("2026-05-18")
+
+    assert note
+    assert "新 AI 內容" in report
+    assert "舊 AI 內容" not in report
+    assert "## 1B) 今日優先觀察清單" in report
+    assert "| 2330.TW | 台積電 |" in report
+    assert report.index("## 1A)") < report.index("## 1B)") < report.index("## 2)")
+
+
 def test_main_backend_send_mode_writes_report_before_calling_api(tmp_path, monkeypatch):
     monkeypatch.setattr(report_email, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(report_email, "check_api", lambda _base: SimpleNamespace(ok=True, error=None))
