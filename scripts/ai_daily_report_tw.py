@@ -1113,6 +1113,34 @@ def _enrich_news_for_candidates(
     return all_records
 
 
+def _enrich_ai_candidate_news(base_url: str, candidates: list[dict], *, report_date: str) -> list[dict]:
+    """Fill missing candidate news before AI analysis so the memo is not starved of events."""
+
+    all_records: list[dict] = []
+    seen: set[str] = set()
+    for item in candidates:
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        existing_digest = str(item.get("news_event_digest") or "").strip()
+        if existing_digest and existing_digest != "暫無重大新聞/事件":
+            continue
+        digest, records = _news_event_digest(
+            base_url,
+            ticker,
+            name=str(item.get("name") or ""),
+            report_date=report_date,
+            refresh=False,
+        )
+        if digest:
+            item["news_event_digest"] = digest
+        all_records.extend(records)
+    if all_records:
+        _store_news_records(base_url, all_records, report_date=report_date)
+    return all_records
+
+
 def _parse_rss_date(value: str) -> datetime | None:
     try:
         return parsedate_to_datetime(value)
@@ -2133,6 +2161,8 @@ def _build_codex_analysis_context(
         ma5_walk_candidates=ma5_walk_candidates,
         max_tickers=max_tickers,
     )
+    ai_news_records = _enrich_ai_candidate_news(base_url, ticker_pool, report_date=report_date)
+    combined_news_records = _dedupe_news_records(news_records + ai_news_records, limit=None)
     graded_by_ticker = {str(item.get("ticker") or "").upper().strip(): item for item in graded_candidates}
     candidates_for_ai: list[dict] = []
     for item in ticker_pool:
@@ -2176,6 +2206,7 @@ def _build_codex_analysis_context(
                 "candidates.kline_structure",
                 "candidates.technical_profile",
                 "candidates.daily_bars_1m",
+                "candidates.news_event_digest",
                 "signal_backtest_summary",
                 "news_packet",
             ],
@@ -2228,11 +2259,11 @@ def _build_codex_analysis_context(
         "news_packet": _news_packet_for_ai(
             candidates=ticker_pool,
             sector_rows=sector_rows,
-            news_records=news_records,
+            news_records=combined_news_records,
             market_news=market_news,
             limit=40,
         ),
-        "news_events": _dedupe_news_records(market_news + news_records, limit=40),
+        "news_events": _dedupe_news_records(market_news + combined_news_records, limit=40),
     }
 
 
@@ -2800,7 +2831,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
     lines.append("")
     lines.append("**分項分數**")
     lines.append(
-        "| 代號 | 價格分 | 突破分 | 量能分 | 法人籌碼分 | K線分 | API原始潛伏分 | K線分數 |"
+        "| 名稱 | 價格分 | 突破分 | 量能分 | 法人籌碼分 | K線分 | API原始潛伏分 | K線分數 |"
     )
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for it in candidates:
@@ -2808,7 +2839,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
             "| "
             + " | ".join(
                 [
-                    _table_cell(it.get("ticker")),
+                    _table_cell(it.get("name")),
                     _table_cell(_fmt_int(it.get("price_score"))),
                     _table_cell(_fmt_int(it.get("breakout_score"))),
                     _table_cell(_fmt_int(it.get("volume_score"))),
@@ -2823,7 +2854,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
 
     lines.append("")
     lines.append("**觀察說明**")
-    lines.append("| 代號 | AI篩選說明 | K線判讀 | 籌碼重點 | 新聞/事件 | 隔日策略 |")
+    lines.append("| 名稱 | AI篩選說明 | K線判讀 | 籌碼重點 | 新聞/事件 | 隔日策略 |")
     lines.append("|---|---|---|---|---|---|")
     for it in candidates:
         cp = it.get("candlestick_profile") or {}
@@ -2833,7 +2864,7 @@ def _candidate_table_lines(title: str, candidates: list[dict]) -> list[str]:
             "| "
             + " | ".join(
                 [
-                    _table_cell(it.get("ticker")),
+                    _table_cell(it.get("name")),
                     _table_cell(_candidate_reason(it), width=76),
                     _table_cell(k_summary + "；" + _k_text(it), width=92),
                     _table_cell(_chip_text(it), width=70),
@@ -2861,6 +2892,14 @@ def _graded_candidate_table_lines(title: str, candidates: list[dict], *, limit: 
     lines.append(
         f"- 依主題強度、量價、法人、訊號驗證與風險旗標重新排序；X 級 {x_count} 檔僅保留在後方完整表格或附錄觀察。"
     )
+    lines.append("")
+    lines.append("**A/B/C 分級說明**")
+    lines.append("| 等級 | 說明 | 操作重點 |")
+    lines.append("|---|---|---|")
+    lines.append("| A | 主題、量價、籌碼與 K 線結構同時較完整，且風險旗標較少。 | 優先觀察是否完成觸發價與量能確認；未確認仍不追價。 |")
+    lines.append("| B | 條件具備但仍有一到兩項需要確認，例如尚未收過突破價、族群廣度不足或歷史命中率偏保守。 | 等隔日收盤確認與失敗線防守；確認前只列觀察。 |")
+    lines.append("| C | 有題材或技術轉強線索，但分數、籌碼、K 線或風險條件不夠完整。 | 放在雷達名單，等待補量、補籌碼或回測支撐後再升級。 |")
+    lines.append("")
     lines.append("| 等級 | 類型 | 代號 | 名稱 | 主題 | 優先分 | 觸發價 | 失敗線 | 觀察理由 | 風險旗標 |")
     lines.append("|---|---|---|---|---|---:|---:|---:|---|---|")
     for item in visible:

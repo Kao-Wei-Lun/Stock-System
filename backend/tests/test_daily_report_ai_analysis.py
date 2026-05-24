@@ -294,7 +294,23 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         fetched_tickers.append(ticker)
         return _sample_daily_rows()
 
+    def fake_news_event_digest(_base_url, ticker, *, name="", report_date="", refresh=False):
+        return (
+            f"新聞：{name or ticker} 新聞補充（UnitTest {report_date}）",
+            [
+                {
+                    "ticker": ticker,
+                    "date": report_date,
+                    "title": f"{name or ticker} 新聞補充",
+                    "source": "UnitTest",
+                    "url": "https://example.com/ai-news",
+                }
+            ],
+        )
+
     monkeypatch.setattr(report_tw, "_fetch_recent_daily_rows", fake_fetch_recent_daily_rows)
+    monkeypatch.setattr(report_tw, "_news_event_digest", fake_news_event_digest)
+    monkeypatch.setattr(report_tw, "_store_news_records", lambda *_args, **_kwargs: 1)
 
     context = report_tw._build_codex_analysis_context(
         base_url="http://qv",
@@ -346,6 +362,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert "今日不做什麼" in context["ai_output_contract"]["allowed_sections"]
     assert context["ai_output_contract"]["decision_limits"]["max_stocks"] == 5
     assert "candidates.kline_structure" in context["ai_output_contract"]["primary_evidence"]
+    assert "candidates.news_event_digest" in context["ai_output_contract"]["primary_evidence"]
     assert context["memo_policy"]["watchlist_only"]
     assert context["data_quality_flags"]
     assert context["electronic_theme_rotation"][0]["state"] == "主線延續"
@@ -365,6 +382,7 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert candidates_by_ticker["2317.TW"]["kline_structure"]["volume_signature_label"]
     assert candidates_by_ticker["2317.TW"]["kline_structure"]["support_zone"]
     assert candidates_by_ticker["2317.TW"]["support_resistance"]["breakout_trigger"] == 64.4
+    assert "新聞補充" in candidates_by_ticker["2317.TW"]["news_event_digest"]
 
 
 def test_extract_openai_response_text_supports_responses_output_shape():
@@ -513,11 +531,37 @@ def test_candidate_tables_are_split_for_email_readability():
     assert any("潛伏總分" in line for line in table_headers)
     assert any("價格分" in line and "K線分" in line for line in table_headers)
     assert any("AI篩選說明" in line and "隔日策略" in line for line in table_headers)
+    assert any(line.startswith("| 名稱 | 價格分") for line in table_headers)
+    assert any(line.startswith("| 名稱 | AI篩選說明") for line in table_headers)
+    assert not any(line.startswith("| 代號 | 價格分") for line in table_headers)
+    assert not any(line.startswith("| 代號 | AI篩選說明") for line in table_headers)
     assert all(len(report_tw._split_markdown_table_row(line)) <= 9 for line in table_headers)
 
     html = report_tw.markdown_to_email_html("\n".join(lines))
     assert "table-layout:fixed" in html
     assert "overflow-wrap:anywhere" in html
+
+
+def test_graded_candidate_table_includes_grade_explanations():
+    candidate = {
+        "ticker": "2330.TW",
+        "name": "台積電",
+        "candidate_grade": "A",
+        "candidate_priority_score": 88,
+        "primary_theme": "半導體",
+        "grade_reason": "A級：主題、量價與籌碼同步。",
+        "risk_flags": [],
+    }
+
+    lines = report_tw._graded_candidate_table_lines("## 1B) AI 精選觀察清單", [candidate])
+    text = "\n".join(lines)
+
+    assert "**A/B/C 分級說明**" in text
+    assert "| A |" in text
+    assert "| B |" in text
+    assert "| C |" in text
+    assert "未確認仍不追價" in text
+    assert "雷達名單" in text
 
 
 def test_table_cells_keep_full_report_text_without_ellipsis():
