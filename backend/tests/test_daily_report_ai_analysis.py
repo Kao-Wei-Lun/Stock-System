@@ -279,7 +279,22 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
             "chip": {"institutional_5d_sum": 1000, "foreign_5d_sum": 800, "investment_trust_10d_sum": 0}
         },
     }
-    monkeypatch.setattr(report_tw, "_fetch_recent_daily_rows", lambda *_args, **_kwargs: _sample_daily_rows())
+    top_graded_only = {
+        **candidate,
+        "ticker": "2317.TW",
+        "name": "鴻海",
+        "candidate_grade": "A",
+        "candidate_priority_score": 88.0,
+        "risk_flags": [],
+        "grade_reason": "A級：主題支撐",
+    }
+    fetched_tickers: list[str] = []
+
+    def fake_fetch_recent_daily_rows(_base_url, ticker, **_kwargs):
+        fetched_tickers.append(ticker)
+        return _sample_daily_rows()
+
+    monkeypatch.setattr(report_tw, "_fetch_recent_daily_rows", fake_fetch_recent_daily_rows)
 
     context = report_tw._build_codex_analysis_context(
         base_url="http://qv",
@@ -292,7 +307,10 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
         sector_rows=[{"sector": "半導體業"}],
         theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2}],
         electronic_theme_rows=[{"theme": "AI Server", "strength_score": 80.0, "count": 2, "state": "主線延續"}],
-        graded_candidates=[{**candidate, "candidate_grade": "B", "candidate_priority_score": 66.5, "risk_flags": [], "grade_reason": "B級：主題支撐"}],
+        graded_candidates=[
+            top_graded_only,
+            {**candidate, "candidate_grade": "B", "candidate_priority_score": 66.5, "risk_flags": [], "grade_reason": "B級：主題支撐"},
+        ],
         selected_stocks=[candidate],
         selected_etfs=[],
         strong_stock_candidates=[],
@@ -332,16 +350,21 @@ def test_codex_context_includes_news_packet_and_technical_profiles(monkeypatch):
     assert context["data_quality_flags"]
     assert context["electronic_theme_rotation"][0]["state"] == "主線延續"
     assert context["theme_rotation"][0]["theme"] == "AI Server"
-    assert context["graded_candidates"][0]["candidate_grade"] == "B"
+    assert context["graded_candidates"][0]["candidate_grade"] == "A"
     assert context["news_packet"]["items"]
     assert context["news_packet"]["candidate_news"][0]["relevance_score"] == 95
-    assert len(context["candidates"][0]["daily_bars_1m"]) == 30
-    assert context["candidates"][0]["technical_profile"]["ma20"] is not None
-    assert context["candidates"][0]["kline_structure"]["structure_type"]
-    assert context["candidates"][0]["kline_structure"]["structure_label"]
-    assert context["candidates"][0]["kline_structure"]["volume_signature_label"]
-    assert context["candidates"][0]["kline_structure"]["support_zone"]
-    assert context["candidates"][0]["support_resistance"]["breakout_trigger"] == 64.4
+    assert context["data_policy"]["ai_candidate_tickers"][0] == "2317.TW"
+    assert {"2317.TW", "2330.TW"}.issubset(set(fetched_tickers))
+    candidates_by_ticker = {item["ticker"]: item for item in context["candidates"]}
+    assert "2317.TW" in candidates_by_ticker
+    assert "2330.TW" in candidates_by_ticker
+    assert len(candidates_by_ticker["2317.TW"]["daily_bars_1m"]) == 30
+    assert candidates_by_ticker["2317.TW"]["technical_profile"]["ma20"] is not None
+    assert candidates_by_ticker["2317.TW"]["kline_structure"]["structure_type"]
+    assert candidates_by_ticker["2317.TW"]["kline_structure"]["structure_label"]
+    assert candidates_by_ticker["2317.TW"]["kline_structure"]["volume_signature_label"]
+    assert candidates_by_ticker["2317.TW"]["kline_structure"]["support_zone"]
+    assert candidates_by_ticker["2317.TW"]["support_resistance"]["breakout_trigger"] == 64.4
 
 
 def test_extract_openai_response_text_supports_responses_output_shape():

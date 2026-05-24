@@ -1806,6 +1806,36 @@ def _candidate_for_ai(item: dict, validation_by_ticker: dict[str, dict], daily_r
     }
 
 
+def _ai_context_ticker_pool(
+    *,
+    graded_candidates: list[dict],
+    selected_stocks: list[dict],
+    selected_etfs: list[dict],
+    strong_stock_candidates: list[dict],
+    bullish_stock_candidates: list[dict],
+    ma5_walk_candidates: list[dict],
+    max_tickers: int,
+) -> list[dict]:
+    """Prioritize candidates the AI is expected to judge, then fill with supporting lists."""
+
+    graded_watchlist = [item for item in graded_candidates if str(item.get("candidate_grade") or "X").upper() != "X"]
+    if len(graded_watchlist) < min(max_tickers, 12):
+        graded_watchlist.extend(
+            item
+            for item in graded_candidates
+            if str(item.get("candidate_grade") or "X").upper() == "X"
+        )
+    graded_focus = graded_watchlist[: min(max_tickers, 12)]
+    supplemental = (
+        selected_etfs[:6]
+        + selected_stocks[:12]
+        + strong_stock_candidates[:8]
+        + bullish_stock_candidates[:8]
+        + ma5_walk_candidates[:8]
+    )
+    return _dedupe_candidates(graded_focus + supplemental)[:max_tickers]
+
+
 def _build_codex_analysis_context(
     *,
     base_url: str,
@@ -1832,13 +1862,15 @@ def _build_codex_analysis_context(
     max_tickers: int,
     history_days: int,
 ) -> dict:
-    ticker_pool = _dedupe_candidates(
-        selected_stocks[:12]
-        + selected_etfs[:6]
-        + strong_stock_candidates[:8]
-        + bullish_stock_candidates[:8]
-        + ma5_walk_candidates[:8]
-    )[:max_tickers]
+    ticker_pool = _ai_context_ticker_pool(
+        graded_candidates=graded_candidates,
+        selected_stocks=selected_stocks,
+        selected_etfs=selected_etfs,
+        strong_stock_candidates=strong_stock_candidates,
+        bullish_stock_candidates=bullish_stock_candidates,
+        ma5_walk_candidates=ma5_walk_candidates,
+        max_tickers=max_tickers,
+    )
     graded_by_ticker = {str(item.get("ticker") or "").upper().strip(): item for item in graded_candidates}
     candidates_for_ai: list[dict] = []
     for item in ticker_pool:
@@ -1889,7 +1921,9 @@ def _build_codex_analysis_context(
         },
         "data_policy": {
             "history_days_per_candidate": history_days,
-            "note": "AI receives at least one month of compact daily bars, technical profiles, news packet, and computed scores; raw screening remains deterministic.",
+            "ai_candidate_ticker_count": len(ticker_pool),
+            "ai_candidate_tickers": [item.get("ticker") for item in ticker_pool],
+            "note": "AI receives at least one month of compact daily bars, technical profiles, news packet, and computed scores for every ticker in candidates; top graded watchlist names are prioritized before supplemental lists.",
         },
         "memo_policy": {
             "style": "盤後決策 Memo，不重述表格，不寫固定模板句。",
