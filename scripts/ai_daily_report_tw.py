@@ -5,7 +5,6 @@ import html
 import json
 import os
 import re
-import textwrap
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -96,8 +95,6 @@ def _table_cell(value: object, *, width: int | None = None) -> str:
     text = "—" if value is None or value == "" else str(value)
     text = " ".join(text.replace("\r", " ").replace("\n", " ").split())
     text = text.replace("|", "｜")
-    if width and len(text) > width:
-        text = textwrap.shorten(text, width=width, placeholder="…")
     return text
 
 
@@ -486,28 +483,40 @@ def _k_trade_plan(item: dict) -> str:
 
 
 def _chip_text(item: dict) -> str:
-    ap = item.get("accumulation_profile") or {}
-    chip = ap.get("chip") or {}
+    chip = _chip_profile(item)
+    if not chip:
+        return "籌碼資料未取得（請檢查台股籌碼同步）"
     inst5 = chip.get("institutional_5d_sum")
     fore5 = chip.get("foreign_5d_sum")
     it10 = chip.get("investment_trust_10d_sum")
+    if not any(value is not None for value in (inst5, fore5, it10)):
+        return "籌碼資料未取得（請檢查台股籌碼同步）"
     inst_streak = chip.get("institutional_streak") or {}
     fore_streak = chip.get("foreign_streak") or {}
     inst_dir = _chip_direction_label(inst_streak.get("direction") or "—")
     inst_days = inst_streak.get("days")
     fore_dir = _chip_direction_label(fore_streak.get("direction") or "—")
     fore_days = fore_streak.get("days")
+    inst_streak_text = (
+        f"法人連續{inst_dir}{_fmt_int(inst_days)}日"
+        if isinstance(inst_days, (int, float)) and inst_days > 0
+        else "法人連續狀態未取得"
+    )
+    fore_streak_text = (
+        f"外資連續{fore_dir}{_fmt_int(fore_days)}日"
+        if isinstance(fore_days, (int, float)) and fore_days > 0
+        else "外資連續狀態未取得"
+    )
     return (
         f"法人5日{_fmt_int(inst5)} / 外資5日{_fmt_int(fore5)} / 投信10日{_fmt_int(it10)}；"
-        f"法人連續{inst_dir}{_fmt_int(inst_days)}日、外資連續{fore_dir}{_fmt_int(fore_days)}日"
+        f"{inst_streak_text}、{fore_streak_text}"
     )
 
 
 def _candidate_reason(item: dict) -> str:
     cp = item.get("candlestick_profile") or {}
-    ap = item.get("accumulation_profile") or {}
     latest = cp.get("latest") or {}
-    chip = ap.get("chip") or {}
+    chip = _chip_profile(item)
     reasons: list[str] = []
     if item.get("total_score") is not None:
         reasons.append(f"潛伏總分{_fmt_int(item.get('total_score'))}")
@@ -528,11 +537,11 @@ def _candidate_reason(item: dict) -> str:
         reasons.append("法人與外資5日同步偏多")
     elif isinstance(inst5, (int, float)) and inst5 > 0:
         reasons.append("法人5日偏多")
-    return "；".join(reasons[:5]) or "條件符合但需等待隔日確認"
+    return "；".join(reasons) or "條件符合但需等待隔日確認"
 
 
 def _positive_chip(item: dict) -> bool:
-    chip = ((item.get("accumulation_profile") or {}).get("chip") or {})
+    chip = _chip_profile(item)
     inst5 = chip.get("institutional_5d_sum") or 0
     fore5 = chip.get("foreign_5d_sum") or 0
     return isinstance(inst5, (int, float)) and isinstance(fore5, (int, float)) and inst5 + fore5 > 0
@@ -552,6 +561,125 @@ def _has_breakout_signal(item: dict) -> bool:
 
 def _volume_expanded(item: dict) -> bool:
     return bool(((item.get("candlestick_profile") or {}).get("latest") or {}).get("volume_expanded"))
+
+
+def _chip_profile(item: dict) -> dict:
+    ap = item.get("accumulation_profile") or {}
+    return ap.get("chip") or {}
+
+
+def _has_chip_profile(item: dict) -> bool:
+    chip = _chip_profile(item)
+    return any(
+        chip.get(key) is not None
+        for key in (
+            "institutional_5d_sum",
+            "foreign_5d_sum",
+            "investment_trust_10d_sum",
+            "institutional_streak",
+            "foreign_streak",
+        )
+    )
+
+
+def _chip_history_sum(series: list[dict], key: str, window: int) -> int | None:
+    values: list[int] = []
+    for row in series[-window:]:
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            values.append(int(value))
+    return sum(values) if values else None
+
+
+def _chip_history_streak(series: list[dict], key: str) -> dict:
+    direction = "neutral"
+    days = 0
+    for row in reversed(series):
+        value = row.get(key)
+        if not isinstance(value, (int, float)) or value == 0:
+            if days == 0:
+                continue
+            break
+        row_direction = "buy" if value > 0 else "sell"
+        if days == 0:
+            direction = row_direction
+        if row_direction != direction:
+            break
+        days += 1
+    return {"direction": direction, "days": days}
+
+
+def _chip_profile_from_history_payload(payload: dict) -> dict:
+    stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
+    series = [row for row in (payload.get("series") or []) if isinstance(row, dict)]
+    series.sort(key=lambda row: str(row.get("snapshot_date") or ""))
+
+    institutional_5d = stats.get("institutional_5d_sum")
+    foreign_5d = stats.get("foreign_5d_sum")
+    trust_10d = stats.get("investment_trust_10d_sum")
+    dealer_5d = stats.get("dealer_5d_sum")
+    if institutional_5d is None:
+        institutional_5d = _chip_history_sum(series, "institutional_net_buy_sell", 5)
+    if foreign_5d is None:
+        foreign_5d = _chip_history_sum(series, "foreign_net_buy_sell", 5)
+    if trust_10d is None:
+        trust_10d = _chip_history_sum(series, "investment_trust_net_buy_sell", 10)
+    if dealer_5d is None:
+        dealer_5d = _chip_history_sum(series, "dealer_net_buy_sell", 5)
+
+    if not any(value is not None for value in (institutional_5d, foreign_5d, trust_10d, dealer_5d)):
+        return {}
+
+    institutional_streak = {
+        "direction": stats.get("institutional_streak_direction"),
+        "days": stats.get("institutional_streak_days"),
+    }
+    foreign_streak = {
+        "direction": stats.get("foreign_streak_direction"),
+        "days": stats.get("foreign_streak_days"),
+    }
+    if not institutional_streak.get("direction") or institutional_streak.get("days") is None:
+        institutional_streak = _chip_history_streak(series, "institutional_net_buy_sell")
+    if not foreign_streak.get("direction") or foreign_streak.get("days") is None:
+        foreign_streak = _chip_history_streak(series, "foreign_net_buy_sell")
+
+    latest = payload.get("latest") if isinstance(payload.get("latest"), dict) else {}
+    latest_detail = latest.get("detail") if isinstance(latest.get("detail"), dict) else {}
+    return {
+        "latest_date": latest.get("snapshot_date") or latest_detail.get("snapshot_date"),
+        "institutional_5d_sum": institutional_5d,
+        "foreign_5d_sum": foreign_5d,
+        "investment_trust_10d_sum": trust_10d,
+        "dealer_5d_sum": dealer_5d,
+        "institutional_streak": institutional_streak,
+        "foreign_streak": foreign_streak,
+        "source": "tw_chips_history",
+    }
+
+
+def _merge_chip_profile(item: dict, chip: dict) -> None:
+    if not chip:
+        return
+    ap = dict(item.get("accumulation_profile") or {})
+    existing = dict(ap.get("chip") or {})
+    for key, value in chip.items():
+        if value is not None and existing.get(key) is None:
+            existing[key] = value
+    ap["chip"] = existing
+    item["accumulation_profile"] = ap
+
+
+def _ensure_chip_profiles(base_url: str, candidates: list[dict]) -> None:
+    seen: set[str] = set()
+    for item in candidates:
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker or ticker in seen or _has_chip_profile(item):
+            continue
+        seen.add(ticker)
+        encoded = urllib.parse.quote(ticker, safe="")
+        payload = _fetch_optional_json(f"{base_url}/api/tw/chips/{encoded}/history?days=20", timeout=25)
+        if isinstance(payload, dict):
+            _merge_chip_profile(item, _chip_profile_from_history_payload(payload))
 
 
 def _candidates_with_names(base_url: str, candidates_raw: list[object]) -> list[dict]:
@@ -2547,7 +2675,7 @@ def _trend_reason(item: dict, *, mode: str) -> str:
         parts.append(f"距近60日/52週高點{_fmt_num(distance_high, 2)}%")
     if _positive_chip(item):
         parts.append("法人/外資合計偏多")
-    return "；".join(parts[:5]) or "趨勢條件成立，等待價量確認"
+    return "；".join(parts) or "趨勢條件成立，等待價量確認"
 
 
 def _momentum_table_lines(title: str, candidates: list[dict], *, mode: str) -> list[str]:
@@ -4055,6 +4183,16 @@ def build_report(*, base_url: str, report_date: str) -> str:
     strong_stock_candidates = _strong_stock_rows(profiled_common_pool, limit=15)
     bullish_stock_candidates = _bullish_stock_rows(profiled_common_pool, limit=15)
     ma5_walk_candidates = _ma5_walk_stock_rows(base_url, profiled_common_pool, limit=15, scan_limit=60)
+    _ensure_chip_profiles(
+        base_url,
+        _dedupe_candidates(
+            selected_stocks
+            + selected_etfs
+            + strong_stock_candidates
+            + bullish_stock_candidates
+            + ma5_walk_candidates
+        ),
+    )
     strong_stock_candidates = _attach_candidate_scores(strong_stock_candidates)
     bullish_stock_candidates = _attach_candidate_scores(bullish_stock_candidates)
     ma5_walk_candidates = _attach_candidate_scores(ma5_walk_candidates)

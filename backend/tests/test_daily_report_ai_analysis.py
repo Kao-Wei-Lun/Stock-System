@@ -520,6 +520,54 @@ def test_candidate_tables_are_split_for_email_readability():
     assert "overflow-wrap:anywhere" in html
 
 
+def test_table_cells_keep_full_report_text_without_ellipsis():
+    long_text = "；".join([f"完整說明{i}" for i in range(20)])
+
+    cell = report_tw._table_cell(long_text, width=20)
+
+    assert cell == long_text
+    assert "…" not in cell
+
+
+def test_missing_chip_profile_is_filled_from_chip_history(monkeypatch):
+    candidate = {"ticker": "2327.TW", "name": "國巨*", "accumulation_profile": None}
+
+    def fake_fetch(url, *, timeout=20):
+        assert "/api/tw/chips/2327.TW/history?days=20" in url
+        return {
+            "latest": {"snapshot_date": "2026-05-22"},
+            "stats": {
+                "institutional_5d_sum": 3225310,
+                "foreign_5d_sum": 120000,
+                "investment_trust_10d_sum": 2114449,
+                "dealer_5d_sum": 1179351,
+                "institutional_streak_days": 2,
+                "institutional_streak_direction": "buy",
+                "foreign_streak_days": 3,
+                "foreign_streak_direction": "buy",
+            },
+        }
+
+    monkeypatch.setattr(report_tw, "_fetch_optional_json", fake_fetch)
+
+    report_tw._ensure_chip_profiles("http://example.test", [candidate])
+    chip_text = report_tw._chip_text(candidate)
+
+    assert "法人5日3,225,310" in chip_text
+    assert "外資5日120,000" in chip_text
+    assert "投信10日2,114,449" in chip_text
+    assert "法人連續買超2日" in chip_text
+    assert "外資連續買超3日" in chip_text
+    assert "—" not in chip_text
+
+
+def test_chip_text_reports_missing_data_without_double_dash():
+    chip_text = report_tw._chip_text({"accumulation_profile": {"chip": {"institutional_streak": {}, "foreign_streak": {}}}})
+
+    assert chip_text == "籌碼資料未取得（請檢查台股籌碼同步）"
+    assert "——" not in chip_text
+
+
 def test_signal_validation_status_labels_are_localized():
     rows = [
         {
