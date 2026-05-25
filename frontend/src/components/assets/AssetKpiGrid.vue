@@ -28,8 +28,17 @@
 
 <script setup>
 import { computed } from "vue";
-
-const EMPTY_MARK = "--";
+import {
+  EMPTY_MARK,
+  firstFinite,
+  formatCurrency as formatAssetCurrency,
+  formatInteger,
+  formatPercent,
+  formatRangeLabel,
+  formatSignedCurrency as formatAssetSignedCurrency,
+  parseFiniteNumber,
+  toneForValue,
+} from "./assetDashboardFormatters";
 
 const props = defineProps({
   assetLoading: { type: Boolean, default: false },
@@ -134,59 +143,12 @@ const kpiCards = computed(() => [
   },
 ]);
 
-function parseFiniteNumber(value) {
-  if (value === "" || value == null) return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function firstFinite(...values) {
-  for (const value of values) {
-    const numeric = parseFiniteNumber(value);
-    if (numeric != null) return numeric;
-  }
-  return null;
-}
-
-function toneForValue(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null || numeric === 0) return "neutral";
-  return numeric > 0 ? "positive" : "negative";
-}
-
 function formatCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${currency} ${numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatAssetCurrency(value, currency);
 }
 
 function formatSignedCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  const sign = numeric > 0 ? "+" : numeric < 0 ? "-" : "";
-  return `${sign}${currency} ${Math.abs(numeric).toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatPercent(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${numeric.toFixed(2)}%`;
-}
-
-function formatInteger(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return numeric.toLocaleString("zh-TW", { maximumFractionDigits: 0 });
-}
-
-function formatRangeLabel(value) {
-  return String(value || "1y").toUpperCase();
+  return formatAssetSignedCurrency(value, currency);
 }
 </script>
 
@@ -206,7 +168,7 @@ function formatRangeLabel(value) {
   min-height: 132px;
   padding: 16px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 16px;
+  border-radius: var(--asset-radius-card, 16px);
   background: var(--asset-card-bg, #111827);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
 }
@@ -314,7 +276,13 @@ function formatRangeLabel(value) {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
+  .asset-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
   .asset-kpi-grid {
     grid-template-columns: 1fr;
   }

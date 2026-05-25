@@ -1,6 +1,31 @@
 <template>
   <div class="asset-overview">
-    <div v-if="hasWarnings" class="asset-warning-stack">
+    <div v-if="assetError" class="asset-error-state">
+      <strong>資產資料載入異常</strong>
+      <span>{{ assetError }}</span>
+    </div>
+
+    <AssetKpiGrid
+      :asset-loading="assetLoading"
+      :asset-performance-range="assetPerformanceRange"
+      :asset-base-currency="assetBaseCurrency"
+      :asset-summary="assetSummary"
+      :asset-performance-summary="assetPerformanceSummary"
+      :asset-performance-series="assetPerformanceSeries"
+      :asset-holdings="assetHoldings"
+    />
+
+    <AssetPerformanceSection
+      :asset-loading="assetLoading"
+      :asset-performance-range="assetPerformanceRange"
+      :asset-base-currency="assetBaseCurrency"
+      :asset-summary="assetSummary"
+      :asset-performance-summary="assetPerformanceSummary"
+      :asset-performance-series="assetPerformanceSeries"
+      @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
+    />
+
+    <div v-if="hasWarnings" class="asset-warning-stack" aria-label="資產資料提醒">
       <button
         v-for="warning in assetWarnings"
         :key="warning"
@@ -40,31 +65,6 @@
         <span>{{ alert.message }}</span>
       </button>
     </div>
-
-    <div v-if="assetError" class="asset-error-state">
-      <strong>資產資料載入異常</strong>
-      <span>{{ assetError }}</span>
-    </div>
-
-    <AssetKpiGrid
-      :asset-loading="assetLoading"
-      :asset-performance-range="assetPerformanceRange"
-      :asset-base-currency="assetBaseCurrency"
-      :asset-summary="assetSummary"
-      :asset-performance-summary="assetPerformanceSummary"
-      :asset-performance-series="assetPerformanceSeries"
-      :asset-holdings="assetHoldings"
-    />
-
-    <AssetPerformanceSection
-      :asset-loading="assetLoading"
-      :asset-performance-range="assetPerformanceRange"
-      :asset-base-currency="assetBaseCurrency"
-      :asset-summary="assetSummary"
-      :asset-performance-summary="assetPerformanceSummary"
-      :asset-performance-series="assetPerformanceSeries"
-      @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
-    />
 
     <AssetHoldingsTable
       :asset-loading="assetLoading"
@@ -132,11 +132,11 @@
             <div class="asset-change-equation" aria-label="asset-change-equation">
               <span>{{ formatCurrency(changeBreakdown.startValue) }}</span>
               <b>+</b>
-              <span :class="changeBreakdown.netFlow >= 0 ? 'up' : 'dn'">
+              <span :class="trendClass(changeBreakdown.netFlow)">
                 {{ formatSignedCurrency(changeBreakdown.netFlow, assetBaseCurrency) }}
               </span>
               <b>+</b>
-              <span :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+              <span :class="trendClass(changeBreakdown.performance)">
                 {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
               </span>
               <b>=</b>
@@ -178,7 +178,7 @@
                 <header>
                   <div>
                     <span class="asset-change-source-kicker">損益來源</span>
-                    <strong :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+                    <strong :class="trendClass(changeBreakdown.performance)">
                       {{ formatSignedCurrency(selectedPerformanceBreakdown.total_change_base, assetBaseCurrency) }}
                     </strong>
                   </div>
@@ -216,7 +216,7 @@
                 <p>{{ changeFundingDescription }}</p>
                 <div class="asset-change-pill-row">
                   <span class="asset-change-pill neutral">期初 {{ formatCurrency(changeBreakdown.startValue) }}</span>
-                  <span class="asset-change-pill" :class="changeBreakdown.netFlow >= 0 ? 'warm' : 'risk'">
+                  <span class="asset-change-pill" :class="flowPillClass(changeBreakdown.netFlow)">
                     {{ changeBreakdown.netFlow >= 0 ? "新增投入" : "淨流出" }}
                     {{ formatSignedCurrency(changeBreakdown.netFlow, assetBaseCurrency) }}
                   </span>
@@ -226,14 +226,14 @@
               <article class="asset-change-insight-card">
                 <header>
                   <span>投資結果</span>
-                  <strong :class="changeBreakdown.performance >= 0 ? 'up' : 'dn'">
+                  <strong :class="trendClass(changeBreakdown.performance)">
                     {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
                   </strong>
                 </header>
                 <p>{{ changePerformanceDescription }}</p>
                 <div class="asset-change-pill-row">
                   <span class="asset-change-pill accent">期末 {{ formatCurrency(changeBreakdown.endValue) }}</span>
-                  <span class="asset-change-pill" :class="changeBreakdown.performance >= 0 ? 'success' : 'risk'">
+                  <span class="asset-change-pill" :class="performancePillClass(changeBreakdown.performance)">
                     {{ changeBreakdown.performance >= 0 ? "報酬貢獻" : "損失影響" }}
                     {{ formatSignedCurrency(changeBreakdown.performance, assetBaseCurrency) }}
                   </span>
@@ -273,73 +273,12 @@
     </div>
 
     <div class="asset-analytics-grid">
-      <section class="asset-card asset-card-wide asset-allocation-card">
-        <div class="asset-card-head">
-          <div>
-            <div class="asset-card-title">資產配置</div>
-            <div class="bt-trade-sub">第一階段先整理帳戶與市場配置，其他維度待資料支援後啟用</div>
-          </div>
-          <div class="asset-allocation-tabs">
-            <button
-              v-for="tab in allocationTabs"
-              :key="tab.key"
-              class="asset-inline-btn"
-              :class="{ active: allocationTab === tab.key }"
-              type="button"
-              :disabled="tab.disabled"
-              @click="allocationTab = tab.key"
-            >
-              {{ tab.label }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="allocationTab === 'account' && assetAccountAllocation.length" class="asset-donut-card">
-          <DeferredVChart
-            class="asset-chart asset-chart-donut"
-            :option="accountAllocationChartOption"
-            autoresize
-            @click="handleAccountAllocationClick"
-          />
-          <div class="asset-donut-legend">
-            <button
-              v-for="item in assetAccountAllocation.slice(0, 5)"
-              :key="item.key"
-              class="asset-donut-legend-item"
-              type="button"
-              @click="focusHoldings({ accountKey: item.key })"
-            >
-              <span class="asset-dot" :style="{ backgroundColor: paletteColorFor(assetAccountAllocation, item.key) }"></span>
-              <strong>{{ item.key }}</strong>
-              <small>{{ formatPercent(item.weight_pct) }}</small>
-            </button>
-          </div>
-        </div>
-        <div v-else-if="allocationTab === 'market' && assetMarketAllocation.length" class="asset-donut-card">
-          <DeferredVChart
-            class="asset-chart asset-chart-donut"
-            :option="marketAllocationChartOption"
-            autoresize
-            @click="handleMarketAllocationClick"
-          />
-          <div class="asset-donut-legend">
-            <button
-              v-for="item in assetMarketAllocation"
-              :key="item.key"
-              class="asset-donut-legend-item"
-              type="button"
-              @click="focusHoldings({ marketKey: item.key })"
-            >
-              <span class="asset-dot" :style="{ backgroundColor: paletteColorFor(assetMarketAllocation, item.key) }"></span>
-              <strong>{{ item.key }}</strong>
-              <small>{{ formatPercent(item.weight_pct) }}</small>
-            </button>
-          </div>
-        </div>
-        <div v-else class="asset-allocation-empty">
-          {{ allocationEmptyMessage }}
-        </div>
-      </section>
+      <AssetAllocationSection
+        :asset-base-currency="assetBaseCurrency"
+        :asset-account-allocation="assetAccountAllocation"
+        :asset-market-allocation="assetMarketAllocation"
+        @focus-holdings="focusHoldings"
+      />
 
       <section class="asset-card">
         <div class="asset-card-head">
@@ -365,31 +304,14 @@
     </div>
 
     <div class="asset-preview-grid asset-preview-grid-single">
-      <section class="asset-card">
-        <div class="asset-card-head">
-          <div class="asset-card-title">最近流水</div>
-          <button class="asset-inline-btn" type="button" @click="$emit('open-tab', 'holdings')">查看明細</button>
-        </div>
-        <div v-if="recentFlowItems.length" class="asset-list">
-          <button
-            v-for="item in recentFlowItems"
-            :key="item.key"
-            class="asset-list-item"
-            type="button"
-            @click="focusHoldings(item.filter)"
-          >
-            <div>
-              <strong>{{ item.title }}</strong>
-              <div class="bt-trade-sub">{{ item.meta }}</div>
-            </div>
-            <div class="asset-list-metrics">
-              <span>{{ item.value }}</span>
-              <small>{{ item.kind }}</small>
-            </div>
-          </button>
-        </div>
-        <div v-else class="bt-history-empty">目前沒有最近流水。</div>
-      </section>
+      <AssetActivityTimeline
+        :asset-loading="assetLoading"
+        :asset-base-currency="assetBaseCurrency"
+        :asset-cash-entries="assetCashEntries"
+        :asset-trade-entries="assetTradeEntries"
+        @focus-holdings="focusHoldings"
+        @open-tab="$emit('open-tab', $event)"
+      />
     </div>
   </div>
 </template>
@@ -397,32 +319,38 @@
 <script setup>
 import { computed, provide, ref, watch } from "vue";
 import { use, graphic } from "echarts/core";
-import { BarChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
+import { BarChart, HeatmapChart } from "echarts/charts";
 import {
-  DataZoomComponent,
-  GraphicComponent,
   GridComponent,
-  LegendComponent,
   TooltipComponent,
   VisualMapComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { THEME_KEY } from "vue-echarts";
+import AssetActivityTimeline from "./AssetActivityTimeline.vue";
+import AssetAllocationSection from "./AssetAllocationSection.vue";
 import AssetHoldingsTable from "./AssetHoldingsTable.vue";
 import AssetKpiGrid from "./AssetKpiGrid.vue";
 import AssetPerformanceSection from "./AssetPerformanceSection.vue";
 import DeferredVChart from "../DeferredVChart.vue";
+import {
+  formatCompactNumber as formatAssetCompactNumber,
+  formatCurrency as formatAssetCurrency,
+  formatDateLabel as formatAssetDateLabel,
+  formatMonthLabel,
+  formatPercent,
+  formatSignedCurrency as formatAssetSignedCurrency,
+  numberOrZero,
+  parseFiniteNumber,
+  percentAgainst,
+  trendClass,
+} from "./assetDashboardFormatters";
 
 use([
   BarChart,
   HeatmapChart,
-  LineChart,
-  PieChart,
   CanvasRenderer,
-  DataZoomComponent,
-  GraphicComponent,
   GridComponent,
-  LegendComponent,
   TooltipComponent,
   VisualMapComponent,
 ]);
@@ -457,23 +385,6 @@ const emit = defineEmits([
   "focus-maintenance",
 ]);
 
-const performanceRangeOptions = [
-  { value: "30d", label: "30D" },
-  { value: "90d", label: "90D" },
-  { value: "180d", label: "180D" },
-  { value: "1y", label: "1Y" },
-  { value: "ytd", label: "YTD" },
-  { value: "all", label: "All" },
-];
-
-const performanceModeOptions = [
-  { value: "total_asset_value_base", label: "總資產", color: "#7be7ff" },
-  { value: "true_performance_base", label: "純績效", color: "#ef4444" },
-  { value: "cash_total_base", label: "現金", color: "#ffcf78" },
-  { value: "market_value_total_base", label: "持倉市值", color: "#60a5fa" },
-];
-
-const palette = ["#60a5fa", "#94a3b8", "#f59e0b", "#ef4444", "#22c55e", "#a78bfa", "#14b8a6"];
 const emptyFlowBreakdown = Object.freeze({
   deposit_base: 0,
   withdraw_base: 0,
@@ -491,19 +402,12 @@ const emptyPerformanceBreakdown = Object.freeze({
   total_change_base: 0,
 });
 
-const activeChartMode = ref("total_asset_value_base");
 const changeBreakdownView = ref("story");
 const selectedDate = ref("");
 const selectedMonth = ref("");
-const allocationTab = ref("account");
 
-const allocationTabs = [
-  { key: "account", label: "帳戶配置", disabled: false },
-  { key: "market", label: "市場配置", disabled: false },
-  { key: "sector", label: "產業配置", disabled: true },
-  { key: "currency", label: "幣別配置", disabled: true },
-];
-
+const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
+const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
 const hasWarnings = computed(() => (
   props.assetWarnings.length
   || props.assetQuoteGaps.length
@@ -511,22 +415,19 @@ const hasWarnings = computed(() => (
   || reconciliationGapItems.value.length
 ));
 
-const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
-const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
-
 const performanceRows = computed(() => (
   (props.assetPerformanceSeries || [])
     .map((item) => ({
       date: String(item?.date || ""),
-      cash_total_base: Number(item?.cash_total_base || 0),
-      market_value_total_base: Number(item?.market_value_total_base || 0),
-      total_asset_value_base: Number(item?.total_asset_value_base || 0),
-      true_performance_base: Number(item?.true_performance_base || 0),
-      net_flow_base: Number(item?.net_flow_base || 0),
-      realized_total_base: Number(item?.realized_total_base || 0),
-      unrealized_total_base: Number(item?.unrealized_total_base || 0),
-      drawdown_pct: Number(item?.drawdown_pct || 0),
-      quote_gap_count: Number(item?.quote_gap_count || 0),
+      cash_total_base: numberOrZero(item?.cash_total_base),
+      market_value_total_base: numberOrZero(item?.market_value_total_base),
+      total_asset_value_base: numberOrZero(item?.total_asset_value_base),
+      true_performance_base: numberOrZero(item?.true_performance_base),
+      net_flow_base: numberOrZero(item?.net_flow_base),
+      realized_total_base: numberOrZero(item?.realized_total_base),
+      unrealized_total_base: numberOrZero(item?.unrealized_total_base),
+      drawdown_pct: numberOrZero(item?.drawdown_pct),
+      quote_gap_count: numberOrZero(item?.quote_gap_count),
       flow_breakdown: normalizeFlowBreakdown(item?.flow_breakdown),
       performance_breakdown: normalizePerformanceBreakdown(item?.performance_breakdown),
     }))
@@ -587,14 +488,16 @@ const selectedPerformanceBreakdown = computed(() => normalizePerformanceBreakdow
   selectedPoint.value.performance_breakdown || props.assetPerformanceSummary.performance_breakdown,
 ));
 const changeBreakdown = computed(() => {
-  const startValue = Number(props.assetPerformanceSummary.start_value_base || 0);
-  const netFlow = Number(selectedFlowBreakdown.value.net_flow_base || selectedPoint.value.net_flow_base || 0);
-  const performance = Number(
-    selectedPerformanceBreakdown.value.total_change_base
-    || selectedPoint.value.true_performance_base
-    || 0,
-  );
-  const endValue = Number(selectedPoint.value.total_asset_value_base || 0);
+  const startValue = numberOrZero(props.assetPerformanceSummary.start_value_base);
+  const netFlow = parseFiniteNumber(selectedFlowBreakdown.value.net_flow_base)
+    ?? parseFiniteNumber(selectedPoint.value.net_flow_base)
+    ?? 0;
+  const breakdownPerformance = parseFiniteNumber(selectedPerformanceBreakdown.value.total_change_base);
+  const pointPerformance = parseFiniteNumber(selectedPoint.value.true_performance_base);
+  const performance = breakdownPerformance != null && Math.abs(breakdownPerformance) >= 0.01
+    ? breakdownPerformance
+    : pointPerformance ?? breakdownPerformance ?? 0;
+  const endValue = numberOrZero(selectedPoint.value.total_asset_value_base);
   return {
     startValue,
     netFlow,
@@ -605,38 +508,38 @@ const changeBreakdown = computed(() => {
 });
 const fundingBreakdownRows = computed(() => {
   const flow = selectedFlowBreakdown.value;
-  const transferNet = Number(flow.transfer_in_base || 0) - Number(flow.transfer_out_base || 0);
+  const transferNet = numberOrZero(flow.transfer_in_base) - numberOrZero(flow.transfer_out_base);
   const rows = [
     {
       key: "deposit",
       label: "入金",
-      amount: Number(flow.deposit_base || 0),
+      amount: numberOrZero(flow.deposit_base),
       helper: "你主動補進來的資金",
       tone: "up",
     },
     {
       key: "withdraw",
       label: "出金",
-      amount: -Number(flow.withdraw_base || 0),
+      amount: -numberOrZero(flow.withdraw_base),
       helper: "提領或移出資產池的資金",
       tone: "dn",
     },
     {
       key: "dividend",
       label: "股利 / 利息",
-      amount: Number(flow.dividend_interest_base || 0),
+      amount: numberOrZero(flow.dividend_interest_base),
       helper: "資產自己產生的現金流",
       tone: "up",
     },
     {
       key: "fees",
       label: "費用 / 稅 / 匯費",
-      amount: -Number(flow.fee_tax_base || 0),
+      amount: -numberOrZero(flow.fee_tax_base),
       helper: "交易與匯兌成本",
       tone: "dn",
     },
   ];
-  if (Math.abs(transferNet) >= 0.01 || Number(flow.transfer_in_base || 0) || Number(flow.transfer_out_base || 0)) {
+  if (Math.abs(transferNet) >= 0.01 || numberOrZero(flow.transfer_in_base) || numberOrZero(flow.transfer_out_base)) {
     rows.push({
       key: "transfer",
       label: "帳戶轉撥",
@@ -645,13 +548,13 @@ const fundingBreakdownRows = computed(() => {
       tone: transferNet >= 0 ? "neutral" : "dn",
     });
   }
-  if (Math.abs(Number(flow.other_flow_base || 0)) >= 0.01) {
+  if (Math.abs(numberOrZero(flow.other_flow_base)) >= 0.01) {
     rows.push({
       key: "other",
       label: "其他現金事件",
-      amount: Number(flow.other_flow_base || 0),
+      amount: numberOrZero(flow.other_flow_base),
       helper: "尚未歸類的現金流",
-      tone: Number(flow.other_flow_base || 0) >= 0 ? "neutral" : "dn",
+      tone: numberOrZero(flow.other_flow_base) >= 0 ? "neutral" : "dn",
     });
   }
   return rows;
@@ -662,25 +565,25 @@ const performanceBreakdownRows = computed(() => {
     {
       key: "realized",
       label: "已實現損益",
-      amount: Number(breakdown.realized_change_base || 0),
+      amount: numberOrZero(breakdown.realized_change_base),
       helper: "已賣出或結束部位累積的結果",
-      tone: Number(breakdown.realized_change_base || 0) >= 0 ? "up" : "dn",
+      tone: trendClass(breakdown.realized_change_base),
     },
     {
       key: "unrealized",
       label: "未實現損益",
-      amount: Number(breakdown.unrealized_change_base || 0),
+      amount: numberOrZero(breakdown.unrealized_change_base),
       helper: "目前仍持有部位的估值變化",
-      tone: Number(breakdown.unrealized_change_base || 0) >= 0 ? "up" : "dn",
+      tone: trendClass(breakdown.unrealized_change_base),
     },
   ];
-  if (Math.abs(Number(breakdown.other_change_base || 0)) >= 0.01) {
+  if (Math.abs(numberOrZero(breakdown.other_change_base)) >= 0.01) {
     rows.push({
       key: "other",
       label: "其他差異",
-      amount: Number(breakdown.other_change_base || 0),
+      amount: numberOrZero(breakdown.other_change_base),
       helper: "尚未被已實現 / 未實現涵蓋的變化",
-      tone: Number(breakdown.other_change_base || 0) >= 0 ? "neutral" : "dn",
+      tone: numberOrZero(breakdown.other_change_base) >= 0 ? "neutral" : "dn",
     });
   }
   return rows;
@@ -714,7 +617,7 @@ const changeBreakdownSteps = computed(() => [
     helper: changeBreakdown.value.netFlow >= 0
       ? "你實際補進來的資金"
       : "這段期間領回或轉出的資金",
-    tone: changeBreakdown.value.netFlow >= 0 ? "up" : "dn",
+    tone: trendClass(changeBreakdown.value.netFlow),
   },
   {
     key: "performance",
@@ -723,7 +626,7 @@ const changeBreakdownSteps = computed(() => [
     helper: changeBreakdown.value.performance >= 0
       ? "扣除資金流後，資產自己長出來的部分"
       : "扣除資金流後，資產自己縮水的部分",
-    tone: changeBreakdown.value.performance >= 0 ? "up" : "dn",
+    tone: trendClass(changeBreakdown.value.performance),
   },
   {
     key: "end",
@@ -765,8 +668,8 @@ const heatmapEntriesByMonth = computed(() => {
     if (!month) return;
     lookup.set(month, {
       month,
-      return_pct: Number(item?.return_pct || 0),
-      true_performance_base: Number(item?.true_performance_base || 0),
+      return_pct: numberOrZero(item?.return_pct),
+      true_performance_base: numberOrZero(item?.true_performance_base),
     });
   });
   return lookup;
@@ -799,83 +702,8 @@ const monthlyHeatmapCells = computed(() => (
   ))
 ));
 
-const performanceChartReady = computed(() => performanceRows.value.length >= 2);
 const waterfallChartReady = computed(() => performanceRows.value.length >= 1);
 const monthlyHeatmapReady = computed(() => (props.assetMonthlyHeatmap || []).length > 0);
-
-const allocationEmptyMessage = computed(() => ({
-  account: "尚無帳戶配置資料。",
-  market: "目前沒有可用的市場配置資料。",
-  sector: "目前資料尚未提供產業配置，待後續資料欄位支援。",
-  currency: "目前資料尚未提供幣別配置，待後續資料欄位支援。",
-}[allocationTab.value] || "尚無配置資料。"));
-
-const summaryCards = computed(() => [
-  {
-    key: "total",
-    label: "總資產現值",
-    value: formatCurrency(selectedPoint.value.total_asset_value_base),
-    helper: `${selectedSnapshotLabel.value} 快照`,
-    tone: "neutral",
-    chartMode: "total_asset_value_base",
-  },
-  {
-    key: "true",
-    label: "區間真實績效",
-    value: formatSignedCurrency(props.assetPerformanceSummary.true_performance_base, props.assetBaseCurrency),
-    helper: formatPercent(props.assetPerformanceSummary.true_return_pct),
-    tone: Number(props.assetPerformanceSummary.true_performance_base || 0) >= 0 ? "up" : "dn",
-    chartMode: "true_performance_base",
-  },
-  {
-    key: "cash",
-    label: "現金總額",
-    value: formatCurrency(selectedPoint.value.cash_total_base),
-    helper: "點我改看現金曲線",
-    tone: "neutral",
-    chartMode: "cash_total_base",
-  },
-  {
-    key: "market",
-    label: "持倉市值",
-    value: formatCurrency(selectedPoint.value.market_value_total_base),
-    helper: "點我改看持倉曲線",
-    tone: "neutral",
-    chartMode: "market_value_total_base",
-  },
-  {
-    key: "unrealized",
-    label: "未實現損益",
-    value: formatSignedCurrency(props.assetSummary.unrealized_total_base, props.assetBaseCurrency),
-    helper: formatPercent(percentAgainstAsset(props.assetSummary.unrealized_total_base, props.assetSummary.total_asset_value_base)),
-    tone: Number(props.assetSummary.unrealized_total_base || 0) >= 0 ? "up" : "dn",
-    chartMode: "market_value_total_base",
-  },
-  {
-    key: "realized",
-    label: "已實現損益",
-    value: formatSignedCurrency(props.assetSummary.realized_total_base, props.assetBaseCurrency),
-    helper: formatSignedCurrency(props.assetPerformanceSummary.realized_end_base, props.assetBaseCurrency),
-    tone: Number(props.assetSummary.realized_total_base || 0) >= 0 ? "up" : "dn",
-    chartMode: "true_performance_base",
-  },
-  {
-    key: "drawdown",
-    label: "最大回撤",
-    value: formatPercent(props.assetPerformanceSummary.max_drawdown_pct),
-    helper: `${selectedPoint.value.quote_gap_count || 0} 個估值缺口`,
-    tone: Number(props.assetPerformanceSummary.max_drawdown_pct || 0) >= 0 ? "neutral" : "dn",
-    chartMode: "total_asset_value_base",
-  },
-  {
-    key: "net-flow",
-    label: "期間淨流入",
-    value: formatSignedCurrency(selectedPoint.value.net_flow_base, props.assetBaseCurrency),
-    helper: `${props.assetPerformanceSummary.point_count || performanceRows.value.length || 0} 個觀察點`,
-    tone: Number(selectedPoint.value.net_flow_base || 0) >= 0 ? "up" : "dn",
-    chartMode: "total_asset_value_base",
-  },
-]);
 
 const contributorRows = computed(() => {
   const source = [
@@ -893,147 +721,16 @@ const contributorRows = computed(() => {
     .map((item) => ({
       ticker: item.ticker,
       account_name: item.account_name || "",
-      value: Number(item.unrealized_pnl_base || 0),
+      value: numberOrZero(item.unrealized_pnl_base),
     }))
     .sort((left, right) => right.value - left.value);
 });
 
-const recentFlowItems = computed(() => {
-  const trades = (props.assetTradeEntries || []).map((entry) => ({
-    key: `trade-${entry.id}`,
-    title: `${entry.ticker} · ${tradeSideLabel(entry.side)}`,
-    meta: `${entry.account_name || entry.account_id || "帳戶"} · ${formatDateLabel(entry.trade_date, true)}`,
-    value: `${formatNumber(entry.quantity, 4)} @ ${formatNumber(entry.price, 2)}`,
-    kind: "交易",
-    timestamp: new Date(entry.trade_date || 0).getTime(),
-    filter: {
-      accountKey: entry.account_name || "",
-      marketKey: entry.market || "",
-      ticker: entry.ticker || "",
-      month: extractMonth(entry.trade_date),
-    },
-  }));
-  const cash = (props.assetCashEntries || []).map((entry) => ({
-    key: `cash-${entry.id}`,
-    title: flowTypeLabel(entry.flow_type),
-    meta: `${entry.account_name || entry.account_id || "帳戶"} · ${formatDateLabel(entry.flow_date, true)}`,
-    value: formatSignedCurrency(entry.amount, entry.currency, entry.flow_type),
-    kind: "現金",
-    timestamp: new Date(entry.flow_date || 0).getTime(),
-    filter: {
-      accountKey: entry.account_name || "",
-      month: extractMonth(entry.flow_date),
-    },
-  }));
-  return [...trades, ...cash]
-    .sort((left, right) => right.timestamp - left.timestamp)
-    .slice(0, 5);
-});
-
-const performanceChartOption = computed(() => {
-  const metric = performanceModeOptions.find((item) => item.value === activeChartMode.value) || performanceModeOptions[0];
-  const selectedIndex = performanceRows.value.findIndex((item) => item.date === selectedPoint.value.date);
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "axis",
-      axisPointer: { type: "line", snap: true },
-      backgroundColor: "rgba(8, 14, 22, 0.94)",
-      borderColor: "rgba(123, 231, 255, 0.18)",
-      textStyle: { color: "#e7f3ff" },
-      formatter(params) {
-        const raw = params?.[0]?.data?.raw;
-        if (!raw) return "";
-        return [
-          `<div class="asset-tooltip-title">${formatDateLabel(raw.date, true)}</div>`,
-          `<div>總資產：${formatCurrency(raw.total_asset_value_base)}</div>`,
-          `<div>現金：${formatCurrency(raw.cash_total_base)}</div>`,
-          `<div>持倉市值：${formatCurrency(raw.market_value_total_base)}</div>`,
-          `<div>純績效：${formatSignedCurrency(raw.true_performance_base, props.assetBaseCurrency)}</div>`,
-          `<div>淨流入：${formatSignedCurrency(raw.net_flow_base, props.assetBaseCurrency)}</div>`,
-        ].join("");
-      },
-    },
-    grid: { top: 28, right: 20, bottom: 44, left: 54 },
-    dataZoom: [
-      {
-        type: "inside",
-        filterMode: "none",
-      },
-    ],
-    xAxis: {
-      type: "category",
-      data: performanceRows.value.map((item) => formatShortDate(item.date)),
-      boundaryGap: false,
-      axisLine: { lineStyle: { color: "rgba(255, 255, 255, 0.12)" } },
-      axisLabel: { color: "rgba(219, 229, 240, 0.66)" },
-    },
-    yAxis: {
-      type: "value",
-      axisLine: { show: false },
-      axisLabel: {
-        color: "rgba(219, 229, 240, 0.66)",
-        formatter: (value) => formatCompactNumber(value),
-      },
-      splitLine: { lineStyle: { color: "rgba(255, 255, 255, 0.07)" } },
-    },
-    series: [
-      {
-        type: "line",
-        name: metric.label,
-        smooth: 0.2,
-        symbol: "circle",
-        symbolSize: 7,
-        lineStyle: {
-          width: 3,
-          color: metric.color,
-        },
-        itemStyle: {
-          color: metric.color,
-          borderColor: "#07111b",
-          borderWidth: 2,
-        },
-        areaStyle: {
-          color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: `${metric.color}88` },
-            { offset: 1, color: "rgba(7, 17, 27, 0.02)" },
-          ]),
-        },
-        markPoint: selectedIndex >= 0
-          ? {
-            symbol: "circle",
-            symbolSize: 14,
-            label: { show: false },
-            itemStyle: {
-              color: metric.color,
-              borderColor: "#f5fbff",
-              borderWidth: 2,
-            },
-            data: [
-              {
-                coord: [
-                  selectedIndex,
-                  Number(selectedPoint.value[activeChartMode.value] || 0),
-                ],
-              },
-            ],
-          }
-          : undefined,
-        data: performanceRows.value.map((item) => ({
-          value: Number(item[activeChartMode.value] || 0),
-          raw: item,
-        })),
-      },
-    ],
-  };
-});
-
 const waterfallChartOption = computed(() => {
-  const endValue = Number(selectedPoint.value.total_asset_value_base || 0);
-  const startValue = Number(props.assetPerformanceSummary.start_value_base || 0);
-  const netFlow = Number(selectedPoint.value.net_flow_base || 0);
-  const performance = Number(selectedPoint.value.true_performance_base || 0);
+  const endValue = numberOrZero(selectedPoint.value.total_asset_value_base);
+  const startValue = numberOrZero(props.assetPerformanceSummary.start_value_base);
+  const netFlow = numberOrZero(selectedPoint.value.net_flow_base);
+  const performance = numberOrZero(selectedPoint.value.true_performance_base);
   const steps = buildWaterfallSteps(startValue, netFlow, performance, endValue);
   const bounds = resolveWaterfallBounds(steps);
   return {
@@ -1175,7 +872,7 @@ const monthlyHeatmapOption = computed(() => {
         label: {
           show: true,
           color: "#f5fbff",
-          formatter: ({ data }) => (data?.hasData ? `${Number(data.return_pct || 0).toFixed(1)}%` : ""),
+          formatter: ({ data }) => (data?.hasData ? formatPercent(data.return_pct, 1) : ""),
         },
         emphasis: {
           itemStyle: {
@@ -1187,18 +884,6 @@ const monthlyHeatmapOption = computed(() => {
     ],
   };
 });
-
-const accountAllocationChartOption = computed(() => buildDonutChartOption(
-  props.assetAccountAllocation,
-  "帳戶",
-  "點擊扇區查看帳戶明細",
-));
-
-const marketAllocationChartOption = computed(() => buildDonutChartOption(
-  props.assetMarketAllocation,
-  "市場",
-  "點擊扇區查看市場明細",
-));
 
 const contributorChartOption = computed(() => ({
   animation: false,
@@ -1238,7 +923,7 @@ const contributorChartOption = computed(() => ({
         value: item.value,
         ticker: item.ticker,
         itemStyle: {
-          color: item.value >= 0 ? "#ef4444" : "#22c55e",
+          color: item.value > 0 ? "#ef4444" : item.value < 0 ? "#22c55e" : "#94a3b8",
         },
       })),
       label: {
@@ -1253,28 +938,24 @@ const contributorChartOption = computed(() => ({
 
 function normalizeFlowBreakdown(value) {
   return {
-    deposit_base: Number(value?.deposit_base || 0),
-    withdraw_base: Number(value?.withdraw_base || 0),
-    dividend_interest_base: Number(value?.dividend_interest_base || 0),
-    fee_tax_base: Number(value?.fee_tax_base || 0),
-    transfer_in_base: Number(value?.transfer_in_base || 0),
-    transfer_out_base: Number(value?.transfer_out_base || 0),
-    other_flow_base: Number(value?.other_flow_base || 0),
-    net_flow_base: Number(value?.net_flow_base || 0),
+    deposit_base: numberOrZero(value?.deposit_base),
+    withdraw_base: numberOrZero(value?.withdraw_base),
+    dividend_interest_base: numberOrZero(value?.dividend_interest_base),
+    fee_tax_base: numberOrZero(value?.fee_tax_base),
+    transfer_in_base: numberOrZero(value?.transfer_in_base),
+    transfer_out_base: numberOrZero(value?.transfer_out_base),
+    other_flow_base: numberOrZero(value?.other_flow_base),
+    net_flow_base: numberOrZero(value?.net_flow_base),
   };
 }
 
 function normalizePerformanceBreakdown(value) {
   return {
-    realized_change_base: Number(value?.realized_change_base || 0),
-    unrealized_change_base: Number(value?.unrealized_change_base || 0),
-    other_change_base: Number(value?.other_change_base || 0),
-    total_change_base: Number(value?.total_change_base || 0),
+    realized_change_base: numberOrZero(value?.realized_change_base),
+    unrealized_change_base: numberOrZero(value?.unrealized_change_base),
+    other_change_base: numberOrZero(value?.other_change_base),
+    total_change_base: numberOrZero(value?.total_change_base),
   };
-}
-
-function setActiveChartMode(mode) {
-  activeChartMode.value = mode;
 }
 
 function setChangeBreakdownView(view) {
@@ -1290,13 +971,6 @@ function focusHoldings(filter = {}) {
   });
 }
 
-function handlePerformanceChartClick(params) {
-  const raw = params?.data?.raw;
-  if (!raw?.date) return;
-  selectedDate.value = raw.date;
-  selectedMonth.value = extractMonth(raw.date);
-}
-
 function handleHeatmapClick(params) {
   const month = params?.data?.month;
   if (!month) return;
@@ -1306,86 +980,10 @@ function handleHeatmapClick(params) {
   }
 }
 
-function handleAccountAllocationClick(params) {
-  const accountKey = params?.data?.name;
-  if (!accountKey) return;
-  focusHoldings({ accountKey });
-}
-
-function handleMarketAllocationClick(params) {
-  const marketKey = params?.data?.name;
-  if (!marketKey) return;
-  focusHoldings({ marketKey });
-}
-
 function handleContributorClick(params) {
   const ticker = params?.data?.ticker;
   if (!ticker) return;
   focusHoldings({ ticker });
-}
-
-function buildDonutChartOption(items, title, subtitle) {
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "item",
-      backgroundColor: "rgba(8, 14, 22, 0.94)",
-      borderColor: "rgba(123, 231, 255, 0.18)",
-      textStyle: { color: "#e7f3ff" },
-      formatter(params) {
-        const pct = Number(params?.data?.weight_pct || 0);
-        return [
-          `<div class="asset-tooltip-title">${params?.data?.name || ""}</div>`,
-          `<div>資產：${formatCurrency(params?.data?.value)}</div>`,
-          `<div>占比：${pct.toFixed(2)}%</div>`,
-        ].join("");
-      },
-    },
-    series: [
-      {
-        type: "pie",
-        radius: ["56%", "80%"],
-        center: ["50%", "48%"],
-        avoidLabelOverlap: true,
-        itemStyle: {
-          borderColor: "#07111b",
-          borderWidth: 3,
-        },
-        label: { show: false },
-        emphasis: { scale: true, scaleSize: 10 },
-        data: items.map((item, index) => ({
-          name: item.key,
-          value: Number(item.value_base || 0),
-          weight_pct: Number(item.weight_pct || 0),
-          itemStyle: { color: palette[index % palette.length] },
-        })),
-      },
-    ],
-    graphic: [
-      {
-        type: "text",
-        left: "center",
-        top: "36%",
-        style: {
-          text: title,
-          fill: "rgba(219, 229, 240, 0.72)",
-          fontSize: 12,
-          fontWeight: 600,
-        },
-      },
-      {
-        type: "text",
-        left: "center",
-        top: "46%",
-        style: {
-          text: subtitle,
-          fill: "rgba(219, 229, 240, 0.46)",
-          fontSize: 10,
-        },
-      },
-    ],
-  };
 }
 
 function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
@@ -1410,9 +1008,9 @@ function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
     const next = running + item.value;
     steps.push({
       label: item.label,
-      base: item.value >= 0 ? running : next,
+      base: item.value > 0 ? running : next,
       value: Math.abs(item.value),
-      color: item.value >= 0 ? item.positiveColor : item.negativeColor,
+      color: item.value > 0 ? item.positiveColor : item.negativeColor,
       signedLabel: formatSignedCurrency(item.value, props.assetBaseCurrency),
       shortLabel: formatCompactNumber(item.value, true),
     });
@@ -1431,13 +1029,15 @@ function buildWaterfallSteps(startValue, netFlow, performance, endValue) {
 }
 
 function dominantDriverLabel(netFlow, performance) {
-  const flowAbs = Math.abs(Number(netFlow || 0));
-  const performanceAbs = Math.abs(Number(performance || 0));
+  const flowValue = numberOrZero(netFlow);
+  const performanceValue = numberOrZero(performance);
+  const flowAbs = Math.abs(flowValue);
+  const performanceAbs = Math.abs(performanceValue);
   if (flowAbs < 0.01 && performanceAbs < 0.01) return "這段期間幾乎沒有明顯變化";
   if (flowAbs >= performanceAbs) {
-    return Number(netFlow || 0) >= 0 ? "主要是新增投入把資產撐大" : "主要是資金流出在拉低資產";
+    return flowValue >= 0 ? "主要是新增投入把資產撐大" : "主要是資金流出在拉低資產";
   }
-  return Number(performance || 0) >= 0 ? "主要是投資報酬在推高資產" : "主要是投資虧損在拖累資產";
+  return performanceValue >= 0 ? "主要是投資報酬在推高資產" : "主要是投資虧損在拖累資產";
 }
 
 function createChangeBreakdownLead({ netFlow, performance, endValue }, snapshotLabel) {
@@ -1471,8 +1071,8 @@ function createChangeBreakdownDetail({ startValue, netFlow, performance, endValu
 
 function resolveWaterfallBounds(steps) {
   if (!steps.length) return { min: 0, max: 100 };
-  const tops = steps.map((item) => Number(item.base || 0) + Number(item.value || 0));
-  const bottoms = steps.map((item) => Number(item.base || 0));
+  const tops = steps.map((item) => numberOrZero(item.base) + numberOrZero(item.value));
+  const bottoms = steps.map((item) => numberOrZero(item.base));
   const minValue = Math.min(0, ...tops, ...bottoms);
   const maxValue = Math.max(0, ...tops, ...bottoms);
   const span = Math.max(maxValue - minValue, 1);
@@ -1483,124 +1083,49 @@ function resolveWaterfallBounds(steps) {
 }
 
 function resolveBreakdownMax(rows) {
-  return Math.max(...(rows || []).map((item) => Math.abs(Number(item.amount || 0))), 1);
+  return Math.max(...(rows || []).map((item) => Math.abs(numberOrZero(item.amount))), 1);
 }
 
 function resolveBreakdownShare(value, maxAbs) {
-  const current = Math.abs(Number(value || 0));
-  const denominator = Math.max(Number(maxAbs || 0), 1);
+  const current = Math.abs(numberOrZero(value));
+  const denominator = Math.max(numberOrZero(maxAbs), 1);
   return Number(((current / denominator) * 100).toFixed(2));
 }
 
-function paletteColorFor(items, key) {
-  const index = (items || []).findIndex((item) => item.key === key);
-  return palette[index >= 0 ? index % palette.length : 0];
+function flowPillClass(value) {
+  const numeric = parseFiniteNumber(value);
+  if (numeric == null || numeric === 0) return "neutral";
+  return numeric > 0 ? "warm" : "risk";
+}
+
+function performancePillClass(value) {
+  const numeric = parseFiniteNumber(value);
+  if (numeric == null || numeric === 0) return "neutral";
+  return numeric > 0 ? "success" : "risk";
 }
 
 function percentAgainstAsset(value, total) {
-  const numerator = Number(value || 0);
-  const denominator = Number(total || 0);
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || !denominator) return 0;
-  return (numerator / denominator) * 100;
-}
-
-function formatNumber(value, digits = 2) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  return numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  });
+  return percentAgainst(value, total);
 }
 
 function formatCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  return `${currency} ${numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatAssetCurrency(value, currency);
 }
 
 function formatSignedCurrency(value, currency = props.assetBaseCurrency, flowType = "") {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  const sign = flowType
-    ? (["withdraw", "fee", "tax", "fx_fee", "transfer_out"].includes(String(flowType)) ? "-" : "+")
-    : (numeric >= 0 ? "+" : "-");
-  return `${sign}${currency} ${Math.abs(numeric).toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatPercent(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  return `${numeric.toFixed(2)}%`;
+  return formatAssetSignedCurrency(value, currency, flowType);
 }
 
 function formatCompactNumber(value, includeSign = false) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  const sign = includeSign && numeric > 0 ? "+" : includeSign && numeric < 0 ? "-" : "";
-  const absolute = Math.abs(numeric);
-  if (absolute >= 1000000) return `${sign}${(absolute / 1000000).toFixed(1)}M`;
-  if (absolute >= 1000) return `${sign}${(absolute / 1000).toFixed(1)}K`;
-  return `${sign}${absolute.toFixed(0)}`;
+  return formatAssetCompactNumber(value, includeSign);
 }
 
 function formatDateLabel(value, includeTime = false) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString("zh-TW", {
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    ...(includeTime ? { hour: "2-digit", minute: "2-digit" } : {}),
-  });
-}
-
-function formatShortDate(value) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("zh-TW", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
-function formatMonthLabel(value) {
-  if (!value) return "—";
-  const year = value.slice(0, 4);
-  const month = value.slice(5, 7);
-  if (!year || !month) return value;
-  return `${year}/${month}`;
+  return formatAssetDateLabel(value, includeTime);
 }
 
 function extractMonth(value) {
   return String(value || "").slice(0, 7);
-}
-
-function flowTypeLabel(value) {
-  return ({
-    deposit: "入金",
-    withdraw: "出金",
-    transfer_in: "轉入",
-    transfer_out: "轉出",
-    dividend: "股利",
-    fee: "手續費",
-    tax: "稅費",
-    fx_fee: "匯費",
-    interest: "利息",
-  }[String(value || "")] || String(value || "事件"));
-}
-
-function tradeSideLabel(value) {
-  return String(value || "").toLowerCase() === "sell" ? "賣出" : "買進";
 }
 </script>
 
@@ -1609,9 +1134,48 @@ function tradeSideLabel(value) {
   padding: 18px;
 }
 
+.asset-card {
+  padding: 18px;
+  border: 1px solid var(--asset-border, #1f2937);
+  border-radius: var(--asset-radius-card, 16px);
+  background: var(--asset-card-bg, #111827);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+}
+
+.asset-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.asset-card-title {
+  color: var(--asset-text-primary, #e5e7eb);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.asset-inline-btn {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--asset-border, #1f2937);
+  border-radius: var(--asset-radius-control, 10px);
+  background: rgba(15, 23, 42, 0.72);
+  color: var(--asset-text-secondary, #94a3b8);
+  font: inherit;
+  cursor: pointer;
+}
+
+.asset-inline-btn:hover,
+.asset-inline-btn.active {
+  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--asset-text-primary, #e5e7eb);
+}
+
 .asset-warning-action,
-.asset-summary-action,
-.asset-donut-legend-item {
+.asset-summary-action {
   appearance: none;
   font: inherit;
   color: inherit;
@@ -1623,13 +1187,52 @@ function tradeSideLabel(value) {
   width: 100%;
 }
 
+.asset-warning-stack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.asset-warning-card {
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.26);
+  border-radius: var(--asset-radius-inner, 12px);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--asset-text-secondary, #94a3b8);
+  line-height: 1.5;
+}
+
+.asset-warning-card:hover {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.asset-warning-card.info {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.asset-warning-card strong {
+  display: block;
+  color: var(--asset-text-primary, #e5e7eb);
+  font-size: 12px;
+}
+
+.asset-warning-card span {
+  display: block;
+  margin-top: 4px;
+  color: var(--asset-text-secondary, #94a3b8);
+}
+
 .asset-error-state {
   display: grid;
   gap: 6px;
   margin-bottom: 18px;
   padding: 14px 16px;
   border: 1px solid rgba(245, 158, 11, 0.32);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-card, 16px);
   background: rgba(245, 158, 11, 0.1);
   color: var(--asset-text-secondary, rgba(219, 229, 240, 0.82));
 }
@@ -1671,11 +1274,6 @@ function tradeSideLabel(value) {
   gap: 10px 14px;
 }
 
-.asset-inline-btn.active {
-  background: rgba(123, 231, 255, 0.14);
-  color: #f5fbff;
-}
-
 .asset-performance-grid-chart {
   align-items: stretch;
 }
@@ -1698,7 +1296,7 @@ function tradeSideLabel(value) {
 .asset-change-hero {
   padding: 16px 18px;
   border: 1px solid rgba(123, 231, 255, 0.12);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background:
     radial-gradient(circle at top left, rgba(123, 231, 255, 0.12), transparent 42%),
     linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
@@ -1744,7 +1342,7 @@ function tradeSideLabel(value) {
   gap: 8px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--asset-radius-card, 16px);
   background: rgba(10, 16, 26, 0.82);
 }
 
@@ -1802,7 +1400,7 @@ function tradeSideLabel(value) {
   gap: 10px;
   padding: 12px 16px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
+  border-radius: var(--asset-radius-card, 16px);
   background: rgba(9, 15, 24, 0.78);
   color: rgba(219, 229, 240, 0.84);
 }
@@ -1827,7 +1425,7 @@ function tradeSideLabel(value) {
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background: rgba(8, 14, 22, 0.72);
 }
 
@@ -1928,7 +1526,7 @@ function tradeSideLabel(value) {
   gap: 10px;
   padding: 14px 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background: rgba(8, 14, 22, 0.7);
 }
 
@@ -2016,83 +1614,10 @@ function tradeSideLabel(value) {
   min-height: 300px;
 }
 
-.asset-chart-donut {
-  min-height: 260px;
-}
-
-.asset-side-analytics-chart {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .asset-overview-secondary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-}
-
-.asset-allocation-card {
-  grid-column: 1 / -1;
-}
-
-.asset-allocation-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.asset-allocation-tabs .asset-inline-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.44;
-}
-
-.asset-allocation-empty {
-  display: grid;
-  place-items: center;
-  min-height: 240px;
-  border: 1px dashed var(--asset-border, rgba(255, 255, 255, 0.08));
-  border-radius: 16px;
-  color: var(--asset-text-secondary, rgba(219, 229, 240, 0.72));
-  text-align: center;
-}
-
-.asset-donut-card {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(260px, 1fr);
-  gap: 16px;
-  align-items: center;
-}
-
-.asset-donut-legend {
-  display: grid;
-  gap: 8px;
-}
-
-.asset-donut-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  background: rgba(8, 14, 24, 0.66);
-  color: var(--text1);
-}
-
-.asset-donut-legend-item strong {
-  flex: 1;
-}
-
-.asset-donut-legend-item small {
-  color: rgba(219, 229, 240, 0.64);
-}
-
-.asset-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  flex: 0 0 10px;
 }
 
 .asset-preview-grid {
@@ -2118,9 +1643,7 @@ function tradeSideLabel(value) {
   .asset-change-step-grid,
   .asset-change-insight-grid,
   .asset-overview-secondary-grid,
-  .asset-preview-grid,
-  .asset-donut-card,
-  .asset-side-analytics-chart {
+  .asset-preview-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -2129,9 +1652,24 @@ function tradeSideLabel(value) {
   .asset-chart-performance,
   .asset-chart-waterfall,
   .asset-chart-contributors,
-  .asset-chart-heatmap,
-  .asset-chart-donut {
+  .asset-chart-heatmap {
     min-height: 240px;
+  }
+}
+
+@media (max-width: 768px) {
+  .asset-overview {
+    padding: 12px;
+  }
+
+  .asset-card-head,
+  .asset-change-source-card header,
+  .asset-change-insight-card header {
+    display: grid;
+  }
+
+  .asset-change-head {
+    justify-content: flex-start;
   }
 }
 </style>

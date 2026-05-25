@@ -52,13 +52,21 @@ import { CanvasRenderer } from "echarts/renderers";
 import { THEME_KEY } from "vue-echarts";
 
 import DeferredVChart from "../DeferredVChart.vue";
+import {
+  EMPTY_MARK,
+  formatCompactNumber,
+  formatCurrency as formatAssetCurrency,
+  formatDateLabel,
+  formatPercent,
+  formatShortDate,
+  formatSignedCurrency as formatAssetSignedCurrency,
+  parseFiniteNumber,
+  toneForValue,
+} from "./assetDashboardFormatters";
 
 use([LineChart, CanvasRenderer, DataZoomComponent, GridComponent, TooltipComponent]);
 provide(THEME_KEY, "dark");
 
-const EMPTY_MARK = "--";
-const POSITIVE_COLOR = "#ef4444";
-const NEGATIVE_COLOR = "#22c55e";
 const INFO_COLOR = "#60a5fa";
 
 const props = defineProps({
@@ -180,7 +188,7 @@ const chartOption = computed(() => ({
     data: rows.value.map((item) => formatShortDate(item.date)),
     boundaryGap: false,
     axisLine: { lineStyle: { color: "rgba(148, 163, 184, 0.18)" } },
-    axisLabel: { color: "#94a3b8" },
+    axisLabel: { color: "#94a3b8", hideOverlap: true },
   },
   yAxis: {
     type: "value",
@@ -218,65 +226,12 @@ const chartOption = computed(() => ({
   ],
 }));
 
-function parseFiniteNumber(value) {
-  if (value === "" || value == null) return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function toneForValue(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null || numeric === 0) return "neutral";
-  return numeric > 0 ? "positive" : "negative";
-}
-
 function formatCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${currency} ${numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatAssetCurrency(value, currency);
 }
 
 function formatSignedCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  const sign = numeric > 0 ? "+" : numeric < 0 ? "-" : "";
-  return `${sign}${currency} ${Math.abs(numeric).toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatPercent(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${numeric.toFixed(2)}%`;
-}
-
-function formatCompactNumber(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  const absolute = Math.abs(numeric);
-  const sign = numeric < 0 ? "-" : "";
-  if (absolute >= 1_000_000) return `${sign}${(absolute / 1_000_000).toFixed(1)}M`;
-  if (absolute >= 1_000) return `${sign}${(absolute / 1_000).toFixed(1)}K`;
-  return `${numeric.toFixed(0)}`;
-}
-
-function formatDateLabel(value) {
-  if (!value) return EMPTY_MARK;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("zh-TW", { hour12: false });
-}
-
-function formatShortDate(value) {
-  if (!value) return EMPTY_MARK;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" });
+  return formatAssetSignedCurrency(value, currency);
 }
 </script>
 
@@ -285,7 +240,7 @@ function formatShortDate(value) {
   margin-bottom: 18px;
   padding: 18px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background: var(--asset-card-bg, #111827);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
 }
@@ -324,7 +279,7 @@ function formatShortDate(value) {
 .asset-range-control button {
   padding: 7px 10px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 9px;
+  border-radius: var(--asset-radius-control, 10px);
   background: rgba(15, 23, 42, 0.72);
   color: var(--asset-text-secondary, #94a3b8);
   cursor: pointer;
@@ -347,7 +302,7 @@ function formatShortDate(value) {
 .asset-chart-panel {
   min-width: 0;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner, 12px);
   background: rgba(15, 23, 42, 0.52);
 }
 
@@ -369,7 +324,7 @@ function formatShortDate(value) {
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 12px;
+  border-radius: var(--asset-radius-inner, 12px);
   background: rgba(15, 23, 42, 0.56);
 }
 
@@ -396,14 +351,14 @@ function formatShortDate(value) {
   place-items: center;
   min-height: 260px;
   border: 1px dashed var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-card, 16px);
   color: var(--asset-text-secondary, #94a3b8);
   text-align: center;
 }
 
 .asset-chart-skeleton,
 .asset-summary-skeleton span {
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner, 12px);
   background: linear-gradient(90deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.08));
   background-size: 180% 100%;
   animation: asset-skeleton 1.2s ease-in-out infinite;
@@ -444,14 +399,14 @@ function formatShortDate(value) {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .asset-section-head {
     display: grid;
   }
 
   .asset-performance-chart,
   .asset-chart-skeleton {
-    min-height: 280px;
+    min-height: 300px;
   }
 }
 </style>

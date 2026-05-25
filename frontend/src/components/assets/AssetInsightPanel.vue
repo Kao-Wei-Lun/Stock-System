@@ -8,34 +8,46 @@
       <em>{{ insightItems.length }}</em>
     </header>
 
-    <div class="asset-insight-summary">
-      <div>
-        <span>現金水位</span>
-        <strong :class="cashRatioTone">{{ cashRatioLabel }}</strong>
-      </div>
-      <div>
-        <span>持倉集中度</span>
-        <strong :class="concentrationTone">{{ concentrationLabel }}</strong>
-      </div>
+    <div v-if="assetLoading" class="asset-insight-skeleton">
+      <span v-for="index in 4" :key="index"></span>
     </div>
 
-    <div v-if="insightItems.length" class="asset-insight-list">
-      <article v-for="item in insightItems" :key="item.key" class="asset-insight-item" :class="item.tone">
-        <span>{{ item.type }}</span>
-        <strong>{{ item.title }}</strong>
-        <p>{{ item.message }}</p>
-      </article>
-    </div>
-    <div v-else class="asset-insight-empty">
-      目前沒有需要特別注意的資產提醒
-    </div>
+    <template v-else>
+      <div class="asset-insight-summary">
+        <div>
+          <span>現金水位</span>
+          <strong :class="cashRatioTone">{{ cashRatioLabel }}</strong>
+        </div>
+        <div>
+          <span>持倉集中度</span>
+          <strong :class="concentrationTone">{{ concentrationLabel }}</strong>
+        </div>
+      </div>
+
+      <div v-if="insightItems.length" class="asset-insight-list">
+        <article v-for="item in insightItems" :key="item.key" class="asset-insight-item" :class="item.tone">
+          <span>{{ item.type }}</span>
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.message }}</p>
+        </article>
+      </div>
+      <div v-else class="asset-insight-empty">
+        目前沒有需要特別注意的資產提醒
+      </div>
+    </template>
   </aside>
 </template>
 
 <script setup>
 import { computed } from "vue";
+import {
+  formatCurrency,
+  formatPercent,
+  parseFiniteNumber,
+} from "./assetDashboardFormatters";
 
 const props = defineProps({
+  assetLoading: { type: Boolean, default: false },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
   assetHoldings: { type: Array, default: () => [] },
@@ -63,11 +75,13 @@ const cashRatioTone = computed(() => {
   return "neutral";
 });
 
-const cashRatioLabel = computed(() => (cashRatio.value == null ? "--" : `${cashRatio.value.toFixed(2)}%`));
+const cashRatioLabel = computed(() => formatPercent(cashRatio.value));
 
 const heaviestHolding = computed(() => (
   [...(props.assetHoldings || [])]
-    .sort((left, right) => Number(right?.market_value_base || 0) - Number(left?.market_value_base || 0))[0] || null
+    .sort((left, right) => (
+      (parseFiniteNumber(right?.market_value_base) ?? 0) - (parseFiniteNumber(left?.market_value_base) ?? 0)
+    ))[0] || null
 ));
 
 const concentrationPct = computed(() => {
@@ -83,7 +97,7 @@ const concentrationTone = computed(() => {
 });
 
 const concentrationLabel = computed(() => (
-  concentrationPct.value == null ? "--" : `${concentrationPct.value.toFixed(2)}%`
+  formatPercent(concentrationPct.value)
 ));
 
 const insightItems = computed(() => {
@@ -137,7 +151,7 @@ const insightItems = computed(() => {
       key: "cash-ratio-low",
       type: "現金",
       title: "現金水位低於 10%",
-      message: `目前現金約 ${props.assetBaseCurrency} ${formatNumber(cashTotal.value)}，占總資產 ${cashRatio.value.toFixed(2)}%。`,
+      message: `目前現金約 ${formatCurrency(cashTotal.value, props.assetBaseCurrency)}，占總資產 ${formatPercent(cashRatio.value)}。`,
       tone: "warning",
     });
   }
@@ -147,28 +161,13 @@ const insightItems = computed(() => {
       key: "holding-concentration",
       type: "集中度",
       title: "單一持股權重偏高",
-      message: `${heaviestHolding.value.ticker || "單一持股"} 目前約占總資產 ${concentrationPct.value.toFixed(2)}%，請留意波動風險。`,
+      message: `${heaviestHolding.value.ticker || "單一持股"} 目前約占總資產 ${formatPercent(concentrationPct.value)}，請留意波動風險。`,
       tone: "warning",
     });
   }
 
   return dedupeInsights(items).slice(0, 6);
 });
-
-function parseFiniteNumber(value) {
-  if (value === "" || value == null) return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function formatNumber(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return "--";
-  return numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
-}
 
 function dedupeInsights(items) {
   const seen = new Set();
@@ -185,7 +184,7 @@ function dedupeInsights(items) {
 .asset-insight-panel {
   padding: 18px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background: var(--asset-card-bg, #111827);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
 }
@@ -265,7 +264,7 @@ function dedupeInsights(items) {
 .asset-insight-item {
   padding: 12px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner, 12px);
   background: rgba(15, 23, 42, 0.72);
 }
 
@@ -294,8 +293,31 @@ function dedupeInsights(items) {
   margin-top: 16px;
   padding: 18px 14px;
   border: 1px dashed var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-card, 16px);
   color: var(--asset-text-secondary, #94a3b8);
   line-height: 1.6;
+}
+
+.asset-insight-skeleton {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.asset-insight-skeleton span {
+  height: 58px;
+  border-radius: var(--asset-radius-inner, 12px);
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.08));
+  background-size: 180% 100%;
+  animation: asset-skeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes asset-skeleton {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 </style>

@@ -576,5 +576,6 @@ onBeforeUnmount(() => {
     max-width: none;
     width: 100%;
   }
+
 }
 </style>

@@ -88,8 +88,14 @@
 
 <script setup>
 import { computed, ref } from "vue";
-
-const EMPTY_MARK = "--";
+import {
+  formatCurrency as formatAssetCurrency,
+  formatNumber,
+  formatPercent,
+  formatSignedCurrency as formatAssetSignedCurrency,
+  parseFiniteNumber,
+  toneForValue,
+} from "./assetDashboardFormatters";
 
 const props = defineProps({
   assetLoading: { type: Boolean, default: false },
@@ -132,7 +138,7 @@ const filteredHoldings = computed(() => {
 });
 
 const totalHoldingValue = computed(() => (
-  filteredHoldings.value.reduce((sum, holding) => sum + Number(holding?.market_value_base || 0), 0)
+  filteredHoldings.value.reduce((sum, holding) => sum + (parseFiniteNumber(holding?.market_value_base) ?? 0), 0)
 ));
 
 const sortedHoldings = computed(() => {
@@ -179,50 +185,12 @@ function holdingKey(holding) {
   return `${holding?.account_id || "account"}-${holding?.ticker || "ticker"}`;
 }
 
-function parseFiniteNumber(value) {
-  if (value === "" || value == null) return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function toneForValue(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null || numeric === 0) return "neutral";
-  return numeric > 0 ? "positive" : "negative";
-}
-
-function formatNumber(value, digits = 2) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  });
-}
-
 function formatCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${currency} ${numeric.toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatAssetCurrency(value, currency);
 }
 
 function formatSignedCurrency(value, currency = props.assetBaseCurrency) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  const sign = numeric > 0 ? "+" : numeric < 0 ? "-" : "";
-  return `${sign}${currency} ${Math.abs(numeric).toLocaleString("zh-TW", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatPercent(value) {
-  const numeric = parseFiniteNumber(value);
-  if (numeric == null) return EMPTY_MARK;
-  return `${numeric.toFixed(2)}%`;
+  return formatAssetSignedCurrency(value, currency);
 }
 </script>
 
@@ -231,7 +199,7 @@ function formatPercent(value) {
   margin-bottom: 18px;
   padding: 18px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 18px;
+  border-radius: var(--asset-radius-card, 16px);
   background: var(--asset-card-bg, #111827);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
 }
@@ -272,7 +240,7 @@ function formatPercent(value) {
 .asset-holdings-actions select {
   min-height: 36px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 10px;
+  border-radius: var(--asset-radius-control, 10px);
   background: rgba(15, 23, 42, 0.72);
   color: var(--asset-text-primary, #e5e7eb);
   padding: 8px 10px;
@@ -293,7 +261,7 @@ function formatPercent(value) {
 .asset-sort-row button {
   padding: 7px 10px;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 9px;
+  border-radius: var(--asset-radius-control, 10px);
   background: rgba(15, 23, 42, 0.7);
   color: var(--asset-text-secondary, #94a3b8);
   cursor: pointer;
@@ -308,7 +276,7 @@ function formatPercent(value) {
 .asset-table-wrap {
   overflow: auto;
   border: 1px solid var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner, 12px);
 }
 
 .asset-holdings-table {
@@ -389,7 +357,7 @@ function formatPercent(value) {
   place-items: center;
   min-height: 180px;
   border: 1px dashed var(--asset-border, #1f2937);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-card, 16px);
   color: var(--asset-text-secondary, #94a3b8);
 }
 
@@ -400,7 +368,7 @@ function formatPercent(value) {
 
 .asset-table-skeleton span {
   height: 42px;
-  border-radius: 12px;
+  border-radius: var(--asset-radius-inner, 12px);
   background: linear-gradient(90deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.08));
   background-size: 180% 100%;
   animation: asset-skeleton 1.2s ease-in-out infinite;
@@ -415,7 +383,7 @@ function formatPercent(value) {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .asset-section-head,
   .asset-holdings-actions {
     display: grid;

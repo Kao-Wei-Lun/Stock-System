@@ -186,6 +186,7 @@
 
       <AssetInsightPanel
         class="asset-side-card"
+        :asset-loading="assetLoading"
         :asset-base-currency="assetBaseCurrency"
         :asset-summary="assetSummary"
         :asset-holdings="assetHoldings"
@@ -318,29 +319,11 @@ const maintenanceNavSections = [
   { key: "imports", label: "匯入工具" },
 ];
 
-const assetIssueCount = computed(() => {
-  const reconciliationItems = props.assetReconciliation?.items || [];
-  const gapCount = reconciliationItems.filter((item) => item?.has_gap).length;
-  return props.assetWarnings.length + props.assetQuoteGaps.length + props.assetAlerts.length + gapCount;
-});
-
 const lastUpdatedLabel = computed(() => (
   formatDateTime(props.assetLastRecompute?.generated_at)
   || formatDateTime(props.assetPerformanceSummary?.latest_snapshot_date)
   || "尚無資料"
 ));
-
-const sideTitle = computed(() => ({
-  overview: "資產總覽",
-  holdings: "持倉與流水",
-  maintenance: "資料維護",
-}[activeTab.value] || "個人資產"));
-
-const sideCopy = computed(() => ({
-  overview: "先看資產變化、績效與主要風險，再決定要不要深入查看明細。",
-  holdings: "把帳戶摘要、目前持倉與最近流水集中在同一頁，方便追查資產來源。",
-  maintenance: "所有手動輸入、匯入、對帳與例外修正都收在這一層，避免干擾日常查看。",
-}[activeTab.value] || ""));
 
 function openTab(tab) {
   activeTab.value = tab;
@@ -425,6 +408,10 @@ function formatDateTime(value) {
   --asset-negative: #22c55e;
   --asset-warning: #f59e0b;
   --asset-info: #2563eb;
+  --asset-radius-card: 16px;
+  --asset-radius-shell: 20px;
+  --asset-radius-control: 10px;
+  --asset-radius-inner: 12px;
   background:
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 30%),
     linear-gradient(180deg, rgba(11, 17, 26, 0.98), rgba(9, 15, 24, 0.98));
@@ -438,7 +425,7 @@ function formatDateTime(value) {
   gap: 18px;
   padding: 22px 24px;
   border: 1px solid var(--asset-border);
-  border-radius: 20px;
+  border-radius: var(--asset-radius-shell);
   background: rgba(17, 24, 39, 0.88);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
 }
@@ -480,7 +467,7 @@ function formatDateTime(value) {
   min-width: 190px;
   padding: 12px 14px;
   border: 1px solid var(--asset-border);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner);
   background: rgba(15, 23, 42, 0.74);
   color: var(--asset-text-secondary);
 }
@@ -500,16 +487,21 @@ function formatDateTime(value) {
 .asset-hero-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
 
 .asset-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
   border: 1px solid rgba(37, 99, 235, 0.42);
   background: rgba(37, 99, 235, 0.16);
   color: var(--asset-text-primary);
   padding: 9px 13px;
-  border-radius: 10px;
+  border-radius: var(--asset-radius-control);
   font-weight: 600;
   cursor: pointer;
 }
@@ -547,7 +539,7 @@ function formatDateTime(value) {
 .asset-tab {
   padding: 10px 14px;
   border: 1px solid var(--asset-border);
-  border-radius: 10px;
+  border-radius: var(--asset-radius-control);
   background: rgba(15, 23, 42, 0.58);
   color: var(--asset-text-secondary);
   cursor: pointer;
@@ -561,15 +553,16 @@ function formatDateTime(value) {
 
 .asset-main-card,
 .asset-side-card {
+  min-width: 0;
   border: 1px solid var(--asset-border);
-  border-radius: 20px;
+  border-radius: var(--asset-radius-shell);
   background: var(--asset-card-bg);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16);
 }
 
 .asset-main-card :deep(.asset-shell) {
   border: 0;
-  border-radius: 20px;
+  border-radius: var(--asset-radius-shell);
 }
 
 .asset-maintenance-shell {
@@ -598,7 +591,7 @@ function formatDateTime(value) {
 .asset-maintenance-nav-btn {
   padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: var(--asset-radius-inner);
   background: rgba(255, 255, 255, 0.03);
   color: rgba(219, 229, 240, 0.82);
   text-align: left;
@@ -628,7 +621,7 @@ function formatDateTime(value) {
 }
 
 .asset-page :deep(.neutral) {
-  color: var(--asset-text-primary) !important;
+  color: var(--asset-text-secondary) !important;
 }
 
 .asset-side-kicker {
@@ -686,6 +679,16 @@ function formatDateTime(value) {
   }
 }
 
+@media (max-width: 1024px) {
+  .workspace-page {
+    padding: 16px;
+  }
+
+  .asset-stage {
+    gap: 14px;
+  }
+}
+
 @media (max-width: 900px) {
   .workspace-hero {
     flex-direction: column;
@@ -700,6 +703,41 @@ function formatDateTime(value) {
   .workspace-hero-meta {
     flex-wrap: wrap;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 768px) {
+  .workspace-page {
+    padding: 12px;
+  }
+
+  .workspace-hero {
+    padding: 18px;
+    gap: 14px;
+  }
+
+  .workspace-hero h1 {
+    font-size: 22px;
+  }
+
+  .asset-hero-actions {
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .asset-action-btn {
+    flex: 0 1 auto;
+    min-width: 118px;
+    min-height: 40px;
+  }
+
+  .asset-tabs {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .asset-tab {
+    flex: 0 0 auto;
   }
 }
 </style>
