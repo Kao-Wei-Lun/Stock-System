@@ -59,6 +59,7 @@ import { THEME_KEY } from "vue-echarts";
 import DeferredVChart from "../DeferredVChart.vue";
 import {
   EMPTY_MARK,
+  formatCalculationMethodLabel,
   formatCompactNumber,
   formatCurrency as formatAssetCurrency,
   formatDateLabel,
@@ -80,6 +81,8 @@ const props = defineProps({
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
   assetPerformanceSummary: { type: Object, default: () => ({}) },
+  portfolioCalculationMetadata: { type: Object, default: () => ({}) },
+  performanceCalculationMetadata: { type: Object, default: () => ({}) },
   assetPerformanceSeries: { type: Array, default: () => [] },
 });
 
@@ -118,13 +121,25 @@ const totalPnl = computed(() => {
   return Number(realized || 0) + Number(unrealized || 0);
 });
 
+const currentPositionCostTitle = computed(() => {
+  const metadata = props.portfolioCalculationMetadata?.current_position_cost;
+  if (!metadata || !Object.keys(metadata).length) {
+    return "目前持倉成本為現有持倉的成本基礎加總，不代表歷史累積投入本金。";
+  }
+  return [
+    formatCalculationMethodLabel(metadata.method),
+    "來源為 holdings.cost_basis_base",
+    "此數值不是歷史累積投入本金",
+  ].join("。");
+});
+
 const summaryRows = computed(() => [
   {
     key: "current-position-cost",
     label: "目前持倉成本",
     value: formatCurrency(props.assetSummary?.current_position_cost_base),
     tone: "neutral",
-    title: "目前持倉成本為現有持倉的成本基礎加總，不代表歷史累積投入本金。",
+    title: currentPositionCostTitle.value,
   },
   {
     key: "total-pnl",

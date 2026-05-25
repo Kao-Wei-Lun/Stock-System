@@ -32,6 +32,8 @@ import { computed } from "vue";
 import {
   EMPTY_MARK,
   firstFinite,
+  formatCalculationLimitation,
+  formatCalculationMethodLabel,
   formatCurrency as formatAssetCurrency,
   formatInteger,
   formatPercent,
@@ -47,6 +49,7 @@ const props = defineProps({
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
   assetPerformanceSummary: { type: Object, default: () => ({}) },
+  performanceCalculationMetadata: { type: Object, default: () => ({}) },
   assetPerformanceSeries: { type: Array, default: () => [] },
   assetHoldings: { type: Array, default: () => [] },
 });
@@ -85,11 +88,21 @@ const recentNetValueChange = computed(() => {
 });
 
 const recentNetValueChangePct = computed(() => parseFiniteNumber(props.assetPerformanceSummary?.daily_nav_change_pct));
+const dailyNavChangeMetadata = computed(() => props.performanceCalculationMetadata?.daily_nav_change || null);
 
-const recentNetValueChangeTitle = computed(() => (
-  props.assetPerformanceSummary?.daily_metric_note
-  || "由最近兩筆績效快照推估，可能包含入出金、股利、匯率或重算影響。"
-));
+const recentNetValueChangeTitle = computed(() => {
+  const metadata = dailyNavChangeMetadata.value;
+  if (metadata && Object.keys(metadata).length) {
+    const parts = [];
+    if (metadata.is_estimated) parts.push("此數值為推估值");
+    parts.push(formatCalculationMethodLabel(metadata.method));
+    const limitations = (metadata.limitations || []).map(formatCalculationLimitation).filter(Boolean);
+    if (limitations.length) parts.push(limitations.join("、"));
+    return parts.join("。");
+  }
+  return props.assetPerformanceSummary?.daily_metric_note
+    || "由最近兩筆績效快照推估，可能包含入出金、股利、匯率或重算影響。";
+});
 
 const recentNetValueChangeHelper = computed(() => {
   if (recentNetValueChange.value == null) return "資料不足";

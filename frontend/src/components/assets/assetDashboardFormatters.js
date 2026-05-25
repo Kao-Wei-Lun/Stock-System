@@ -137,3 +137,39 @@ export function percentAgainst(value, total) {
   if (numerator == null || denominator == null || denominator === 0) return null;
   return (numerator / denominator) * 100;
 }
+
+export function formatCalculationMethodLabel(method) {
+  const normalized = String(method || "").trim();
+  const labels = {
+    latest_two_snapshots: "使用最近兩筆績效快照計算",
+    sum_holdings_cost_basis_base: "使用目前持倉的成本基礎加總",
+    sum_holdings_market_value_and_cash_by_currency: "依持倉市值與現金餘額，按原始幣別聚合",
+  };
+  return labels[normalized] || "使用系統提供的計算方法";
+}
+
+export function formatCalculationLimitation(limitation) {
+  const normalized = String(limitation || "").trim();
+  const labels = {
+    may_include_cash_flows: "可能包含入出金影響",
+    may_include_fx_changes: "可能包含匯率變動",
+    may_include_recalculation_effects: "可能包含資料重算影響",
+  };
+  return labels[normalized] || "可能受資料品質或計算條件影響";
+}
+
+export function normalizeDataQualitySeverity(severity) {
+  const normalized = String(severity || "").trim().toLowerCase();
+  if (["ok", "info", "warning", "critical"].includes(normalized)) return normalized;
+  return "";
+}
+
+export function mergeUserVisibleMessages(...sources) {
+  const merged = [];
+  sources.flat().forEach((message) => {
+    const text = String(message || "").trim();
+    if (!text || merged.includes(text)) return;
+    merged.push(text);
+  });
+  return merged;
+}

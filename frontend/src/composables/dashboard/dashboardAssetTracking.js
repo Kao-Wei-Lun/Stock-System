@@ -162,6 +162,8 @@ export function createDashboardAssetTracking({
   const assetWarnings = computed(() => assetPortfolio.value?.warnings || []);
   const assetQuoteGaps = computed(() => assetPortfolio.value?.quote_gaps || []);
   const assetReconciliation = computed(() => assetPortfolio.value?.reconciliation || { items: [], summary: {} });
+  const assetPortfolioCalculationMetadata = computed(() => assetPortfolio.value?.calculation_metadata || {});
+  const assetPortfolioDataQualitySummary = computed(() => assetPortfolio.value?.data_quality_summary || null);
   const assetAccountAllocation = computed(() => assetPortfolio.value?.allocation?.items || []);
   const assetMarketAllocation = computed(() => {
     const grouped = new Map();
@@ -191,6 +193,8 @@ export function createDashboardAssetTracking({
     };
   });
   const assetPerformanceSummary = computed(() => assetPerformance.value?.summary || {});
+  const assetPerformanceCalculationMetadata = computed(() => assetPerformance.value?.calculation_metadata || {});
+  const assetPerformanceDataQualitySummary = computed(() => assetPerformance.value?.data_quality_summary || null);
   const assetPerformanceSeries = computed(() => normalizeHeatmapItems(assetPerformance.value?.series));
   const assetMonthlyHeatmap = computed(() => normalizeHeatmapItems(assetPerformance.value?.monthly_heatmap));
   const assetRealizedVsUnrealized = computed(() => normalizeHeatmapItems(assetPerformance.value?.realized_vs_unrealized));
@@ -1116,11 +1120,15 @@ export function createDashboardAssetTracking({
     assetWarnings,
     assetQuoteGaps,
     assetReconciliation,
+    assetPortfolioCalculationMetadata,
+    assetPortfolioDataQualitySummary,
     assetAccountAllocation,
     assetMarketAllocation,
     assetCurrencyAllocation,
     assetContributors,
     assetPerformanceSummary,
+    assetPerformanceCalculationMetadata,
+    assetPerformanceDataQualitySummary,
     assetPerformanceSeries,
     assetMonthlyHeatmap,
     assetRealizedVsUnrealized,

@@ -3,7 +3,7 @@
     <div class="asset-card-head">
       <div>
         <div class="asset-card-title">資產配置</div>
-        <div class="bt-trade-sub">帳戶、市場與幣別配置；產業維度待資料欄位支援後啟用</div>
+        <div class="bt-trade-sub" :title="allocationSubtitle">{{ allocationSubtitle }}</div>
       </div>
       <div class="asset-allocation-tabs">
         <button
@@ -100,6 +100,7 @@ import { THEME_KEY } from "vue-echarts";
 
 import DeferredVChart from "../DeferredVChart.vue";
 import {
+  formatCalculationMethodLabel,
   formatCurrency,
   formatPercent,
   numberOrZero,
@@ -114,6 +115,7 @@ const props = defineProps({
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
   assetCurrencyAllocation: { type: Array, default: () => [] },
+  portfolioCalculationMetadata: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(["focus-holdings"]);
@@ -135,6 +137,15 @@ const allocationEmptyMessage = computed(() => ({
   sector: "目前資料尚未提供產業配置，待後續資料欄位支援。",
   currency: "目前沒有可用的幣別配置資料。",
 }[allocationTab.value] || "尚無配置資料。"));
+
+const currencyAllocationMetadata = computed(() => props.portfolioCalculationMetadata?.currency_allocation || null);
+
+const allocationSubtitle = computed(() => {
+  if (allocationTab.value === "currency" && currencyAllocationMetadata.value) {
+    return `${formatCalculationMethodLabel(currencyAllocationMetadata.value.method)}；金額以基準幣別表示`;
+  }
+  return "帳戶、市場與幣別配置；產業維度待資料欄位支援後啟用";
+});
 
 const normalizedCurrencyAllocation = computed(() => (
   (props.assetCurrencyAllocation || [])

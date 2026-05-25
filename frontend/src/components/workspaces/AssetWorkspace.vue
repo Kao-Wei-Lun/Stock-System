@@ -49,7 +49,11 @@
           :asset-warnings="assetWarnings"
           :asset-quote-gaps="assetQuoteGaps"
           :asset-reconciliation="assetReconciliation"
+          :portfolio-calculation-metadata="portfolioCalculationMetadata"
+          :portfolio-data-quality-summary="portfolioDataQualitySummary"
           :asset-performance-summary="assetPerformanceSummary"
+          :performance-calculation-metadata="performanceCalculationMetadata"
+          :performance-data-quality-summary="performanceDataQualitySummary"
           :asset-performance-series="assetPerformanceSeries"
           :asset-monthly-heatmap="assetMonthlyHeatmap"
           :asset-alerts="assetAlerts"
@@ -194,6 +198,8 @@
         :asset-warnings="assetWarnings"
         :asset-quote-gaps="assetQuoteGaps"
         :asset-reconciliation="assetReconciliation"
+        :portfolio-data-quality-summary="portfolioDataQualitySummary"
+        :performance-data-quality-summary="performanceDataQualitySummary"
         :asset-alerts="assetAlerts"
       />
     </div>
@@ -221,10 +227,14 @@ const props = defineProps({
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
   assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
+  portfolioCalculationMetadata: { type: Object, default: () => ({}) },
+  portfolioDataQualitySummary: { type: Object, default: null },
   assetPriceOverrides: { type: Array, default: () => [] },
   assetFxRates: { type: Array, default: () => [] },
   assetAdjustments: { type: Array, default: () => [] },
   assetPerformanceSummary: { type: Object, default: () => ({}) },
+  performanceCalculationMetadata: { type: Object, default: () => ({}) },
+  performanceDataQualitySummary: { type: Object, default: null },
   assetPerformanceSeries: { type: Array, default: () => [] },
   assetMonthlyHeatmap: { type: Array, default: () => [] },
   assetRealizedVsUnrealized: { type: Array, default: () => [] },

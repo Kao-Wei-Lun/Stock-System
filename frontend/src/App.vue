@@ -259,10 +259,14 @@
         :asset-warnings="assetWarnings"
         :asset-quote-gaps="assetQuoteGaps"
         :asset-reconciliation="assetReconciliation"
+        :portfolio-calculation-metadata="assetPortfolioCalculationMetadata"
+        :portfolio-data-quality-summary="assetPortfolioDataQualitySummary"
         :asset-price-overrides="assetPriceOverrides"
         :asset-fx-rates="assetFxRates"
         :asset-adjustments="assetAdjustments"
         :asset-performance-summary="assetPerformanceSummary"
+        :performance-calculation-metadata="assetPerformanceCalculationMetadata"
+        :performance-data-quality-summary="assetPerformanceDataQualitySummary"
         :asset-performance-series="assetPerformanceSeries"
         :asset-monthly-heatmap="assetMonthlyHeatmap"
         :asset-realized-vs-unrealized="assetRealizedVsUnrealized"
@@ -614,11 +618,15 @@ const {
   assetWarnings,
   assetQuoteGaps,
   assetReconciliation,
+  assetPortfolioCalculationMetadata,
+  assetPortfolioDataQualitySummary,
   assetAccountAllocation,
   assetMarketAllocation,
   assetCurrencyAllocation,
   assetContributors,
   assetPerformanceSummary,
+  assetPerformanceCalculationMetadata,
+  assetPerformanceDataQualitySummary,
   assetPerformanceSeries,
   assetMonthlyHeatmap,
   assetRealizedVsUnrealized,

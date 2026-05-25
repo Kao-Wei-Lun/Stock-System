@@ -291,6 +291,7 @@ describe("AssetOverviewPanel", () => {
     expect(card.text()).toContain("+TWD 2,500");
     expect(card.text()).not.toContain("+TWD 18,000");
     expect(card.attributes("title")).toBe("API daily note");
+    expect(card.classes()).toContain("positive");
   });
 
   it("keeps the existing daily NAV fallback when API value is missing", () => {
@@ -299,6 +300,37 @@ describe("AssetOverviewPanel", () => {
     });
 
     expect(wrapper.get('[data-testid="asset-kpi-recent-change"]').text()).toContain("+TWD 18,000");
+  });
+
+  it("uses daily NAV calculation metadata for a readable KPI tooltip", () => {
+    const props = buildProps();
+    props.assetPerformanceSummary.daily_nav_change_base = 2500;
+    props.assetPerformanceSummary.daily_nav_change_pct = 1.5;
+    props.performanceCalculationMetadata = {
+      daily_nav_change: {
+        status: "estimated",
+        method: "latest_two_snapshots",
+        is_estimated: true,
+        limitations: [
+          "may_include_cash_flows",
+          "may_include_fx_changes",
+          "may_include_recalculation_effects",
+        ],
+      },
+    };
+
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    const title = wrapper.get('[data-testid="asset-kpi-recent-change"]').attributes("title");
+    expect(title).toContain("此數值為推估值");
+    expect(title).toContain("使用最近兩筆績效快照計算");
+    expect(title).toContain("可能包含入出金影響");
+    expect(title).toContain("可能包含匯率變動");
+    expect(title).toContain("可能包含資料重算影響");
+    expect(title).not.toContain("latest_two_snapshots");
+    expect(title).not.toContain("may_include_cash_flows");
   });
 
   it("shows current position cost without treating zero as empty", () => {
@@ -319,6 +351,27 @@ describe("AssetOverviewPanel", () => {
     expect(nullWrapper.get('[data-testid="asset-performance-summary-current-position-cost"]').text()).toContain("--");
   });
 
+  it("uses current position cost metadata in the performance tooltip", () => {
+    const props = buildProps();
+    props.portfolioCalculationMetadata = {
+      current_position_cost: {
+        status: "computed",
+        method: "sum_holdings_cost_basis_base",
+        is_estimated: false,
+        source_fields: ["holdings.cost_basis_base"],
+      },
+    };
+
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    const row = wrapper.get('[data-testid="asset-performance-summary-current-position-cost"] strong');
+    expect(row.attributes("title")).toContain("使用目前持倉的成本基礎加總");
+    expect(row.attributes("title")).toContain("來源為 holdings.cost_basis_base");
+    expect(row.attributes("title")).toContain("此數值不是歷史累積投入本金");
+  });
+
   it("enables currency allocation while keeping sector allocation disabled", async () => {
     const wrapper = mount(AssetOverviewPanel, {
       props: buildProps(),
@@ -334,6 +387,27 @@ describe("AssetOverviewPanel", () => {
 
     expect(wrapper.text()).toContain("TWD");
     expect(wrapper.text()).toContain("USD");
+  });
+
+  it("uses currency allocation metadata for allocation helper text", async () => {
+    const props = buildProps();
+    props.portfolioCalculationMetadata = {
+      currency_allocation: {
+        status: "computed",
+        method: "sum_holdings_market_value_and_cash_by_currency",
+        is_estimated: false,
+      },
+    };
+
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    await wrapper.get('[data-testid="asset-allocation-tab-currency"]').trigger("click");
+
+    const subtitle = wrapper.get(".asset-allocation-card .bt-trade-sub");
+    expect(subtitle.text()).toContain("依持倉市值與現金餘額，按原始幣別聚合");
+    expect(subtitle.text()).toContain("金額以基準幣別表示");
   });
 
   it("shows an empty state when currency allocation is empty", async () => {

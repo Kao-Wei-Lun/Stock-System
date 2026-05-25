@@ -11,6 +11,7 @@
       :asset-base-currency="assetBaseCurrency"
       :asset-summary="assetSummary"
       :asset-performance-summary="assetPerformanceSummary"
+      :performance-calculation-metadata="performanceCalculationMetadata"
       :asset-performance-series="assetPerformanceSeries"
       :asset-holdings="assetHoldings"
     />
@@ -21,6 +22,8 @@
       :asset-base-currency="assetBaseCurrency"
       :asset-summary="assetSummary"
       :asset-performance-summary="assetPerformanceSummary"
+      :portfolio-calculation-metadata="portfolioCalculationMetadata"
+      :performance-calculation-metadata="performanceCalculationMetadata"
       :asset-performance-series="assetPerformanceSeries"
       @set-asset-performance-range="$emit('set-asset-performance-range', $event)"
     />
@@ -278,6 +281,7 @@
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
         :asset-currency-allocation="assetCurrencyAllocation"
+        :portfolio-calculation-metadata="portfolioCalculationMetadata"
         @focus-holdings="focusHoldings"
       />
 
@@ -367,7 +371,11 @@ const props = defineProps({
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
   assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
+  portfolioCalculationMetadata: { type: Object, default: () => ({}) },
+  portfolioDataQualitySummary: { type: Object, default: null },
   assetPerformanceSummary: { type: Object, default: () => ({}) },
+  performanceCalculationMetadata: { type: Object, default: () => ({}) },
+  performanceDataQualitySummary: { type: Object, default: null },
   assetPerformanceSeries: { type: Array, default: () => [] },
   assetMonthlyHeatmap: { type: Array, default: () => [] },
   assetAlerts: { type: Array, default: () => [] },

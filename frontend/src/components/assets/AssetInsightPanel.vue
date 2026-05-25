@@ -24,6 +24,23 @@
         </div>
       </div>
 
+      <div
+        v-if="hasDataQualityMetadata"
+        class="asset-data-quality-card"
+        :class="dataQualityTone"
+        data-testid="asset-data-quality-summary"
+      >
+        <span>{{ dataQualityTypeLabel }}</span>
+        <strong>{{ dataQualityTitle }}</strong>
+        <ul v-if="visibleDataQualityMessages.length">
+          <li v-for="message in visibleDataQualityMessages" :key="message">{{ message }}</li>
+        </ul>
+        <p v-else>未偵測到需要顯示的資料品質提醒</p>
+        <small v-if="hiddenDataQualityMessageCount > 0">
+          另有 {{ hiddenDataQualityMessageCount }} 項資料品質提醒
+        </small>
+      </div>
+
       <div v-if="insightItems.length" class="asset-insight-list">
         <article v-for="item in insightItems" :key="item.key" class="asset-insight-item" :class="item.tone">
           <span>{{ item.type }}</span>
@@ -43,6 +60,8 @@ import { computed } from "vue";
 import {
   formatCurrency,
   formatPercent,
+  mergeUserVisibleMessages,
+  normalizeDataQualitySeverity,
   parseFiniteNumber,
 } from "./assetDashboardFormatters";
 
@@ -54,6 +73,8 @@ const props = defineProps({
   assetWarnings: { type: Array, default: () => [] },
   assetQuoteGaps: { type: Array, default: () => [] },
   assetReconciliation: { type: Object, default: () => ({ items: [], summary: {} }) },
+  portfolioDataQualitySummary: { type: Object, default: null },
+  performanceDataQualitySummary: { type: Object, default: null },
   assetAlerts: { type: Array, default: () => [] },
 });
 
@@ -99,6 +120,40 @@ const concentrationTone = computed(() => {
 const concentrationLabel = computed(() => (
   formatPercent(concentrationPct.value)
 ));
+
+const dataQualitySummaries = computed(() => (
+  [props.portfolioDataQualitySummary, props.performanceDataQualitySummary]
+    .filter((summary) => summary && typeof summary === "object" && normalizeDataQualitySeverity(summary.severity))
+));
+
+const hasDataQualityMetadata = computed(() => dataQualitySummaries.value.length > 0);
+
+const combinedDataQualitySeverity = computed(() => {
+  const severities = dataQualitySummaries.value.map((summary) => normalizeDataQualitySeverity(summary.severity));
+  if (severities.includes("warning")) return "warning";
+  if (severities.includes("info")) return "info";
+  if (severities.includes("ok")) return "ok";
+  return "";
+});
+
+const dataQualityMessages = computed(() => mergeUserVisibleMessages(
+  ...dataQualitySummaries.value.map((summary) => summary.user_visible_messages || []),
+));
+
+const visibleDataQualityMessages = computed(() => dataQualityMessages.value.slice(0, 3));
+const hiddenDataQualityMessageCount = computed(() => Math.max(dataQualityMessages.value.length - 3, 0));
+
+const dataQualityTone = computed(() => combinedDataQualitySeverity.value || "neutral");
+const dataQualityTypeLabel = computed(() => {
+  if (combinedDataQualitySeverity.value === "warning") return "資料品質";
+  if (combinedDataQualitySeverity.value === "info") return "資料說明";
+  return "資料狀態";
+});
+const dataQualityTitle = computed(() => {
+  if (combinedDataQualitySeverity.value === "warning") return "資料品質提醒";
+  if (combinedDataQualitySeverity.value === "info") return "資料品質說明";
+  return "資料品質目前正常";
+});
 
 const insightItems = computed(() => {
   const items = [];
@@ -253,6 +308,59 @@ function dedupeInsights(items) {
 
 .asset-insight-summary .warning {
   color: var(--asset-warning, #f59e0b);
+}
+
+.asset-data-quality-card {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--asset-border, #1f2937);
+  border-radius: var(--asset-radius-inner, 12px);
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.asset-data-quality-card.info {
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.asset-data-quality-card.warning {
+  border-color: rgba(245, 158, 11, 0.32);
+}
+
+.asset-data-quality-card > span {
+  display: inline-flex;
+  margin-bottom: 6px;
+  color: var(--asset-text-muted, #64748b);
+  font-size: 11px;
+}
+
+.asset-data-quality-card strong {
+  display: block;
+  color: var(--asset-text-primary, #e5e7eb);
+}
+
+.asset-data-quality-card.info strong {
+  color: var(--asset-info, #2563eb);
+}
+
+.asset-data-quality-card.warning strong {
+  color: var(--asset-warning, #f59e0b);
+}
+
+.asset-data-quality-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--asset-text-secondary, #94a3b8);
+  line-height: 1.5;
+}
+
+.asset-data-quality-card p,
+.asset-data-quality-card small {
+  display: block;
+  margin: 8px 0 0;
+  color: var(--asset-text-secondary, #94a3b8);
+  line-height: 1.5;
 }
 
 .asset-insight-list {
