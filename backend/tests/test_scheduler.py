@@ -7,6 +7,7 @@ from scheduler import (
     BackgroundScheduler,
     SchedulerDependencies,
     SchedulerSettings,
+    _tw_history_retry_needed,
     fubon_ws_listener_loop,
 )
 
@@ -133,6 +134,24 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
     await scheduler.shutdown()
 
     assert scheduler.task_count == 0
+
+
+def test_tw_history_retry_needed_checks_date_and_latest_coverage():
+    assert _tw_history_retry_needed(
+        {"expected_latest_date": "2026-05-25", "latest_coverage_pct": 79.9},
+        target_date="2026-05-25",
+        min_latest_coverage_pct=80,
+    )
+    assert _tw_history_retry_needed(
+        {"expected_latest_date": "2026-05-22", "latest_coverage_pct": 99.0},
+        target_date="2026-05-25",
+        min_latest_coverage_pct=80,
+    )
+    assert not _tw_history_retry_needed(
+        {"expected_latest_date": "2026-05-25", "latest_coverage_pct": 80.0},
+        target_date="2026-05-25",
+        min_latest_coverage_pct=80,
+    )
 
 
 @pytest.mark.anyio

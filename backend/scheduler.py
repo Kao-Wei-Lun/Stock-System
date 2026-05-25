@@ -46,6 +46,8 @@ class SchedulerSettings:
     tw_full_history_sync_enabled: bool = False
     tw_full_history_sync_start_time: time_of_day = time_of_day(14, 0)
     tw_full_history_sync_stop_time: time_of_day = time_of_day(8, 0)
+    tw_full_history_retry_interval_seconds: int = 1800
+    tw_full_history_retry_min_latest_coverage_pct: float = 80.0
 
 
 @dataclass(slots=True)
@@ -67,6 +69,7 @@ class SchedulerDependencies:
     futopt_candle_recorder: Any = None
     sync_paper_trading_margins: Any = None
     sync_taiwan_full_history: Any = None
+    get_taiwan_analysis_kline_coverage: Any = None
 
 
 async def startup_download(
@@ -253,12 +256,52 @@ def _window_stop_after(start_at: datetime, stop_time: time_of_day) -> datetime:
     return stop_at
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _tw_history_retry_needed(
+    coverage: dict | None,
+    *,
+    target_date: str,
+    min_latest_coverage_pct: float,
+) -> bool:
+    if not isinstance(coverage, dict):
+        return True
+    latest_date = str(
+        coverage.get("expected_latest_date")
+        or coverage.get("newest_latest_date")
+        or ""
+    )[:10]
+    latest_pct = _safe_float(coverage.get("latest_coverage_pct"))
+    if latest_pct is None:
+        latest_pct = _safe_float(coverage.get("coverage_pct"))
+    if latest_date != target_date:
+        return True
+    return latest_pct is None or latest_pct < min_latest_coverage_pct
+
+
+async def _fetch_tw_history_retry_coverage(get_coverage, summary: dict | None) -> dict | None:
+    if callable(get_coverage):
+        return await get_coverage("1d")
+    if isinstance(summary, dict):
+        coverage = summary.get("analysis_coverage") or summary.get("coverage")
+        return coverage if isinstance(coverage, dict) else None
+    return None
+
+
 async def taiwan_full_history_sync_loop(
     sync_taiwan_full_history,
     app_tz: tzinfo,
     start_time: time_of_day,
     stop_time: time_of_day,
     startup_delay_seconds: float = 35.0,
+    retry_interval_seconds: int = 1800,
+    min_latest_coverage_pct: float = 80.0,
+    get_analysis_coverage=None,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
@@ -272,14 +315,62 @@ async def taiwan_full_history_sync_loop(
 
         run_started_at = datetime.now(app_tz)
         stop_at = _window_stop_after(run_started_at, stop_time)
-        try:
-            summary = await sync_taiwan_full_history(
-                reason="scheduled-tw-full-history",
-                stop_at=stop_at,
+        target_date = run_started_at.date().isoformat()
+        attempt = 1
+
+        while datetime.now(app_tz) < stop_at:
+            summary = None
+            try:
+                summary = await sync_taiwan_full_history(
+                    reason="scheduled-tw-full-history" if attempt == 1 else "scheduled-tw-full-history-retry",
+                    stop_at=stop_at,
+                )
+                log.info("Taiwan full history sync attempt %s finished: %s", attempt, summary)
+            except Exception as exc:
+                log.warning("Taiwan full history sync attempt %s failed: %s", attempt, exc)
+
+            try:
+                coverage = await _fetch_tw_history_retry_coverage(get_analysis_coverage, summary)
+            except Exception as exc:
+                coverage = None
+                log.warning("Taiwan full history coverage check failed after attempt %s: %s", attempt, exc)
+
+            if not _tw_history_retry_needed(
+                coverage,
+                target_date=target_date,
+                min_latest_coverage_pct=min_latest_coverage_pct,
+            ):
+                log.info(
+                    "Taiwan full history coverage ready for %s after attempt %s: %s",
+                    target_date,
+                    attempt,
+                    coverage,
+                )
+                break
+
+            if retry_interval_seconds <= 0:
+                log.info("Taiwan full history retry disabled; latest coverage after attempt %s: %s", attempt, coverage)
+                break
+
+            next_retry_at = datetime.now(app_tz) + timedelta(seconds=retry_interval_seconds)
+            if next_retry_at >= stop_at:
+                log.warning(
+                    "Taiwan full history still not ready for %s, but retry window closes at %s: %s",
+                    target_date,
+                    stop_at.isoformat(),
+                    coverage,
+                )
+                break
+
+            log.warning(
+                "Taiwan full history not ready for %s after attempt %s; retrying in %ss. Coverage=%s",
+                target_date,
+                attempt,
+                retry_interval_seconds,
+                coverage,
             )
-            log.info("Taiwan full history sync finished: %s", summary)
-        except Exception as exc:
-            log.warning("Taiwan full history sync failed: %s", exc)
+            await asyncio.sleep(retry_interval_seconds)
+            attempt += 1
 
 
 async def daily_paper_margin_sync_loop(
@@ -729,6 +820,9 @@ class BackgroundScheduler:
                     start_time=self._settings.tw_full_history_sync_start_time,
                     stop_time=self._settings.tw_full_history_sync_stop_time,
                     startup_delay_seconds=self._settings.tw_full_history_startup_delay_seconds,
+                    retry_interval_seconds=self._settings.tw_full_history_retry_interval_seconds,
+                    min_latest_coverage_pct=self._settings.tw_full_history_retry_min_latest_coverage_pct,
+                    get_analysis_coverage=self._deps.get_taiwan_analysis_kline_coverage,
                     logger=self._log,
                 ),
             )

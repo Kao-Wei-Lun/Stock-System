@@ -89,6 +89,16 @@ TW_FULL_HISTORY_INTERVALS = _normalize_intervals(read_text_env("TW_FULL_HISTORY_
 TW_FULL_HISTORY_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0)
 TW_FULL_HISTORY_TICKER_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_TICKER_DELAY_SECONDS", "2.0", minimum=0)
 TW_FULL_HISTORY_INCLUDE_ETF = read_bool_env("TW_FULL_HISTORY_INCLUDE_ETF", True)
+TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS = read_int_env(
+    "TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS",
+    "1800",
+    minimum=0,
+)
+TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT = read_float_env(
+    "TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT",
+    "80",
+    minimum=0,
+)
 ALERT_EVALUATOR_ENABLED = read_bool_env("ALERT_EVALUATOR_ENABLED", True)
 ALERT_POLL_INTERVAL_SECONDS = read_int_env("ALERT_POLL_INTERVAL_SECONDS", "30", minimum=10)
 MARKET_INTELLIGENCE_SYNC_ENABLED = read_bool_env("MARKET_INTELLIGENCE_SYNC_ENABLED", True)
@@ -332,6 +342,8 @@ background_scheduler = BackgroundScheduler(
         tw_full_history_sync_enabled=TW_FULL_HISTORY_SYNC_ENABLED,
         tw_full_history_sync_start_time=TW_FULL_HISTORY_SYNC_START_TIME,
         tw_full_history_sync_stop_time=TW_FULL_HISTORY_SYNC_STOP_TIME,
+        tw_full_history_retry_interval_seconds=TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS,
+        tw_full_history_retry_min_latest_coverage_pct=TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -351,6 +363,7 @@ background_scheduler = BackgroundScheduler(
         futopt_candle_recorder=futopt_candle_recorder,
         sync_paper_trading_margins=sync_paper_trading_margins,
         sync_taiwan_full_history=sync_taiwan_full_history,
+        get_taiwan_analysis_kline_coverage=db.get_tw_analysis_kline_coverage,
     ),
     logger=log,
 )
