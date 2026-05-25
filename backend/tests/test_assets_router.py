@@ -595,8 +595,22 @@ def test_asset_routes_crud_and_summary_snapshot(client, asset_store):
 
     portfolio_response = client.get("/api/assets/portfolio/current?refresh=false")
     assert portfolio_response.status_code == 200
-    assert portfolio_response.json()["reconciliation"]["summary"]["gap_account_count"] == 1
-    assert portfolio_response.json()["reconciliation"]["items"][0]["total_difference"] == 110
+    portfolio_payload = portfolio_response.json()
+    assert portfolio_payload["summary"]["cash_total_base"] == 98990
+    assert portfolio_payload["summary"]["current_position_cost_base"] == 1010
+    assert portfolio_payload["reconciliation"]["summary"]["gap_account_count"] == 1
+    assert portfolio_payload["reconciliation"]["items"][0]["total_difference"] == 110
+    assert portfolio_payload["currency_allocation"][0]["currency"] == "TWD"
+    assert "reconciliation_gaps_present" in portfolio_payload["data_quality_flags"]
+
+    performance_response = client.get("/api/assets/performance?refresh=false&range=30d")
+    assert performance_response.status_code == 200
+    performance_payload = performance_response.json()
+    assert "start_value_base" in performance_payload["summary"]
+    assert "daily_nav_change_base" in performance_payload["summary"]
+    assert "daily_metric_type" in performance_payload["summary"]
+    assert "calculation_warnings" in performance_payload
+    assert "data_quality_flags" in performance_payload
 
     delete_reconciliation_response = client.delete(f"/api/assets/reconciliation/{reconciliation_payload['id']}")
     assert delete_reconciliation_response.status_code == 200
@@ -1004,7 +1018,7 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert fx_rate_response.status_code == 200
     fx_rate_payload = fx_rate_response.json()
 
-    performance_response = client.get("/api/assets/performance?range=30d&refresh=false")
+    performance_response = client.get("/api/assets/performance?range=90d&refresh=false")
     assert performance_response.status_code == 200
     performance_payload = performance_response.json()
     assert performance_payload["summary"]["true_performance_base"] == -15000
@@ -1022,14 +1036,14 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert portfolio_payload["summary"]["total_asset_value_base"] == 85000
     assert portfolio_payload["holdings"][0]["manual_price_override_id"] == override_payload["id"]
 
-    alerts_response = client.get("/api/assets/alerts/current?refresh=false&performance_range=30d")
+    alerts_response = client.get("/api/assets/alerts/current?refresh=false&performance_range=90d")
     assert alerts_response.status_code == 200
     alert_codes = {item["code"] for item in alerts_response.json()["items"]}
     assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes
 
     recompute_response = client.post(
         "/api/assets/recompute",
-        json={"refresh": False, "performance_range": "30d"},
+        json={"refresh": False, "performance_range": "90d"},
     )
     assert recompute_response.status_code == 200
     assert recompute_response.json()["performance_summary"]["true_performance_base"] == -15000

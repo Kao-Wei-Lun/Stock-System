@@ -1,10 +1,30 @@
 import asyncio
 
 from asset_tracking_service import (
+    _build_daily_nav_change_metadata,
     build_asset_alerts,
     build_asset_performance_report,
     build_asset_portfolio_snapshot,
 )
+
+
+def test_daily_nav_change_metadata_handles_empty_or_single_series():
+    empty_metadata, empty_warnings, empty_flags = _build_daily_nav_change_metadata([])
+
+    assert empty_metadata["daily_nav_change_base"] is None
+    assert empty_metadata["daily_nav_change_pct"] is None
+    assert empty_metadata["daily_metric_type"] == "unavailable"
+    assert empty_warnings
+    assert "insufficient_performance_series" in empty_flags
+
+    one_point_metadata, _, one_point_flags = _build_daily_nav_change_metadata([
+        {"date": "2026-04-18", "total_asset_value_base": 1000},
+    ])
+
+    assert one_point_metadata["daily_nav_change_base"] is None
+    assert one_point_metadata["daily_nav_change_pct"] is None
+    assert one_point_metadata["daily_metric_type"] == "unavailable"
+    assert "insufficient_performance_series" in one_point_flags
 
 
 def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in_total():
@@ -104,12 +124,14 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
     assert snapshot["summary"]["cash_total_base"] == 98990
     assert snapshot["summary"]["market_value_total_base"] == 1200
     assert snapshot["summary"]["total_asset_value_base"] == 100190
+    assert snapshot["summary"]["current_position_cost_base"] == 1010
     assert snapshot["summary"]["unrealized_total_base"] == 190
     assert snapshot["summary"]["quote_gap_count"] == 0
     assert snapshot["summary"]["account_count"] == 2
     assert snapshot["summary"]["reconciliation_account_count"] == 1
     assert snapshot["summary"]["reconciliation_gap_count"] == 1
     assert snapshot["summary"]["reconciliation_difference_total_base"] == 110
+    assert "reconciliation_gaps_present" in snapshot["data_quality_flags"]
     assert snapshot["holdings"][0]["ticker"] == "2330.TW"
     assert snapshot["holdings"][0]["market_value_base"] == 1200
     assert snapshot["holdings"][0]["unrealized_pnl_base"] == 190
@@ -119,6 +141,165 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
     assert snapshot["reconciliation"]["items"][0]["cash_difference"] == 10
     assert snapshot["reconciliation"]["items"][0]["market_value_difference"] == 100
     assert snapshot["reconciliation"]["items"][0]["total_difference"] == 110
+
+
+def test_build_asset_portfolio_snapshot_returns_zero_position_cost_without_holdings():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Cash Account",
+            "account_type": "bank",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+
+    snapshot = asyncio.run(build_asset_portfolio_snapshot(accounts, [], [], fetch_quote=None))
+
+    assert snapshot["summary"]["current_position_cost_base"] == 0
+    assert snapshot["currency_allocation"] == []
+
+
+def test_build_asset_portfolio_snapshot_groups_currency_allocation_from_cash_and_holdings():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Global Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+    cash_entries = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "flow_date": "2026-04-01T09:00:00",
+            "flow_type": "deposit",
+            "amount": 100000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+        },
+        {
+            "id": 2,
+            "account_id": 1,
+            "flow_date": "2026-04-01T09:01:00",
+            "flow_type": "deposit",
+            "amount": 1000,
+            "currency": "USD",
+            "fx_rate_to_base": 30,
+        },
+    ]
+    trade_entries = [
+        {
+            "id": 11,
+            "account_id": 1,
+            "trade_date": "2026-04-02T10:00:00",
+            "ticker": "AAPL",
+            "display_name": "Apple",
+            "market": "US",
+            "asset_type": "stock",
+            "currency": "USD",
+            "side": "buy",
+            "quantity": 10,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 30,
+        }
+    ]
+    fx_rate_entries = [
+        {
+            "id": 31,
+            "snapshot_date": "2026-04-18",
+            "from_currency": "USD",
+            "to_currency": "TWD",
+            "rate": 31.5,
+            "source": "manual",
+        }
+    ]
+
+    async def fetch_quote(ticker):
+        if ticker == "AAPL":
+            return {
+                "ticker": ticker,
+                "source": "unit-test",
+                "quote_type": "snapshot",
+                "is_delayed": False,
+                "currency": "USD",
+                "price": 110,
+                "quote_timestamp": "2026-04-18T09:00:00+00:00",
+            }
+        return None
+
+    snapshot = asyncio.run(
+        build_asset_portfolio_snapshot(
+            accounts,
+            cash_entries,
+            trade_entries,
+            fx_rate_entries=fx_rate_entries,
+            fetch_quote=fetch_quote,
+        )
+    )
+
+    assert snapshot["summary"]["total_asset_value_base"] == 134650
+    assert snapshot["summary"]["current_position_cost_base"] == 31500
+    allocation_by_currency = {item["currency"]: item for item in snapshot["currency_allocation"]}
+    assert allocation_by_currency["TWD"]["value_base"] == 100000
+    assert allocation_by_currency["TWD"]["weight_pct"] == 74.2666
+    assert allocation_by_currency["USD"]["value_base"] == 34650
+    assert allocation_by_currency["USD"]["weight_pct"] == 25.7334
+
+
+def test_build_asset_portfolio_snapshot_marks_quote_gap_quality_flags():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+    cash_entries = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "flow_date": "2026-04-01T09:00:00",
+            "flow_type": "deposit",
+            "amount": 10000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+        }
+    ]
+    trade_entries = [
+        {
+            "id": 11,
+            "account_id": 1,
+            "trade_date": "2026-04-02T10:00:00",
+            "ticker": "2330.TW",
+            "display_name": "TSMC",
+            "market": "TW",
+            "asset_type": "stock",
+            "currency": "TWD",
+            "side": "buy",
+            "quantity": 10,
+            "price": 100,
+            "fee_amount": 0,
+            "tax_amount": 0,
+            "fx_rate_to_base": 1,
+        }
+    ]
+
+    snapshot = asyncio.run(build_asset_portfolio_snapshot(accounts, cash_entries, trade_entries, fetch_quote=None))
+
+    assert snapshot["summary"]["quote_gap_count"] == 1
+    assert "quote_gaps_present" in snapshot["data_quality_flags"]
+    assert "missing_fx_or_price_data" in snapshot["data_quality_flags"]
+    assert snapshot["calculation_warnings"]
 
 
 def test_build_asset_portfolio_snapshot_applies_manual_override_fx_rates_and_splits():
@@ -414,6 +595,9 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
     assert report["summary"]["net_flow_base"] == 0
     assert report["summary"]["true_performance_base"] == -15000
     assert report["summary"]["true_return_pct"] == -15
+    assert report["summary"]["daily_nav_change_base"] == -24000
+    assert report["summary"]["daily_nav_change_pct"] == -22.0183
+    assert report["summary"]["daily_metric_type"] == "daily_nav_change"
     assert report["summary"]["realized_end_base"] == 3000
     assert report["summary"]["unrealized_end_base"] == -18000
     assert report["summary"]["max_drawdown_pct"] == -22.0183
@@ -453,6 +637,48 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
         "total_change_base": -15000.0,
     }
     assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes
+
+
+def test_build_asset_performance_report_handles_previous_zero_daily_percentage():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+    cash_entries = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "flow_date": "2026-04-18T09:00:00",
+            "flow_type": "deposit",
+            "amount": 1000,
+            "currency": "TWD",
+            "fx_rate_to_base": 1,
+        }
+    ]
+
+    report = asyncio.run(
+        build_asset_performance_report(
+            accounts,
+            cash_entries,
+            [],
+            start_at="2026-04-17T00:00:00",
+            end_at="2026-04-18T23:59:59",
+        )
+    )
+
+    assert report["series"][0]["total_asset_value_base"] == 0
+    assert report["series"][-1]["total_asset_value_base"] == 1000
+    assert report["summary"]["daily_nav_change_base"] == 1000
+    assert report["summary"]["daily_nav_change_pct"] is None
+    assert report["summary"]["daily_metric_type"] == "daily_nav_change"
+    assert "previous_total_asset_zero" in report["data_quality_flags"]
+    assert report["calculation_warnings"]
 
 
 def test_build_asset_performance_report_treats_initial_balances_as_baseline():

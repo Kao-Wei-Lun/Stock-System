@@ -608,6 +608,166 @@ def _build_reconciliation_summary(
     }, warnings
 
 
+def _build_current_position_cost_base(
+    holdings: Sequence[Dict[str, Any]],
+    included_account_ids: set[int],
+) -> float | None:
+    total = 0.0
+    for holding in holdings or []:
+        if _safe_int(holding.get("account_id")) not in included_account_ids:
+            continue
+        cost_basis_base = _safe_float(holding.get("cost_basis_base"), None)
+        if cost_basis_base is None:
+            return None
+        total += cost_basis_base
+    return round(total, 6)
+
+
+def _build_currency_allocation(
+    account_summaries: Dict[int, Dict[str, Any]],
+    holdings: Sequence[Dict[str, Any]],
+    included_account_ids: set[int],
+    total_asset_value_base: float | None,
+    base_currency: str,
+) -> List[Dict[str, Any]]:
+    grouped: Dict[str, float] = defaultdict(float)
+    normalized_base = _normalize_currency(base_currency)
+
+    for account in account_summaries.values():
+        if _safe_int(account.get("account_id")) not in included_account_ids:
+            continue
+        for cash_item in account.get("cash_breakdown") or []:
+            amount_base = _safe_float(cash_item.get("amount_base"), None)
+            if amount_base is None or abs(amount_base) < 1e-9:
+                continue
+            currency = _normalize_currency(cash_item.get("currency"), normalized_base)
+            grouped[currency] += amount_base
+
+    for holding in holdings or []:
+        if _safe_int(holding.get("account_id")) not in included_account_ids:
+            continue
+        market_value_base = _safe_float(holding.get("market_value_base"), None)
+        if market_value_base is None or abs(market_value_base) < 1e-9:
+            continue
+        currency = _normalize_currency(holding.get("currency"), normalized_base)
+        grouped[currency] += market_value_base
+
+    total_value = _safe_float(total_asset_value_base, None)
+    has_valid_total = bool(total_value is not None and abs(total_value) >= 1e-9)
+    return [
+        {
+            "currency": currency,
+            "value_base": round(value, 6),
+            "weight_pct": round(value / total_value * 100, 4) if has_valid_total else None,
+        }
+        for currency, value in sorted(grouped.items(), key=lambda item: item[1], reverse=True)
+    ]
+
+
+def _build_portfolio_quality_metadata(
+    warnings: Sequence[str],
+    quote_gaps: Sequence[Dict[str, Any]],
+    reconciliation: Dict[str, Any],
+    account_summaries: Dict[int, Dict[str, Any]],
+    holdings: Sequence[Dict[str, Any]],
+    included_account_ids: set[int],
+) -> tuple[List[str], List[str]]:
+    calculation_warnings = list(dict.fromkeys(warnings or []))
+    data_quality_flags: List[str] = []
+
+    if quote_gaps:
+        data_quality_flags.append("quote_gaps_present")
+        data_quality_flags.append("missing_fx_or_price_data")
+        calculation_warnings.append(
+            f"有 {len(quote_gaps)} 筆持倉缺少有效報價或匯率，資產估值可能不完整。"
+        )
+
+    reconciliation_gap_count = _safe_int(((reconciliation or {}).get("summary") or {}).get("gap_account_count"), 0) or 0
+    if reconciliation_gap_count > 0:
+        data_quality_flags.append("reconciliation_gaps_present")
+        calculation_warnings.append(f"有 {reconciliation_gap_count} 個帳戶存在對帳差異。")
+
+    has_missing_fx_or_price_data = False
+    for holding in holdings or []:
+        if _safe_int(holding.get("account_id")) not in included_account_ids:
+            continue
+        if holding.get("market_value_base") is None or holding.get("cost_basis_base") is None:
+            has_missing_fx_or_price_data = True
+            break
+    if not has_missing_fx_or_price_data:
+        for account in account_summaries.values():
+            if _safe_int(account.get("account_id")) not in included_account_ids:
+                continue
+            if any(item.get("amount_base") is None for item in account.get("cash_breakdown") or []):
+                has_missing_fx_or_price_data = True
+                break
+    if has_missing_fx_or_price_data and "missing_fx_or_price_data" not in data_quality_flags:
+        data_quality_flags.append("missing_fx_or_price_data")
+
+    return list(dict.fromkeys(calculation_warnings)), list(dict.fromkeys(data_quality_flags))
+
+
+def _build_daily_nav_change_metadata(series: Sequence[Dict[str, Any]]) -> tuple[Dict[str, Any], List[str], List[str]]:
+    insufficient_note = "績效快照不足，無法計算近一日淨值變化。"
+    estimated_note = "由最近兩筆績效快照推估，可能包含入出金、股利、匯率或重算影響。"
+
+    if len(series or []) < 2:
+        return {
+            "daily_nav_change_base": None,
+            "daily_nav_change_pct": None,
+            "daily_metric_type": "unavailable",
+            "daily_metric_note": insufficient_note,
+        }, [insufficient_note], ["insufficient_performance_series"]
+
+    previous_total = _safe_float((series or [])[-2].get("total_asset_value_base"), None)
+    latest_total = _safe_float((series or [])[-1].get("total_asset_value_base"), None)
+    if previous_total is None or latest_total is None:
+        return {
+            "daily_nav_change_base": None,
+            "daily_nav_change_pct": None,
+            "daily_metric_type": "unavailable",
+            "daily_metric_note": insufficient_note,
+        }, [insufficient_note], ["insufficient_performance_series"]
+
+    daily_nav_change_base = round(latest_total - previous_total, 6)
+    warnings: List[str] = []
+    flags: List[str] = []
+    if previous_total == 0:
+        daily_nav_change_pct = None
+        zero_warning = "前一筆績效快照總資產為 0，無法計算近一日淨值變化百分比。"
+        warnings.append(zero_warning)
+        flags.append("previous_total_asset_zero")
+    else:
+        daily_nav_change_pct = round(daily_nav_change_base / previous_total * 100, 4)
+
+    return {
+        "daily_nav_change_base": daily_nav_change_base,
+        "daily_nav_change_pct": daily_nav_change_pct,
+        "daily_metric_type": "daily_nav_change",
+        "daily_metric_note": estimated_note,
+    }, warnings, flags
+
+
+def _build_performance_quality_metadata(
+    series: Sequence[Dict[str, Any]],
+    warnings: Sequence[str],
+    quote_gaps: Sequence[Dict[str, Any]],
+) -> tuple[Dict[str, Any], List[str], List[str]]:
+    daily_metadata, daily_warnings, daily_flags = _build_daily_nav_change_metadata(series)
+    calculation_warnings = list(dict.fromkeys([*(warnings or []), *daily_warnings]))
+    data_quality_flags = list(dict.fromkeys(daily_flags))
+
+    has_quote_gaps = bool(quote_gaps) or any(
+        (_safe_int(point.get("quote_gap_count"), 0) or 0) > 0 for point in series or []
+    )
+    if has_quote_gaps:
+        data_quality_flags.append("quote_gaps_present")
+        data_quality_flags.append("missing_fx_or_price_data")
+        calculation_warnings.append("績效區間內有持倉缺少有效報價或匯率，績效快照可能不完整。")
+
+    return daily_metadata, list(dict.fromkeys(calculation_warnings)), list(dict.fromkeys(data_quality_flags))
+
+
 def _resolve_price_override(
     price_overrides: Sequence[Dict[str, Any]] | None,
     *,
@@ -850,11 +1010,29 @@ async def build_asset_portfolio_snapshot(
     ]
     reconciliation, reconciliation_warnings = _build_reconciliation_summary(account_summaries, reconciliation_snapshots)
     warnings = list(dict.fromkeys([*(state["warnings"] or []), *reconciliation_warnings]))
+    current_position_cost_base = _build_current_position_cost_base(valued_positions, included_account_ids)
+    currency_allocation = _build_currency_allocation(
+        account_summaries,
+        valued_positions,
+        included_account_ids,
+        total_asset_value_base,
+        normalized_base_currency,
+    )
+    calculation_warnings, data_quality_flags = _build_portfolio_quality_metadata(
+        warnings,
+        quote_gaps,
+        reconciliation,
+        account_summaries,
+        valued_positions,
+        included_account_ids,
+    )
 
     return {
         "base_currency": normalized_base_currency,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "warnings": warnings,
+        "calculation_warnings": calculation_warnings,
+        "data_quality_flags": data_quality_flags,
         "quote_gaps": quote_gaps,
         "accounts": sorted(
             [
@@ -875,11 +1053,13 @@ async def build_asset_portfolio_snapshot(
             "group_by": "account",
             "items": allocation_items,
         },
+        "currency_allocation": currency_allocation,
         "reconciliation": reconciliation,
         "summary": {
             "cash_total_base": round(cash_total_base, 6),
             "market_value_total_base": round(market_value_total_base, 6),
             "total_asset_value_base": round(total_asset_value_base, 6),
+            "current_position_cost_base": current_position_cost_base,
             "realized_total_base": round(realized_total_base, 6),
             "unrealized_total_base": round(unrealized_total_base, 6),
             "total_pnl_base": round(total_pnl_base, 6),
@@ -1232,10 +1412,13 @@ async def build_asset_performance_report(
             end_quote_gaps = quote_gaps
 
     if not series:
+        daily_metadata, calculation_warnings, data_quality_flags = _build_performance_quality_metadata([], [], [])
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "base_currency": _normalize_currency(base_currency),
             "warnings": [],
+            "calculation_warnings": calculation_warnings,
+            "data_quality_flags": data_quality_flags,
             "quote_gaps": [],
             "summary": {
                 "start_value_base": 0.0,
@@ -1243,6 +1426,7 @@ async def build_asset_performance_report(
                 "net_flow_base": 0.0,
                 "true_performance_base": 0.0,
                 "true_return_pct": 0.0,
+                **daily_metadata,
                 "high_water_mark_base": 0.0,
                 "max_drawdown_pct": 0.0,
                 "point_count": 0,
@@ -1303,6 +1487,11 @@ async def build_asset_performance_report(
     end_net_flow_base = _safe_float(end_point.get("net_flow_base"), 0.0) or 0.0
     true_performance_base = end_value_base - start_value_base - end_net_flow_base
     true_return_pct = (true_performance_base / start_value_base * 100) if start_value_base else 0.0
+    daily_metadata, calculation_warnings, data_quality_flags = _build_performance_quality_metadata(
+        series,
+        end_warnings,
+        end_quote_gaps,
+    )
 
     monthly_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for point in series:
@@ -1337,6 +1526,8 @@ async def build_asset_performance_report(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "base_currency": _normalize_currency(base_currency),
         "warnings": end_warnings,
+        "calculation_warnings": calculation_warnings,
+        "data_quality_flags": data_quality_flags,
         "quote_gaps": end_quote_gaps,
         "summary": {
             "start_value_base": round(start_value_base, 6),
@@ -1344,6 +1535,7 @@ async def build_asset_performance_report(
             "net_flow_base": round(end_net_flow_base, 6),
             "true_performance_base": round(true_performance_base, 6),
             "true_return_pct": round(true_return_pct, 4),
+            **daily_metadata,
             "high_water_mark_base": round(high_water_mark, 6),
             "max_drawdown_pct": round(max_drawdown_pct, 4),
             "latest_snapshot_date": end_point["date"],
