@@ -178,6 +178,7 @@ export function createDashboardAssetTracking({
       }))
       .sort((left, right) => right.value_base - left.value_base);
   });
+  const assetCurrencyAllocation = computed(() => normalizeCurrencyAllocation(assetPortfolio.value?.currency_allocation));
   const assetContributors = computed(() => {
     const holdings = [...(assetHoldings.value || [])];
     return {
@@ -193,6 +194,24 @@ export function createDashboardAssetTracking({
   const assetPerformanceSeries = computed(() => normalizeHeatmapItems(assetPerformance.value?.series));
   const assetMonthlyHeatmap = computed(() => normalizeHeatmapItems(assetPerformance.value?.monthly_heatmap));
   const assetRealizedVsUnrealized = computed(() => normalizeHeatmapItems(assetPerformance.value?.realized_vs_unrealized));
+
+  function normalizeCurrencyAllocation(items) {
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((item) => {
+        const currency = String(item?.currency || item?.key || "").trim().toUpperCase();
+        const valueBase = Number(item?.value_base);
+        const weightPct = item?.weight_pct == null ? null : Number(item.weight_pct);
+        return {
+          key: currency,
+          currency,
+          value_base: Number.isFinite(valueBase) ? Number(valueBase.toFixed(6)) : null,
+          weight_pct: Number.isFinite(weightPct) ? Number(weightPct.toFixed(4)) : null,
+        };
+      })
+      .filter((item) => item.currency && item.value_base != null)
+      .sort((left, right) => Number(right.value_base || 0) - Number(left.value_base || 0));
+  }
 
   function getPrimaryAccountId() {
     return assetAccounts.value[0]?.id || "";
@@ -1099,6 +1118,7 @@ export function createDashboardAssetTracking({
     assetReconciliation,
     assetAccountAllocation,
     assetMarketAllocation,
+    assetCurrencyAllocation,
     assetContributors,
     assetPerformanceSummary,
     assetPerformanceSeries,

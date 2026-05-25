@@ -273,6 +273,7 @@
         :asset-last-recompute="assetLastRecompute"
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
+        :asset-currency-allocation="assetCurrencyAllocation"
         :asset-contributors="assetContributors"
         :asset-cash-entries="assetCashEntries"
         :asset-trade-entries="assetTradeEntries"
@@ -615,6 +616,7 @@ const {
   assetReconciliation,
   assetAccountAllocation,
   assetMarketAllocation,
+  assetCurrencyAllocation,
   assetContributors,
   assetPerformanceSummary,
   assetPerformanceSeries,

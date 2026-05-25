@@ -30,7 +30,12 @@
         <DeferredVChart class="asset-performance-chart" :option="chartOption" autoresize />
       </div>
       <aside class="asset-performance-summary">
-        <div v-for="item in summaryRows" :key="item.key" class="asset-summary-row">
+        <div
+          v-for="item in summaryRows"
+          :key="item.key"
+          class="asset-summary-row"
+          :data-testid="`asset-performance-summary-${item.key}`"
+        >
           <span>{{ item.label }}</span>
           <strong :class="item.tone" :title="item.title || ''">{{ item.value }}</strong>
         </div>
@@ -115,11 +120,11 @@ const totalPnl = computed(() => {
 
 const summaryRows = computed(() => [
   {
-    key: "invested-cost",
-    label: "投入成本",
-    value: EMPTY_MARK,
+    key: "current-position-cost",
+    label: "目前持倉成本",
+    value: formatCurrency(props.assetSummary?.current_position_cost_base),
     tone: "neutral",
-    title: "目前 API 尚未提供可靠投入成本欄位。",
+    title: "目前持倉成本為現有持倉的成本基礎加總，不代表歷史累積投入本金。",
   },
   {
     key: "total-pnl",

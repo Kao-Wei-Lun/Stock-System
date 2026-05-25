@@ -55,6 +55,7 @@
           :asset-alerts="assetAlerts"
           :asset-account-allocation="assetAccountAllocation"
           :asset-market-allocation="assetMarketAllocation"
+          :asset-currency-allocation="assetCurrencyAllocation"
           :asset-contributors="assetContributors"
           :asset-holdings="assetHoldings"
           :asset-cash-entries="assetCashEntries"
@@ -234,6 +235,7 @@ const props = defineProps({
   assetLastRecompute: { type: Object, default: null },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
+  assetCurrencyAllocation: { type: Array, default: () => [] },
   assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
   assetCashEntries: { type: Array, default: () => [] },
   assetTradeEntries: { type: Array, default: () => [] },

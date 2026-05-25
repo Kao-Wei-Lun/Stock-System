@@ -277,6 +277,7 @@
         :asset-base-currency="assetBaseCurrency"
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
+        :asset-currency-allocation="assetCurrencyAllocation"
         @focus-holdings="focusHoldings"
       />
 
@@ -372,6 +373,7 @@ const props = defineProps({
   assetAlerts: { type: Array, default: () => [] },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
+  assetCurrencyAllocation: { type: Array, default: () => [] },
   assetContributors: { type: Object, default: () => ({ top_gainers: [], top_losers: [] }) },
   assetHoldings: { type: Array, default: () => [] },
   assetCashEntries: { type: Array, default: () => [] },

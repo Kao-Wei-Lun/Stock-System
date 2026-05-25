@@ -48,6 +48,7 @@ function buildProps() {
     assetBaseCurrency: "TWD",
     assetSummary: {
       total_asset_value_base: 180000,
+      current_position_cost_base: 120000,
       unrealized_total_base: 12000,
       realized_total_base: 6000,
     },
@@ -175,6 +176,10 @@ function buildProps() {
       { key: "US", value_base: 90000, weight_pct: 50 },
       { key: "TW", value_base: 90000, weight_pct: 50 },
     ],
+    assetCurrencyAllocation: [
+      { key: "TWD", currency: "TWD", value_base: 120000, weight_pct: 66.67 },
+      { key: "USD", currency: "USD", value_base: 60000, weight_pct: 33.33 },
+    ],
     assetContributors: {
       top_gainers: [{ ticker: "AAPL", unrealized_pnl_base: 9000 }],
       top_losers: [{ ticker: "TSM", unrealized_pnl_base: -2000 }],
@@ -270,5 +275,76 @@ describe("AssetOverviewPanel", () => {
 
     const charts = findCharts(wrapper);
     expect(charts[1].props("option").xAxis.data).toEqual(["淨流入", "真實績效", "期末"]);
+  });
+
+  it("prefers API daily NAV change when it is available", () => {
+    const props = buildProps();
+    props.assetPerformanceSummary.daily_nav_change_base = 2500;
+    props.assetPerformanceSummary.daily_nav_change_pct = 1.5;
+    props.assetPerformanceSummary.daily_metric_note = "API daily note";
+
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    const card = wrapper.get('[data-testid="asset-kpi-recent-change"]');
+    expect(card.text()).toContain("+TWD 2,500");
+    expect(card.text()).not.toContain("+TWD 18,000");
+    expect(card.attributes("title")).toBe("API daily note");
+  });
+
+  it("keeps the existing daily NAV fallback when API value is missing", () => {
+    const wrapper = mount(AssetOverviewPanel, {
+      props: buildProps(),
+    });
+
+    expect(wrapper.get('[data-testid="asset-kpi-recent-change"]').text()).toContain("+TWD 18,000");
+  });
+
+  it("shows current position cost without treating zero as empty", () => {
+    const zeroProps = buildProps();
+    zeroProps.assetSummary.current_position_cost_base = 0;
+    const zeroWrapper = mount(AssetOverviewPanel, {
+      props: zeroProps,
+    });
+
+    expect(zeroWrapper.get('[data-testid="asset-performance-summary-current-position-cost"]').text()).toContain("TWD 0");
+
+    const nullProps = buildProps();
+    nullProps.assetSummary.current_position_cost_base = null;
+    const nullWrapper = mount(AssetOverviewPanel, {
+      props: nullProps,
+    });
+
+    expect(nullWrapper.get('[data-testid="asset-performance-summary-current-position-cost"]').text()).toContain("--");
+  });
+
+  it("enables currency allocation while keeping sector allocation disabled", async () => {
+    const wrapper = mount(AssetOverviewPanel, {
+      props: buildProps(),
+    });
+
+    const sectorTab = wrapper.get('[data-testid="asset-allocation-tab-sector"]');
+    const currencyTab = wrapper.get('[data-testid="asset-allocation-tab-currency"]');
+
+    expect(sectorTab.attributes("disabled")).toBeDefined();
+    expect(currencyTab.attributes("disabled")).toBeUndefined();
+
+    await currencyTab.trigger("click");
+
+    expect(wrapper.text()).toContain("TWD");
+    expect(wrapper.text()).toContain("USD");
+  });
+
+  it("shows an empty state when currency allocation is empty", async () => {
+    const props = buildProps();
+    props.assetCurrencyAllocation = [];
+    const wrapper = mount(AssetOverviewPanel, {
+      props,
+    });
+
+    await wrapper.get('[data-testid="asset-allocation-tab-currency"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="asset-allocation-empty"]').text()).toContain("幣別配置");
   });
 });

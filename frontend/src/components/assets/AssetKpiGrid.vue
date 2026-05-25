@@ -14,6 +14,7 @@
         class="asset-kpi-card"
         :class="[card.size, card.tone]"
         :title="card.title || card.helper"
+        :data-testid="`asset-kpi-${card.key}`"
       >
         <div class="asset-kpi-label-row">
           <span>{{ card.label }}</span>
@@ -77,8 +78,25 @@ const totalPnl = computed(() => {
 });
 
 const recentNetValueChange = computed(() => {
+  const apiValue = parseFiniteNumber(props.assetPerformanceSummary?.daily_nav_change_base);
+  if (apiValue != null) return apiValue;
   if (!latestPoint.value || !previousPoint.value) return null;
   return latestPoint.value.total_asset_value_base - previousPoint.value.total_asset_value_base;
+});
+
+const recentNetValueChangePct = computed(() => parseFiniteNumber(props.assetPerformanceSummary?.daily_nav_change_pct));
+
+const recentNetValueChangeTitle = computed(() => (
+  props.assetPerformanceSummary?.daily_metric_note
+  || "由最近兩筆績效快照推估，可能包含入出金、股利、匯率或重算影響。"
+));
+
+const recentNetValueChangeHelper = computed(() => {
+  if (recentNetValueChange.value == null) return "資料不足";
+  if (recentNetValueChangePct.value != null) {
+    return `${formatPercent(recentNetValueChangePct.value)} · 由最近兩筆績效快照推估`;
+  }
+  return "由最近兩筆績效快照推估";
 });
 
 const cashRatio = computed(() => {
@@ -115,8 +133,8 @@ const kpiCards = computed(() => [
     key: "recent-change",
     label: "近一日淨值變化",
     value: recentNetValueChange.value == null ? EMPTY_MARK : formatSignedCurrency(recentNetValueChange.value),
-    helper: recentNetValueChange.value == null ? "資料不足" : "由最近兩筆績效快照推估",
-    title: "由最近兩筆績效快照推估，可能包含入出金、股利、匯率或重算影響。",
+    helper: recentNetValueChangeHelper.value,
+    title: recentNetValueChangeTitle.value,
     tone: toneForValue(recentNetValueChange.value),
     badge: "估算",
   },

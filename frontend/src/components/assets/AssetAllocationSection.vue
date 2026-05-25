@@ -3,7 +3,7 @@
     <div class="asset-card-head">
       <div>
         <div class="asset-card-title">資產配置</div>
-        <div class="bt-trade-sub">帳戶與市場配置；其他維度待資料欄位支援後啟用</div>
+        <div class="bt-trade-sub">帳戶、市場與幣別配置；產業維度待資料欄位支援後啟用</div>
       </div>
       <div class="asset-allocation-tabs">
         <button
@@ -13,6 +13,7 @@
           :class="{ active: allocationTab === tab.key }"
           type="button"
           :disabled="tab.disabled"
+          :data-testid="`asset-allocation-tab-${tab.key}`"
           @click="setAllocationTab(tab)"
         >
           {{ tab.label }}
@@ -64,7 +65,26 @@
       </div>
     </div>
 
-    <div v-else class="asset-allocation-empty">
+    <div v-else-if="allocationTab === 'currency' && normalizedCurrencyAllocation.length" class="asset-donut-card">
+      <DeferredVChart
+        class="asset-chart asset-chart-donut"
+        :option="currencyAllocationChartOption"
+        autoresize
+      />
+      <div class="asset-donut-legend">
+        <div
+          v-for="item in normalizedCurrencyAllocation"
+          :key="item.key"
+          class="asset-donut-legend-item static"
+        >
+          <span class="asset-dot" :style="{ backgroundColor: paletteColorFor(normalizedCurrencyAllocation, item.key) }"></span>
+          <strong>{{ item.key }}</strong>
+          <small>{{ formatPercent(item.weight_pct) }}</small>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="asset-allocation-empty" data-testid="asset-allocation-empty">
       {{ allocationEmptyMessage }}
     </div>
   </section>
@@ -83,6 +103,7 @@ import {
   formatCurrency,
   formatPercent,
   numberOrZero,
+  parseFiniteNumber,
 } from "./assetDashboardFormatters";
 
 use([PieChart, CanvasRenderer, GraphicComponent, TooltipComponent]);
@@ -92,6 +113,7 @@ const props = defineProps({
   assetBaseCurrency: { type: String, default: "TWD" },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
+  assetCurrencyAllocation: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(["focus-holdings"]);
@@ -102,7 +124,7 @@ const allocationTabs = [
   { key: "account", label: "帳戶配置", disabled: false },
   { key: "market", label: "市場配置", disabled: false },
   { key: "sector", label: "產業配置", disabled: true },
-  { key: "currency", label: "幣別配置", disabled: true },
+  { key: "currency", label: "幣別配置", disabled: false },
 ];
 
 const allocationPalette = ["#60a5fa", "#94a3b8", "#f59e0b", "#a78bfa", "#14b8a6", "#64748b", "#f97316"];
@@ -111,8 +133,21 @@ const allocationEmptyMessage = computed(() => ({
   account: "尚無帳戶配置資料。",
   market: "目前沒有可用的市場配置資料。",
   sector: "目前資料尚未提供產業配置，待後續資料欄位支援。",
-  currency: "目前資料尚未提供幣別配置，待後續資料欄位支援。",
+  currency: "目前沒有可用的幣別配置資料。",
 }[allocationTab.value] || "尚無配置資料。"));
+
+const normalizedCurrencyAllocation = computed(() => (
+  (props.assetCurrencyAllocation || [])
+    .map((item) => {
+      const key = String(item?.key || item?.currency || "").trim().toUpperCase();
+      return {
+        ...item,
+        key,
+        currency: key,
+      };
+    })
+    .filter((item) => item.key && parseFiniteNumber(item.value_base) != null)
+));
 
 const accountAllocationChartOption = computed(() => buildDonutChartOption(
   props.assetAccountAllocation,
@@ -124,6 +159,12 @@ const marketAllocationChartOption = computed(() => buildDonutChartOption(
   props.assetMarketAllocation,
   "市場配置",
   formatCurrency(totalAllocationValue(props.assetMarketAllocation), props.assetBaseCurrency),
+));
+
+const currencyAllocationChartOption = computed(() => buildDonutChartOption(
+  normalizedCurrencyAllocation.value,
+  "幣別配置",
+  formatCurrency(totalAllocationValue(normalizedCurrencyAllocation.value), props.assetBaseCurrency),
 ));
 
 function setAllocationTab(tab) {
@@ -175,7 +216,7 @@ function buildDonutChartOption(items, title, subtitle) {
         data: (items || []).map((item, index) => ({
           name: item.key,
           value: numberOrZero(item.value_base),
-          weight_pct: numberOrZero(item.weight_pct),
+          weight_pct: parseFiniteNumber(item.weight_pct),
           itemStyle: { color: allocationPalette[index % allocationPalette.length] },
         })),
       },
@@ -327,6 +368,15 @@ function totalAllocationValue(items) {
 .asset-donut-legend-item:hover {
   border-color: rgba(37, 99, 235, 0.34);
   background: rgba(37, 99, 235, 0.1);
+}
+
+.asset-donut-legend-item.static {
+  cursor: default;
+}
+
+.asset-donut-legend-item.static:hover {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.5);
 }
 
 .asset-donut-legend-item strong {
