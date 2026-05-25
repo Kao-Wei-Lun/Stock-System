@@ -602,6 +602,11 @@ def test_asset_routes_crud_and_summary_snapshot(client, asset_store):
     assert portfolio_payload["reconciliation"]["items"][0]["total_difference"] == 110
     assert portfolio_payload["currency_allocation"][0]["currency"] == "TWD"
     assert "reconciliation_gaps_present" in portfolio_payload["data_quality_flags"]
+    assert "calculation_warnings" in portfolio_payload
+    assert "data_quality_flags" in portfolio_payload
+    assert portfolio_payload["calculation_metadata"]["current_position_cost"]["status"] == "computed"
+    assert portfolio_payload["calculation_metadata"]["currency_allocation"]["status"] == "computed"
+    assert portfolio_payload["data_quality_summary"]["severity"] == "warning"
 
     performance_response = client.get("/api/assets/performance?refresh=false&range=30d")
     assert performance_response.status_code == 200
@@ -611,6 +616,9 @@ def test_asset_routes_crud_and_summary_snapshot(client, asset_store):
     assert "daily_metric_type" in performance_payload["summary"]
     assert "calculation_warnings" in performance_payload
     assert "data_quality_flags" in performance_payload
+    assert "calculation_metadata" in performance_payload
+    assert "data_quality_summary" in performance_payload
+    assert "daily_nav_change" in performance_payload["calculation_metadata"]
 
     delete_reconciliation_response = client.delete(f"/api/assets/reconciliation/{reconciliation_payload['id']}")
     assert delete_reconciliation_response.status_code == 200

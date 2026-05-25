@@ -768,6 +768,145 @@ def _build_performance_quality_metadata(
     return daily_metadata, list(dict.fromkeys(calculation_warnings)), list(dict.fromkeys(data_quality_flags))
 
 
+def _unique_limited_messages(messages: Sequence[str], limit: int = 5) -> List[str]:
+    clean_messages: List[str] = []
+    for message in messages or []:
+        text = str(message or "").strip()
+        if not text or text in clean_messages:
+            continue
+        clean_messages.append(text[:240])
+        if len(clean_messages) >= limit:
+            break
+    return clean_messages
+
+
+def _build_data_quality_summary(
+    calculation_warnings: Sequence[str],
+    data_quality_flags: Sequence[str],
+    user_visible_messages: Sequence[str] | None = None,
+    *,
+    has_estimated_metric: bool = False,
+) -> Dict[str, Any]:
+    warning_flags = {"quote_gaps_present", "reconciliation_gaps_present", "missing_fx_or_price_data"}
+    flags = [str(flag) for flag in list(dict.fromkeys(data_quality_flags or [])) if str(flag or "").strip()]
+    warnings = [str(item) for item in list(dict.fromkeys(calculation_warnings or [])) if str(item or "").strip()]
+    visible_messages = _unique_limited_messages(user_visible_messages or [], limit=5)
+
+    if any(flag in warning_flags for flag in flags):
+        severity = "warning"
+    elif flags or warnings or visible_messages or has_estimated_metric:
+        severity = "info"
+    else:
+        severity = "ok"
+
+    return {
+        "severity": severity,
+        "flag_count": len(flags),
+        "warning_count": len(warnings),
+        "user_visible_messages": visible_messages,
+        "debug_flags": flags,
+    }
+
+
+def _build_portfolio_calculation_metadata(
+    current_position_cost_base: float | None,
+    currency_allocation: Sequence[Dict[str, Any]],
+    data_quality_flags: Sequence[str],
+) -> Dict[str, Any]:
+    currency_status = "computed" if currency_allocation else "empty"
+    if "missing_fx_or_price_data" in set(data_quality_flags or []):
+        currency_status = "unavailable"
+
+    return {
+        "current_position_cost": {
+            "status": "computed" if current_position_cost_base is not None else "unavailable",
+            "method": "sum_holdings_cost_basis_base",
+            "is_estimated": False,
+            "source_fields": ["holdings.cost_basis_base"],
+        },
+        "currency_allocation": {
+            "status": currency_status,
+            "method": "sum_holdings_market_value_and_cash_by_currency",
+            "is_estimated": False,
+            "source_fields": [
+                "holdings.currency",
+                "holdings.market_value_base",
+                "accounts.cash_breakdown.currency",
+                "accounts.cash_breakdown.amount_base",
+            ],
+        },
+    }
+
+
+def _build_portfolio_user_visible_messages(
+    warnings: Sequence[str],
+    quote_gaps: Sequence[Dict[str, Any]],
+    reconciliation: Dict[str, Any],
+    data_quality_flags: Sequence[str],
+) -> List[str]:
+    messages: List[str] = []
+    flags = set(data_quality_flags or [])
+    if quote_gaps or "missing_fx_or_price_data" in flags:
+        messages.append("有多筆持倉缺少有效報價或匯率，估值可能不完整。")
+    reconciliation_gap_count = _safe_int(((reconciliation or {}).get("summary") or {}).get("gap_account_count"), 0) or 0
+    if reconciliation_gap_count > 0:
+        messages.append("有帳戶存在對帳差異，請確認現金或持倉紀錄。")
+    if warnings and not messages:
+        messages.append("部分資產資料需要檢查，請確認資料維護紀錄。")
+    return _unique_limited_messages(messages, limit=5)
+
+
+def _build_daily_nav_calculation_metadata(daily_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    status = (
+        "estimated"
+        if daily_metadata.get("daily_metric_type") == "daily_nav_change"
+        and _safe_float(daily_metadata.get("daily_nav_change_base"), None) is not None
+        else "unavailable"
+    )
+    return {
+        "status": status,
+        "method": "latest_two_snapshots",
+        "is_estimated": True,
+        "source_fields": ["series.total_asset_value_base"],
+        "limitations": [
+            "may_include_cash_flows",
+            "may_include_fx_changes",
+            "may_include_recalculation_effects",
+        ],
+    }
+
+
+def _build_performance_calculation_metadata(daily_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "daily_nav_change": _build_daily_nav_calculation_metadata(daily_metadata),
+    }
+
+
+def _build_performance_user_visible_messages(
+    daily_metadata: Dict[str, Any],
+    calculation_warnings: Sequence[str],
+    data_quality_flags: Sequence[str],
+) -> List[str]:
+    flags = set(data_quality_flags or [])
+    messages: List[str] = []
+
+    if "quote_gaps_present" in flags or "missing_fx_or_price_data" in flags:
+        messages.append("績效區間內有持倉缺少有效報價或匯率，走勢與績效可能不完整。")
+    if "insufficient_performance_series" in flags:
+        messages.append("績效快照不足，無法計算近一日淨值變化。")
+    if "previous_total_asset_zero" in flags:
+        messages.append("前一筆績效快照總資產為 0，無法計算近一日變化百分比。")
+    if (
+        daily_metadata.get("daily_metric_type") == "daily_nav_change"
+        and _safe_float(daily_metadata.get("daily_nav_change_base"), None) is not None
+    ):
+        messages.append(str(daily_metadata.get("daily_metric_note") or "近一日淨值變化由最近兩筆績效快照推估。"))
+    if calculation_warnings and not messages:
+        messages.append("部分績效資料需要檢查，請確認資料維護紀錄。")
+
+    return _unique_limited_messages(messages, limit=5)
+
+
 def _resolve_price_override(
     price_overrides: Sequence[Dict[str, Any]] | None,
     *,
@@ -1026,6 +1165,16 @@ async def build_asset_portfolio_snapshot(
         valued_positions,
         included_account_ids,
     )
+    calculation_metadata = _build_portfolio_calculation_metadata(
+        current_position_cost_base,
+        currency_allocation,
+        data_quality_flags,
+    )
+    data_quality_summary = _build_data_quality_summary(
+        calculation_warnings,
+        data_quality_flags,
+        _build_portfolio_user_visible_messages(warnings, quote_gaps, reconciliation, data_quality_flags),
+    )
 
     return {
         "base_currency": normalized_base_currency,
@@ -1033,6 +1182,8 @@ async def build_asset_portfolio_snapshot(
         "warnings": warnings,
         "calculation_warnings": calculation_warnings,
         "data_quality_flags": data_quality_flags,
+        "calculation_metadata": calculation_metadata,
+        "data_quality_summary": data_quality_summary,
         "quote_gaps": quote_gaps,
         "accounts": sorted(
             [
@@ -1413,12 +1564,21 @@ async def build_asset_performance_report(
 
     if not series:
         daily_metadata, calculation_warnings, data_quality_flags = _build_performance_quality_metadata([], [], [])
+        calculation_metadata = _build_performance_calculation_metadata(daily_metadata)
+        data_quality_summary = _build_data_quality_summary(
+            calculation_warnings,
+            data_quality_flags,
+            _build_performance_user_visible_messages(daily_metadata, calculation_warnings, data_quality_flags),
+            has_estimated_metric=True,
+        )
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "base_currency": _normalize_currency(base_currency),
             "warnings": [],
             "calculation_warnings": calculation_warnings,
             "data_quality_flags": data_quality_flags,
+            "calculation_metadata": calculation_metadata,
+            "data_quality_summary": data_quality_summary,
             "quote_gaps": [],
             "summary": {
                 "start_value_base": 0.0,
@@ -1492,6 +1652,13 @@ async def build_asset_performance_report(
         end_warnings,
         end_quote_gaps,
     )
+    calculation_metadata = _build_performance_calculation_metadata(daily_metadata)
+    data_quality_summary = _build_data_quality_summary(
+        calculation_warnings,
+        data_quality_flags,
+        _build_performance_user_visible_messages(daily_metadata, calculation_warnings, data_quality_flags),
+        has_estimated_metric=bool(calculation_metadata["daily_nav_change"]["is_estimated"]),
+    )
 
     monthly_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for point in series:
@@ -1528,6 +1695,8 @@ async def build_asset_performance_report(
         "warnings": end_warnings,
         "calculation_warnings": calculation_warnings,
         "data_quality_flags": data_quality_flags,
+        "calculation_metadata": calculation_metadata,
+        "data_quality_summary": data_quality_summary,
         "quote_gaps": end_quote_gaps,
         "summary": {
             "start_value_base": round(start_value_base, 6),

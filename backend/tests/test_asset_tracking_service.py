@@ -132,6 +132,9 @@ def test_build_asset_portfolio_snapshot_derives_holdings_and_respects_include_in
     assert snapshot["summary"]["reconciliation_gap_count"] == 1
     assert snapshot["summary"]["reconciliation_difference_total_base"] == 110
     assert "reconciliation_gaps_present" in snapshot["data_quality_flags"]
+    assert snapshot["data_quality_summary"]["severity"] == "warning"
+    assert "reconciliation_gaps_present" in snapshot["data_quality_summary"]["debug_flags"]
+    assert snapshot["data_quality_summary"]["user_visible_messages"]
     assert snapshot["holdings"][0]["ticker"] == "2330.TW"
     assert snapshot["holdings"][0]["market_value_base"] == 1200
     assert snapshot["holdings"][0]["unrealized_pnl_base"] == 190
@@ -159,6 +162,8 @@ def test_build_asset_portfolio_snapshot_returns_zero_position_cost_without_holdi
 
     assert snapshot["summary"]["current_position_cost_base"] == 0
     assert snapshot["currency_allocation"] == []
+    assert snapshot["calculation_metadata"]["current_position_cost"]["status"] == "computed"
+    assert snapshot["calculation_metadata"]["currency_allocation"]["status"] == "empty"
 
 
 def test_build_asset_portfolio_snapshot_groups_currency_allocation_from_cash_and_holdings():
@@ -246,6 +251,7 @@ def test_build_asset_portfolio_snapshot_groups_currency_allocation_from_cash_and
 
     assert snapshot["summary"]["total_asset_value_base"] == 134650
     assert snapshot["summary"]["current_position_cost_base"] == 31500
+    assert snapshot["calculation_metadata"]["currency_allocation"]["status"] == "computed"
     allocation_by_currency = {item["currency"]: item for item in snapshot["currency_allocation"]}
     assert allocation_by_currency["TWD"]["value_base"] == 100000
     assert allocation_by_currency["TWD"]["weight_pct"] == 74.2666
@@ -300,6 +306,9 @@ def test_build_asset_portfolio_snapshot_marks_quote_gap_quality_flags():
     assert "quote_gaps_present" in snapshot["data_quality_flags"]
     assert "missing_fx_or_price_data" in snapshot["data_quality_flags"]
     assert snapshot["calculation_warnings"]
+    assert snapshot["data_quality_summary"]["severity"] == "warning"
+    assert "quote_gaps_present" in snapshot["data_quality_summary"]["debug_flags"]
+    assert snapshot["data_quality_summary"]["user_visible_messages"]
 
 
 def test_build_asset_portfolio_snapshot_applies_manual_override_fx_rates_and_splits():
@@ -406,6 +415,12 @@ def test_build_asset_portfolio_snapshot_applies_manual_override_fx_rates_and_spl
     assert snapshot["summary"]["total_asset_value_base"] == 352800
     assert snapshot["summary"]["manual_override_count"] == 1
     assert snapshot["summary"]["quote_gap_count"] == 0
+    assert snapshot["calculation_metadata"]["current_position_cost"]["status"] == "computed"
+    assert snapshot["calculation_metadata"]["current_position_cost"]["is_estimated"] is False
+    assert snapshot["calculation_metadata"]["currency_allocation"]["status"] == "computed"
+    assert snapshot["data_quality_summary"]["severity"] == "ok"
+    assert snapshot["calculation_warnings"] == []
+    assert snapshot["data_quality_flags"] == []
     assert snapshot["holdings"][0]["ticker"] == "AAPL"
     assert snapshot["holdings"][0]["quantity"] == 20
     assert snapshot["holdings"][0]["quote_source"] == "manual_override"
@@ -598,6 +613,11 @@ def test_build_asset_performance_report_and_alerts_use_start_day_baseline_correc
     assert report["summary"]["daily_nav_change_base"] == -24000
     assert report["summary"]["daily_nav_change_pct"] == -22.0183
     assert report["summary"]["daily_metric_type"] == "daily_nav_change"
+    assert report["calculation_metadata"]["daily_nav_change"]["status"] == "estimated"
+    assert report["calculation_metadata"]["daily_nav_change"]["method"] == "latest_two_snapshots"
+    assert report["calculation_metadata"]["daily_nav_change"]["is_estimated"] is True
+    assert report["data_quality_summary"]["severity"] == "info"
+    assert report["data_quality_summary"]["user_visible_messages"]
     assert report["summary"]["realized_end_base"] == 3000
     assert report["summary"]["unrealized_end_base"] == -18000
     assert report["summary"]["max_drawdown_pct"] == -22.0183
@@ -679,6 +699,39 @@ def test_build_asset_performance_report_handles_previous_zero_daily_percentage()
     assert report["summary"]["daily_metric_type"] == "daily_nav_change"
     assert "previous_total_asset_zero" in report["data_quality_flags"]
     assert report["calculation_warnings"]
+    assert report["data_quality_summary"]["severity"] == "info"
+    assert "previous_total_asset_zero" in report["data_quality_summary"]["debug_flags"]
+
+
+def test_build_asset_performance_report_marks_daily_nav_unavailable_with_one_snapshot():
+    accounts = [
+        {
+            "id": 1,
+            "name": "Main Broker",
+            "account_type": "brokerage",
+            "base_currency": "TWD",
+            "include_in_total": True,
+            "sort_order": 0,
+        }
+    ]
+
+    report = asyncio.run(
+        build_asset_performance_report(
+            accounts,
+            [],
+            [],
+            start_at="2026-04-18T00:00:00",
+            end_at="2026-04-18T23:59:59",
+        )
+    )
+
+    assert len(report["series"]) == 1
+    assert report["summary"]["daily_nav_change_base"] is None
+    assert report["summary"]["daily_metric_type"] == "unavailable"
+    assert report["calculation_metadata"]["daily_nav_change"]["status"] == "unavailable"
+    assert report["calculation_metadata"]["daily_nav_change"]["is_estimated"] is True
+    assert "insufficient_performance_series" in report["data_quality_flags"]
+    assert report["data_quality_summary"]["severity"] == "info"
 
 
 def test_build_asset_performance_report_treats_initial_balances_as_baseline():
