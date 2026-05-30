@@ -321,6 +321,11 @@ class FubonRealtimeSubscriptionPool:
 
     async def refresh_session_assignments(self) -> None:
         """Re-subscribe futures/options streams when TAIFEX switches day/night sessions."""
+        if self._db is not None and self._managers and not any(manager.connected for manager in self._managers.values()):
+            log.warning("All Fubon websocket managers are disconnected; reloading enabled accounts")
+            await self.reload_from_db(self._db)
+            return
+
         desired_after_hours = is_futopt_after_hours()
         stale_tickers = [
             ticker

@@ -10,6 +10,35 @@ from typing import Any, Callable, Dict, Optional
 log = logging.getLogger(__name__)
 
 
+class FubonMarketdataAuthenticationError(RuntimeError):
+    """Raised when Fubon/Fugle marketdata credentials remain invalid after retry."""
+
+
+def _is_marketdata_auth_error(exc: Exception) -> bool:
+    status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status", None) or getattr(response, "status_code", None)
+    text = " ".join(
+        str(part or "")
+        for part in (
+            exc,
+            status,
+            response_status,
+            getattr(exc, "message", None),
+            getattr(exc, "error", None),
+        )
+    ).lower()
+    return (
+        status == 401
+        or response_status == 401
+        or "status: 401" in text
+        or "statuscode\":401" in text.replace(" ", "")
+        or "token expired" in text
+        or "invalid authentication credentials" in text
+        or "unauthorized" in text
+    )
+
+
 def _normalize_futopt_session(session: str | None) -> Optional[str]:
     raw = str(session or "").strip().lower()
     if raw in {"afterhours", "night", "night_session"}:
@@ -399,6 +428,75 @@ class FubonSDKManager:
             self.start_ws_futopt()
             return bool(self.connected and self._sdk and self._active_futopt_account is not None)
 
+    async def _recover_marketdata_session(
+        self,
+        exc: Exception,
+        *,
+        require_futopt: bool = False,
+    ) -> bool:
+        if self._shutting_down or not _is_marketdata_auth_error(exc):
+            return False
+
+        old_subscriptions = dict(self._subscription_payloads)
+        self.connected = False
+
+        async with self._reinit_lock:
+            from database import db as _db
+            from repositories.fubon_accounts import FubonAccountRepository
+
+            repo = FubonAccountRepository(_db)
+            account = await repo.get_active_account()
+            if not account:
+                log.warning("Fubon marketdata authentication failed and no active account is configured")
+                return False
+
+            log.warning(
+                "Fubon marketdata authentication failed; reinitializing active account %s",
+                account.get("label") or account.get("id"),
+            )
+            success = await self._init_with_account(account, repo)
+            if not success:
+                return False
+
+            self.start_ws_stock()
+            self.start_ws_futopt()
+            self._restore_ws_subscriptions(old_subscriptions)
+            return self._has_marketdata_ready(require_futopt=require_futopt)
+
+    async def _call_marketdata_rest(
+        self,
+        client_getter: Callable[[], Any],
+        request: Callable[[Any], Any],
+        *,
+        require_futopt: bool = False,
+        operation: str = "marketdata request",
+    ) -> Optional[dict]:
+        last_auth_error: Exception | None = None
+        for attempt in range(2):
+            await self.ensure_marketdata_ready(require_futopt=require_futopt)
+            client = client_getter()
+            if not client:
+                return None
+
+            try:
+                return await asyncio.to_thread(lambda: request(client))
+            except Exception as exc:
+                if not _is_marketdata_auth_error(exc):
+                    raise
+
+                last_auth_error = exc
+                if attempt == 0 and await self._recover_marketdata_session(exc, require_futopt=require_futopt):
+                    continue
+                raise FubonMarketdataAuthenticationError(
+                    f"Fubon {operation} failed because marketdata authentication is invalid or expired"
+                ) from exc
+
+        if last_auth_error:
+            raise FubonMarketdataAuthenticationError(
+                f"Fubon {operation} failed because marketdata authentication is invalid or expired"
+            ) from last_auth_error
+        return None
+
     def _has_marketdata_ready(self, *, require_futopt: bool = False) -> bool:
         if not self.connected:
             return False
@@ -444,19 +542,14 @@ class FubonSDKManager:
         return await asyncio.to_thread(_query_sync)
 
     async def fetch_stock_quote(self, symbol: str) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             intraday = getattr(rest_stock, "intraday", None)
             quote = getattr(intraday, "quote", None)
             if not callable(quote):
                 return None
             return quote(symbol=symbol)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(self.get_rest_stock, _fetch_sync, operation="stock quote")
 
     async def fetch_stock_intraday_candles(
         self,
@@ -465,12 +558,7 @@ class FubonSDKManager:
         timeframe: str | None = None,
         sort: str | None = None,
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             intraday = getattr(rest_stock, "intraday", None)
             candles = getattr(intraday, "candles", None)
             if not callable(candles):
@@ -482,7 +570,11 @@ class FubonSDKManager:
                 kwargs["sort"] = str(sort)
             return candles(**kwargs)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_stock,
+            _fetch_sync,
+            operation="stock intraday candles",
+        )
 
     async def fetch_stock_historical_candles(
         self,
@@ -494,12 +586,7 @@ class FubonSDKManager:
         adjusted: bool | None = None,
         sort: str | None = None,
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             historical = getattr(rest_stock, "historical", None) or getattr(rest_stock, "history", None)
             candles = getattr(historical, "candles", None)
             if not callable(candles):
@@ -517,26 +604,25 @@ class FubonSDKManager:
                 kwargs["sort"] = str(sort)
             return candles(**kwargs)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_stock,
+            _fetch_sync,
+            operation="stock historical candles",
+        )
 
     async def fetch_stock_snapshot_quotes(
         self,
         *,
         market: str = "TSE",
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             snapshot = getattr(rest_stock, "snapshot", None)
             quotes = getattr(snapshot, "quotes", None)
             if not callable(quotes):
                 return None
             return quotes(market=market)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(self.get_rest_stock, _fetch_sync, operation="stock snapshot quotes")
 
     async def fetch_stock_snapshot_movers(
         self,
@@ -545,19 +631,14 @@ class FubonSDKManager:
         direction: str = "up",
         change: str = "percent",
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             snapshot = getattr(rest_stock, "snapshot", None)
             movers = getattr(snapshot, "movers", None)
             if not callable(movers):
                 return None
             return movers(market=market, direction=direction, change=change)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(self.get_rest_stock, _fetch_sync, operation="stock snapshot movers")
 
     async def fetch_stock_snapshot_actives(
         self,
@@ -565,19 +646,14 @@ class FubonSDKManager:
         market: str = "TSE",
         trade: str = "value",
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready()
-        rest_stock = self.get_rest_stock()
-        if not rest_stock:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_stock):
             snapshot = getattr(rest_stock, "snapshot", None)
             actives = getattr(snapshot, "actives", None)
             if not callable(actives):
                 return None
             return actives(market=market, trade=trade)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(self.get_rest_stock, _fetch_sync, operation="stock snapshot actives")
 
     async def fetch_futopt_products(
         self,
@@ -587,12 +663,7 @@ class FubonSDKManager:
         session: str = "REGULAR",
         contractType: str = "I",
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready(require_futopt=True)
-        rest_futopt = self.get_rest_futopt()
-        if not rest_futopt:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_futopt):
             intraday = getattr(rest_futopt, "intraday", None)
             products = getattr(intraday, "products", None)
             if not callable(products):
@@ -604,7 +675,12 @@ class FubonSDKManager:
                 contractType=contractType,
             )
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_futopt,
+            _fetch_sync,
+            require_futopt=True,
+            operation="futopt products",
+        )
 
     async def fetch_futopt_quote(
         self,
@@ -612,12 +688,7 @@ class FubonSDKManager:
         *,
         session: str | None = None,
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready(require_futopt=True)
-        rest_futopt = self.get_rest_futopt()
-        if not rest_futopt:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_futopt):
             intraday = getattr(rest_futopt, "intraday", None)
             quote = getattr(intraday, "quote", None)
             if not callable(quote):
@@ -628,7 +699,12 @@ class FubonSDKManager:
                 kwargs["session"] = normalized_session
             return quote(**kwargs)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_futopt,
+            _fetch_sync,
+            require_futopt=True,
+            operation="futopt quote",
+        )
 
     async def fetch_futopt_tickers(
         self,
@@ -639,12 +715,7 @@ class FubonSDKManager:
         contractType: str = "I",
         product: str | None = None,
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready(require_futopt=True)
-        rest_futopt = self.get_rest_futopt()
-        if not rest_futopt:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_futopt):
             intraday = getattr(rest_futopt, "intraday", None)
             tickers = getattr(intraday, "tickers", None)
             if not callable(tickers):
@@ -659,7 +730,12 @@ class FubonSDKManager:
                 kwargs["product"] = str(product)
             return tickers(**kwargs)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_futopt,
+            _fetch_sync,
+            require_futopt=True,
+            operation="futopt tickers",
+        )
 
     async def fetch_futopt_intraday_candles(
         self,
@@ -668,12 +744,7 @@ class FubonSDKManager:
         timeframe: str | None = None,
         session: str | None = None,
     ) -> Optional[dict]:
-        await self.ensure_marketdata_ready(require_futopt=True)
-        rest_futopt = self.get_rest_futopt()
-        if not rest_futopt:
-            return None
-
-        def _fetch_sync():
+        def _fetch_sync(rest_futopt):
             intraday = getattr(rest_futopt, "intraday", None)
             candles = getattr(intraday, "candles", None)
             if not callable(candles):
@@ -686,7 +757,12 @@ class FubonSDKManager:
                 kwargs["session"] = normalized_session
             return candles(**kwargs)
 
-        return await asyncio.to_thread(_fetch_sync)
+        return await self._call_marketdata_rest(
+            self.get_rest_futopt,
+            _fetch_sync,
+            require_futopt=True,
+            operation="futopt intraday candles",
+        )
 
     def shutdown(self) -> None:
         self._shutting_down = True
@@ -785,6 +861,10 @@ class FubonSDKManager:
         if self._shutting_down:
             return
         log.warning("Fubon %s websocket error: %s", market_type, args or "unknown")
+        if any(_is_marketdata_auth_error(arg) for arg in args if isinstance(arg, Exception) or arg is not None):
+            self._invalidate_marketdata_session(
+                f"Fubon {market_type} websocket authentication failed: {args or 'unknown'}"
+            )
 
     def _reconnect_ws_target(self, market_type: str) -> None:
         if not self.connected:
@@ -846,6 +926,17 @@ class FubonSDKManager:
                 timer.cancel()
             except Exception:
                 pass
+
+    def _invalidate_marketdata_session(self, reason: str) -> None:
+        if self._shutting_down:
+            return
+        log.warning("%s; marking Fubon marketdata session for reinitialization", reason)
+        self.connected = False
+        self._ws_started_targets.clear()
+        self._attached_targets.clear()
+        self._cancel_all_reconnect_timers()
+        self._best_effort_shutdown(self._ws_stock)
+        self._best_effort_shutdown(self._ws_futopt)
 
     def _restore_ws_subscriptions(self, payloads: Dict[str, dict]) -> None:
         for key, payload in payloads.items():

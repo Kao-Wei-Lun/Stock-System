@@ -8,6 +8,7 @@ from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
 from futopt_history_service import sync_futopt_intraday_ohlc
+from fubon_provider import FubonMarketdataAuthenticationError
 from fubon_symbols import looks_like_futopt_search_query
 from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
 from schemas import QuoteResponse
@@ -232,6 +233,8 @@ async def get_fubon_snapshot(
         payload = await fubon_market_snapshot_provider.fetch_snapshot(market, refresh=refresh)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FubonMarketdataAuthenticationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not payload:
         raise HTTPException(404, "Unable to fetch Fubon market snapshot")
     return payload
@@ -255,6 +258,8 @@ async def get_fubon_movers(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FubonMarketdataAuthenticationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not payload:
         raise HTTPException(404, "Unable to fetch Fubon movers")
     return payload
@@ -276,6 +281,8 @@ async def get_fubon_actives(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FubonMarketdataAuthenticationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not payload:
         raise HTTPException(404, "Unable to fetch Fubon actives")
     return payload

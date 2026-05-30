@@ -1,4 +1,5 @@
 import main
+from fubon_provider import FubonMarketdataAuthenticationError
 
 
 def test_fubon_snapshot_route_returns_provider_payload(client, monkeypatch):
@@ -62,3 +63,15 @@ def test_fubon_snapshot_route_rejects_invalid_market(client, monkeypatch):
 
     assert response.status_code == 400
     assert "Unsupported market" in response.json()["detail"]
+
+
+def test_fubon_snapshot_route_returns_503_for_authentication_error(client, monkeypatch):
+    async def fake_fetch_snapshot(_market, *, refresh=False):
+        raise FubonMarketdataAuthenticationError("Fubon marketdata authentication is invalid or expired")
+
+    monkeypatch.setattr(main.market_data.fubon_market_snapshot_provider, "fetch_snapshot", fake_fetch_snapshot)
+
+    response = client.get("/api/fubon/snapshot/TSE")
+
+    assert response.status_code == 503
+    assert "authentication" in response.json()["detail"]

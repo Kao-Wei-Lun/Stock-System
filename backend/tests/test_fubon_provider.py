@@ -4,7 +4,7 @@ import pytest
 import fubon_provider
 import repositories.fubon_accounts as fubon_accounts_repo
 
-from fubon_provider import FubonSDKManager
+from fubon_provider import FubonMarketdataAuthenticationError, FubonSDKManager
 
 
 class FakeSDK:
@@ -316,6 +316,26 @@ class FakeSnapshotApi:
         return {"market": kwargs["market"], "trade": kwargs["trade"], "data": []}
 
 
+class FakeAuthExpiredError(Exception):
+    status_code = 401
+
+    def __str__(self):
+        return "[Fugle API Error] Token expired Status: 401"
+
+
+class FakeAuthOnceSnapshotApi(FakeSnapshotApi):
+    def __init__(self):
+        super().__init__()
+        self.failed = False
+
+    def quotes(self, **kwargs):
+        self.calls.append(("quotes", kwargs))
+        if not self.failed:
+            self.failed = True
+            raise FakeAuthExpiredError()
+        return {"market": kwargs["market"], "data": []}
+
+
 class FakeRestStock:
     def __init__(self, snapshot):
         self.snapshot = snapshot
@@ -447,6 +467,64 @@ def test_fetch_stock_snapshot_quotes_self_heals_missing_rest_client(monkeypatch)
 
     assert payload["market"] == "TSE"
     assert snapshot.calls == [("quotes", {"market": "TSE"})]
+
+
+def test_fetch_stock_snapshot_quotes_reinitializes_after_expired_token(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    snapshot = FakeAuthOnceSnapshotApi()
+    calls = []
+
+    manager.get_rest_stock = lambda: FakeRestStock(snapshot)
+    manager.start_ws_stock = lambda: calls.append("start_ws_stock") or True
+    manager.start_ws_futopt = lambda: calls.append("start_ws_futopt") or True
+
+    fake_repo = FakeRepo({"id": 2, "label": "Kao"})
+
+    monkeypatch.setattr(database, "db", object())
+    monkeypatch.setattr(fubon_accounts_repo, "FubonAccountRepository", lambda _db: fake_repo)
+
+    async def fake_init_with_account(account, repo=None):
+        calls.append(("init", account["id"], repo is fake_repo))
+        manager.connected = True
+        return True
+
+    monkeypatch.setattr(manager, "_init_with_account", fake_init_with_account)
+
+    payload = asyncio.run(manager.fetch_stock_snapshot_quotes(market="TSE"))
+
+    assert payload["market"] == "TSE"
+    assert snapshot.calls == [
+        ("quotes", {"market": "TSE"}),
+        ("quotes", {"market": "TSE"}),
+    ]
+    assert calls == [
+        ("init", 2, True),
+        "start_ws_stock",
+        "start_ws_futopt",
+    ]
+
+
+def test_fetch_stock_snapshot_quotes_reports_auth_error_after_failed_reinit(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    snapshot = FakeAuthOnceSnapshotApi()
+
+    manager.get_rest_stock = lambda: FakeRestStock(snapshot)
+
+    fake_repo = FakeRepo({"id": 2, "label": "Kao"})
+
+    monkeypatch.setattr(database, "db", object())
+    monkeypatch.setattr(fubon_accounts_repo, "FubonAccountRepository", lambda _db: fake_repo)
+
+    async def fake_init_with_account(account, repo=None):
+        manager.connected = False
+        return False
+
+    monkeypatch.setattr(manager, "_init_with_account", fake_init_with_account)
+
+    with pytest.raises(FubonMarketdataAuthenticationError):
+        asyncio.run(manager.fetch_stock_snapshot_quotes(market="TSE"))
 
 
 def test_fetch_futopt_requests_omit_regular_session_and_keep_afterhours():
