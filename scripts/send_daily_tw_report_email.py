@@ -39,6 +39,7 @@ from email_delivery import (
     smtp_failure_message as _shared_smtp_failure_message,
     socket_probe as _shared_socket_probe,
 )
+from report_validation import validate_daily_tw_report_sections
 
 
 def _configure_console_encoding() -> None:
@@ -513,6 +514,8 @@ def main() -> int:
         print(f"Codex context should be available at: {PROJECT_ROOT / 'log' / f'codex_report_context_{report_date}.json'}")
         print(f"Codex analysis target path: {PROJECT_ROOT / 'log' / f'codex_ai_analysis_{report_date}.md'}")
         return 0
+
+    validate_daily_tw_report_sections(report)
 
     subject = args.subject or f"台股每日盤後 AI 交易策略報告｜{report_date}"
     if reuse_note:

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import email_delivery
+from report_validation import validate_daily_tw_report_sections
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -95,6 +96,11 @@ async def send_daily_tw_report_email(
         raise HTTPException(status_code=404, detail=f"HTML report not found: {html_path}")
 
     markdown_text = md_path.read_text(encoding="utf-8")
+    try:
+        validate_daily_tw_report_sections(markdown_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     html_text = html_path.read_text(encoding="utf-8")
     subject = payload.subject or f"台股每日盤後 AI 交易策略報告｜{payload.report_date}"
     try:

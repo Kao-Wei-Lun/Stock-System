@@ -14,6 +14,29 @@ for path in (str(PROJECT_ROOT), str(SCRIPTS_DIR)):
 from scripts import send_daily_tw_report_email as report_email  # noqa: E402
 
 
+def _complete_report(report_date: str = "2026-05-18") -> str:
+    sections = [
+        "API/資料池檢查",
+        "今日結論",
+        "Codex/AI 綜合分析",
+        "法人偏多個股與 ETF 分類",
+        "強勢股",
+        "多頭股",
+        "持續沿5日均線上漲的個股",
+        "近5日訊號驗證",
+        "訊號後績效驗證",
+        "可能轉強族群",
+        "個股潛伏起漲候選",
+        "ETF/基金/REIT 候選",
+        "新聞與事件雷達",
+        "隔日三情境交易策略",
+    ]
+    lines = [f"# 台股每日盤後 AI 交易策略報告｜{report_date}", ""]
+    for section in sections:
+        lines.extend([f"## {section}", "| 欄位 | 值 |", "|---|---|", "| 風險 | 觀察清單，不是買賣建議 |", ""])
+    return "\n".join(lines)
+
+
 def test_report_from_context_preview_preserves_priority_table_after_ai_section(tmp_path, monkeypatch):
     monkeypatch.setattr(report_email, "PROJECT_ROOT", tmp_path)
     log_dir = tmp_path / "log"
@@ -58,7 +81,7 @@ def test_main_backend_send_mode_writes_report_before_calling_api(tmp_path, monke
     monkeypatch.setattr(
         report_email,
         "build_report",
-        lambda *, base_url, report_date: f"# 每日盤後 AI 交易策略報告（台股）｜{report_date}\n\n| 欄位 | 值 |\n|---|---|\n| 風險 | 觀察清單，不是買賣建議 |\n",
+        lambda *, base_url, report_date: _complete_report(report_date),
     )
     monkeypatch.setattr(
         report_email,
@@ -113,3 +136,37 @@ def test_main_backend_send_mode_writes_report_before_calling_api(tmp_path, monke
             "subject": "台股每日盤後 AI 交易策略報告｜2026-05-18",
         }
     ]
+
+
+def test_main_backend_send_mode_rejects_incomplete_report_before_api_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(report_email, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(report_email, "check_api", lambda _base: SimpleNamespace(ok=True, error=None))
+    monkeypatch.setattr(report_email, "build_report", lambda *, base_url, report_date: "# Report\n\n## 今日結論\n缺章節\n")
+
+    def fail_send(**_kwargs):
+        raise AssertionError("backend email API should not be called for incomplete reports")
+
+    monkeypatch.setattr(report_email, "_send_via_backend_email_api", fail_send)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "send_daily_tw_report_email.py",
+            "--date",
+            "2026-05-18",
+            "--base",
+            "http://localhost:8001",
+            "--to",
+            "alpha@example.com",
+            "--skip-data-ready-wait",
+            "--send-mode",
+            "backend",
+        ],
+    )
+
+    try:
+        report_email.main()
+    except ValueError as exc:
+        assert "missing required sections" in str(exc)
+    else:
+        raise AssertionError("Expected incomplete report validation to fail")

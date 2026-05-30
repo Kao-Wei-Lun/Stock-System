@@ -23,6 +23,29 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _complete_report(report_date: str = "2026-05-18") -> str:
+    sections = [
+        "API/資料池檢查",
+        "今日結論",
+        "Codex/AI 綜合分析",
+        "法人偏多個股與 ETF 分類",
+        "強勢股",
+        "多頭股",
+        "持續沿5日均線上漲的個股",
+        "近5日訊號驗證",
+        "訊號後績效驗證",
+        "可能轉強族群",
+        "個股潛伏起漲候選",
+        "ETF/基金/REIT 候選",
+        "新聞與事件雷達",
+        "隔日三情境交易策略",
+    ]
+    lines = [f"# 台股每日盤後 AI 交易策略報告｜{report_date}", ""]
+    for section in sections:
+        lines.extend([f"## {section}", "| 欄位 | 值 |", "|---|---|", "| 風險 | 觀察清單，不是買賣建議 |", ""])
+    return "\n".join(lines)
+
+
 def test_daily_tw_report_email_endpoint_sends_existing_report(tmp_path, monkeypatch):
     monkeypatch.setenv("REPORT_EMAIL_API_TOKEN", "secret")
     monkeypatch.setenv("REPORT_EMAIL_ALLOWED_TO", "alpha@example.com,beta@example.com")
@@ -30,7 +53,7 @@ def test_daily_tw_report_email_endpoint_sends_existing_report(tmp_path, monkeypa
 
     log_dir = tmp_path / "log"
     log_dir.mkdir()
-    (log_dir / "ai_daily_tw_report_2026-05-18.md").write_text("# Report\n\n觀察清單，不是買賣建議。\n", encoding="utf-8")
+    (log_dir / "ai_daily_tw_report_2026-05-18.md").write_text(_complete_report(), encoding="utf-8")
     (log_dir / "ai_daily_tw_report_2026-05-18.html").write_text(
         '<html><body><table style="border:1px solid #999"><tr><td>Report</td></tr></table></body></html>',
         encoding="utf-8",
@@ -99,3 +122,28 @@ def test_daily_tw_report_email_endpoint_reports_missing_files(tmp_path, monkeypa
 
     assert response.status_code == 404
     assert "Markdown report not found" in response.json()["detail"]
+
+
+def test_daily_tw_report_email_endpoint_rejects_incomplete_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("REPORT_EMAIL_API_TOKEN", "secret")
+    monkeypatch.setenv("REPORT_EMAIL_ALLOWED_TO", "alpha@example.com")
+    monkeypatch.setattr(reports, "PROJECT_ROOT", tmp_path)
+
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    (log_dir / "ai_daily_tw_report_2026-05-18.md").write_text("# Report\n\n## 今日結論\n缺章節\n", encoding="utf-8")
+    (log_dir / "ai_daily_tw_report_2026-05-18.html").write_text("<html><body>Report</body></html>", encoding="utf-8")
+
+    def fail_send_email(**_kwargs):
+        raise AssertionError("SMTP should not be called for incomplete reports")
+
+    monkeypatch.setattr(reports.email_delivery, "send_email", fail_send_email)
+
+    response = _client().post(
+        "/api/reports/daily-tw/email",
+        headers={"X-Report-Email-Token": "secret"},
+        json={"report_date": "2026-05-18", "to": ["alpha@example.com"]},
+    )
+
+    assert response.status_code == 422
+    assert "missing required sections" in response.json()["detail"]
