@@ -39,8 +39,21 @@ def _prime_long_trend(strategy: IndicatorComboStrategyEngine) -> None:
 
 
 def test_indicator_strategy_presets_resolve_current_candidates() -> None:
+    auto = StrategyConfig.from_dict({"strategy_type": "tmf_auto_kd_psar_5m"})
     pullback = StrategyConfig.from_dict({"strategy_type": "tmf_pullback_breakout"})
     psar = StrategyConfig.from_dict({"strategy_type": "tmf_psar_flip"})
+
+    assert auto.to_dict()["indicator_entry_timeframe_minutes"] == 5
+    assert auto.to_dict()["indicator_trend_timeframe_minutes"] == 5
+    assert auto.to_dict()["indicator_entry_type"] == "kd_momentum"
+    assert auto.to_dict()["indicator_longs_enabled"] is True
+    assert auto.to_dict()["indicator_shorts_enabled"] is False
+    assert auto.to_dict()["indicator_kd_long_max"] == 70.0
+    assert auto.to_dict()["indicator_atr_stop_mult"] == 2.0
+    assert auto.to_dict()["indicator_atr_target_mult"] == 1.0
+    assert auto.to_dict()["indicator_trend_hist_min"] == 5.0
+    assert auto.to_dict()["indicator_require_psar_entry"] is True
+    assert auto.to_dict()["indicator_min_hold_bars"] == 5
 
     assert pullback.to_dict()["indicator_entry_timeframe_minutes"] == 1
     assert pullback.to_dict()["indicator_trend_timeframe_minutes"] == 5
@@ -56,6 +69,14 @@ def test_indicator_strategy_presets_resolve_current_candidates() -> None:
     assert psar.to_dict()["indicator_kd_short_min"] == 25.0
     assert psar.to_dict()["indicator_atr_stop_mult"] == 1.2
     assert psar.to_dict()["indicator_atr_target_mult"] == 2.0
+
+
+def test_auto_kd_psar_strategy_type_routes_to_indicator_engine() -> None:
+    config = StrategyConfig.from_dict({"strategy_type": "tmf_auto_kd_psar_5m"})
+    bot = PaperTradingBot(bot_id=1, strategy_config=config)
+
+    assert isinstance(bot.strategy, IndicatorComboStrategyEngine)
+    assert bot.strategy.config.strategy_type == "tmf_auto_kd_psar_5m"
 
 
 def test_tmf_kd_macd_ma_bot_strategy_types_route_to_dedicated_engine() -> None:

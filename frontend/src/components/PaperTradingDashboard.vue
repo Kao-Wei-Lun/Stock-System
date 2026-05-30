@@ -180,6 +180,7 @@
           <div class="pt-field">
             <label>策略引擎</label>
             <select v-model="botStrategyForm.strategy_type">
+              <option value="tmf_auto_kd_psar_5m">TMF Auto: 5m KD/PSAR momentum</option>
               <option value="tmf_pullback_breakout">TMF C: 1m pullback breakout</option>
               <option value="tmf_psar_flip">TMF PSAR: 3m flip confirmation</option>
               <option value="tmf_kd_macd_ma_v14">TMF KD/MACD/MA v1.4</option>
@@ -490,6 +491,7 @@
           <div class="pt-field">
             <label>回放策略引擎</label>
             <select v-model="replayStrategyForm.strategy_type">
+              <option value="tmf_auto_kd_psar_5m">TMF Auto: 5m KD/PSAR momentum</option>
               <option value="tmf_pullback_breakout">TMF C: 1m pullback breakout</option>
               <option value="tmf_psar_flip">TMF PSAR: 3m flip confirmation</option>
               <option value="tmf_kd_macd_ma_v14">TMF KD/MACD/MA v1.4</option>
@@ -880,6 +882,7 @@ function buildRiskSizingPayload() {
 
 function riskSizingStopLossPoints(form) {
   const indicatorStops = {
+    tmf_auto_kd_psar_5m: 160,
     tmf_pullback_breakout: 80,
     tmf_psar_flip: 120,
     tmf_kd_macd_ma_v14: 80,
@@ -923,6 +926,7 @@ function strategyVariantLabel(value) {
 function strategyTypeLabel(value) {
   return {
     v1: "V1 fixed points",
+    tmf_auto_kd_psar_5m: "TMF Auto: 5m KD/PSAR momentum",
     tmf_pullback_breakout: "TMF C: 1m pullback breakout",
     tmf_psar_flip: "TMF PSAR: 3m flip confirmation",
     tmf_kd_macd_ma_v14: "TMF KD/MACD/MA v1.4",

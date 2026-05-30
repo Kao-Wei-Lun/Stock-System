@@ -123,6 +123,7 @@ V2_STRATEGY_VARIANT_PRESETS = {
 
 
 INDICATOR_STRATEGY_TYPES = {
+    "tmf_auto_kd_psar_5m",
     "tmf_pullback_breakout",
     "tmf_psar_flip",
 }
@@ -137,6 +138,25 @@ TMF_KD_MACD_MA_STRATEGY_TYPES = {
 
 
 INDICATOR_STRATEGY_PRESETS = {
+    "tmf_auto_kd_psar_5m": {
+        "indicator_entry_timeframe_minutes": 5,
+        "indicator_trend_timeframe_minutes": 5,
+        "indicator_entry_type": "kd_momentum",
+        "indicator_longs_enabled": True,
+        "indicator_shorts_enabled": False,
+        "indicator_kd_long_max": 70.0,
+        "indicator_kd_short_min": 15.0,
+        "indicator_atr_stop_mult": 2.0,
+        "indicator_atr_target_mult": 1.0,
+        "indicator_touch_atr_mult": 0.1,
+        "indicator_trend_hist_min": 5.0,
+        "indicator_entry_hist_min": 0.0,
+        "indicator_require_psar_entry": True,
+        "indicator_trail_psar": True,
+        "indicator_trail_after_bars": 1,
+        "indicator_min_hold_bars": 5,
+        "indicator_cooldown_bars": 2,
+    },
     "tmf_pullback_breakout": {
         "indicator_entry_timeframe_minutes": 1,
         "indicator_trend_timeframe_minutes": 5,
