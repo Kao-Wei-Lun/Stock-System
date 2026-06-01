@@ -10,7 +10,7 @@ from paper_trading.cost_model import get_product_spec
 log = logging.getLogger(__name__)
 
 APP_TZ = ZoneInfo("Asia/Taipei")
-DEFAULT_FALLBACK_MARGIN = 26_300.0
+DEFAULT_FALLBACK_MARGIN = 28_900.0
 
 
 def _coerce_positive_float(value: Any) -> float | None:

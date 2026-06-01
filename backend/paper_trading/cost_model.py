@@ -47,7 +47,7 @@ TMF_SPEC = FuturesProductSpec(
     symbol="TMF",
     name="微型臺指期貨",
     point_value=10.0,
-    initial_margin=26_300.0,
+    initial_margin=28_900.0,
     maintenance_margin=20_150.0,
 )
 TX_SPEC = FuturesProductSpec(symbol="TXF", name="臺股期貨", point_value=200.0)

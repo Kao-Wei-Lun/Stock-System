@@ -680,7 +680,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
 
 const API = "/api/paper-trading";
-const DEFAULT_INITIAL_MARGIN = 26300;
+const DEFAULT_INITIAL_MARGIN = 28900;
 
 const activeTab = ref("setup");
 const tabs = [

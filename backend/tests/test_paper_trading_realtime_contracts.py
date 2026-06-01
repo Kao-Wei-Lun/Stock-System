@@ -81,7 +81,7 @@ class FakeDb:
         return {
             "id": account_id,
             "starting_equity": 100000,
-            "initial_margin_per_contract": 26300,
+            "initial_margin_per_contract": 28900,
             "risk_config": {},
             "cost_model": {},
             "strategy_config": {},

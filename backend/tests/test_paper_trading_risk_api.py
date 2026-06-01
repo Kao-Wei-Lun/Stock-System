@@ -7,7 +7,7 @@ def test_paper_trading_position_size_api_returns_contract_breakdown(client):
         json={
             "product_symbol": "TMF",
             "futures_capital": 100000,
-            "initial_margin": 26300,
+            "initial_margin": 28900,
             "stop_loss_points": 60,
             "stress_points": 2000,
             "margin_usage_limit": 0.6,
@@ -33,7 +33,7 @@ def test_paper_trading_order_validate_blocks_oversized_order(client):
         json={
             "product_symbol": "TMF",
             "futures_capital": 100000,
-            "initial_margin": 26300,
+            "initial_margin": 28900,
             "stop_loss_points": 60,
             "stress_points": 2000,
             "margin_usage_limit": 0.6,

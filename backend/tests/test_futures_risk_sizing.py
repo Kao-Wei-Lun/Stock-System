@@ -11,7 +11,7 @@ def test_tmf_position_sizing_uses_most_conservative_limit() -> None:
         FuturesPositionSizingInput(
             futures_capital=100_000,
             point_value=10,
-            initial_margin=26_300,
+            initial_margin=28_900,
             maintenance_margin=20_150,
             stop_loss_points=60,
             stress_points=2_000,
@@ -34,7 +34,7 @@ def test_existing_position_reduces_addable_contracts() -> None:
         FuturesPositionSizingInput(
             futures_capital=300_000,
             point_value=10,
-            initial_margin=26_300,
+            initial_margin=28_900,
             stop_loss_points=60,
             stress_points=2_000,
             margin_usage_limit=0.6,
@@ -56,7 +56,7 @@ def test_zero_stop_loss_blocks_risk_contracts() -> None:
         FuturesPositionSizingInput(
             futures_capital=100_000,
             point_value=10,
-            initial_margin=26_300,
+            initial_margin=28_900,
             stop_loss_points=0,
             stress_points=2_000,
             margin_usage_limit=0.6,

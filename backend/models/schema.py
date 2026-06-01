@@ -936,7 +936,7 @@ CREATE_TABLE_STATEMENTS = {
             `name` VARCHAR(128) NOT NULL,
             `product_symbol` VARCHAR(32) NOT NULL DEFAULT 'TMF',
             `starting_equity` DOUBLE NOT NULL DEFAULT 100000,
-            `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 26300,
+            `initial_margin_per_contract` DOUBLE NOT NULL DEFAULT 28900,
             `margin_source` VARCHAR(64) NOT NULL DEFAULT 'manual',
             `margin_reference_symbol` VARCHAR(32) NULL,
             `margin_currency` VARCHAR(16) NULL,

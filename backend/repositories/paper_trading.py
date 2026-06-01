@@ -29,7 +29,7 @@ class PaperTradingMixin:
             data.get("name", "Default Account"),
             data.get("product_symbol", "TMF"),
             data.get("starting_equity", 100000),
-            data.get("initial_margin_per_contract") or 26300,
+            data.get("initial_margin_per_contract") or 28900,
             data.get("margin_source", "manual"),
             data.get("margin_reference_symbol"),
             data.get("margin_currency"),

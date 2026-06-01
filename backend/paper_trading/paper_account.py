@@ -162,7 +162,7 @@ class PaperAccount:
         starting_equity: float = 100_000.0,
         cost_model: CostModel = DEFAULT_COST_MODEL,
         product: FuturesProductSpec = TMF_SPEC,
-        margin_per_contract: float = 26_300.0,
+        margin_per_contract: float = 28_900.0,
     ):
         self.starting_equity = starting_equity
         self.cost_model = cost_model

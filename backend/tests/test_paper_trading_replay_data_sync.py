@@ -64,7 +64,7 @@ def test_paper_replay_auto_syncs_missing_futopt_minute_bars(client, monkeypatch)
             "id": account_id,
             "product_symbol": "TMF",
             "starting_equity": 250000,
-            "initial_margin_per_contract": 26300,
+            "initial_margin_per_contract": 28900,
             "risk_config": {},
             "cost_model": {},
         }

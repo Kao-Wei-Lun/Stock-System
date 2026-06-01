@@ -101,7 +101,7 @@ class RiskConfig:
 
     # 帳戶與資金
     starting_equity: float = 100_000.0          # 模擬帳戶初始權益 (TWD)
-    initial_margin_per_contract: float = 26_300.0  # TMF 原始保證金
+    initial_margin_per_contract: float = 28_900.0  # TMF 原始保證金
     maintenance_margin_per_contract: float = 20_150.0  # TMF 維持保證金
 
     # 口數上限
@@ -169,7 +169,7 @@ class RiskConfig:
         holding = data.get("holding_policy", "day_only")
         return cls(
             starting_equity=float(data.get("starting_equity", 100_000)),
-            initial_margin_per_contract=float(data.get("initial_margin_per_contract", 26_300)),
+            initial_margin_per_contract=float(data.get("initial_margin_per_contract", 28_900)),
             maintenance_margin_per_contract=float(data.get("maintenance_margin_per_contract", 20_150)),
             max_contracts_hard=int(data.get("max_contracts_hard", data.get("user_max_contracts", 10))),
             max_margin_usage_pct=float(data.get("max_margin_usage_pct", data.get("margin_usage_limit", 0.6))),
