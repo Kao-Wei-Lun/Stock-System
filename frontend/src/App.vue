@@ -26,7 +26,10 @@
       @open-command-palette="openCommandPalette"
     />
 
-    <section v-if="showFubonOnboardingBanner && activeWorkspacePage !== 'settings'" class="app-notice-banner">
+    <section
+      v-if="showFubonOnboardingBanner && !['assets', 'settings'].includes(activeWorkspacePage)"
+      class="app-notice-banner"
+    >
       <div class="app-notice-copy">
         <div class="app-notice-kicker">Setup</div>
         <strong>尚未設定富邦 API 帳號</strong>

@@ -311,6 +311,20 @@ function formatSignedCurrency(value, currency = props.assetBaseCurrency) {
   .asset-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .asset-kpi-card {
+    min-height: 112px;
+    padding: 12px;
+  }
+
+  .asset-kpi-card strong {
+    margin-top: 10px;
+    font-size: 20px;
+  }
+
+  .asset-kpi-card small {
+    margin-top: 7px;
+  }
 }
 
 @media (max-width: 540px) {

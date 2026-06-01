@@ -1,5 +1,5 @@
 <template>
-  <header class="app-navbar">
+  <header class="app-navbar" :class="{ 'asset-mode': workspacePage === 'assets' }">
     <div class="brand-block">
       <div class="brand-kicker">Workflow Trading OS</div>
       <button class="brand-mark" type="button" @click="$emit('navigate', 'overview')">
@@ -544,6 +544,57 @@ onBeforeUnmount(() => {
   }
 }
 
+.app-navbar.asset-mode {
+  grid-template-areas: "brand nav tools";
+  grid-template-columns: auto minmax(420px, 1fr) minmax(360px, max-content);
+  gap: 12px;
+  padding: 10px 16px;
+}
+
+.app-navbar.asset-mode .brand-block {
+  min-width: 170px;
+  gap: 2px;
+}
+
+.app-navbar.asset-mode .brand-kicker {
+  display: none;
+}
+
+.app-navbar.asset-mode .brand-mark {
+  font-size: 22px;
+}
+
+.app-navbar.asset-mode .workspace-nav {
+  grid-template-columns: repeat(7, minmax(48px, 1fr));
+  gap: 6px;
+}
+
+.app-navbar.asset-mode .workspace-nav-btn {
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  align-items: center;
+}
+
+.app-navbar.asset-mode .workspace-nav-hint {
+  display: none;
+}
+
+.app-navbar.asset-mode .navbar-tools {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.app-navbar.asset-mode .search-wrap {
+  flex: 0 1 220px;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.app-navbar.asset-mode .market-pills {
+  display: none;
+}
+
 @media (max-width: 1900px) and (min-width: 1501px) {
   .app-navbar {
     grid-template-areas:
@@ -577,5 +628,55 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
+}
+
+@media (max-width: 1100px) {
+  .app-navbar.asset-mode {
+    grid-template-areas:
+      "brand tools"
+      "nav nav";
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .app-navbar.asset-mode .navbar-tools {
+    justify-self: end;
+  }
+
+  .app-navbar.asset-mode .workspace-nav-btn {
+    min-height: 38px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-navbar.asset-mode {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .app-navbar.asset-mode .brand-mark {
+    font-size: 19px;
+  }
+
+  .app-navbar.asset-mode .search-wrap,
+  .app-navbar.asset-mode .heatmap-link,
+  .app-navbar.asset-mode .fubon-badge,
+  .app-navbar.asset-mode .quote-badge {
+    display: none;
+  }
+
+  .app-navbar.asset-mode .workspace-nav {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .app-navbar.asset-mode .workspace-nav-btn {
+    min-height: 32px;
+    padding: 4px 5px;
+  }
+
+  .app-navbar.asset-mode .workspace-nav-label {
+    font-size: 12px;
+  }
 }
 </style>

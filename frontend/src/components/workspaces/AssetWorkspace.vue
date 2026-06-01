@@ -724,12 +724,27 @@ function formatDateTime(value) {
   }
 
   .workspace-hero {
-    padding: 18px;
-    gap: 14px;
+    padding: 14px;
+    gap: 10px;
   }
 
   .workspace-hero h1 {
-    font-size: 22px;
+    font-size: 21px;
+  }
+
+  .workspace-hero p {
+    margin-top: 5px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .workspace-hero-meta {
+    gap: 8px;
+  }
+
+  .hero-stat {
+    min-width: 0;
+    padding: 9px 11px;
   }
 
   .asset-hero-actions {
@@ -740,7 +755,8 @@ function formatDateTime(value) {
   .asset-action-btn {
     flex: 0 1 auto;
     min-width: 118px;
-    min-height: 40px;
+    min-height: 34px;
+    padding: 7px 10px;
   }
 
   .asset-tabs {
