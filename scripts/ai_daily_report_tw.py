@@ -57,8 +57,8 @@ REPORT_FILE_RE = re.compile(r"^ai_daily_tw_report_(\d{4}-\d{2}-\d{2})\.md$")
 
 def check_api(base_url: str) -> ApiCheck:
     try:
-        _http_json(f"{base_url}/api/tw/universe/coverage?interval=1d", timeout=15)
-        _http_json(f"{base_url}/api/tw/history/status", timeout=15)
+        _http_json(f"{base_url}/api/tw/universe/coverage?interval=1d", timeout=60)
+        _http_json(f"{base_url}/api/tw/history/status", timeout=60)
         return ApiCheck(ok=True, base_url=base_url)
     except Exception as exc:  # noqa: BLE001
         return ApiCheck(ok=False, base_url=base_url, error=str(exc))
@@ -4412,14 +4412,14 @@ def build_report(*, base_url: str, report_date: str) -> str:
         lines.append("## 0) 資料狀態警示")
         lines.append("- 資料狀態：警示；候選清單需降權觀察。")
         lines.append("- 警示原因：" + "；".join(data_warning_reasons))
-        lines.append("- 完整 API / 資料池檢查已移至文末附錄。")
+        lines.append("- 完整 API/資料池檢查已移至文末附錄。")
         lines.append("")
 
     lines.append("## 1) 今日結論（可執行）")
     if data_pool_incomplete:
         lines.append("- 資料狀態：警示；" + "；".join(data_warning_reasons))
     else:
-        lines.append("- 資料狀態：正常；完整 API / 資料池檢查請見文末附錄。")
+        lines.append("- 資料狀態：正常；完整 API/資料池檢查請見文末附錄。")
     lines.append(
         "- 市場狀態："
         f"風險={_market_context_value_label(market_context.get('overall_risk'), _MARKET_RISK_LABELS)}；"
@@ -4457,7 +4457,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
 
     lines.extend(_graded_candidate_table_lines("## 1B) 今日優先觀察清單（A/B/C 分級）", graded_candidates))
 
-    lines.append("## 2) 法人偏多候選（依標的類型分類）")
+    lines.append("## 2) 法人偏多個股與 ETF 分類")
     lines.append("- 條件：法人5日>0 且外資5日>0；以下分為個股與 ETF/基金/REIT，避免不同工具混在同一張表。")
     lines.append("")
     lines.extend(_institutional_table_lines("### 2A. 法人偏多個股", inst_bullish_stocks[:12]))
@@ -4471,7 +4471,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.extend(_momentum_table_lines("### 3B. 多頭股（收盤站上MA20，且MA20高於MA50）", bullish_stock_candidates, mode="bullish"))
     lines.extend(_ma5_walk_table_lines("### 3C. 持續沿5日均線上漲的個股", ma5_walk_candidates))
 
-    lines.extend(_signal_validation_table_lines("## 4) 近 5 日訊號驗證與續強名單", signal_validation_rows))
+    lines.extend(_signal_validation_table_lines("## 4) 近5日訊號驗證與續強名單", signal_validation_rows))
 
     lines.extend(
         _signal_backtest_summary_lines(
@@ -4572,7 +4572,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.append("")
 
     lines.extend(_candidate_table_lines("## 7) 個股潛伏起漲候選（Top 20）", selected_stocks))
-    lines.extend(_candidate_table_lines("## 8) ETF / 基金 / REIT 候選（Top 10）", selected_etfs))
+    lines.extend(_candidate_table_lines("## 8) ETF/基金/REIT 候選（Top 10）", selected_etfs))
 
     lines.append("## 9) 新聞與事件雷達")
     all_news_records = _dedupe_news_records(market_news + news_records, limit=28)
@@ -4623,7 +4623,7 @@ def build_report(*, base_url: str, report_date: str) -> str:
     lines.append("- 行動：只保留觀察清單，等待「突破確認」或「回測不破」再出手")
     lines.append("")
 
-    lines.append("## 附錄 A) API / 資料池檢查")
+    lines.append("## 附錄 A) API/資料池檢查")
     lines.append(f"- API Base: {base_url}")
     lines.append(
         f"- GET /api/tw/universe/coverage?interval=1d：覆蓋率={_fmt_num(cov_pct,2)}%（{covered_count}/{universe_count}），"
