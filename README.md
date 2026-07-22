@@ -39,6 +39,9 @@ MYSQL_PASSWORD=your_password
 MYSQL_DATABASE=quantvision
 MYSQL_CHARSET=utf8mb4
 APP_PORT=8001
+APP_BIND_HOST=127.0.0.1
+FRONTEND_BIND_HOST=127.0.0.1
+ALLOW_LAN_ACCESS=false
 APP_ENCRYPT_KEY=your_generated_secret
 STARTUP_DOWNLOAD_ENABLED=false
 FRONTEND_DEV_URL=http://localhost:5173
@@ -49,6 +52,11 @@ FRONTEND_DEV_URL=http://localhost:5173
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+系統預設只接受本機連線。若確定要讓區域網路中的其他裝置使用，才在啟動前的環境變數中將
+`APP_BIND_HOST`、`FRONTEND_BIND_HOST` 設為 `0.0.0.0`，並將
+`ALLOW_LAN_ACCESS` 設為 `true`。Docker Compose 可在 `.env` 另以
+`DOCKER_BIND_HOST` 控制主機端綁定。
 
 ## 啟動方式
 
@@ -118,6 +126,7 @@ Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook
 ## 後端說明
 
 - FastAPI 提供 `/api/*` 路由與 `/ws` WebSocket
+- `/api/health` 僅表示程序存活；`/api/ready` 會實際檢查資料庫是否可用
 - 啟動時會初始化 MySQL database / tables
 - 如果 `frontend/dist` 存在，後端可從 `/app/` 提供建置後的前端
 - 若尚未 build，後端根路徑會導向開發中的前端服務 `FRONTEND_DEV_URL`
@@ -129,7 +138,7 @@ Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook
 ```bash
 cd frontend
 npm install
-npm run dev -- --host 0.0.0.0 --port 5173
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 ### 單獨啟動後端

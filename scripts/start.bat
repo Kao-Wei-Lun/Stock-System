@@ -7,6 +7,8 @@ cd /d "%~dp0.."
 set "PROJECT_ROOT=%CD%"
 set "BACKEND_PORT=8001"
 set "FRONTEND_PORT=5173"
+if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"
+if not defined FRONTEND_BIND_HOST set "FRONTEND_BIND_HOST=127.0.0.1"
 set "BACKEND_URL=http://localhost:%BACKEND_PORT%"
 set "FRONTEND_URL=http://localhost:%FRONTEND_PORT%"
 set "FRONTEND_DEV_URL=%FRONTEND_URL%"
@@ -43,7 +45,7 @@ echo [INFO] Launching backend service in a new admin cmd window...
 start "QuantVision Backend" "%CMD_EXE%" /k call "%SCRIPT_PATH%" backend
 
 echo [INFO] Waiting for backend health check...
-call :wait_for_http "%BACKEND_URL%/api/health" "Backend API" 90 || (
+call :wait_for_http "%BACKEND_URL%/api/ready" "Backend API" 90 || (
     echo [ERROR] Backend did not become ready in time.
     echo         Please check the "QuantVision Backend" window for details.
     exit /b 1
@@ -81,7 +83,7 @@ if errorlevel 1 (
 )
 
 echo [INFO] Starting frontend dev server on port %FRONTEND_PORT%...
-call "%NPM_EXE%" run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%
+call "%NPM_EXE%" run dev -- --host %FRONTEND_BIND_HOST% --port %FRONTEND_PORT%
 exit /b %errorlevel%
 
 :backend
@@ -122,7 +124,7 @@ if exist "%PROJECT_ROOT%\docs\fubon_neo-2.2.8-cp37-abi3-win_amd64.whl" (
 
 echo [INFO] Starting backend API on port %BACKEND_PORT%...
 cd /d "%PROJECT_ROOT%\backend"
-"%VENV_PYTHON%" -X utf8 -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --no-use-colors
+"%VENV_PYTHON%" -X utf8 -m uvicorn main:app --host %APP_BIND_HOST% --port %BACKEND_PORT% --no-use-colors
 exit /b %errorlevel%
 
 :resolve_python

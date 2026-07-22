@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
@@ -86,6 +87,26 @@ class DatabaseCore:
         if self._pool:
             self._pool.close()
             await self._pool.wait_closed()
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Return a non-throwing database readiness snapshot."""
+        started = time.perf_counter()
+        if self._pool is None:
+            return {"connected": False, "latency_ms": None, "error": "pool_not_initialized"}
+        try:
+            row = await self._fetchone("SELECT 1 AS `ok`")
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            return {
+                "connected": bool(row and row.get("ok") == 1),
+                "latency_ms": latency_ms,
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "connected": False,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                "error": str(exc)[:300],
+            }
 
     async def create_tables(self):
         async with self._pool.acquire() as conn:

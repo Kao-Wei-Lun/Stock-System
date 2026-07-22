@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from data_fetcher import normalize_ticker
 from providers import ws_manager
@@ -16,15 +16,17 @@ log = logging.getLogger(__name__)
 _FRONTEND_DEV_URL = "http://localhost:5173"
 _FRONTEND_DIST_DIR: Path | None = None
 _SCHEDULER = None
+_DATABASE = None
 
 router = APIRouter(tags=["system"])
 
 
-def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None):
-    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER
+def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None, database=None):
+    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
+    _DATABASE = database
 
 
 def _frontend_ready() -> bool:
@@ -34,6 +36,22 @@ def _frontend_ready() -> bool:
 @router.get("/api/health")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/api/ready")
+async def readiness():
+    database_health = (
+        await _DATABASE.health_check()
+        if _DATABASE is not None and hasattr(_DATABASE, "health_check")
+        else {"connected": False, "latency_ms": None, "error": "database_unconfigured"}
+    )
+    ready = bool(database_health.get("connected"))
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        "components": {"database": database_health},
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
+    return JSONResponse(payload, status_code=200 if ready else 503)
 
 
 @router.get("/api/scheduler/health")

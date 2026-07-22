@@ -8,7 +8,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-quantvision}
       MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
       - quantvision_mysql:/var/lib/mysql
     healthcheck:
@@ -31,6 +31,7 @@ services:
       MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
       APP_PORT: 8001
       FRONTEND_DEV_URL: http://localhost:5173
+      ALLOW_LAN_ACCESS: ${ALLOW_LAN_ACCESS:-false}
       APP_ENCRYPT_KEY: ${APP_ENCRYPT_KEY:-}
       STARTUP_DOWNLOAD_ENABLED: ${STARTUP_DOWNLOAD_ENABLED:-false}
       INSTITUTIONAL_AUTO_SYNC_ENABLED: ${INSTITUTIONAL_AUTO_SYNC_ENABLED:-true}
@@ -50,9 +51,9 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${APP_PORT:-8001}:8001"
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${APP_PORT:-8001}:8001"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/ready"]
       interval: 15s
       timeout: 5s
       retries: 12
@@ -68,7 +69,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${FRONTEND_PORT:-5173}:5173"
 
 volumes:
   quantvision_mysql:

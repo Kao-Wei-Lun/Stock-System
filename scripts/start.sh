@@ -5,6 +5,8 @@ cd "$(dirname "$0")/.."
 
 BACKEND_URL="http://localhost:8001"
 FRONTEND_URL="http://localhost:5173"
+APP_BIND_HOST="${APP_BIND_HOST:-127.0.0.1}"
+FRONTEND_BIND_HOST="${FRONTEND_BIND_HOST:-127.0.0.1}"
 export FRONTEND_DEV_URL="$FRONTEND_URL"
 
 echo "======================================"
@@ -51,7 +53,7 @@ echo "[INFO] Starting frontend service..."
 echo "       Frontend: ${FRONTEND_URL}"
 (
   cd frontend
-  npm run dev -- --host 0.0.0.0 --port 5173
+  npm run dev -- --host "$FRONTEND_BIND_HOST" --port 5173
 ) &
 FRONTEND_PID=$!
 
@@ -73,4 +75,4 @@ echo "[INFO] Press Ctrl+C to stop the backend."
 echo "======================================"
 
 cd backend
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8001
+python3 -m uvicorn main:app --host "$APP_BIND_HOST" --port 8001

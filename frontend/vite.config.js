@@ -3,12 +3,13 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig(({ command }) => {
   const backendTarget = (process.env.VITE_BACKEND_TARGET || "http://127.0.0.1:8001").replace(/\/$/, "");
+  const bindHost = process.env.FRONTEND_BIND_HOST || "127.0.0.1";
 
   return {
     base: command === "build" ? "/app/" : "/",
     plugins: [vue()],
     server: {
-      host: "0.0.0.0",
+      host: bindHost,
       port: 5173,
       proxy: {
         "/api": {
@@ -23,7 +24,7 @@ export default defineConfig(({ command }) => {
       },
     },
     preview: {
-      host: "0.0.0.0",
+      host: bindHost,
       port: 4173,
     },
     build: {
