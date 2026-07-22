@@ -160,6 +160,22 @@ scripts\restore-mysql.ps1 `
 若 `mysqldump` 或 `mysql` 不在 PATH，可設定 `MYSQLDUMP_PATH` 與
 `MYSQL_CLIENT_PATH`。不要在尚未驗證備份前使用 `AllowSourceOverwrite`。
 
+### 資料庫 migration
+
+系統使用 `schema_migrations` 記錄 migration 版本、checksum、執行時間與 SQL
+數量。先查看唯讀計畫，再於完成備份後套用：
+
+```powershell
+python backend\database_migrate.py plan
+scripts\backup-mysql.ps1
+python backend\database_migrate.py apply
+python backend\database_migrate.py status
+```
+
+`DB_AUTO_MIGRATE=true` 保留既有啟動相容性；正式維護時可設為 `false`，讓有
+pending migration 的服務拒絕啟動，改由上述流程明確套用。已套用 migration
+若 checksum 改變，系統會拒絕繼續執行，必須建立新的 migration 版本。
+
 ### 單獨啟動前端
 
 ```bash

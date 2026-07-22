@@ -35,6 +35,7 @@ class Database(
 db = Database()
 
 import logging
+from env_validation import read_bool_env
 log = logging.getLogger(__name__)
 from .core import MYSQL_USER, MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE
 from models.schema import (
@@ -46,7 +47,7 @@ from models.schema import (
 
 async def init_db():
     await db.connect()
-    await db.create_tables()
+    await db.create_tables(auto_apply=read_bool_env("DB_AUTO_MIGRATE", True))
     log.info(
         "MySQL initialized: %s@%s:%s/%s",
         MYSQL_USER,
