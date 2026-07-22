@@ -14,6 +14,7 @@ from fubon_market_snapshot_provider import FubonMarketSnapshotProvider
 from fubon_realtime_pool import FubonRealtimeSubscriptionPool
 from fubon_symbols import (
     is_exact_futopt_contract,
+    is_futopt_base_alias,
     supports_fubon_stock_realtime_ticker,
     tw_ticker_to_fubon,
 )
@@ -74,8 +75,11 @@ def _subscribe_fubon_streams(ticker: str) -> None:
     normalized = str(ticker or "").strip()
     if not normalized:
         return
+    # Dynamic near-month aliases such as *TMFF and *TXFF must enter the
+    # realtime pool as the requested ticker. The pool resolves them to the
+    # physical contract and maps books/quotes back to the alias used by UI.
     if not supports_fubon_stock_realtime_ticker(normalized) and not (
-        is_exact_futopt_contract(normalized) or normalized in {"TX", "TXF", "MTX", "MXF", "TMF"}
+        is_exact_futopt_contract(normalized) or is_futopt_base_alias(normalized)
     ):
         return
     fubon_realtime_pool.track_ticker(normalized, source="ws")
