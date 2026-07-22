@@ -169,8 +169,8 @@ function mountWorkspace() {
         },
         AssetTrackingPanel: {
           name: "AssetTrackingPanel",
-          props: ["panelMode"],
-          template: "<div class='maintenance-panel-stub'>{{ panelMode }}</div>",
+          props: ["panelMode", "maintenanceSection"],
+          template: "<div class='maintenance-panel-stub'>{{ panelMode }}:{{ maintenanceSection }}</div>",
         },
       },
     },
@@ -191,7 +191,7 @@ describe("AssetWorkspace", () => {
 
     await wrapper.findAll(".asset-tab")[2].trigger("click");
 
-    expect(wrapper.find(".maintenance-panel-stub").text()).toBe("maintenance");
+    expect(wrapper.find(".maintenance-panel-stub").text()).toBe("maintenance:accounts");
     expect(wrapper.find(".asset-tab.active").text()).toContain("資料維護");
   });
 
@@ -214,5 +214,18 @@ describe("AssetWorkspace", () => {
     await wrapper.findAll(".asset-tab")[0].trigger("click");
     await wrapper.get('[data-testid="overview-focus-maintenance"]').trigger("click");
     expect(wrapper.find(".maintenance-panel-stub").exists()).toBe(true);
+    expect(wrapper.find(".maintenance-panel-stub").text()).toBe("maintenance:reconciliation");
+  });
+
+  it("focuses one maintenance tool and can restore the complete view", async () => {
+    const wrapper = mountWorkspace();
+
+    await wrapper.findAll(".asset-tab")[2].trigger("click");
+    await wrapper.get('[data-testid="maintenance-nav-imports"]').trigger("click");
+    expect(wrapper.find(".maintenance-panel-stub").text()).toBe("maintenance:imports");
+    expect(wrapper.get('[data-testid="maintenance-nav-imports"]').classes()).toContain("active");
+
+    await wrapper.get('[data-testid="maintenance-nav-all"]').trigger("click");
+    expect(wrapper.find(".maintenance-panel-stub").text()).toBe("maintenance:all");
   });
 });

@@ -179,4 +179,15 @@ describe("AssetTrackingPanel", () => {
       [{ key: "is_initial_balance", value: true }],
     ]);
   });
+
+  it("shows only the selected maintenance tool while preserving stable section ids", () => {
+    const wrapper = mount(AssetTrackingPanel, {
+      props: { ...buildProps(), maintenanceSection: "trades" },
+    });
+
+    expect(wrapper.get('[data-asset-section="trades"]').isVisible()).toBe(true);
+    expect(wrapper.get('[data-asset-section="accounts"]').isVisible()).toBe(false);
+    expect(wrapper.get('[data-asset-section="cash"]').isVisible()).toBe(false);
+    expect(wrapper.findAll('[data-asset-section="imports"]').every((item) => !item.isVisible())).toBe(true);
+  });
 });

@@ -141,7 +141,7 @@
     </template>
 
     <div class="asset-form-grid">
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('accounts')" class="asset-card" data-asset-section="accounts">
         <div class="asset-card-head">
           <div class="asset-card-title">帳戶管理</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-account-form')">清空</button>
@@ -216,7 +216,7 @@
         </div>
       </section>
 
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('cash')" class="asset-card" data-asset-section="cash">
         <div class="asset-card-head">
           <div class="asset-card-title">現金事件</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-cash-form')">清空</button>
@@ -282,7 +282,7 @@
       </section>
     </div>
 
-    <section class="asset-card asset-card-wide">
+    <section v-show="showsMaintenanceSection('trades')" class="asset-card asset-card-wide" data-asset-section="trades">
       <div class="asset-card-head">
         <div>
           <div class="asset-card-title">交易事件</div>
@@ -368,7 +368,7 @@
     </section>
 
     <div class="asset-form-grid asset-form-grid-3">
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('reconciliation')" class="asset-card" data-asset-section="reconciliation">
         <div class="asset-card-head">
           <div class="asset-card-title">對帳快照</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-reconciliation-form')">清空</button>
@@ -408,7 +408,7 @@
         </div>
       </section>
 
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('price-overrides')" class="asset-card" data-asset-section="price-overrides">
         <div class="asset-card-head">
           <div class="asset-card-title">手動價格覆蓋</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-price-override-form')">清空</button>
@@ -461,7 +461,7 @@
         </div>
       </section>
 
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('fx-rates')" class="asset-card" data-asset-section="fx-rates">
         <div class="asset-card-head">
           <div class="asset-card-title">FX 匯率</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-fx-rate-form')">清空</button>
@@ -499,7 +499,7 @@
     </div>
 
     <div class="asset-form-grid asset-form-grid-3">
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('adjustments')" class="asset-card" data-asset-section="adjustments">
         <div class="asset-card-head">
           <div class="asset-card-title">調整事件</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-adjustment-form')">清空</button>
@@ -552,7 +552,7 @@
         </div>
       </section>
 
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('imports')" class="asset-card" data-asset-section="imports">
         <div class="asset-card-head">
           <div class="asset-card-title">交易 CSV 匯入</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-import-forms')">清空</button>
@@ -582,7 +582,7 @@
         </div>
       </section>
 
-      <section class="asset-card">
+      <section v-show="showsMaintenanceSection('imports')" class="asset-card" data-asset-section="imports">
         <div class="asset-card-head">
           <div class="asset-card-title">現金 CSV 匯入</div>
           <button class="asset-inline-btn" type="button" @click="$emit('reset-asset-import-forms')">清空</button>
@@ -613,7 +613,7 @@
       </section>
     </div>
 
-    <section class="asset-card asset-card-wide">
+    <section v-show="showsMaintenanceSection('imports')" class="asset-card asset-card-wide" data-asset-section="imports">
       <div class="asset-card-head">
         <div>
           <div class="asset-card-title">Journal 匯入</div>
@@ -765,6 +765,7 @@ const props = defineProps({
   currentTicker: { type: String, required: true },
   assetLoading: { type: Boolean, required: true },
   panelMode: { type: String, default: "full" },
+  maintenanceSection: { type: String, default: "all" },
   assetPerformanceRange: { type: String, default: "1y" },
   assetBaseCurrency: { type: String, default: "TWD" },
   assetSummary: { type: Object, default: () => ({}) },
@@ -879,6 +880,14 @@ const reconciliationSummary = computed(() => props.assetReconciliation?.summary 
 const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
 const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
 const isMaintenanceMode = computed(() => props.panelMode === "maintenance");
+
+function showsMaintenanceSection(sectionKey) {
+  return !isMaintenanceMode.value
+    || !props.maintenanceSection
+    || props.maintenanceSection === "all"
+    || props.maintenanceSection === sectionKey;
+}
+
 const settlementAccountOptions = computed(() => (
   (props.assetAccounts || []).filter((account) => String(account?.id) !== String(props.assetAccountForm?.id || ""))
 ));

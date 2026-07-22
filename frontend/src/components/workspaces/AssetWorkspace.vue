@@ -89,8 +89,11 @@
               v-for="section in maintenanceNavSections"
               :key="section.key"
               class="asset-maintenance-nav-btn"
+              :class="{ active: activeMaintenanceSection === section.key }"
+              :aria-pressed="activeMaintenanceSection === section.key"
+              :data-testid="`maintenance-nav-${section.key}`"
               type="button"
-              @click="scrollMaintenanceSection(section.key)"
+              @click="selectMaintenanceSection(section.key)"
             >
               {{ section.label }}
             </button>
@@ -99,6 +102,7 @@
           <div ref="maintenanceContentRef" class="asset-maintenance-content">
             <AssetTrackingPanel
           panel-mode="maintenance"
+          :maintenance-section="activeMaintenanceSection"
           :current-ticker="currentTicker"
           :asset-loading="assetLoading"
           :asset-performance-range="assetPerformanceRange"
@@ -320,7 +324,9 @@ const holdingsFilter = ref({
   month: "",
 });
 const maintenanceContentRef = ref(null);
+const activeMaintenanceSection = ref("accounts");
 const maintenanceNavSections = [
+  { key: "all", label: "全部工具" },
   { key: "accounts", label: "帳戶管理" },
   { key: "cash", label: "現金事件" },
   { key: "trades", label: "交易事件" },
@@ -360,30 +366,22 @@ function focusHoldings(filter = {}) {
   activeTab.value = "holdings";
 }
 
-function scrollMaintenanceSection(sectionKey) {
-  const sectionIndexByKey = {
-    accounts: 0,
-    cash: 1,
-    trades: 2,
-    reconciliation: 3,
-    "price-overrides": 4,
-    "fx-rates": 5,
-    adjustments: 6,
-    imports: 7,
-  };
-  const cards = maintenanceContentRef.value?.querySelectorAll?.(".asset-card");
-  const target = cards?.[sectionIndexByKey[sectionKey]];
-  if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+async function selectMaintenanceSection(sectionKey) {
+  const validSection = maintenanceNavSections.some((section) => section.key === sectionKey)
+    ? sectionKey
+    : "accounts";
+  activeMaintenanceSection.value = validSection;
+  await nextTick();
+  const target = validSection === "all"
+    ? maintenanceContentRef.value
+    : maintenanceContentRef.value?.querySelector?.(`[data-asset-section="${validSection}"]`);
+  target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
 async function focusMaintenance(sectionKey = "") {
   activeTab.value = "maintenance";
   await nextTick();
-  if (sectionKey) {
-    scrollMaintenanceSection(sectionKey);
-  }
+  await selectMaintenanceSection(sectionKey || activeMaintenanceSection.value);
 }
 
 function formatDateTime(value) {
@@ -613,6 +611,12 @@ function formatDateTime(value) {
 .asset-maintenance-nav-btn:hover {
   border-color: rgba(147, 232, 193, 0.26);
   background: rgba(93, 211, 158, 0.08);
+}
+
+.asset-maintenance-nav-btn.active {
+  border-color: rgba(147, 232, 193, 0.54);
+  background: rgba(93, 211, 158, 0.14);
+  color: var(--asset-text-primary);
 }
 
 .asset-maintenance-content {
