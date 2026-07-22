@@ -1,5 +1,6 @@
 """Watchlist routes."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -7,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
-from market_freshness import is_at_least_as_recent, market_data_freshness
+from market_freshness import is_at_least_as_recent, market_aware_freshness
 from providers import fetcher, fubon_realtime_pool
 from schemas import (
     WatchlistGroupCreate,
@@ -46,10 +47,28 @@ def categorize(ticker: str) -> str:
     return "美股"
 
 
-async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = None) -> dict:
-    row = await db.get_latest_ohlcv(ticker)
-    quote = await db.get_market_quote(ticker)
-    info = await db.get_stock_info(ticker)
+async def hydrate_watchlist_item(
+    ticker: str,
+    group: dict,
+    item: dict | None = None,
+    prefetched: dict | None = None,
+) -> dict:
+    normalized_ticker = str(ticker).strip().upper()
+    recent_rows = (prefetched or {}).get("recent_ohlcv", {}).get(normalized_ticker)
+    if recent_rows is None:
+        row = await db.get_latest_ohlcv(ticker)
+    else:
+        row = recent_rows[0] if recent_rows else None
+    quote = (
+        (prefetched or {}).get("quotes", {}).get(normalized_ticker)
+        if prefetched is not None
+        else await db.get_market_quote(ticker)
+    )
+    info = (
+        (prefetched or {}).get("stock_info", {}).get(normalized_ticker)
+        if prefetched is not None
+        else await db.get_stock_info(ticker)
+    )
     quote_timestamp = (quote or {}).get("quote_timestamp") or (quote or {}).get("synced_at")
     row_timestamp = (row or {}).get("date")
     use_quote = bool(quote) and (
@@ -57,12 +76,20 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
     )
     snapshot = quote if use_quote else row
     data_timestamp = quote_timestamp if use_quote else row_timestamp
-    freshness = market_data_freshness(data_timestamp)
+    data_origin = "quote" if use_quote else ("ohlcv" if row else "missing")
+    freshness = market_aware_freshness(
+        data_timestamp,
+        ticker=ticker,
+        data_origin=data_origin,
+    )
     prev = None
     if use_quote and quote.get("prev_close") not in (None, 0):
         prev = quote.get("prev_close")
     elif row:
-        prev = await db.get_prev_close(ticker)
+        if recent_rows is not None:
+            prev = recent_rows[1].get("close") if len(recent_rows) > 1 else None
+        else:
+            prev = await db.get_prev_close(ticker)
 
     latest_price = None
     if use_quote and quote.get("price") is not None:
@@ -92,7 +119,7 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
             if use_quote
             else (row or {}).get("updated_at")
         ),
-        "data_origin": "quote" if use_quote else ("ohlcv" if row else "missing"),
+        "data_origin": data_origin,
         **freshness,
         "tags": item.get("tags") if isinstance(item, dict) and isinstance(item.get("tags"), list) else [],
         "category": categorize(ticker),
@@ -107,11 +134,27 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
 @router.get("/watchlist")
 async def get_watchlist():
     groups = await db.get_watchlist_groups()
+    tickers = list(dict.fromkeys(
+        str(item.get("ticker") or "").strip().upper()
+        for group in groups
+        for item in group.get("items", [])
+        if item.get("ticker")
+    ))
+    recent_ohlcv, quotes, stock_info = await asyncio.gather(
+        db.get_recent_ohlcv_many(tickers, per_ticker_limit=2),
+        db.get_market_quotes(tickers),
+        db.get_stock_info_many(tickers),
+    )
+    prefetched = {
+        "recent_ohlcv": recent_ohlcv,
+        "quotes": quotes,
+        "stock_info": stock_info,
+    }
     flat_items = []
     for group in groups:
         hydrated_items = []
         for item in group.get("items", []):
-            hydrated = await hydrate_watchlist_item(item["ticker"], group, item)
+            hydrated = await hydrate_watchlist_item(item["ticker"], group, item, prefetched=prefetched)
             hydrated["id"] = item["id"]
             hydrated["sort_order"] = item["sort_order"]
             hydrated_items.append(hydrated)

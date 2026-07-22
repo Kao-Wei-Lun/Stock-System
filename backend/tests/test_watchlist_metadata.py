@@ -186,3 +186,45 @@ def test_hydrate_watchlist_item_ignores_quote_older_than_latest_ohlcv(monkeypatc
     assert result["data_origin"] == "ohlcv"
     assert result["quote_type"] == "historical_close"
     assert result["data_timestamp"].startswith("2026-07-22")
+
+
+def test_get_watchlist_uses_three_bulk_queries(client, monkeypatch):
+    calls = []
+
+    async def get_groups():
+        return [{
+            "id": 1, "name": "Core", "color": None,
+            "items": [
+                {"id": 11, "ticker": "AAPL", "sort_order": 0, "tags": []},
+                {"id": 12, "ticker": "2330.TW", "sort_order": 1, "tags": []},
+            ],
+        }]
+
+    async def recent(tickers, per_ticker_limit=2):
+        calls.append(("recent", tuple(tickers), per_ticker_limit))
+        return {
+            ticker: [
+                {"ticker": ticker, "date": "2026-07-22", "close": 100, "source": "test"},
+                {"ticker": ticker, "date": "2026-07-21", "close": 99, "source": "test"},
+            ] for ticker in tickers
+        }
+
+    async def quotes(tickers):
+        calls.append(("quotes", tuple(tickers)))
+        return {}
+
+    async def infos(tickers):
+        calls.append(("info", tuple(tickers)))
+        return {ticker: {"name": ticker} for ticker in tickers}
+
+    monkeypatch.setattr(main.db, "get_watchlist_groups", get_groups)
+    monkeypatch.setattr(main.db, "get_recent_ohlcv_many", recent)
+    monkeypatch.setattr(main.db, "get_market_quotes", quotes)
+    monkeypatch.setattr(main.db, "get_stock_info_many", infos)
+
+    response = client.get("/api/watchlist")
+
+    assert response.status_code == 200
+    assert [item["ticker"] for item in response.json()["items"]] == ["AAPL", "2330.TW"]
+    assert len(calls) == 3
+    assert {item[0] for item in calls} == {"recent", "quotes", "info"}

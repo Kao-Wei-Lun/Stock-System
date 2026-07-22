@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from market_freshness import is_at_least_as_recent, market_data_freshness
+from market_freshness import is_at_least_as_recent, market_aware_freshness
 
 
 STATUS_RANK = {"healthy": 0, "idle": 0, "warning": 1, "error": 2}
@@ -191,25 +191,41 @@ class DataQualityService:
                 for item in group.get("items", [])
                 if item.get("ticker")
             ))
+            if hasattr(self.db, "get_market_quotes") and hasattr(self.db, "get_latest_ohlcv_many"):
+                quotes, latest_rows = await asyncio.gather(
+                    self.db.get_market_quotes(tickers),
+                    self.db.get_latest_ohlcv_many(tickers),
+                )
+            else:
+                quote_rows, ohlcv_rows = await asyncio.gather(
+                    asyncio.gather(*(self.db.get_market_quote(ticker) for ticker in tickers)),
+                    asyncio.gather(*(self.db.get_latest_ohlcv(ticker) for ticker in tickers)),
+                )
+                quotes = {ticker: row for ticker, row in zip(tickers, quote_rows) if row}
+                latest_rows = {ticker: row for ticker, row in zip(tickers, ohlcv_rows) if row}
             items = []
             source_counts: Counter[str] = Counter()
             for ticker in tickers:
-                quote, row = await asyncio.gather(
-                    self.db.get_market_quote(ticker),
-                    self.db.get_latest_ohlcv(ticker),
-                )
+                quote = quotes.get(ticker)
+                row = latest_rows.get(ticker)
                 quote_time = (quote or {}).get("quote_timestamp") or (quote or {}).get("synced_at")
                 row_time = (row or {}).get("date")
                 use_quote = bool(quote) and (not row or is_at_least_as_recent(quote_time, row_time))
                 selected = quote if use_quote else row
                 timestamp = quote_time if use_quote else row_time
-                freshness = market_data_freshness(timestamp, now=reference)
+                data_origin = "quote" if use_quote else ("ohlcv" if row else "missing")
+                freshness = market_aware_freshness(
+                    timestamp,
+                    ticker=ticker,
+                    data_origin=data_origin,
+                    now=reference,
+                )
                 source = str((selected or {}).get("source") or "missing")
                 source_counts[source] += 1
                 items.append({
                     "ticker": ticker,
                     "source": source,
-                    "data_origin": "quote" if use_quote else ("ohlcv" if row else "missing"),
+                    "data_origin": data_origin,
                     **freshness,
                 })
             stale_items = [item for item in items if item["is_stale"]]
@@ -240,7 +256,12 @@ class DataQualityService:
         try:
             for symbol in status.get("symbols") or []:
                 row = await self.db.get_latest_ohlcv(symbol, status.get("interval") or "1m")
-                freshness = market_data_freshness((row or {}).get("date"), now=reference)
+                freshness = market_aware_freshness(
+                    (row or {}).get("date"),
+                    ticker=symbol,
+                    data_origin="quote",
+                    now=reference,
+                )
                 records.append({"symbol": symbol, **freshness})
         except Exception as exc:
             return _component(

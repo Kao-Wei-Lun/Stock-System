@@ -16,6 +16,9 @@ REFERENCE = datetime(2026, 7, 22, 4, 0, tzinfo=timezone.utc)
 
 
 class HealthyDatabase:
+    def __init__(self):
+        self.bulk_calls = []
+
     async def health_check(self):
         return {"connected": True, "latency_ms": 1.2, "error": None}
 
@@ -40,10 +43,18 @@ class HealthyDatabase:
             "source": "fubon_neo_ws",
         }
 
+    async def get_market_quotes(self, tickers):
+        self.bulk_calls.append(("quotes", tuple(tickers)))
+        return {ticker: await self.get_market_quote(ticker) for ticker in tickers}
+
     async def get_latest_ohlcv(self, ticker, interval="1d"):
         if interval == "1m":
             return {"ticker": ticker, "date": "2026-07-22T03:58:00+00:00", "source": "futopt_recorder"}
         return {"ticker": ticker, "date": "2026-07-21T05:30:00+00:00", "source": "yahoo_finance"}
+
+    async def get_latest_ohlcv_many(self, tickers, interval="1d"):
+        self.bulk_calls.append(("ohlcv", tuple(tickers)))
+        return {ticker: await self.get_latest_ohlcv(ticker, interval) for ticker in tickers}
 
 
 class HealthyScheduler:
@@ -107,8 +118,9 @@ def healthy_backup_status():
 
 @pytest.mark.anyio
 async def test_build_snapshot_reports_all_healthy_components():
+    database = HealthyDatabase()
     service = DataQualityService(
-        db=HealthyDatabase(),
+        db=database,
         scheduler=HealthyScheduler(),
         fubon_pool=HealthyFubonPool(),
         ws_manager=HealthyWebsocketManager(),
@@ -129,6 +141,7 @@ async def test_build_snapshot_reports_all_healthy_components():
     assert snapshot["components"]["watchlist"]["source_counts"] == {"fubon_neo_ws": 1}
     assert snapshot["components"]["futures_recorder"]["stale_symbol_count"] == 0
     assert snapshot["components"]["backups"]["backup_id"] == "20260722T010000Z"
+    assert database.bulk_calls == [("quotes", ("2330.TW",)), ("ohlcv", ("2330.TW",))]
 
 
 class BrokenDatabase:

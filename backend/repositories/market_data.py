@@ -4,6 +4,14 @@ from database.core import DEFAULT_OWNER_ID
 # Import common serialization helpers here if needed
 
 class MarketDataMixin:
+    @staticmethod
+    def _normalized_tickers(tickers) -> List[str]:
+        return list(dict.fromkeys(
+            str(ticker or "").strip().upper()
+            for ticker in tickers or []
+            if str(ticker or "").strip()
+        ))
+
     async def upsert_ohlcv_batch(self, ticker: str, rows: List[Dict], interval: str = "1d") -> int:
         if not rows:
             return 0
@@ -114,6 +122,49 @@ class MarketDataMixin:
                 await cur.execute(sql, (ticker, interval))
                 return await cur.fetchone()
 
+    async def get_recent_ohlcv_many(
+        self,
+        tickers,
+        interval: str = "1d",
+        per_ticker_limit: int = 2,
+    ) -> Dict[str, List[Dict]]:
+        normalized = self._normalized_tickers(tickers)
+        if not normalized:
+            return {}
+        clean_limit = max(1, min(int(per_ticker_limit), 10))
+        # A window function over the 1-minute OHLCV table scans too many rows.
+        # Each UNION branch can use the ticker/interval/date index and still
+        # returns the whole watchlist in one database round trip.
+        rows = []
+        for start in range(0, len(normalized), 100):
+            batch = normalized[start:start + 100]
+            branches = [
+                "(SELECT * FROM `ohlcv` WHERE `ticker`=%s AND `interval`=%s ORDER BY `date` DESC LIMIT %s)"
+                for _ in batch
+            ]
+            params = tuple(
+                value
+                for ticker in batch
+                for value in (ticker, interval, clean_limit)
+            )
+            rows.extend(await self._fetchall(
+                f"""
+                SELECT *
+                FROM ({' UNION ALL '.join(branches)}) AS `recent`
+                ORDER BY `ticker`, `date` DESC
+                """,
+                params,
+            ))
+        grouped: Dict[str, List[Dict]] = {ticker: [] for ticker in normalized}
+        for row in rows:
+            item = dict(row)
+            grouped.setdefault(str(item.get("ticker") or "").upper(), []).append(item)
+        return grouped
+
+    async def get_latest_ohlcv_many(self, tickers, interval: str = "1d") -> Dict[str, Dict]:
+        grouped = await self.get_recent_ohlcv_many(tickers, interval=interval, per_ticker_limit=1)
+        return {ticker: rows[0] for ticker, rows in grouped.items() if rows}
+
     async def get_prev_close(self, ticker: str) -> Optional[float]:
         sql = """
             SELECT `close`
@@ -178,6 +229,17 @@ class MarketDataMixin:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute("SELECT * FROM `stock_info` WHERE `ticker`=%s", (ticker,))
                 return await cur.fetchone()
+
+    async def get_stock_info_many(self, tickers) -> Dict[str, Dict]:
+        normalized = self._normalized_tickers(tickers)
+        if not normalized:
+            return {}
+        placeholders = ", ".join(["%s"] * len(normalized))
+        rows = await self._fetchall(
+            f"SELECT * FROM `stock_info` WHERE `ticker` IN ({placeholders})",
+            tuple(normalized),
+        )
+        return {str(row["ticker"]).upper(): row for row in rows}
 
     async def upsert_tw_equity_universe(self, rows: List[Dict[str, Any]]) -> int:
         if not rows:
@@ -570,4 +632,18 @@ class MarketDataMixin:
             (ticker,),
         )
         return _deserialize_market_quote(row)
+
+    async def get_market_quotes(self, tickers) -> Dict[str, Dict[str, Any]]:
+        normalized = self._normalized_tickers(tickers)
+        if not normalized:
+            return {}
+        placeholders = ", ".join(["%s"] * len(normalized))
+        rows = await self._fetchall(
+            f"SELECT * FROM `market_quotes_latest` WHERE `ticker` IN ({placeholders})",
+            tuple(normalized),
+        )
+        return {
+            str(row["ticker"]).upper(): _deserialize_market_quote(row)
+            for row in rows
+        }
 
