@@ -65,6 +65,15 @@ class ConnectionManager:
     def get_subscribed_tickers(self) -> Set[str]:
         return {ticker for ticker, subs in self._ticker_subs.items() if subs}
 
+    def get_status(self) -> dict:
+        subscribed_tickers = sorted(self.get_subscribed_tickers())
+        return {
+            "client_count": len(self._clients),
+            "subscribed_ticker_count": len(subscribed_tickers),
+            "subscription_count": sum(len(subscriptions) for subscriptions in self._clients.values()),
+            "subscribed_tickers": subscribed_tickers,
+        }
+
     async def broadcast_to_ticker(self, ticker: str, data: dict):
         message = json.dumps(data)
         dead = set()

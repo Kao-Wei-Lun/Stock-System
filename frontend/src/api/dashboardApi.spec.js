@@ -24,6 +24,15 @@ describe("dashboardApi", () => {
     vi.restoreAllMocks();
   });
 
+  it("requests the unified system data-quality snapshot", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ status: "healthy", components: {} }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    await api.getSystemDataQuality();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/system/data-quality", {});
+  });
+
   it("creates workspaces with JSON payloads", async () => {
     globalThis.fetch.mockImplementation(() => jsonResponse({ id: 9, name: "Morning Desk" }));
     const api = createDashboardApi({ baseUrl: "http://127.0.0.1:8001/" });

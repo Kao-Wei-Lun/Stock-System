@@ -28,6 +28,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
   }
 
   return {
+    getSystemDataQuality() {
+      return request("/api/system/data-quality");
+    },
     searchSymbols(query) {
       return request(`/api/search?q=${encodeURIComponent(query)}`);
     },

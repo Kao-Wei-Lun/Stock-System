@@ -26,10 +26,7 @@
         <p>通知通道會沿用目前的 Telegram 與 Discord 環境設定。</p>
       </section>
 
-      <section v-else class="settings-placeholder">
-        <h2>系統資訊</h2>
-        <p>後端連線、排程與資料同步狀態維持在狀態列與系統健康檢查中。</p>
-      </section>
+      <SystemHealthPanel v-else />
     </div>
   </main>
 </template>
@@ -38,6 +35,7 @@
 import { ref } from "vue";
 
 import FubonAccountsPanel from "./FubonAccountsPanel.vue";
+import SystemHealthPanel from "./SystemHealthPanel.vue";
 
 const activeTab = ref("fubon");
 

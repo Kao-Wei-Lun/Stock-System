@@ -14,6 +14,7 @@ def test_app_import_smoke():
     assert main.app.title == "QuantVision Pro API"
     assert any(route.path == "/api/health" for route in main.app.routes)
     assert any(route.path == "/api/ready" for route in main.app.routes)
+    assert any(route.path == "/api/system/data-quality" for route in main.app.routes)
 
 
 def test_health_endpoint_smoke(client):
@@ -49,3 +50,21 @@ def test_readiness_endpoint_returns_503_when_database_is_unavailable(client, mon
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
     assert response.json()["components"]["database"]["error"] == "pool_not_initialized"
+
+
+def test_data_quality_endpoint_returns_unified_snapshot(client, monkeypatch):
+    async def snapshot(_self):
+        return {
+            "status": "warning",
+            "summary": {"warning_count": 1},
+            "issues": [{"component": "fubon", "status": "warning", "message": "富邦行情未連線"}],
+            "components": {},
+        }
+
+    monkeypatch.setattr(type(main.data_quality_service), "build_snapshot", snapshot)
+
+    response = client.get("/api/system/data-quality")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "warning"
+    assert response.json()["summary"]["warning_count"] == 1

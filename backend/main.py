@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from background_tasks import BackgroundTaskService
+from data_quality_service import DataQualityService
 from database import DEFAULT_OWNER_ID, db, init_db
 from env_validation import (
     read_bool_env,
@@ -369,6 +370,14 @@ background_scheduler = BackgroundScheduler(
     ),
     logger=log,
 )
+data_quality_service = DataQualityService(
+    db=db,
+    scheduler=background_scheduler,
+    fubon_pool=fubon_realtime_pool,
+    ws_manager=ws_manager,
+    futopt_recorder=futopt_candle_recorder,
+    futopt_enabled=FUTOPT_RECORDER_ENABLED,
+)
 
 
 # ─── App lifecycle ───────────────────────────────────────────
@@ -497,6 +506,7 @@ system.configure(
     frontend_dist_dir=FRONTEND_DIST_DIR,
     scheduler=background_scheduler,
     database=db,
+    data_quality_service=data_quality_service,
 )
 
 app.include_router(watchlist.router)

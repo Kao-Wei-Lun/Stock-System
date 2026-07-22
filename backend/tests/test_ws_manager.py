@@ -65,6 +65,23 @@ class TestConnectionManager:
         assert manager.get_subscribed_tickers() == set()
 
     @pytest.mark.anyio
+    async def test_get_status_summarizes_clients_and_subscriptions(self, manager):
+        ws1 = _make_ws()
+        ws2 = _make_ws()
+        await manager.connect(ws1)
+        await manager.connect(ws2)
+        manager.subscribe(ws1, "2330.TW")
+        manager.subscribe(ws1, "AAPL")
+        manager.subscribe(ws2, "2330.TW")
+
+        assert manager.get_status() == {
+            "client_count": 2,
+            "subscribed_ticker_count": 2,
+            "subscription_count": 3,
+            "subscribed_tickers": ["2330.TW", "AAPL"],
+        }
+
+    @pytest.mark.anyio
     async def test_disconnect_cleans_subscriptions(self, manager):
         ws = _make_ws()
         await manager.connect(ws)

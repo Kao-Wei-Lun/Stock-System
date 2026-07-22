@@ -17,16 +17,18 @@ _FRONTEND_DEV_URL = "http://localhost:5173"
 _FRONTEND_DIST_DIR: Path | None = None
 _SCHEDULER = None
 _DATABASE = None
+_DATA_QUALITY_SERVICE = None
 
 router = APIRouter(tags=["system"])
 
 
-def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None, database=None):
-    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE
+def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None, database=None, data_quality_service=None):
+    global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
     _DATABASE = database
+    _DATA_QUALITY_SERVICE = data_quality_service
 
 
 def _frontend_ready() -> bool:
@@ -63,6 +65,13 @@ async def scheduler_health():
     if summary["running"] and summary["active_count"] == 0:
         status = "idle"
     return {"status": status, **summary, "time": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/api/system/data-quality")
+async def system_data_quality():
+    if _DATA_QUALITY_SERVICE is None:
+        return JSONResponse({"status": "error", "detail": "Data quality service is not configured"}, status_code=503)
+    return await _DATA_QUALITY_SERVICE.build_snapshot()
 
 
 @router.websocket("/ws")
