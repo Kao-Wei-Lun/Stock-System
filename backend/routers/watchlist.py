@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
+from market_freshness import is_at_least_as_recent, market_data_freshness
 from providers import fetcher, fubon_realtime_pool
 from schemas import (
     WatchlistGroupCreate,
@@ -49,14 +50,22 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
     row = await db.get_latest_ohlcv(ticker)
     quote = await db.get_market_quote(ticker)
     info = await db.get_stock_info(ticker)
+    quote_timestamp = (quote or {}).get("quote_timestamp") or (quote or {}).get("synced_at")
+    row_timestamp = (row or {}).get("date")
+    use_quote = bool(quote) and (
+        not row or is_at_least_as_recent(quote_timestamp, row_timestamp)
+    )
+    snapshot = quote if use_quote else row
+    data_timestamp = quote_timestamp if use_quote else row_timestamp
+    freshness = market_data_freshness(data_timestamp)
     prev = None
-    if quote and quote.get("prev_close") not in (None, 0):
+    if use_quote and quote.get("prev_close") not in (None, 0):
         prev = quote.get("prev_close")
     elif row:
         prev = await db.get_prev_close(ticker)
 
     latest_price = None
-    if quote and quote.get("price") is not None:
+    if use_quote and quote.get("price") is not None:
         latest_price = quote.get("price")
     elif row:
         latest_price = row.get("close")
@@ -68,17 +77,23 @@ async def hydrate_watchlist_item(ticker: str, group: dict, item: dict | None = N
         "ticker": ticker,
         "name": display_name,
         "close": latest_price,
-        "open": quote.get("open") if quote and quote.get("open") is not None else (row["open"] if row else None),
-        "high": quote.get("high") if quote and quote.get("high") is not None else (row["high"] if row else None),
-        "low": quote.get("low") if quote and quote.get("low") is not None else (row["low"] if row else None),
-        "volume": quote.get("volume") if quote and quote.get("volume") is not None else (row["volume"] if row else None),
+        "open": snapshot.get("open") if snapshot else None,
+        "high": snapshot.get("high") if snapshot else None,
+        "low": snapshot.get("low") if snapshot else None,
+        "volume": snapshot.get("volume") if snapshot else None,
         "change_pct": round(chg_pct, 2) if latest_price is not None else 0,
         "date": row["date"] if row else None,
-        "source": (quote or {}).get("source") or (row or {}).get("source") or "local_cache",
-        "quote_type": (quote or {}).get("quote_type"),
-        "is_delayed": (quote or {}).get("is_delayed", True),
-        "quote_timestamp": (quote or {}).get("quote_timestamp"),
-        "synced_at": (quote or {}).get("synced_at") or (row.get("updated_at") if row else None),
+        "source": (snapshot or {}).get("source") or "local_cache",
+        "quote_type": (quote or {}).get("quote_type") if use_quote else "historical_close",
+        "is_delayed": (quote or {}).get("is_delayed", True) if use_quote else True,
+        "quote_timestamp": (quote or {}).get("quote_timestamp") if use_quote else None,
+        "synced_at": (
+            (quote or {}).get("synced_at")
+            if use_quote
+            else (row or {}).get("updated_at")
+        ),
+        "data_origin": "quote" if use_quote else ("ohlcv" if row else "missing"),
+        **freshness,
         "tags": item.get("tags") if isinstance(item, dict) and isinstance(item.get("tags"), list) else [],
         "category": categorize(ticker),
         "group_id": group["id"],

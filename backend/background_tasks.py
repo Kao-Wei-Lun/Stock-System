@@ -82,6 +82,7 @@ class BackgroundTaskService:
             )
             successes = []
             failures = []
+            quote_failures = []
             total_rows = 0
             for index, ticker in enumerate(tickers):
                 try:
@@ -92,7 +93,27 @@ class BackgroundTaskService:
                         include_info=False,
                     )
                     total_rows += synced
-                    successes.append({"ticker": ticker, "synced": synced})
+                    quote_synced = False
+                    quote_error = None
+                    try:
+                        quote_synced = bool(await self.fetch_and_store_quote_snapshot(ticker))
+                        if not quote_synced:
+                            quote_error = "provider returned no quote"
+                    except Exception as exc:
+                        quote_error = str(exc)
+                    if quote_error:
+                        quote_failures.append({"ticker": ticker, "message": quote_error})
+                        self.logger.warning(
+                            "Tracked quote sync failed for %s (%s): %s",
+                            ticker,
+                            reason,
+                            quote_error,
+                        )
+                    successes.append({
+                        "ticker": ticker,
+                        "synced": synced,
+                        "quote_synced": quote_synced,
+                    })
                     await self.db.log_sync(
                         ticker,
                         "success",
@@ -121,9 +142,12 @@ class BackgroundTaskService:
                 "tickers": tickers,
                 "success_count": len(successes),
                 "failure_count": len(failures),
+                "quote_success_count": sum(1 for item in successes if item["quote_synced"]),
+                "quote_failure_count": len(quote_failures),
                 "total_rows": total_rows,
                 "results": successes,
                 "failures": failures,
+                "quote_failures": quote_failures,
             }
 
     async def fetch_and_store_quote_snapshot(self, ticker: str) -> dict | None:

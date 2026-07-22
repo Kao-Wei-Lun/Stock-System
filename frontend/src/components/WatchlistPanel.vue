@@ -200,7 +200,8 @@
               <button
                 class="wl-shortcut"
                 :data-testid="`watch-alert-${item.ticker}`"
-                title="建立警報"
+                :title="isStaleItem(item) ? '資料已過期，更新後才能建立警報' : '建立警報'"
+                :disabled="isStaleItem(item)"
                 @click.stop="openAlertShortcut(item)"
               >
                 警報
@@ -428,7 +429,7 @@ function parseWatchTimestamp(value) {
 }
 
 function resolveWatchTimestamp(item) {
-  return item?.quote_timestamp || item?.synced_at || item?.date || null;
+  return item?.data_timestamp || item?.quote_timestamp || item?.date || item?.synced_at || null;
 }
 
 function formatSourceLabel(source) {
@@ -448,13 +449,15 @@ function formatWatchTimestamp(item) {
 }
 
 function isStaleItem(item) {
+  if (typeof item?.is_stale === "boolean") return item.is_stale;
+  if (item?.freshness_status === "stale" || item?.freshness_status === "missing") return true;
   const parsed = parseWatchTimestamp(resolveWatchTimestamp(item));
   if (!parsed) return true;
-  return Date.now() - parsed.getTime() > 24 * 60 * 60 * 1000;
+  return Date.now() - parsed.getTime() > 4 * 24 * 60 * 60 * 1000;
 }
 
 function getFreshnessLabel(item) {
-  if (isStaleItem(item)) return "資料較舊";
+  if (isStaleItem(item)) return "資料已過期";
   return item?.is_delayed === false ? "最新快照" : "延遲快照";
 }
 
@@ -573,7 +576,7 @@ function openJournalEntry(item) {
 
 function buildAlertShortcutPayload(item, overrides = {}) {
   const ticker = String(item?.ticker || "").trim();
-  if (!ticker) return null;
+  if (!ticker || isStaleItem(item)) return null;
   const extraTags = Array.isArray(overrides.extra_tags) ? overrides.extra_tags : [];
   const contextTags = Array.from(new Set([...getTagList(item), ...extraTags.filter(Boolean)])).slice(0, 6);
   const hasPrice = Number.isFinite(Number(item.close));

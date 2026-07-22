@@ -140,3 +140,49 @@ def test_add_watchlist_item_persists_tags_via_api(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["tags"] == ["優先候選", "Q4", "市場:選擇性出手"]
+
+
+def test_hydrate_watchlist_item_ignores_quote_older_than_latest_ohlcv(monkeypatch):
+    async def fake_get_latest_ohlcv(ticker):
+        return {
+            "ticker": ticker,
+            "date": "2026-07-22",
+            "open": 210.0,
+            "high": 216.0,
+            "low": 209.0,
+            "close": 215.0,
+            "volume": 2000000,
+            "source": "yahoo_finance",
+            "updated_at": "2026-07-22T04:05:00+00:00",
+        }
+
+    async def fake_get_market_quote(ticker):
+        return {
+            "ticker": ticker,
+            "price": 180.0,
+            "prev_close": 179.0,
+            "source": "yahoo_finance",
+            "quote_type": "delayed_snapshot",
+            "is_delayed": True,
+            "quote_timestamp": "2026-04-08T04:00:00+00:00",
+            "synced_at": "2026-04-08T04:01:00+00:00",
+        }
+
+    async def fake_get_stock_info(ticker):
+        return {"name": "Apple Inc."}
+
+    async def fake_get_prev_close(ticker):
+        return 212.0
+
+    monkeypatch.setattr(main.db, "get_latest_ohlcv", fake_get_latest_ohlcv)
+    monkeypatch.setattr(main.db, "get_market_quote", fake_get_market_quote)
+    monkeypatch.setattr(main.db, "get_stock_info", fake_get_stock_info)
+    monkeypatch.setattr(main.db, "get_prev_close", fake_get_prev_close)
+
+    result = asyncio.run(main.hydrate_watchlist_item("AAPL", {"id": 3, "name": "Core"}))
+
+    assert result["close"] == 215.0
+    assert result["change_pct"] == 1.42
+    assert result["data_origin"] == "ohlcv"
+    assert result["quote_type"] == "historical_close"
+    assert result["data_timestamp"].startswith("2026-07-22")

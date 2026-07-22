@@ -55,7 +55,7 @@ describe("WatchlistPanel", () => {
     expect(wrapper.text()).not.toContain("無時間戳");
   });
 
-  it("marks items without timestamps as stale", () => {
+  it("marks items without timestamps as stale", async () => {
     const wrapper = mount(WatchlistPanel, {
       props: buildPanelProps({
         groups: [
@@ -83,8 +83,12 @@ describe("WatchlistPanel", () => {
     });
 
     expect(wrapper.text()).toContain("Local cache");
-    expect(wrapper.text()).toContain("資料較舊");
+    expect(wrapper.text()).toContain("資料已過期");
     expect(wrapper.text()).toContain("無時間戳");
+    expect(wrapper.get('[data-testid="watch-alert-CACHE"]').attributes("disabled")).toBeDefined();
+
+    await wrapper.get('[data-testid="watch-alert-CACHE"]').trigger("click");
+    expect(wrapper.emitted("open-alert-modal")).toBeUndefined();
   });
 
   it("filters and sorts watchlist items by stored screener tags", async () => {
