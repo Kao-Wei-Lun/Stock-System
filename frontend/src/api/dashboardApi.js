@@ -331,6 +331,16 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     importAssetCashCsv(payload) {
       return request("/api/assets/import/cash-csv", buildJsonRequest("POST", payload));
     },
+    listAssetImportBatches(options = {}) {
+      const params = new URLSearchParams();
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.offset != null) params.set("offset", String(options.offset));
+      const query = params.toString();
+      return request(`/api/assets/import-batches${query ? `?${query}` : ""}`);
+    },
+    rollbackAssetImportBatch(batchId) {
+      return request(`/api/assets/import-batches/${batchId}/rollback`, { method: "POST" });
+    },
     previewAssetJournalImport(payload) {
       return request("/api/assets/journal-import/preview", buildJsonRequest("POST", payload));
     },

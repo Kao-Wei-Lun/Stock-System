@@ -32,6 +32,21 @@ def _asset_page(limit: int | None, offset: int, *, default_limit: int) -> tuple[
     return clean_limit, clean_offset
 
 
+def _deserialize_asset_import_batch(row: Dict[str, Any] | None) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    item = dict(row)
+    raw_metadata = item.pop("metadata_json", None)
+    if isinstance(raw_metadata, str) and raw_metadata:
+        try:
+            item["metadata"] = json.loads(raw_metadata)
+        except (TypeError, ValueError):
+            item["metadata"] = {}
+    else:
+        item["metadata"] = raw_metadata if isinstance(raw_metadata, dict) else {}
+    return item
+
+
 class AssetMixin:
     async def _find_asset_import_keys(
         self,
@@ -70,6 +85,121 @@ class AssetMixin:
         owner_id: int = DEFAULT_OWNER_ID,
     ) -> Dict[str, int]:
         return await self._find_asset_import_keys("asset_cash_ledger", import_keys, owner_id=owner_id)
+
+    async def create_asset_import_batch(
+        self,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, Any]:
+        batch_id = await self._execute_insert(
+            """
+            INSERT INTO `asset_import_batches`
+                (`owner_id`, `import_type`, `source_name`, `status`, `row_count`,
+                 `created_count`, `skipped_count`, `error_count`, `metadata_json`, `error_message`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                owner_id,
+                str(payload.get("import_type") or "csv")[:32],
+                str(payload.get("source_name") or "").strip()[:255] or None,
+                str(payload.get("status") or "pending")[:20],
+                max(0, int(payload.get("row_count") or 0)),
+                max(0, int(payload.get("created_count") or 0)),
+                max(0, int(payload.get("skipped_count") or 0)),
+                max(0, int(payload.get("error_count") or 0)),
+                json.dumps(payload.get("metadata") or {}, ensure_ascii=False),
+                str(payload.get("error_message") or "")[:2000] or None,
+            ),
+        )
+        batch = await self.get_asset_import_batch(batch_id, owner_id=owner_id)
+        if not batch:
+            raise RuntimeError("Asset import batch was not persisted")
+        return batch
+
+    async def get_asset_import_batch(
+        self,
+        batch_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._fetchone(
+            "SELECT * FROM `asset_import_batches` WHERE `id`=%s AND `owner_id`=%s LIMIT 1",
+            (batch_id, owner_id),
+        )
+        return _deserialize_asset_import_batch(row)
+
+    async def list_asset_import_batches(
+        self,
+        owner_id: int = DEFAULT_OWNER_ID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=50)
+        rows = await self._fetchall(
+            """
+            SELECT *
+            FROM `asset_import_batches`
+            WHERE `owner_id`=%s
+            ORDER BY `created_at` DESC, `id` DESC
+            LIMIT %s OFFSET %s
+            """,
+            (owner_id, clean_limit, clean_offset),
+        )
+        return [_deserialize_asset_import_batch(row) for row in rows]
+
+    async def finalize_asset_import_batch(
+        self,
+        batch_id: int,
+        payload: Dict[str, Any],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Optional[Dict[str, Any]]:
+        status = str(payload.get("status") or "failed")[:20]
+        updated = await self._execute(
+            """
+            UPDATE `asset_import_batches`
+            SET `status`=%s,
+                `row_count`=%s,
+                `created_count`=%s,
+                `skipped_count`=%s,
+                `error_count`=%s,
+                `metadata_json`=%s,
+                `error_message`=%s,
+                `committed_at`=IF(%s='committed', CURRENT_TIMESTAMP, `committed_at`),
+                `rolled_back_at`=IF(%s='rolled_back', CURRENT_TIMESTAMP, `rolled_back_at`)
+            WHERE `id`=%s AND `owner_id`=%s
+            """,
+            (
+                status,
+                max(0, int(payload.get("row_count") or 0)),
+                max(0, int(payload.get("created_count") or 0)),
+                max(0, int(payload.get("skipped_count") or 0)),
+                max(0, int(payload.get("error_count") or 0)),
+                json.dumps(payload.get("metadata") or {}, ensure_ascii=False),
+                str(payload.get("error_message") or "")[:2000] or None,
+                status,
+                status,
+                batch_id,
+                owner_id,
+            ),
+        )
+        if not updated:
+            return None
+        return await self.get_asset_import_batch(batch_id, owner_id=owner_id)
+
+    async def delete_asset_import_batch_entries(
+        self,
+        batch_id: int,
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, int]:
+        cash_count = await self._execute(
+            "DELETE FROM `asset_cash_ledger` WHERE `owner_id`=%s AND `import_batch_id`=%s",
+            (owner_id, batch_id),
+        )
+        trade_count = await self._execute(
+            "DELETE FROM `asset_trade_ledger` WHERE `owner_id`=%s AND `import_batch_id`=%s",
+            (owner_id, batch_id),
+        )
+        return {"cash_count": int(cash_count), "trade_count": int(trade_count)}
 
     async def list_asset_accounts(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
         rows = await self._fetchall(
@@ -235,9 +365,9 @@ class AssetMixin:
             """
             INSERT INTO `asset_cash_ledger`
                 (`owner_id`, `account_id`, `flow_date`, `flow_type`, `amount`, `currency`,
-                 `fx_rate_to_base`, `is_initial_balance`, `source`, `import_key`,
+                 `fx_rate_to_base`, `is_initial_balance`, `source`, `import_key`, `import_batch_id`,
                  `linked_trade_id`, `linked_trade_role`, `counterparty`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -250,6 +380,7 @@ class AssetMixin:
                 normalized["is_initial_balance"],
                 normalized["source"],
                 normalized["import_key"],
+                payload.get("import_batch_id"),
                 normalized["linked_trade_id"],
                 normalized["linked_trade_role"],
                 normalized["counterparty"],
@@ -400,8 +531,8 @@ class AssetMixin:
                 (`owner_id`, `account_id`, `trade_date`, `ticker`, `display_name`, `market`,
                  `asset_type`, `currency`, `side`, `quantity`, `price`, `gross_amount`,
                  `fee_amount`, `tax_amount`, `net_amount`, `fx_rate_to_base`,
-                 `is_initial_balance`, `source`, `import_key`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `is_initial_balance`, `source`, `import_key`, `import_batch_id`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -423,6 +554,7 @@ class AssetMixin:
                 normalized["is_initial_balance"],
                 normalized["source"],
                 normalized["import_key"],
+                payload.get("import_batch_id"),
                 normalized["note"],
             ),
         )

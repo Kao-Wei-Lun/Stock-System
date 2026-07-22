@@ -1,4 +1,6 @@
 import copy
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import pytest
 
@@ -32,6 +34,7 @@ def asset_store(monkeypatch):
         "next_price_override_id": 1,
         "next_fx_rate_id": 1,
         "next_adjustment_id": 1,
+        "next_import_batch_id": 1,
         "accounts": {},
         "cash_entries": {},
         "trade_entries": {},
@@ -39,6 +42,7 @@ def asset_store(monkeypatch):
         "price_overrides": {},
         "fx_rates": {},
         "adjustments": {},
+        "import_batches": {},
         "price_histories": {},
         "journal_entries": [],
         "quotes": {
@@ -116,6 +120,69 @@ def asset_store(monkeypatch):
             if item.get("import_key") in requested
         }
 
+    async def create_asset_import_batch(payload, owner_id=1):
+        batch_id = store["next_import_batch_id"]
+        store["next_import_batch_id"] += 1
+        item = {
+            "id": batch_id,
+            "owner_id": owner_id,
+            "import_type": payload.get("import_type"),
+            "source_name": payload.get("source_name"),
+            "status": payload.get("status") or "pending",
+            "row_count": int(payload.get("row_count") or 0),
+            "created_count": int(payload.get("created_count") or 0),
+            "skipped_count": int(payload.get("skipped_count") or 0),
+            "error_count": int(payload.get("error_count") or 0),
+            "metadata": clone(payload.get("metadata") or {}),
+            "error_message": payload.get("error_message"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "committed_at": None,
+            "rolled_back_at": None,
+        }
+        store["import_batches"][batch_id] = item
+        return clone(item)
+
+    async def get_asset_import_batch(batch_id, owner_id=1):
+        item = store["import_batches"].get(batch_id)
+        return clone(item) if item and item.get("owner_id") == owner_id else None
+
+    async def list_asset_import_batches(owner_id=1, limit=50, offset=0):
+        items = [item for item in store["import_batches"].values() if item.get("owner_id") == owner_id]
+        items.sort(key=lambda item: item["id"], reverse=True)
+        return clone(items[offset:offset + limit])
+
+    async def finalize_asset_import_batch(batch_id, payload, owner_id=1):
+        item = store["import_batches"].get(batch_id)
+        if not item or item.get("owner_id") != owner_id:
+            return None
+        for key in ("status", "row_count", "created_count", "skipped_count", "error_count", "metadata", "error_message"):
+            if key in payload:
+                item[key] = clone(payload[key])
+        if item.get("status") == "committed":
+            item["committed_at"] = datetime.now(timezone.utc).isoformat()
+        if item.get("status") == "rolled_back":
+            item["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+        return clone(item)
+
+    async def delete_asset_import_batch_entries(batch_id, owner_id=1):
+        cash_ids = [key for key, item in store["cash_entries"].items() if item.get("owner_id") == owner_id and item.get("import_batch_id") == batch_id]
+        trade_ids = [key for key, item in store["trade_entries"].items() if item.get("owner_id") == owner_id and item.get("import_batch_id") == batch_id]
+        for key in cash_ids:
+            del store["cash_entries"][key]
+        for key in trade_ids:
+            del store["trade_entries"][key]
+        return {"cash_count": len(cash_ids), "trade_count": len(trade_ids)}
+
+    @asynccontextmanager
+    async def transaction():
+        before = clone(store)
+        try:
+            yield
+        except BaseException:
+            store.clear()
+            store.update(before)
+            raise
+
     async def list_asset_cash_ledger_entries(owner_id=1, account_id=None, date_from=None, date_to=None, limit=200, offset=0):
         items = list(store["cash_entries"].values())
         if account_id is not None:
@@ -148,6 +215,7 @@ def asset_store(monkeypatch):
             "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "source": payload.get("source") or "manual",
             "import_key": payload.get("import_key"),
+            "import_batch_id": payload.get("import_batch_id"),
             "linked_trade_id": payload.get("linked_trade_id"),
             "linked_trade_role": payload.get("linked_trade_role"),
             "counterparty": payload.get("counterparty"),
@@ -225,6 +293,7 @@ def asset_store(monkeypatch):
             "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "source": payload.get("source") or "manual",
             "import_key": payload.get("import_key"),
+            "import_batch_id": payload.get("import_batch_id"),
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:30:00+00:00",
             "updated_at": "2026-04-18T08:30:00+00:00",
@@ -475,6 +544,12 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "delete_asset_account", delete_asset_account)
     monkeypatch.setattr(main.db, "find_asset_trade_import_keys", find_asset_trade_import_keys)
     monkeypatch.setattr(main.db, "find_asset_cash_import_keys", find_asset_cash_import_keys)
+    monkeypatch.setattr(main.db, "create_asset_import_batch", create_asset_import_batch)
+    monkeypatch.setattr(main.db, "get_asset_import_batch", get_asset_import_batch)
+    monkeypatch.setattr(main.db, "list_asset_import_batches", list_asset_import_batches)
+    monkeypatch.setattr(main.db, "finalize_asset_import_batch", finalize_asset_import_batch)
+    monkeypatch.setattr(main.db, "delete_asset_import_batch_entries", delete_asset_import_batch_entries)
+    monkeypatch.setattr(main.db, "transaction", transaction)
     monkeypatch.setattr(main.db, "list_asset_cash_ledger_entries", list_asset_cash_ledger_entries)
     monkeypatch.setattr(main.db, "get_asset_cash_ledger_entry", get_asset_cash_ledger_entry)
     monkeypatch.setattr(main.db, "create_asset_cash_ledger_entry", create_asset_cash_ledger_entry)
@@ -1170,10 +1245,11 @@ def test_asset_csv_preview_validates_rows_and_marks_file_duplicates(client, asse
         json={"csv_text": csv_text, "default_account_id": account["id"], "dry_run": False},
     )
     assert imported.status_code == 200
-    assert imported.json()["summary"]["created_count"] == 1
+    assert imported.json()["summary"]["created_count"] == 0
     assert imported.json()["summary"]["skipped_count"] == 1
     assert imported.json()["summary"]["error_count"] == 2
-    assert len(asset_store["trade_entries"]) == 1
+    assert imported.json()["batch"]["status"] == "failed"
+    assert len(asset_store["trade_entries"]) == 0
 
 
 def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_store):
@@ -1316,3 +1392,79 @@ def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_sto
     preview_after_payload = preview_after_response.json()
     assert preview_after_payload["summary"]["importable_count"] == 0
     assert preview_after_payload["summary"]["skipped_count"] == 2
+
+
+def test_asset_csv_import_rolls_back_every_row_when_one_insert_fails(client, asset_store, monkeypatch):
+    account = client.post(
+        "/api/assets/accounts",
+        json={"name": "Atomic Import", "account_type": "brokerage", "base_currency": "TWD"},
+    ).json()
+    original_create = main.db.create_asset_trade_entry
+    attempts = 0
+
+    async def fail_second_insert(payload, owner_id=1):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            raise RuntimeError("simulated second-row failure")
+        return await original_create(payload, owner_id=owner_id)
+
+    monkeypatch.setattr(main.db, "create_asset_trade_entry", fail_second_insert)
+    csv_text = "\n".join(
+        [
+            "trade_date,ticker,side,quantity,price,external_id",
+            "2026-04-01T09:00:00,2330,buy,1,100,A-1",
+            "2026-04-02T09:00:00,2317,buy,1,200,A-2",
+        ]
+    )
+
+    response = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": csv_text, "default_account_id": account["id"], "dry_run": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["created_count"] == 0
+    assert payload["summary"]["error_count"] == 1
+    assert payload["batch"]["status"] == "failed"
+    assert asset_store["trade_entries"] == {}
+
+
+def test_committed_asset_import_batch_can_be_audited_and_rolled_back(client, asset_store):
+    account = client.post(
+        "/api/assets/accounts",
+        json={"name": "Rollback Import", "account_type": "brokerage", "base_currency": "TWD"},
+    ).json()
+    csv_text = "\n".join(
+        [
+            "trade_date,ticker,side,quantity,price,external_id",
+            "2026-04-01T09:00:00,2330,buy,1,100,R-1",
+        ]
+    )
+    imported = client.post(
+        "/api/assets/import/trades-csv",
+        json={
+            "csv_text": csv_text,
+            "default_account_id": account["id"],
+            "source_name": "broker-2026.csv",
+            "dry_run": False,
+        },
+    ).json()
+    batch_id = imported["batch"]["id"]
+
+    assert imported["batch"]["status"] == "committed"
+    assert imported["batch"]["source_name"] == "broker-2026.csv"
+    assert len(asset_store["trade_entries"]) == 1
+    history = client.get("/api/assets/import-batches").json()["items"]
+    assert history[0]["id"] == batch_id
+
+    rolled_back = client.post(f"/api/assets/import-batches/{batch_id}/rollback")
+
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["batch"]["status"] == "rolled_back"
+    assert rolled_back.json()["deleted"]["trade_count"] == 1
+    assert asset_store["trade_entries"] == {}
+    repeated = client.post(f"/api/assets/import-batches/{batch_id}/rollback")
+    assert repeated.status_code == 200
+    assert repeated.json()["deleted"] == {"trade_count": 0, "cash_count": 0}

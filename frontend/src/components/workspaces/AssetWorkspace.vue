@@ -125,6 +125,7 @@
           :asset-trade-import-result="assetTradeImportResult"
           :asset-cash-import-result="assetCashImportResult"
           :asset-journal-import-preview="assetJournalImportPreview"
+          :asset-import-batches="assetImportBatches"
           :asset-last-recompute="assetLastRecompute"
           :asset-account-allocation="assetAccountAllocation"
           :asset-market-allocation="assetMarketAllocation"
@@ -164,6 +165,7 @@
           @save-asset-adjustment="$emit('save-asset-adjustment')"
           @import-asset-trades-csv="$emit('import-asset-trades-csv', $event)"
           @import-asset-cash-csv="$emit('import-asset-cash-csv', $event)"
+          @rollback-asset-import-batch="$emit('rollback-asset-import-batch', $event)"
           @preview-asset-journal-import="$emit('preview-asset-journal-import')"
           @import-asset-journal="$emit('import-asset-journal')"
           @recompute-asset-tracking="$emit('recompute-asset-tracking')"
@@ -246,6 +248,7 @@ const props = defineProps({
   assetTradeImportResult: { type: Object, default: null },
   assetCashImportResult: { type: Object, default: null },
   assetJournalImportPreview: { type: Object, default: null },
+  assetImportBatches: { type: Array, default: () => [] },
   assetLastRecompute: { type: Object, default: null },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
@@ -290,6 +293,7 @@ defineEmits([
   "save-asset-adjustment",
   "import-asset-trades-csv",
   "import-asset-cash-csv",
+  "rollback-asset-import-batch",
   "preview-asset-journal-import",
   "import-asset-journal",
   "recompute-asset-tracking",

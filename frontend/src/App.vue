@@ -277,6 +277,7 @@
         :asset-trade-import-result="assetTradeImportResult"
         :asset-cash-import-result="assetCashImportResult"
         :asset-journal-import-preview="assetJournalImportPreview"
+        :asset-import-batches="assetImportBatches"
         :asset-last-recompute="assetLastRecompute"
         :asset-account-allocation="assetAccountAllocation"
         :asset-market-allocation="assetMarketAllocation"
@@ -318,6 +319,7 @@
         @save-asset-adjustment="saveAssetAdjustment"
         @import-asset-trades-csv="importAssetTradesCsv($event || {})"
         @import-asset-cash-csv="importAssetCashCsv($event || {})"
+        @rollback-asset-import-batch="rollbackAssetImportBatch"
         @preview-asset-journal-import="previewAssetJournalImport"
         @import-asset-journal="importAssetJournalEntries"
         @recompute-asset-tracking="recomputeAssetTracking"
@@ -613,6 +615,7 @@ const {
   assetTradeImportResult,
   assetCashImportResult,
   assetJournalImportPreview,
+  assetImportBatches,
   assetLastRecompute,
   assetBaseCurrency,
   assetSummary,
@@ -775,6 +778,7 @@ const {
   deleteAssetPriceOverride,
   deleteAssetFxRate,
   deleteAssetAdjustment,
+  rollbackAssetImportBatch,
   importAssetTradesCsv,
   importAssetCashCsv,
   previewAssetJournalImport,

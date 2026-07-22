@@ -1,5 +1,7 @@
 import asyncio
 import time
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set
 
 import aiomysql
@@ -34,6 +36,10 @@ class DatabaseCore:
     def __init__(self):
         self._pool: Optional[aiomysql.Pool] = None
         self._lock = asyncio.Lock()
+        self._transaction_connection: ContextVar[Any | None] = ContextVar(
+            f"quantvision_db_transaction_{id(self)}",
+            default=None,
+        )
 
     async def connect(self):
         try:
@@ -113,6 +119,34 @@ class DatabaseCore:
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "error": str(exc)[:300],
             }
+
+    @property
+    def in_transaction(self) -> bool:
+        return self._transaction_connection.get() is not None
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Run repository calls atomically on one connection.
+
+        Repository helpers automatically reuse this connection through the
+        task-local context, so existing methods remain backward compatible.
+        """
+        if self._pool is None:
+            raise RuntimeError("Database pool is not initialized")
+        if self.in_transaction:
+            raise RuntimeError("Nested database transactions are not supported")
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                await conn.begin()
+                token = self._transaction_connection.set(conn)
+                try:
+                    yield conn
+                    await conn.commit()
+                except BaseException:
+                    await conn.rollback()
+                    raise
+                finally:
+                    self._transaction_connection.reset(token)
 
     async def _inspect_schema(self, cur) -> SchemaState:
         await cur.execute(
@@ -208,12 +242,22 @@ class DatabaseCore:
         return plan
 
     async def _fetchone(self, sql: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
+        transaction_conn = self._transaction_connection.get()
+        if transaction_conn is not None:
+            async with transaction_conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                return await cur.fetchone()
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, params)
                 return await cur.fetchone()
 
     async def _fetchall(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        transaction_conn = self._transaction_connection.get()
+        if transaction_conn is not None:
+            async with transaction_conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql, params)
+                return list(await cur.fetchall())
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, params)
@@ -221,6 +265,11 @@ class DatabaseCore:
         return list(rows)
 
     async def _execute(self, sql: str, params: tuple = ()) -> int:
+        transaction_conn = self._transaction_connection.get()
+        if transaction_conn is not None:
+            async with transaction_conn.cursor() as cur:
+                await cur.execute(sql, params)
+                return cur.rowcount
         async with self._lock:
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cur:
@@ -228,6 +277,11 @@ class DatabaseCore:
                     return cur.rowcount
 
     async def _execute_insert(self, sql: str, params: tuple = ()) -> int:
+        transaction_conn = self._transaction_connection.get()
+        if transaction_conn is not None:
+            async with transaction_conn.cursor() as cur:
+                await cur.execute(sql, params)
+                return cur.lastrowid
         async with self._lock:
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cur:

@@ -564,6 +564,10 @@
             <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
           </select>
         </div>
+        <div class="bt-row">
+          <div class="bt-label">來源檔名</div>
+          <input class="bt-inp" :value="assetTradeImportForm.source_name" placeholder="例如：2026-07 證券對帳單.csv" @input="$emit('update-asset-trade-import-field', { key: 'source_name', value: $event.target.value })" />
+        </div>
         <div class="journal-text-row">
           <div class="bt-label">CSV</div>
           <textarea class="journal-textarea asset-import-textarea" :value="assetTradeImportForm.csv_text" @input="$emit('update-asset-trade-import-field', { key: 'csv_text', value: $event.target.value })" placeholder="trade_date,ticker,side,quantity,price"></textarea>
@@ -601,6 +605,10 @@
             <option v-for="account in assetAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
           </select>
         </div>
+        <div class="bt-row">
+          <div class="bt-label">來源檔名</div>
+          <input class="bt-inp" :value="assetCashImportForm.source_name" placeholder="例如：銀行流水.csv" @input="$emit('update-asset-cash-import-field', { key: 'source_name', value: $event.target.value })" />
+        </div>
         <div class="journal-text-row">
           <div class="bt-label">CSV</div>
           <textarea class="journal-textarea asset-import-textarea" :value="assetCashImportForm.csv_text" @input="$emit('update-asset-cash-import-field', { key: 'csv_text', value: $event.target.value })" placeholder="flow_date,flow_type,amount,currency"></textarea>
@@ -624,6 +632,28 @@
           </div>
           <div v-else class="bt-history-empty">先貼上 CSV 後預覽。</div>
         </div>
+      </section>
+
+      <section v-show="showsMaintenanceSection('imports')" class="asset-card asset-card-wide" data-asset-section="imports">
+        <div class="asset-card-head">
+          <div>
+            <div class="asset-card-title">匯入批次紀錄</div>
+            <div class="bt-trade-sub">每次正式匯入皆為全有或全無；已完成的批次可整批撤銷。</div>
+          </div>
+        </div>
+        <div v-if="assetImportBatches.length" class="asset-list">
+          <div v-for="item in assetImportBatches" :key="`asset-import-batch-${item.id}`" class="asset-list-item asset-import-batch-row">
+            <div>
+              <strong>#{{ item.id }} · {{ item.source_name || importBatchTypeLabel(item.import_type) }}</strong>
+              <div class="bt-trade-sub">{{ formatDateTime(item.created_at) }} · {{ importBatchStatusLabel(item.status) }}</div>
+            </div>
+            <div class="asset-list-metrics">
+              <span>新增 {{ item.created_count || 0 }} · 略過 {{ item.skipped_count || 0 }} · 錯誤 {{ item.error_count || 0 }}</span>
+              <button v-if="item.status === 'committed'" class="asset-inline-btn" type="button" :data-testid="`rollback-import-batch-${item.id}`" @click="confirmRollbackImportBatch(item)">撤銷批次</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="bt-history-empty">尚無正式匯入批次。</div>
       </section>
     </div>
 
@@ -800,6 +830,7 @@ const props = defineProps({
   assetTradeImportResult: { type: Object, default: null },
   assetCashImportResult: { type: Object, default: null },
   assetJournalImportPreview: { type: Object, default: null },
+  assetImportBatches: { type: Array, default: () => [] },
   assetLastRecompute: { type: Object, default: null },
   assetAccountAllocation: { type: Array, default: () => [] },
   assetMarketAllocation: { type: Array, default: () => [] },
@@ -843,6 +874,7 @@ const emit = defineEmits([
   "save-asset-adjustment",
   "import-asset-trades-csv",
   "import-asset-cash-csv",
+  "rollback-asset-import-batch",
   "preview-asset-journal-import",
   "import-asset-journal",
   "reset-asset-account-form",
@@ -1054,6 +1086,29 @@ function importDuplicateLabel(item) {
   if (item?.import_status === "duplicate_in_database") return `資料庫已存在 #${item.existing_id || "—"}`;
   if (item?.import_status === "duplicate_in_file") return `與第 ${item.duplicate_of_row || "—"} 列重複`;
   return "重複資料";
+}
+
+function importBatchTypeLabel(type) {
+  return {
+    trade_csv: "交易 CSV",
+    cash_csv: "現金 CSV",
+    journal: "Journal",
+  }[type] || "資產匯入";
+}
+
+function importBatchStatusLabel(status) {
+  return {
+    pending: "處理中",
+    committed: "已完成",
+    failed: "失敗（未寫入）",
+    rolled_back: "已撤銷",
+  }[status] || status || "未知";
+}
+
+function confirmRollbackImportBatch(item) {
+  const source = item?.source_name || importBatchTypeLabel(item?.import_type);
+  if (!window.confirm(`確定撤銷批次 #${item?.id}（${source}）？此批次建立的交易與現金流水會一併移除。`)) return;
+  emit("rollback-asset-import-batch", item?.id);
 }
 
 function heatmapTone(value) {

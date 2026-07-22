@@ -400,11 +400,13 @@ class AssetPositionAdjustmentUpdatePayload(BaseModel):
 class AssetCsvImportPayload(BaseModel):
     csv_text: str = Field(..., min_length=1)
     default_account_id: int | None = None
+    source_name: str | None = Field(None, max_length=255)
     dry_run: bool = False
 
 
 class AssetJournalImportPayload(BaseModel):
     account_id: int
+    source_name: str | None = Field(None, max_length=255)
     ticker: str | None = Field(None, max_length=32)
     market: str | None = Field(None, max_length=32)
     strategy_code: str | None = Field(None, max_length=64)

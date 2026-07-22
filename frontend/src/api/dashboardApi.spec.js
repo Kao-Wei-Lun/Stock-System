@@ -413,4 +413,17 @@ describe("dashboardApi", () => {
       body: JSON.stringify({ name: "Momentum", filters: { market: "US" } }),
     });
   });
+
+  it("lists and rolls back auditable asset import batches", async () => {
+    globalThis.fetch
+      .mockImplementationOnce(() => jsonResponse({ items: [{ id: 12, status: "committed" }] }))
+      .mockImplementationOnce(() => jsonResponse({ ok: true, batch: { id: 12, status: "rolled_back" } }));
+    const api = createDashboardApi();
+
+    await api.listAssetImportBatches({ limit: 20, offset: 0 });
+    await api.rollbackAssetImportBatch(12);
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "/api/assets/import-batches?limit=20&offset=0", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "/api/assets/import-batches/12/rollback", { method: "POST" });
+  });
 });

@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import AssetTrackingPanel from "./AssetTrackingPanel.vue";
 
@@ -31,6 +31,7 @@ function buildProps() {
     assetTradeImportResult: null,
     assetCashImportResult: null,
     assetJournalImportPreview: null,
+    assetImportBatches: [],
     assetLastRecompute: null,
     assetAccountAllocation: [],
     assetMarketAllocation: [],
@@ -127,11 +128,13 @@ function buildProps() {
     },
     assetTradeImportForm: {
       default_account_id: 1,
+      source_name: "",
       csv_text: "",
       dry_run: true,
     },
     assetCashImportForm: {
       default_account_id: 1,
+      source_name: "",
       csv_text: "",
       dry_run: true,
     },
@@ -221,5 +224,34 @@ describe("AssetTrackingPanel", () => {
 
     expect(wrapper.get('[data-testid="asset-trade-import-submit"]').attributes("disabled")).toBeUndefined();
     expect(wrapper.text()).toContain("資料庫已存在 #9");
+  });
+
+  it("shows auditable import batches and confirms rollback", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const wrapper = mount(AssetTrackingPanel, {
+      props: {
+        ...buildProps(),
+        maintenanceSection: "imports",
+        assetImportBatches: [
+          {
+            id: 12,
+            import_type: "trade_csv",
+            source_name: "broker.csv",
+            status: "committed",
+            created_count: 3,
+            skipped_count: 1,
+            error_count: 0,
+            created_at: "2026-07-22T09:00:00+08:00",
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.text()).toContain("broker.csv");
+    expect(wrapper.text()).toContain("新增 3 · 略過 1 · 錯誤 0");
+    await wrapper.get('[data-testid="rollback-import-batch-12"]').trigger("click");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(wrapper.emitted("rollback-asset-import-batch")).toEqual([[12]]);
   });
 });

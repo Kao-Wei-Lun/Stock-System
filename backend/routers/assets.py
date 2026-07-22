@@ -101,6 +101,7 @@ def _build_trade_settlement_payloads(
         "fx_rate_to_base": fx_rate_to_base,
         "is_initial_balance": False,
         "source": _AUTO_TRADE_SETTLEMENT_SOURCE,
+        "import_batch_id": trade_entry.get("import_batch_id"),
         "linked_trade_id": trade_entry.get("id"),
         "note": note,
     }
@@ -774,6 +775,82 @@ def _asset_import_payload(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def _run_atomic_asset_import(
+    *,
+    import_type: str,
+    source_name: str | None,
+    items: List[Dict[str, Any]],
+    duplicates: List[Dict[str, Any]],
+    errors: List[Dict[str, Any]],
+    create_item,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """Persist one import as an auditable all-or-nothing database transaction."""
+    importable = [item for item in items if item.get("import_status") == "importable"]
+    batch = await db.create_asset_import_batch(
+        {
+            "import_type": import_type,
+            "source_name": source_name,
+            "row_count": len(items) + len(errors),
+            "skipped_count": len(duplicates),
+            "error_count": len(errors),
+            "metadata": {"importable_count": len(importable), "duplicate_count": len(duplicates)},
+        },
+        owner_id=DEFAULT_OWNER_ID,
+    )
+    batch_id = int(batch["id"])
+    if errors:
+        batch = await db.finalize_asset_import_batch(
+            batch_id,
+            {
+                **batch,
+                "status": "failed",
+                "created_count": 0,
+                "error_count": len(errors),
+                "error_message": "CSV validation failed; no rows were imported.",
+            },
+            owner_id=DEFAULT_OWNER_ID,
+        )
+        return [], list(errors), batch
+
+    created: List[Dict[str, Any]] = []
+    current_item: Dict[str, Any] | None = None
+    try:
+        async with db.transaction():
+            for current_item in importable:
+                item_payload = _asset_import_payload(current_item)
+                item_payload["import_batch_id"] = batch_id
+                created.append(await create_item(item_payload))
+            batch = await db.finalize_asset_import_batch(
+                batch_id,
+                {
+                    **batch,
+                    "status": "committed",
+                    "created_count": len(created),
+                    "error_count": 0,
+                },
+                owner_id=DEFAULT_OWNER_ID,
+            )
+    except Exception as exc:  # noqa: BLE001 - rollback is guaranteed by db.transaction
+        failure = {
+            "row": (current_item or {}).get("import_row"),
+            "message": str(exc),
+            "payload": current_item,
+        }
+        batch = await db.finalize_asset_import_batch(
+            batch_id,
+            {
+                **batch,
+                "status": "failed",
+                "created_count": 0,
+                "error_count": 1,
+                "error_message": str(exc),
+            },
+            owner_id=DEFAULT_OWNER_ID,
+        )
+        return [], [failure], batch
+    return created, [], batch
+
+
 def _map_journal_entry_to_asset_trades(entry: Dict[str, Any], account_id: int) -> Dict[str, Any]:
     direction = str(entry.get("direction") or "long").strip().lower()
     if direction != "long":
@@ -1286,6 +1363,39 @@ async def delete_asset_reconciliation_snapshot(snapshot_id: int):
     return {"ok": True, "snapshot_id": snapshot_id}
 
 
+@router.get("/import-batches")
+async def list_asset_import_batches(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    items = await db.list_asset_import_batches(
+        owner_id=DEFAULT_OWNER_ID,
+        limit=limit,
+        offset=offset,
+    )
+    return {"items": items, "count": len(items), "limit": limit, "offset": offset}
+
+
+@router.post("/import-batches/{batch_id}/rollback")
+async def rollback_asset_import_batch(batch_id: int):
+    batch = await db.get_asset_import_batch(batch_id, owner_id=DEFAULT_OWNER_ID)
+    if not batch:
+        raise HTTPException(404, "Asset import batch not found")
+    if batch.get("status") == "rolled_back":
+        return {"ok": True, "batch": batch, "deleted": {"trade_count": 0, "cash_count": 0}}
+    if batch.get("status") != "committed":
+        raise HTTPException(409, "Only committed asset import batches can be rolled back")
+
+    async with db.transaction():
+        deleted = await db.delete_asset_import_batch_entries(batch_id, owner_id=DEFAULT_OWNER_ID)
+        batch = await db.finalize_asset_import_batch(
+            batch_id,
+            {**batch, "status": "rolled_back"},
+            owner_id=DEFAULT_OWNER_ID,
+        )
+    return {"ok": True, "batch": batch, "deleted": deleted}
+
+
 @router.post("/import/trades-csv")
 async def import_asset_trades_csv(payload: AssetCsvImportPayload):
     accounts, existing_trades = await asyncio.gather(
@@ -1323,15 +1433,17 @@ async def import_asset_trades_csv(payload: AssetCsvImportPayload):
             "errors": errors,
         }
 
-    created = []
-    row_errors = list(errors)
-    for item in items:
-        if item.get("import_status") != "importable":
-            continue
-        try:
-            created.append(await _create_trade_entry_with_settlement_sync(_asset_import_payload(item)))
-        except Exception as exc:  # noqa: BLE001
-            row_errors.append({"row": item.get("import_row"), "message": str(exc), "payload": item})
+    async def create_trade(item_payload):
+        return await _create_trade_entry_with_settlement_sync(item_payload)
+
+    created, row_errors, batch = await _run_atomic_asset_import(
+        import_type="trade_csv",
+        source_name=payload.source_name,
+        items=items,
+        duplicates=duplicates,
+        errors=errors,
+        create_item=create_trade,
+    )
     return {
         "dry_run": False,
         "summary": _csv_import_summary(
@@ -1344,6 +1456,7 @@ async def import_asset_trades_csv(payload: AssetCsvImportPayload):
         "items": created,
         "duplicates": duplicates,
         "errors": row_errors,
+        "batch": batch,
     }
 
 
@@ -1384,15 +1497,17 @@ async def import_asset_cash_csv(payload: AssetCsvImportPayload):
             "errors": errors,
         }
 
-    created = []
-    row_errors = list(errors)
-    for item in items:
-        if item.get("import_status") != "importable":
-            continue
-        try:
-            created.append(await db.create_asset_cash_ledger_entry(_asset_import_payload(item), owner_id=DEFAULT_OWNER_ID))
-        except Exception as exc:  # noqa: BLE001
-            row_errors.append({"row": item.get("import_row"), "message": str(exc), "payload": item})
+    async def create_cash(item_payload):
+        return await db.create_asset_cash_ledger_entry(item_payload, owner_id=DEFAULT_OWNER_ID)
+
+    created, row_errors, batch = await _run_atomic_asset_import(
+        import_type="cash_csv",
+        source_name=payload.source_name,
+        items=items,
+        duplicates=duplicates,
+        errors=errors,
+        create_item=create_cash,
+    )
     return {
         "dry_run": False,
         "summary": _csv_import_summary(
@@ -1405,6 +1520,7 @@ async def import_asset_cash_csv(payload: AssetCsvImportPayload):
         "items": created,
         "duplicates": duplicates,
         "errors": row_errors,
+        "batch": batch,
     }
 
 
@@ -1416,16 +1532,27 @@ async def preview_asset_journal_import(payload: AssetJournalImportPayload):
 @router.post("/journal-import")
 async def import_asset_journal_entries(payload: AssetJournalImportPayload):
     preview = await _build_journal_import_preview(payload)
-    created = []
-    errors = []
-    for item in preview.get("items") or []:
+    preview_items = preview.get("items") or []
+    trade_items: List[Dict[str, Any]] = []
+    duplicates: List[Dict[str, Any]] = []
+    for item in preview_items:
         if not item.get("importable"):
+            duplicates.append(item)
             continue
         for trade_payload in item.get("payloads") or []:
-            try:
-                created.append(await _create_trade_entry_with_settlement_sync(trade_payload))
-            except Exception as exc:  # noqa: BLE001
-                errors.append({"entry_id": item.get("entry_id"), "source": trade_payload.get("source"), "message": str(exc)})
+            trade_items.append({**trade_payload, "import_status": "importable", "import_row": item.get("entry_id")})
+
+    async def create_trade(item_payload):
+        return await _create_trade_entry_with_settlement_sync(item_payload)
+
+    created, errors, batch = await _run_atomic_asset_import(
+        import_type="journal",
+        source_name=payload.source_name or "trade_journal",
+        items=trade_items,
+        duplicates=duplicates,
+        errors=[],
+        create_item=create_trade,
+    )
     return {
         "summary": {
             "entry_count": preview.get("summary", {}).get("entry_count", 0),
@@ -1434,6 +1561,7 @@ async def import_asset_journal_entries(payload: AssetJournalImportPayload):
         },
         "items": created,
         "errors": errors,
+        "batch": batch,
     }
 
 

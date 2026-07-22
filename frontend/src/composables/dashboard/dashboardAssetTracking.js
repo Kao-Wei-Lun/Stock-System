@@ -40,6 +40,7 @@ export function createDashboardAssetTracking({
   const assetPriceOverrides = ref([]);
   const assetFxRates = ref([]);
   const assetAdjustments = ref([]);
+  const assetImportBatches = ref([]);
   const assetPortfolio = ref(null);
   const assetPerformance = ref(null);
   const assetAlerts = ref([]);
@@ -137,11 +138,13 @@ export function createDashboardAssetTracking({
   });
   const assetTradeImportForm = reactive({
     default_account_id: "",
+    source_name: "",
     csv_text: "",
     dry_run: true,
   });
   const assetCashImportForm = reactive({
     default_account_id: "",
+    source_name: "",
     csv_text: "",
     dry_run: true,
   });
@@ -356,9 +359,11 @@ export function createDashboardAssetTracking({
 
   function resetAssetImportForms() {
     assetTradeImportForm.default_account_id = getPrimaryAccountId();
+    assetTradeImportForm.source_name = "";
     assetTradeImportForm.csv_text = "";
     assetTradeImportForm.dry_run = true;
     assetCashImportForm.default_account_id = getPrimaryAccountId();
+    assetCashImportForm.source_name = "";
     assetCashImportForm.csv_text = "";
     assetCashImportForm.dry_run = true;
     assetTradeImportResult.value = null;
@@ -397,6 +402,7 @@ export function createDashboardAssetTracking({
         priceOverrideResponse,
         fxRateResponse,
         adjustmentResponse,
+        importBatchResponse,
         portfolioResponse,
       ] = await Promise.all([
         dashboardApi.listAssetAccounts(),
@@ -406,6 +412,7 @@ export function createDashboardAssetTracking({
         dashboardApi.listAssetPriceOverrides({ limit: 12 }),
         dashboardApi.listAssetFxRates({ limit: 12, refresh_public: refresh }),
         dashboardApi.listAssetAdjustments({ limit: 12 }),
+        dashboardApi.listAssetImportBatches({ limit: 20 }),
         dashboardApi.getAssetPortfolioCurrent({ refresh, allocation_group_by: "account" }),
       ]);
       assetAccounts.value = normalizeAssetAccounts(accountsResponse?.items);
@@ -415,6 +422,7 @@ export function createDashboardAssetTracking({
       assetPriceOverrides.value = normalizeAssetEntries(priceOverrideResponse);
       assetFxRates.value = normalizeAssetEntries(fxRateResponse);
       assetAdjustments.value = normalizeAssetEntries(adjustmentResponse);
+      assetImportBatches.value = normalizeAssetEntries(importBatchResponse);
       assetPortfolio.value = portfolioResponse || null;
       await loadAssetPerformance({ refresh });
       ensureAssetFormAccountDefaults();
@@ -992,6 +1000,7 @@ export function createDashboardAssetTracking({
       const result = await dashboardApi.importAssetTradesCsv({
         csv_text: assetTradeImportForm.csv_text,
         default_account_id: assetTradeImportForm.default_account_id || null,
+        source_name: String(assetTradeImportForm.source_name || "").trim() || null,
         dry_run: Boolean(dryRun),
       });
       assetTradeImportResult.value = result;
@@ -1000,7 +1009,7 @@ export function createDashboardAssetTracking({
       }
       pushNotification({
         icon: dryRun ? "📄" : "📥",
-        title: dryRun ? "交易 CSV 預覽完成" : "交易 CSV 已匯入",
+        title: dryRun ? "交易 CSV 預覽完成" : (result?.batch?.status === "committed" ? "交易 CSV 已匯入" : "交易 CSV 未寫入"),
         msg: dryRun
           ? `可匯入 ${result?.summary?.importable_count || 0}、重複 ${result?.summary?.duplicate_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`
           : `新增 ${result?.summary?.created_count || 0}、略過 ${result?.summary?.skipped_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`,
@@ -1017,6 +1026,7 @@ export function createDashboardAssetTracking({
       const result = await dashboardApi.importAssetCashCsv({
         csv_text: assetCashImportForm.csv_text,
         default_account_id: assetCashImportForm.default_account_id || null,
+        source_name: String(assetCashImportForm.source_name || "").trim() || null,
         dry_run: Boolean(dryRun),
       });
       assetCashImportResult.value = result;
@@ -1025,7 +1035,7 @@ export function createDashboardAssetTracking({
       }
       pushNotification({
         icon: dryRun ? "📄" : "📥",
-        title: dryRun ? "現金 CSV 預覽完成" : "現金 CSV 已匯入",
+        title: dryRun ? "現金 CSV 預覽完成" : (result?.batch?.status === "committed" ? "現金 CSV 已匯入" : "現金 CSV 未寫入"),
         msg: dryRun
           ? `可匯入 ${result?.summary?.importable_count || 0}、重複 ${result?.summary?.duplicate_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`
           : `新增 ${result?.summary?.created_count || 0}、略過 ${result?.summary?.skipped_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`,
@@ -1052,6 +1062,23 @@ export function createDashboardAssetTracking({
     } catch (error) {
       console.error(error);
       pushNotification({ icon: "⚠️", title: "Journal 預覽失敗", msg: error.message || "請稍後再試", type: "error" });
+    }
+  }
+
+  async function rollbackAssetImportBatch(batchId) {
+    if (!batchId) return;
+    try {
+      const result = await dashboardApi.rollbackAssetImportBatch(batchId);
+      await loadAssetTrackingData({ refresh: true, silent: false });
+      pushNotification({
+        icon: "↩️",
+        title: "匯入批次已撤銷",
+        msg: `交易 ${result?.deleted?.trade_count || 0}、現金 ${result?.deleted?.cash_count || 0} 筆`,
+        type: "success",
+      });
+    } catch (error) {
+      console.error(error);
+      pushNotification({ icon: "⚠️", title: "撤銷匯入失敗", msg: error.message || "請稍後再試", type: "error" });
     }
   }
 
@@ -1112,6 +1139,7 @@ export function createDashboardAssetTracking({
     assetPriceOverrides,
     assetFxRates,
     assetAdjustments,
+    assetImportBatches,
     assetPortfolio,
     assetPerformance,
     assetAlerts,
@@ -1192,6 +1220,7 @@ export function createDashboardAssetTracking({
     deleteAssetAdjustment,
     importAssetTradesCsv,
     importAssetCashCsv,
+    rollbackAssetImportBatch,
     previewAssetJournalImport,
     importAssetJournalEntries,
     recomputeAssetTracking,
