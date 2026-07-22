@@ -49,6 +49,7 @@ router = APIRouter(prefix="/api/assets", tags=["assets"])
 _fetch_and_store_quote_snapshot = None
 _latest_public_fx_provider = None
 _SNAPSHOT_LIMIT = 5000
+_LEDGER_PAGE_SIZE = 1000
 _AUTO_TRADE_SETTLEMENT_SOURCE = "trade_settlement_auto"
 
 
@@ -213,19 +214,36 @@ def _is_public_auto_fx_source(source: str | None) -> bool:
     return normalized in {"taifex_daily_reference", "public_auto"}
 
 
+async def _load_all_asset_rows(fetcher, **kwargs) -> List[Dict[str, Any]]:
+    """Read a complete ledger in stable pages so long histories are never truncated."""
+    rows: List[Dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = await fetcher(
+            owner_id=DEFAULT_OWNER_ID,
+            limit=_LEDGER_PAGE_SIZE,
+            offset=offset,
+            **kwargs,
+        )
+        rows.extend(page)
+        if len(page) < _LEDGER_PAGE_SIZE:
+            return rows
+        offset += len(page)
+
+
 async def _sync_latest_public_fx_rates() -> List[Dict[str, Any]]:
     if _latest_public_fx_provider is None:
-        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+        return await _load_all_asset_rows(db.list_asset_fx_rates)
 
     try:
         payload = await asyncio.to_thread(_latest_public_fx_provider.fetch_latest_rates)
     except Exception:  # noqa: BLE001 - keep asset snapshot resilient to public FX fetch issues
-        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+        return await _load_all_asset_rows(db.list_asset_fx_rates)
 
     snapshot_date = payload.get("snapshot_date")
     candidate_rates = payload.get("rates") or []
     if not snapshot_date or not candidate_rates:
-        return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+        return await _load_all_asset_rows(db.list_asset_fx_rates)
 
     existing_rows = await db.list_asset_fx_rates(
         owner_id=DEFAULT_OWNER_ID,
@@ -258,7 +276,7 @@ async def _sync_latest_public_fx_rates() -> List[Dict[str, Any]]:
             owner_id=DEFAULT_OWNER_ID,
         )
 
-    return await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+    return await _load_all_asset_rows(db.list_asset_fx_rates)
 
 
 async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
@@ -270,13 +288,24 @@ async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
 ]:
-    accounts = await db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID)
-    cash_entries = await db.list_asset_cash_ledger_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    trade_entries = await db.list_asset_trade_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    adjustment_entries = await db.list_asset_position_adjustments(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    price_overrides = await db.list_asset_price_overrides(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    fx_rates = await _sync_latest_public_fx_rates() if refresh_public_fx else await db.list_asset_fx_rates(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
-    reconciliation_snapshots = await db.list_asset_reconciliation_snapshots(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+    fx_loader = _sync_latest_public_fx_rates() if refresh_public_fx else _load_all_asset_rows(db.list_asset_fx_rates)
+    (
+        accounts,
+        cash_entries,
+        trade_entries,
+        adjustment_entries,
+        price_overrides,
+        fx_rates,
+        reconciliation_snapshots,
+    ) = await asyncio.gather(
+        db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID),
+        _load_all_asset_rows(db.list_asset_cash_ledger_entries),
+        _load_all_asset_rows(db.list_asset_trade_entries),
+        _load_all_asset_rows(db.list_asset_position_adjustments),
+        _load_all_asset_rows(db.list_asset_price_overrides),
+        fx_loader,
+        _load_all_asset_rows(db.list_asset_reconciliation_snapshots),
+    )
     return (
         accounts,
         cash_entries,
@@ -807,7 +836,7 @@ async def _build_journal_import_preview(payload: AssetJournalImportPayload) -> D
         search=payload.search,
         limit=payload.limit,
     )
-    asset_trades = await db.list_asset_trade_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT)
+    asset_trades = await _load_all_asset_rows(db.list_asset_trade_entries)
     existing_sources = {str(item.get("source") or "") for item in asset_trades}
 
     items = []
@@ -1261,7 +1290,7 @@ async def delete_asset_reconciliation_snapshot(snapshot_id: int):
 async def import_asset_trades_csv(payload: AssetCsvImportPayload):
     accounts, existing_trades = await asyncio.gather(
         db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID),
-        db.list_asset_trade_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT),
+        _load_all_asset_rows(db.list_asset_trade_entries),
     )
     try:
         items, errors = _run_csv_import(
@@ -1322,7 +1351,7 @@ async def import_asset_trades_csv(payload: AssetCsvImportPayload):
 async def import_asset_cash_csv(payload: AssetCsvImportPayload):
     accounts, existing_cash = await asyncio.gather(
         db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID),
-        db.list_asset_cash_ledger_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT),
+        _load_all_asset_rows(db.list_asset_cash_ledger_entries),
     )
     try:
         items, errors = _run_csv_import(

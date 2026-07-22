@@ -25,6 +25,13 @@ from database.helpers import (
 )
 
 
+def _asset_page(limit: int | None, offset: int, *, default_limit: int) -> tuple[int, int]:
+    """Normalize internal asset-ledger pagination without changing public API caps."""
+    clean_limit = max(1, min(int(limit or default_limit), 5000))
+    clean_offset = max(0, int(offset or 0))
+    return clean_limit, clean_offset
+
+
 class AssetMixin:
     async def _find_asset_import_keys(
         self,
@@ -176,6 +183,7 @@ class AssetMixin:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
@@ -188,16 +196,16 @@ class AssetMixin:
         if date_to:
             filters.append("`flow_date` <= %s")
             params.append(_parse_datetime_value(date_to))
-        clean_limit = max(1, min(int(limit or 200), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=200)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_cash_ledger`
             WHERE {' AND '.join(filters)}
             ORDER BY `flow_date` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_cash_ledger_entry(row) for row in rows]
 
@@ -335,6 +343,7 @@ class AssetMixin:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
@@ -350,16 +359,16 @@ class AssetMixin:
         if date_to:
             filters.append("`trade_date` <= %s")
             params.append(_parse_datetime_value(date_to))
-        clean_limit = max(1, min(int(limit or 200), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=200)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_trade_ledger`
             WHERE {' AND '.join(filters)}
             ORDER BY `trade_date` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_trade_entry(row) for row in rows]
 
@@ -497,22 +506,23 @@ class AssetMixin:
         *,
         account_id: int | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
         if account_id is not None:
             filters.append("`account_id`=%s")
             params.append(account_id)
-        clean_limit = max(1, min(int(limit or 200), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=200)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_reconciliation_snapshots`
             WHERE {' AND '.join(filters)}
             ORDER BY `snapshot_date` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_reconciliation_snapshot(row) for row in rows]
 
@@ -580,6 +590,7 @@ class AssetMixin:
         account_id: int | None = None,
         ticker: str | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
@@ -589,16 +600,16 @@ class AssetMixin:
         if ticker:
             filters.append("`ticker`=%s")
             params.append(str(ticker).strip().upper())
-        clean_limit = max(1, min(int(limit or 200), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=200)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_price_overrides`
             WHERE {' AND '.join(filters)}
             ORDER BY `effective_at` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_price_override(row) for row in rows]
 
@@ -708,6 +719,7 @@ class AssetMixin:
         from_currency: str | None = None,
         to_currency: str | None = None,
         limit: int = 365,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
@@ -723,16 +735,16 @@ class AssetMixin:
         if to_currency:
             filters.append("`to_currency`=%s")
             params.append(str(to_currency).strip().upper())
-        clean_limit = max(1, min(int(limit or 365), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=365)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_fx_rates_daily`
             WHERE {' AND '.join(filters)}
             ORDER BY `snapshot_date` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_fx_rate(row) for row in rows]
 
@@ -856,6 +868,7 @@ class AssetMixin:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         filters = ["`owner_id`=%s"]
         params: List[Any] = [owner_id]
@@ -871,16 +884,16 @@ class AssetMixin:
         if date_to:
             filters.append("`event_date` <= %s")
             params.append(_parse_datetime_value(date_to))
-        clean_limit = max(1, min(int(limit or 200), 5000))
+        clean_limit, clean_offset = _asset_page(limit, offset, default_limit=200)
         rows = await self._fetchall(
             f"""
             SELECT *
             FROM `asset_position_adjustments`
             WHERE {' AND '.join(filters)}
             ORDER BY `event_date` DESC, `id` DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            tuple(params + [clean_limit]),
+            tuple(params + [clean_limit, clean_offset]),
         )
         return [_deserialize_asset_position_adjustment(row) for row in rows]
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -42,3 +43,16 @@ async def test_find_asset_import_keys_skips_query_for_empty_keys():
 
     assert result == {}
     assert repository.queries == []
+
+
+@pytest.mark.anyio
+async def test_asset_ledger_queries_support_stable_internal_pagination():
+    repository = FakeAssetRepository()
+    repository._fetchall = AsyncMock(return_value=[])
+
+    await repository.list_asset_trade_entries(owner_id=3, limit=1000, offset=5000)
+
+    sql, params = repository._fetchall.await_args.args
+    assert "ORDER BY `trade_date` DESC, `id` DESC" in sql
+    assert "LIMIT %s OFFSET %s" in sql
+    assert params == (3, 1000, 5000)

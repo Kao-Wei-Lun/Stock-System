@@ -5,6 +5,23 @@ import pytest
 import main
 
 
+@pytest.mark.anyio
+async def test_complete_asset_loader_reads_records_beyond_legacy_snapshot_limit():
+    source_rows = [{"id": index} for index in range(5107)]
+    requested_offsets = []
+
+    async def fetch_page(*, owner_id, limit, offset):
+        assert owner_id == 1
+        requested_offsets.append(offset)
+        return source_rows[offset:offset + limit]
+
+    rows = await main.assets._load_all_asset_rows(fetch_page)
+
+    assert len(rows) == 5107
+    assert rows[-1]["id"] == 5106
+    assert requested_offsets == [0, 1000, 2000, 3000, 4000, 5000]
+
+
 @pytest.fixture
 def asset_store(monkeypatch):
     store = {
@@ -99,7 +116,7 @@ def asset_store(monkeypatch):
             if item.get("import_key") in requested
         }
 
-    async def list_asset_cash_ledger_entries(owner_id=1, account_id=None, date_from=None, date_to=None, limit=200):
+    async def list_asset_cash_ledger_entries(owner_id=1, account_id=None, date_from=None, date_to=None, limit=200, offset=0):
         items = list(store["cash_entries"].values())
         if account_id is not None:
             items = [item for item in items if item["account_id"] == account_id]
@@ -108,7 +125,7 @@ def asset_store(monkeypatch):
         if date_to:
             items = [item for item in items if item["flow_date"] <= date_to]
         items.sort(key=lambda item: (item["flow_date"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_cash_ledger_entry(entry_id, owner_id=1):
         item = store["cash_entries"].get(entry_id)
@@ -161,7 +178,7 @@ def asset_store(monkeypatch):
         items.sort(key=lambda item: item["id"])
         return clone(items)
 
-    async def list_asset_trade_entries(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200):
+    async def list_asset_trade_entries(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200, offset=0):
         items = list(store["trade_entries"].values())
         if account_id is not None:
             items = [item for item in items if item["account_id"] == account_id]
@@ -172,7 +189,7 @@ def asset_store(monkeypatch):
         if date_to:
             items = [item for item in items if item["trade_date"] <= date_to]
         items.sort(key=lambda item: (item["trade_date"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_trade_entry(entry_id, owner_id=1):
         item = store["trade_entries"].get(entry_id)
@@ -234,12 +251,12 @@ def asset_store(monkeypatch):
     async def delete_asset_trade_entry(entry_id, owner_id=1):
         return store["trade_entries"].pop(entry_id, None) is not None
 
-    async def list_asset_reconciliation_snapshots(owner_id=1, account_id=None, limit=200):
+    async def list_asset_reconciliation_snapshots(owner_id=1, account_id=None, limit=200, offset=0):
         items = list(store["reconciliation_entries"].values())
         if account_id is not None:
             items = [item for item in items if item["account_id"] == account_id]
         items.sort(key=lambda item: (item["snapshot_date"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_reconciliation_snapshot(snapshot_id, owner_id=1):
         item = store["reconciliation_entries"].get(snapshot_id)
@@ -267,14 +284,14 @@ def asset_store(monkeypatch):
     async def delete_asset_reconciliation_snapshot(snapshot_id, owner_id=1):
         return store["reconciliation_entries"].pop(snapshot_id, None) is not None
 
-    async def list_asset_price_overrides(owner_id=1, account_id=None, ticker=None, limit=200):
+    async def list_asset_price_overrides(owner_id=1, account_id=None, ticker=None, limit=200, offset=0):
         items = list(store["price_overrides"].values())
         if account_id is not None:
             items = [item for item in items if item["account_id"] == account_id]
         if ticker:
             items = [item for item in items if item["ticker"] == ticker]
         items.sort(key=lambda item: (item["effective_at"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_price_override(override_id, owner_id=1):
         item = store["price_overrides"].get(override_id)
@@ -311,7 +328,7 @@ def asset_store(monkeypatch):
     async def delete_asset_price_override(override_id, owner_id=1):
         return store["price_overrides"].pop(override_id, None) is not None
 
-    async def list_asset_fx_rates(owner_id=1, date_from=None, date_to=None, from_currency=None, to_currency=None, limit=365):
+    async def list_asset_fx_rates(owner_id=1, date_from=None, date_to=None, from_currency=None, to_currency=None, limit=365, offset=0):
         items = list(store["fx_rates"].values())
         if date_from:
             items = [item for item in items if item["snapshot_date"] >= date_from]
@@ -322,7 +339,7 @@ def asset_store(monkeypatch):
         if to_currency:
             items = [item for item in items if item["to_currency"] == to_currency]
         items.sort(key=lambda item: (item["snapshot_date"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_fx_rate(fx_rate_id, owner_id=1):
         item = store["fx_rates"].get(fx_rate_id)
@@ -357,7 +374,7 @@ def asset_store(monkeypatch):
     async def delete_asset_fx_rate(fx_rate_id, owner_id=1):
         return store["fx_rates"].pop(fx_rate_id, None) is not None
 
-    async def list_asset_position_adjustments(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200):
+    async def list_asset_position_adjustments(owner_id=1, account_id=None, ticker=None, date_from=None, date_to=None, limit=200, offset=0):
         items = list(store["adjustments"].values())
         if account_id is not None:
             items = [item for item in items if item["account_id"] == account_id]
@@ -368,7 +385,7 @@ def asset_store(monkeypatch):
         if date_to:
             items = [item for item in items if item["event_date"] <= date_to]
         items.sort(key=lambda item: (item["event_date"], item["id"]), reverse=True)
-        return clone(items[:limit])
+        return clone(items[offset:offset + limit])
 
     async def get_asset_position_adjustment(adjustment_id, owner_id=1):
         item = store["adjustments"].get(adjustment_id)
