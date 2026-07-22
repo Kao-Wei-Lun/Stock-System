@@ -4,11 +4,11 @@ import asyncio
 import logging
 import time
 from datetime import date
-from datetime import datetime, tzinfo
+from datetime import datetime, timezone, tzinfo
 from typing import Any
 
 from futopt_session import is_futopt_trading_time
-from fubon_symbols import normalize_futopt_symbol_query
+from fubon_symbols import is_exact_futopt_contract, normalize_futopt_symbol_query
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +52,114 @@ def build_futopt_storage_tickers(symbol: str, payload: dict[str, Any]) -> list[s
         if ticker and ticker not in tickers:
             tickers.append(ticker)
     return tickers
+
+
+def _row_time_key(row: dict[str, Any]) -> str:
+    raw = str(row.get("date") or "").strip().replace(" ", "T")
+    if not raw:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+    return parsed.isoformat(timespec="seconds")
+
+
+def merge_futopt_ohlcv_rows(*row_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge alias/contract rows into one deterministic minute series."""
+    merged: dict[str, dict[str, Any]] = {}
+    for rows in row_groups:
+        for row in rows or []:
+            key = _row_time_key(row)
+            if key:
+                merged[key] = dict(row)
+    return [merged[key] for key in sorted(merged)]
+
+
+async def load_futopt_ohlc_db_first(
+    provider,
+    db,
+    symbol: str,
+    *,
+    period: str,
+    interval: str,
+    refresh: bool = True,
+) -> dict[str, Any]:
+    """Read persisted futures candles first, then use Fubon only to fill/correct the requested range."""
+    requested = str(symbol or "").strip().upper()
+    canonical = normalize_futopt_symbol_query(requested)
+    storage_tickers = list(dict.fromkeys(item for item in (requested, canonical) if item))
+
+    initial_groups = [await db.get_ohlcv(ticker, period=period, interval=interval) for ticker in storage_tickers]
+    initial_rows = merge_futopt_ohlcv_rows(*initial_groups)
+    sync_result: dict[str, Any] | None = None
+    sync_error: str | None = None
+
+    if refresh:
+        try:
+            sync_result = await sync_futopt_intraday_ohlc(
+                provider,
+                db,
+                requested,
+                period=period,
+                interval=interval,
+            )
+        except Exception as exc:
+            sync_error = str(exc)
+            log.warning("Futopt DB-first refresh failed for %s (%s/%s): %s", requested, period, interval, exc)
+
+    resolved = str((sync_result or {}).get("resolved_symbol") or "").strip().upper()
+    for ticker in (resolved, *((sync_result or {}).get("stored_tickers") or [])):
+        normalized = str(ticker or "").strip().upper()
+        if normalized and normalized not in storage_tickers:
+            storage_tickers.append(normalized)
+
+    if sync_result:
+        refreshed_groups = [await db.get_ohlcv(ticker, period=period, interval=interval) for ticker in storage_tickers]
+        rows = merge_futopt_ohlcv_rows(*refreshed_groups)
+    else:
+        rows = initial_rows
+
+    return {
+        "ticker": requested or canonical,
+        "requested_symbol": requested,
+        "resolved_symbol": resolved or (canonical if is_exact_futopt_contract(canonical) else None),
+        "period": period,
+        "interval": interval,
+        "data": rows,
+        "row_count": len(rows),
+        "latest_date": rows[-1].get("date") if rows else None,
+        "data_source": "database",
+        "refreshed_from": "fubon_neo" if sync_result else None,
+        "sync_status": "refreshed" if sync_result else "failed" if sync_error else "skipped",
+        "sync_error": sync_error,
+        "storage_tickers": storage_tickers,
+    }
+
+
+def latest_row_to_futopt_period(row: dict[str, Any] | None, *, now: datetime | None = None) -> str:
+    """Choose the smallest Fubon period bucket that can repair a restart gap."""
+    if not row or not row.get("date"):
+        return "1d"
+    current = now or datetime.now().astimezone()
+    try:
+        parsed = datetime.fromisoformat(str(row.get("date")).replace(" ", "T").replace("Z", "+00:00"))
+    except ValueError:
+        return "1d"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=current.tzinfo)
+    age_days = max(0.0, (current - parsed.astimezone(current.tzinfo)).total_seconds() / 86400)
+    if age_days <= 1:
+        return "1d"
+    if age_days <= 5:
+        return "5d"
+    if age_days <= 31:
+        return "1mo"
+    if age_days <= 93:
+        return "3mo"
+    return "6mo"
 
 
 async def persist_futopt_ohlc_payload(
@@ -146,6 +254,8 @@ class FutoptCandleRecorder:
         symbols: list[str] | tuple[str, ...] = ("TXF", "TMF"),
         interval: str = "1m",
         source: str = "futopt_recorder",
+        queue_maxsize: int = 2000,
+        shutdown_drain_seconds: float = 5.0,
         logger: logging.Logger | None = None,
     ):
         self.provider = provider
@@ -154,12 +264,18 @@ class FutoptCandleRecorder:
         self.symbols = tuple(dict.fromkeys(str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()))
         self.interval = interval
         self.source = source
+        self.queue_maxsize = max(10, int(queue_maxsize))
+        self.shutdown_drain_seconds = max(0.1, float(shutdown_drain_seconds))
         self.log = logger or log
 
         self._handler = None
         self._queue: asyncio.Queue | None = None
         self._consumer_task: asyncio.Task | None = None
         self._active = False
+        self._last_backfill_summary: dict[str, Any] | None = None
+        self._last_persisted_at: str | None = None
+        self._last_error: str | None = None
+        self._dropped_messages = 0
 
     @property
     def active(self) -> bool:
@@ -168,14 +284,31 @@ class FutoptCandleRecorder:
     async def start_ws(self) -> None:
         if self._active:
             return
-        self._queue = asyncio.Queue()
+        self._queue = asyncio.Queue(maxsize=self.queue_maxsize)
         loop = asyncio.get_running_loop()
 
         def _handler(message: dict) -> None:
             if loop.is_closed() or self._queue is None:
                 return
+            if str(message.get("event") or "").strip().lower() != "data":
+                return
+            if str(message.get("channel") or "").strip().lower() != "candles":
+                return
+
+            def _enqueue_latest() -> None:
+                if self._queue is None:
+                    return
+                if self._queue.full():
+                    try:
+                        self._queue.get_nowait()
+                        self._queue.task_done()
+                        self._dropped_messages += 1
+                    except asyncio.QueueEmpty:
+                        pass
+                self._queue.put_nowait(message)
+
             try:
-                loop.call_soon_threadsafe(self._queue.put_nowait, message)
+                loop.call_soon_threadsafe(_enqueue_latest)
             except RuntimeError:
                 return
 
@@ -195,6 +328,11 @@ class FutoptCandleRecorder:
         if self._handler is not None:
             self.realtime_pool.unregister_message_handler(self._handler)
             self._handler = None
+        if self._queue is not None:
+            try:
+                await asyncio.wait_for(self._queue.join(), timeout=self.shutdown_drain_seconds)
+            except asyncio.TimeoutError:
+                self.log.warning("Futopt candle recorder shutdown drain timed out with %s queued messages", self._queue.qsize())
         if self._consumer_task is not None:
             self._consumer_task.cancel()
             try:
@@ -206,26 +344,48 @@ class FutoptCandleRecorder:
         self._active = False
         self.log.info("Futopt candle recorder stopped")
 
-    async def backfill(self, *, period: str = "1d") -> dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
+        return {
+            "active": self.active,
+            "symbols": list(self.symbols),
+            "interval": self.interval,
+            "queue_size": self._queue.qsize() if self._queue is not None else 0,
+            "queue_capacity": self.queue_maxsize,
+            "dropped_messages": self._dropped_messages,
+            "last_persisted_at": self._last_persisted_at,
+            "last_error": self._last_error,
+            "last_backfill": self._last_backfill_summary,
+        }
+
+    async def backfill(self, *, period: str | None = "1d") -> dict[str, Any]:
         results = []
         total_rows = 0
         for symbol in self.symbols:
+            selected_period = period
+            if selected_period is None:
+                latest = await self.db.get_latest_ohlcv(symbol, self.interval)
+                selected_period = latest_row_to_futopt_period(latest)
             try:
                 result = await sync_futopt_intraday_ohlc(
                     self.provider,
                     self.db,
                     symbol,
-                    period=period,
+                    period=selected_period,
                     interval=self.interval,
                 )
             except Exception as exc:
+                self._last_error = str(exc)
                 self.log.warning("Futopt candle recorder backfill failed for %s: %s", symbol, exc)
-                results.append({"symbol": symbol, "error": str(exc)})
+                results.append({"symbol": symbol, "period": selected_period, "error": str(exc)})
                 continue
             if result:
                 total_rows += int(result.get("row_count") or 0)
                 results.append(result)
-        return {"period": period, "interval": self.interval, "row_count": total_rows, "results": results}
+        summary = {"period": period or "auto", "interval": self.interval, "row_count": total_rows, "results": results}
+        self._last_backfill_summary = summary
+        if not any(item.get("error") for item in results):
+            self._last_error = None
+        return summary
 
     async def run(
         self,
@@ -241,7 +401,7 @@ class FutoptCandleRecorder:
                 in_session = is_futopt_trading_time(now)
                 if in_session and not self.active:
                     await self.start_ws()
-                    await self.backfill(period="1d")
+                    await self.backfill(period=None)
                     last_backfill_at = time.monotonic()
                 elif not in_session and self.active:
                     await self.stop_ws()
@@ -263,7 +423,10 @@ class FutoptCandleRecorder:
             try:
                 await self._process_message(message)
             except Exception as exc:
+                self._last_error = str(exc)
                 self.log.warning("Futopt candle recorder failed to process message: %s", exc)
+            finally:
+                self._queue.task_done()
 
     async def _process_message(self, message: dict) -> None:
         if str(message.get("event") or "").strip().lower() != "data":
@@ -301,6 +464,8 @@ class FutoptCandleRecorder:
                     continue
                 await self.db.upsert_ohlcv_batch(ticker, [row], self.interval)
                 stored.add(ticker)
+        self._last_persisted_at = str(row.get("date") or "") or datetime.now().astimezone().isoformat()
+        self._last_error = None
 
 
 async def sync_futopt_intraday_ohlc(

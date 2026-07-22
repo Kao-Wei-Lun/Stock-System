@@ -477,6 +477,7 @@ market_data.configure(
     latest_data_sync_period=LATEST_DATA_SYNC_PERIOD,
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
     sync_taiwan_full_history=sync_taiwan_full_history,
+    futopt_candle_recorder=futopt_candle_recorder,
 )
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,

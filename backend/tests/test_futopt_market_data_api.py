@@ -1,11 +1,57 @@
 import main
 
 
-def test_futopt_ohlc_route_returns_502_when_provider_raises(client, monkeypatch):
+def test_futopt_history_status_exposes_recorder_health(client):
+    response = client.get("/api/futopt/history/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is True
+    assert payload["interval"] == "1m"
+    assert {"TXF", "TMF"} <= set(payload["symbols"])
+    assert payload["queue_capacity"] >= 10
+
+
+def test_futopt_ohlc_route_returns_persisted_rows_when_provider_raises(client, monkeypatch):
     async def fake_fetch_intraday_ohlc(_symbol, *, period="1d", interval="1m"):
         raise RuntimeError("upstream futopt failure")
 
+    async def fake_get_ohlcv(ticker, period="1d", interval="1m"):
+        assert ticker == "MXFE6"
+        return [
+            {
+                "date": "2026-04-11T09:00:00+08:00",
+                "open": 20550,
+                "high": 20580,
+                "low": 20540,
+                "close": 20570,
+                "volume": 1200,
+                "source": "fubon_neo_ws",
+            }
+        ]
+
     monkeypatch.setattr(main.market_data.fubon_futopt_provider, "fetch_intraday_ohlc", fake_fetch_intraday_ohlc)
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
+
+    response = client.get("/api/futopt/ohlc/MXFE6?period=1d&interval=1m")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data_source"] == "database"
+    assert payload["sync_status"] == "failed"
+    assert payload["row_count"] == 1
+    assert "upstream futopt failure" in payload["sync_error"]
+
+
+def test_futopt_ohlc_route_returns_502_when_provider_and_database_have_no_data(client, monkeypatch):
+    async def fake_fetch_intraday_ohlc(_symbol, *, period="1d", interval="1m"):
+        raise RuntimeError("upstream futopt failure")
+
+    async def fake_get_ohlcv(_ticker, period="1d", interval="1m"):
+        return []
+
+    monkeypatch.setattr(main.market_data.fubon_futopt_provider, "fetch_intraday_ohlc", fake_fetch_intraday_ohlc)
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
 
     response = client.get("/api/futopt/ohlc/MXFE6?period=1d&interval=1m")
 

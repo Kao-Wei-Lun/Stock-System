@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
-from futopt_history_service import sync_futopt_intraday_ohlc
+from futopt_history_service import load_futopt_ohlc_db_first, sync_futopt_intraday_ohlc
 from fubon_provider import FubonMarketdataAuthenticationError
 from fubon_symbols import looks_like_futopt_search_query
 from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
@@ -22,6 +22,7 @@ _sync_tracked_market_data = None
 _sync_taiwan_full_history = None
 _needs_history_backfill = None
 _has_suspicious_daily_rows = None
+_futopt_candle_recorder = None
 FULL_HISTORY_PERIODS = {"10y", "max"}
 LATEST_DATA_SYNC_PERIOD = "1y"
 LATEST_DATA_SYNC_INTERVAL = "1d"
@@ -54,16 +55,19 @@ def configure(
     latest_data_sync_period,
     latest_data_sync_interval,
     sync_taiwan_full_history=None,
+    futopt_candle_recorder=None,
 ):
     """Inject helpers from main.py to avoid circular imports."""
     global _fetch_and_store_quote_snapshot, _sync_tracked_market_data, _sync_taiwan_full_history
     global _needs_history_backfill, _has_suspicious_daily_rows
+    global _futopt_candle_recorder
     global FULL_HISTORY_PERIODS, LATEST_DATA_SYNC_PERIOD, LATEST_DATA_SYNC_INTERVAL
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _sync_tracked_market_data = sync_tracked_market_data
     _sync_taiwan_full_history = sync_taiwan_full_history
     _needs_history_backfill = needs_history_backfill
     _has_suspicious_daily_rows = has_suspicious_daily_rows
+    _futopt_candle_recorder = futopt_candle_recorder
     FULL_HISTORY_PERIODS = full_history_periods
     LATEST_DATA_SYNC_PERIOD = latest_data_sync_period
     LATEST_DATA_SYNC_INTERVAL = latest_data_sync_interval
@@ -189,16 +193,29 @@ async def get_futopt_ohlc(
     symbol: str,
     period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo"),
     interval: str = Query("1m", description="1m 5m 15m 30m 60m 1h"),
+    refresh: bool = Query(True, description="Refresh the persisted tail from Fubon before returning"),
 ):
     period, interval = _normalize_futopt_ohlc_query(period, interval)
-    try:
-        payload = await fubon_futopt_provider.fetch_intraday_ohlc(symbol, period=period, interval=interval)
-    except Exception as exc:
-        log.warning("futopt ohlc fetch failed for %s (%s/%s): %s", symbol, period, interval, exc)
-        raise HTTPException(502, f"Unable to fetch futopt ohlc: {exc}") from exc
-    if not payload:
+    payload = await load_futopt_ohlc_db_first(
+        fubon_futopt_provider,
+        db,
+        symbol,
+        period=period,
+        interval=interval,
+        refresh=refresh,
+    )
+    if not payload.get("data") and payload.get("sync_error"):
+        raise HTTPException(502, f"Unable to refresh futopt ohlc: {payload['sync_error']}")
+    if not payload.get("data"):
         raise HTTPException(404, "Unable to fetch futopt ohlc")
     return payload
+
+
+@router.get("/futopt/history/status")
+async def get_futopt_history_status():
+    if _futopt_candle_recorder is None:
+        return {"configured": False, "active": False}
+    return {"configured": True, **_futopt_candle_recorder.get_status()}
 
 
 @router.post("/futopt/sync/{symbol}")
