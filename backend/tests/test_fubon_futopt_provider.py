@@ -151,6 +151,16 @@ async def test_futopt_provider_resolves_nearest_contract_from_base_alias():
 
 
 @pytest.mark.anyio
+async def test_futopt_provider_resolves_dynamic_continuous_alias():
+    provider = FubonFutoptProvider(StubFutoptManager())
+
+    resolved = await provider.resolve_contract("*TXFF")
+
+    assert resolved["requested_symbol"] == "*TXFF"
+    assert resolved["resolved_symbol"] == "TXFE6"
+
+
+@pytest.mark.anyio
 async def test_futopt_provider_fetches_quote_with_resolved_symbol():
     manager = StubFutoptManager()
     provider = FubonFutoptProvider(manager)

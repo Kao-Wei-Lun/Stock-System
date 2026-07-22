@@ -55,6 +55,9 @@ def test_taiwan_market_indexes_are_supported_by_fubon_symbols():
 
 
 def test_futopt_symbol_helpers_support_future_and_option_contracts():
+    assert fubon_symbols.normalize_futopt_symbol_query("*TXFF") == "TXF"
+    assert fubon_symbols.normalize_futopt_symbol_query("*tmff") == "TMF"
+    assert fubon_symbols.is_dynamic_futopt_alias("*TXFF") is True
     assert fubon_symbols.is_exact_futopt_contract("TXFE6") is True
     assert fubon_symbols.is_exact_futopt_contract("TXO20000E4") is True
     assert fubon_symbols.derive_futopt_product_query("TXFE6") == "TXF"
@@ -62,3 +65,4 @@ def test_futopt_symbol_helpers_support_future_and_option_contracts():
     assert fubon_symbols.derive_futopt_product_query("TXO200") == "TXO"
     assert fubon_symbols.looks_like_futopt_search_query("TXO") is True
     assert fubon_symbols.looks_like_futopt_search_query("TXO200") is True
+    assert fubon_symbols.looks_like_futopt_search_query("*TMFF") is True

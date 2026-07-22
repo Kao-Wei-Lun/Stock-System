@@ -1,6 +1,30 @@
 import main
 
 
+def test_search_dynamic_futures_alias_returns_resolved_near_month(client, monkeypatch):
+    async def fake_search_tickers(_query):
+        return []
+
+    async def fake_resolve_contract(symbol):
+        assert symbol == "*TXFF"
+        return {"requested_symbol": symbol, "resolved_symbol": "TXFE6"}
+
+    async def fake_search_contracts(_query, limit=20):
+        return []
+
+    monkeypatch.setattr(main.market_data.db, "search_tickers", fake_search_tickers)
+    monkeypatch.setattr(main.market_data.fubon_futopt_provider, "resolve_contract", fake_resolve_contract)
+    monkeypatch.setattr(main.market_data.fubon_futopt_provider, "search_contracts", fake_search_contracts)
+
+    response = client.get("/api/search?q=%2ATXFF")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["ticker"] == "*TXFF"
+    assert payload[0]["resolved_symbol"] == "TXFE6"
+    assert "目前 TXFE6" in payload[0]["name"]
+
+
 def test_futopt_history_status_exposes_recorder_health(client):
     response = client.get("/api/futopt/history/status")
 

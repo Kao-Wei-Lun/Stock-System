@@ -160,6 +160,31 @@ async def test_realtime_pool_maps_alias_ticker_to_resolved_contract():
     assert pool.resolve_broadcast_tickers("TXFE6") == ("TXF", "TXFE6")
 
 
+@pytest.mark.anyio
+async def test_realtime_pool_deduplicates_aliases_resolving_to_same_contract():
+    primary = FakeManager(1)
+    secondary = FakeManager(2)
+
+    async def resolve_contract(_ticker):
+        return {"resolved_symbol": "TXFE6"}
+
+    pool = FubonRealtimeSubscriptionPool(primary, resolve_futopt_contract=resolve_contract)
+    pool._managers = {1: primary, 2: secondary}
+
+    await pool.set_source_tickers("ws", ["TXF", "*TXFF"])
+
+    assert len(primary.subscribed) == 3
+    assert secondary.subscribed == []
+    assert pool.resolve_broadcast_tickers("TXFE6") == ("*TXFF", "TXF", "TXFE6")
+    assert pool.get_account_runtime_statuses()[1]["realtime_physical_subscription_count"] == 1
+
+    await pool.set_source_tickers("ws", ["*TXFF"])
+    assert primary.unsubscribed == []
+
+    await pool.set_source_tickers("ws", [])
+    assert len(primary.unsubscribed) == 3
+
+
 def test_realtime_pool_records_ws_message_diagnostics():
     primary = FakeManager(1)
     pool = FubonRealtimeSubscriptionPool(primary)

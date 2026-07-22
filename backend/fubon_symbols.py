@@ -10,12 +10,15 @@ _FUTOPT_FUTURE_CONTRACT_PATTERN = re.compile(r"^[A-Z]{2,5}[A-Z]\d$")
 _FUTOPT_OPTION_CONTRACT_PATTERN = re.compile(r"^(?P<product>[A-Z]{2,5})\d{3,6}[A-Z]\d$")
 _FUTOPT_PARTIAL_OPTION_PATTERN = re.compile(r"^(?P<product>[A-Z]{2,5})\d{1,6}$")
 _FUTOPT_BASE_ALIASES = {
+    "*TXFF": "TXF",
+    "*TMFF": "TMF",
     "TX": "TXF",
     "TXF": "TXF",
     "MTX": "MXF",
     "MXF": "MXF",
     "TMF": "TMF",
 }
+_FUTOPT_DYNAMIC_ALIASES = {"*TXFF", "*TMFF"}
 _FUBON_INDEX_SYMBOLS = {
     "^TWII": "IX0001",
     "^TWOII": "IX0043",
@@ -68,6 +71,10 @@ def fubon_market_to_ticker(symbol: str, market: str | None) -> str:
 def normalize_futopt_symbol_query(symbol: str) -> str:
     raw = str(symbol or "").strip().upper()
     return _FUTOPT_BASE_ALIASES.get(raw, raw)
+
+
+def is_dynamic_futopt_alias(symbol: str) -> bool:
+    return str(symbol or "").strip().upper() in _FUTOPT_DYNAMIC_ALIASES
 
 
 def is_exact_futopt_future_contract(symbol: str) -> bool:

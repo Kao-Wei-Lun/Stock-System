@@ -10,6 +10,8 @@ import {
 describe("dashboard timeframe helpers", () => {
   it("uses a futopt-only intraday timeframe menu for futures contracts and base symbols", () => {
     expect(normalizeTicker("TMF")).toBe("TMF");
+    expect(normalizeTicker("*txff")).toBe("*TXFF");
+    expect(normalizeTicker("*tmff")).toBe("*TMFF");
 
     const labels = getTimeframeOptionsForTicker("TMF").map((option) => option.label);
 

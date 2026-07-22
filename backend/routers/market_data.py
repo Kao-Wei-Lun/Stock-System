@@ -9,7 +9,7 @@ from database import db
 from display_name_resolver import resolve_display_name
 from futopt_history_service import load_futopt_ohlc_db_first, sync_futopt_intraday_ohlc
 from fubon_provider import FubonMarketdataAuthenticationError
-from fubon_symbols import looks_like_futopt_search_query
+from fubon_symbols import is_dynamic_futopt_alias, looks_like_futopt_search_query
 from providers import fetcher, fubon_futopt_provider, fubon_market_snapshot_provider
 from schemas import QuoteResponse
 from tw_symbol_lookup import search_taiwan_tickers
@@ -457,6 +457,31 @@ async def search(q: str = Query(..., min_length=1)):
             }
         )
         seen.add(ticker)
+
+    if is_dynamic_futopt_alias(normalized_query) and normalized_query not in seen:
+        try:
+            resolution = await fubon_futopt_provider.resolve_contract(normalized_query)
+        except Exception as exc:
+            log.warning("Dynamic futures alias resolution failed for %s: %s", normalized_query, exc)
+            resolution = None
+        resolved_symbol = str((resolution or {}).get("resolved_symbol") or "").strip().upper()
+        alias_name = {
+            "*TXFF": "臺股期貨連續近月",
+            "*TMFF": "微型臺指期貨連續近月",
+        }.get(normalized_query, normalized_query)
+        results.append(
+            {
+                "ticker": normalized_query,
+                "name": f"{alias_name}（目前 {resolved_symbol}）" if resolved_symbol else alias_name,
+                "asset_class": "futopt",
+                "instrument_type": "future",
+                "exchange": "TAIFEX",
+                "market": "FUTOPT",
+                "source": "fubon_dynamic_alias",
+                "resolved_symbol": resolved_symbol or None,
+            }
+        )
+        seen.add(normalized_query)
 
     if looks_like_futopt_search_query(normalized_query):
         for row in await fubon_futopt_provider.search_contracts(normalized_query, limit=20):

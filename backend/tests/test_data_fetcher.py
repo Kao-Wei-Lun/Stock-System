@@ -43,6 +43,8 @@ def test_normalize_ticker_preserves_supported_futopt_aliases_and_contracts(monke
 
     assert normalize_ticker("txf") == "TXF"
     assert normalize_ticker("mtx") == "MTX"
+    assert normalize_ticker("*txff") == "*TXFF"
+    assert normalize_ticker("*tmff") == "*TMFF"
     assert normalize_ticker("TXFE6") == "TXFE6"
     assert normalize_ticker("MXFJ6") == "MXFJ6"
     assert normalize_ticker("TXO20000E4") == "TXO20000E4"

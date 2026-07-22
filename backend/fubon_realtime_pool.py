@@ -61,6 +61,9 @@ class FubonRealtimeSubscriptionPool:
         self._message_handlers: list[Callable[[dict], None]] = []
         self._source_tickers: dict[str, set[str]] = defaultdict(set)
         self._assignments: dict[str, RealtimeAssignment] = {}
+        # Multiple user-facing aliases may resolve to one physical contract. Keep
+        # one SDK subscription per account/contract/channel set and reference-count it.
+        self._physical_subscriptions: dict[tuple, int] = {}
         self._resolved_to_requested: dict[str, set[str]] = defaultdict(set)
         self._assignment_lock = asyncio.Lock()
         self._pending_tasks: dict[str, asyncio.Task] = {}
@@ -160,6 +163,7 @@ class FubonRealtimeSubscriptionPool:
                 account_id: manager for account_id, manager in self._managers.items() if manager is self._primary_manager
             }
         self._assignments.clear()
+        self._physical_subscriptions.clear()
         self._resolved_to_requested.clear()
         self._source_tickers.clear()
         self._ws_diagnostics.clear()
@@ -345,6 +349,11 @@ class FubonRealtimeSubscriptionPool:
             )
             result[account_id] = {
                 "realtime_assigned_count": len(assignments),
+                "realtime_physical_subscription_count": sum(
+                    1
+                    for key, reference_count in self._physical_subscriptions.items()
+                    if key[0] == account_id and reference_count > 0
+                ),
                 "realtime_assigned_tickers": [item.requested_ticker for item in assignments],
                 "realtime_resolved_tickers": sorted({item.resolved_ticker for item in assignments}),
                 "realtime_afterhours_tickers": [
@@ -522,9 +531,9 @@ class FubonRealtimeSubscriptionPool:
                 return
 
             errors: list[str] = []
-            for account_id, manager in self._candidate_managers(normalized):
+            for account_id, manager in self._candidate_managers(normalized, target=target):
                 try:
-                    channels = await self._subscribe_target_on_manager(manager, target)
+                    channels = await self._subscribe_target_on_manager(account_id, manager, target)
                 except Exception as exc:
                     log.warning("Fubon realtime subscribe failed for %s via account %s: %s", normalized, account_id, exc)
                     errors.append(f"{account_id}:{exc}")
@@ -652,10 +661,16 @@ class FubonRealtimeSubscriptionPool:
         )
         return current_priority == best_priority
 
-    def _candidate_managers(self, ticker: str) -> list[tuple[int, FubonSDKManager]]:
+    def _candidate_managers(
+        self,
+        ticker: str,
+        *,
+        target: dict[str, str] | None = None,
+    ) -> list[tuple[int, FubonSDKManager]]:
         loads = defaultdict(int)
-        for assignment in self._assignments.values():
-            loads[assignment.account_id] += 1
+        for key, reference_count in self._physical_subscriptions.items():
+            if reference_count > 0:
+                loads[key[0]] += 1
 
         primary_id = self._primary_manager.active_account_id
         preferred_modes = self._preferred_ws_modes_for_ticker(ticker)
@@ -668,11 +683,28 @@ class FubonRealtimeSubscriptionPool:
             candidates,
             key=lambda item: (
                 self._mode_priority(item[1].ws_mode, preferred_modes),
+                0 if target and self._target_is_subscribed_on_manager(item[0], item[1], target) else 1,
                 loads[item[0]],
                 0 if primary_id is not None and item[0] == primary_id else 1,
                 item[0],
             ),
         )
+
+    def _target_is_subscribed_on_manager(
+        self,
+        account_id: int,
+        manager: FubonSDKManager,
+        target: dict[str, str],
+    ) -> bool:
+        channels = self._channels_for(manager, target["market_type"])
+        key = self._physical_subscription_key(
+            account_id,
+            target["market_type"],
+            target["symbol"],
+            bool(target.get("after_hours")),
+            channels,
+        )
+        return self._physical_subscriptions.get(key, 0) > 0
 
     @staticmethod
     def _channels_for(manager: FubonSDKManager, market_type: str) -> tuple[str, ...]:
@@ -680,10 +712,36 @@ class FubonRealtimeSubscriptionPool:
             return ("aggregates", "books", "candles") if manager.ws_mode == "Normal" else ("trades", "books")
         return ("aggregates", "books", "candles") if manager.ws_mode == "Normal" else ("trades", "books")
 
-    async def _subscribe_target_on_manager(self, manager: FubonSDKManager, target: dict[str, str]) -> tuple[str, ...]:
+    @staticmethod
+    def _physical_subscription_key(
+        account_id: int,
+        market_type: str,
+        symbol: str,
+        after_hours: bool,
+        channels: tuple[str, ...],
+    ) -> tuple:
+        return (account_id, market_type, symbol, after_hours, channels)
+
+    async def _subscribe_target_on_manager(
+        self,
+        account_id: int,
+        manager: FubonSDKManager,
+        target: dict[str, str],
+    ) -> tuple[str, ...]:
         channels = self._channels_for(manager, target["market_type"])
         subscribed: list[str] = []
         after_hours = bool(target.get("after_hours"))
+        subscription_key = self._physical_subscription_key(
+            account_id,
+            target["market_type"],
+            target["symbol"],
+            after_hours,
+            channels,
+        )
+        reference_count = self._physical_subscriptions.get(subscription_key, 0)
+        if reference_count > 0:
+            self._physical_subscriptions[subscription_key] = reference_count + 1
+            return channels
 
         try:
             for channel in channels:
@@ -709,6 +767,7 @@ class FubonRealtimeSubscriptionPool:
                     manager.unsubscribe_futopt(target["symbol"], channel, after_hours=after_hours)
             raise
 
+        self._physical_subscriptions[subscription_key] = 1
         return channels
 
     async def _notify_shortage(self, ticker: str, errors: list[str]) -> None:
@@ -754,6 +813,18 @@ class FubonRealtimeSubscriptionPool:
         if not self._resolved_to_requested.get(assignment.resolved_ticker):
             self._resolved_to_requested.pop(assignment.resolved_ticker, None)
         manager = self._managers.get(assignment.account_id)
+        subscription_key = self._physical_subscription_key(
+            assignment.account_id,
+            assignment.market_type,
+            assignment.symbol,
+            assignment.after_hours,
+            assignment.channels,
+        )
+        reference_count = self._physical_subscriptions.get(subscription_key, 0)
+        if reference_count > 1:
+            self._physical_subscriptions[subscription_key] = reference_count - 1
+            return
+        self._physical_subscriptions.pop(subscription_key, None)
         if not manager:
             return
         for channel in assignment.channels:

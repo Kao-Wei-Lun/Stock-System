@@ -41,10 +41,11 @@ RANGE_MAP = {
 _FUTOPT_FUTURE_CONTRACT_PATTERN = re.compile(r"^[A-Z]{2,5}[A-Z]\d$")
 _FUTOPT_OPTION_CONTRACT_PATTERN = re.compile(r"^[A-Z]{2,5}\d{3,6}[A-Z]\d$")
 _FUTOPT_BASE_ALIASES = {"TX", "TXF", "MTX", "MXF", "TMF"}
+_FUTOPT_DYNAMIC_ALIASES = {"*TXFF", "*TMFF"}
 
 
 def _looks_like_futopt_symbol(raw: str) -> bool:
-    if raw in _FUTOPT_BASE_ALIASES:
+    if raw in _FUTOPT_BASE_ALIASES or raw in _FUTOPT_DYNAMIC_ALIASES:
         return True
     return bool(
         _FUTOPT_FUTURE_CONTRACT_PATTERN.fullmatch(raw)

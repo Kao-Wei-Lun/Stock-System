@@ -67,7 +67,7 @@ export const WATCHLIST_COLOR_OPTIONS = [
   "#9b6dff",
   "#ff4d6a",
 ];
-const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF", "TMF"]);
+const FUTOPT_BASE_ALIASES = new Set(["TX", "TXF", "MTX", "MXF", "TMF", "*TXFF", "*TMFF"]);
 const FUTOPT_FUTURE_CONTRACT_RE = /^[A-Z]{2,5}[A-Z]\d$/;
 const FUTOPT_OPTION_CONTRACT_RE = /^[A-Z]{2,5}\d{3,6}[A-Z]\d$/;
 const FUTOPT_ALLOWED_PERIODS = new Set(["1d", "5d", "1mo", "3mo", "6mo"]);
