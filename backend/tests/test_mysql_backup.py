@@ -11,6 +11,7 @@ from mysql_backup import (
     BackupError,
     MysqlSettings,
     create_backup,
+    latest_backup_status,
     prune_backups,
     restore_backup,
     verify_backup,
@@ -80,6 +81,72 @@ def test_backup_uses_temporary_defaults_file_and_excludes_password_from_manifest
     assert "super-secret" not in manifest_text
     assert all("super-secret" not in argument for argument in commands[0])
     assert not Path(commands[0][1].split("=", 1)[1]).exists()
+
+
+def test_critical_backup_preserves_schema_but_excludes_rebuildable_table_data(tmp_path):
+    commands = []
+
+    def fake_runner(command, **kwargs):
+        commands.append(command)
+        kwargs["stdout"].write(b"CREATE TABLE sample (id INT);\n")
+        return subprocess.CompletedProcess(command, 0, stderr=b"")
+
+    result = create_backup(
+        build_settings(),
+        backup_dir=tmp_path / "backups",
+        scope="critical",
+        mysqldump_path=create_fake_tool(tmp_path, "mysqldump.exe"),
+        runner=fake_runner,
+        now=datetime(2026, 7, 22, 1, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["scope"] == "critical"
+    assert result["excluded_data_tables"] == ["taiwan_chip_snapshots", "ohlcv"]
+    assert "--no-data" in commands[0]
+    assert "--no-create-info" in commands[1]
+    assert "--ignore-table=quantvision.taiwan_chip_snapshots" in commands[1]
+    assert "--ignore-table=quantvision.ohlcv" in commands[1]
+
+
+def test_backup_timeout_removes_partial_file(tmp_path):
+    def timed_out(_command, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="mysqldump", timeout=2)
+
+    backup_dir = tmp_path / "backups"
+    with pytest.raises(BackupError, match="timed out after 2 seconds"):
+        create_backup(
+            build_settings(),
+            backup_dir=backup_dir,
+            timeout_seconds=2,
+            mysqldump_path=create_fake_tool(tmp_path, "mysqldump.exe"),
+            runner=timed_out,
+        )
+
+    assert list(backup_dir.glob("*.part")) == []
+
+
+def test_latest_backup_status_detects_current_stale_and_missing_files(tmp_path):
+    manifest_path = create_manifest(tmp_path)
+    current = latest_backup_status(
+        tmp_path,
+        max_age_hours=36,
+        now=datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc),
+    )
+    assert current["healthy"] is True
+    assert current["scope"] == "full"
+
+    stale = latest_backup_status(
+        tmp_path,
+        max_age_hours=1,
+        now=datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc),
+    )
+    assert stale["healthy"] is False
+    assert "older than" in stale["error"]
+
+    (tmp_path / "quantvision_20260722T010000Z.sql").unlink()
+    missing = latest_backup_status(tmp_path, now=datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc))
+    assert missing["healthy"] is False
+    assert "do not match" in missing["error"]
 
 
 def test_verify_backup_detects_tampering(tmp_path):

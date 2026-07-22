@@ -91,6 +91,20 @@ class HealthyFuturesRecorder:
         }
 
 
+def healthy_backup_status():
+    return {
+        "healthy": True,
+        "status": "healthy",
+        "scope": "full",
+        "backup_id": "20260722T010000Z",
+        "created_at": "2026-07-22T01:00:00+00:00",
+        "age_hours": 3.0,
+        "size_bytes": 1024,
+        "checksum_recorded": True,
+        "error": None,
+    }
+
+
 @pytest.mark.anyio
 async def test_build_snapshot_reports_all_healthy_components():
     service = DataQualityService(
@@ -99,20 +113,22 @@ async def test_build_snapshot_reports_all_healthy_components():
         fubon_pool=HealthyFubonPool(),
         ws_manager=HealthyWebsocketManager(),
         futopt_recorder=HealthyFuturesRecorder(),
+        backup_status_provider=healthy_backup_status,
     )
 
     snapshot = await service.build_snapshot(now=REFERENCE)
 
     assert snapshot["status"] == "healthy"
     assert snapshot["summary"] == {
-        "component_count": 7,
-        "healthy_count": 7,
+        "component_count": 8,
+        "healthy_count": 8,
         "idle_count": 0,
         "warning_count": 0,
         "error_count": 0,
     }
     assert snapshot["components"]["watchlist"]["source_counts"] == {"fubon_neo_ws": 1}
     assert snapshot["components"]["futures_recorder"]["stale_symbol_count"] == 0
+    assert snapshot["components"]["backups"]["backup_id"] == "20260722T010000Z"
 
 
 class BrokenDatabase:
@@ -157,6 +173,7 @@ async def test_build_snapshot_is_resilient_and_surfaces_stale_data():
         ws_manager=runtime,
         futopt_recorder=None,
         futopt_enabled=False,
+        backup_status_provider=lambda: {"healthy": False, "status": "warning", "error": "stale"},
     )
 
     snapshot = await service.build_snapshot(now=REFERENCE)
@@ -167,3 +184,26 @@ async def test_build_snapshot_is_resilient_and_surfaces_stale_data():
     assert snapshot["components"]["fubon"]["status"] == "error"
     assert snapshot["components"]["watchlist"]["stale_items"][0]["ticker"] == "AAPL"
     assert snapshot["components"]["futures_recorder"]["status"] == "idle"
+    assert snapshot["components"]["backups"]["status"] == "warning"
+
+
+@pytest.mark.anyio
+async def test_scheduler_failure_changes_component_to_error():
+    class FailedScheduler:
+        def health_summary(self):
+            return {
+                "running": True,
+                "task_count": 2,
+                "active_count": 1,
+                "failed_count": 1,
+                "unexpected_stopped_count": 0,
+                "tasks": [{"name": "backup", "state": "failed", "last_error": "boom"}],
+            }
+
+    service = DataQualityService(
+        db=HealthyDatabase(), scheduler=FailedScheduler(), fubon_pool=HealthyFubonPool(),
+        ws_manager=HealthyWebsocketManager(), futopt_recorder=HealthyFuturesRecorder(),
+        backup_status_provider=healthy_backup_status,
+    )
+    snapshot = await service.build_snapshot(now=REFERENCE)
+    assert snapshot["components"]["scheduler"]["status"] == "error"

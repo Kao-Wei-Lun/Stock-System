@@ -26,6 +26,7 @@ class DataQualityService:
     ws_manager: Any
     futopt_recorder: Any = None
     futopt_enabled: bool = True
+    backup_status_provider: Any = None
 
     async def build_snapshot(self, *, now: datetime | None = None) -> dict[str, Any]:
         reference = now or datetime.now(timezone.utc)
@@ -68,12 +69,45 @@ class DataQualityService:
             "active_count": 0,
             "tasks": [],
         }
-        scheduler_ok = bool(scheduler_summary.get("running") and scheduler_summary.get("active_count", 0) > 0)
+        scheduler_failed = int(scheduler_summary.get("failed_count") or 0)
+        scheduler_stopped = int(scheduler_summary.get("unexpected_stopped_count") or 0)
+        scheduler_ok = bool(
+            scheduler_summary.get("running")
+            and scheduler_summary.get("active_count", 0) > 0
+            and scheduler_failed == 0
+            and scheduler_stopped == 0
+        )
         components["scheduler"] = _component(
-            "healthy" if scheduler_ok else "warning",
-            "背景排程運作中" if scheduler_ok else "背景排程未運作",
+            "healthy" if scheduler_ok else ("error" if scheduler_failed else "warning"),
+            "背景排程運作中" if scheduler_ok else (
+                "背景排程有任務異常停止" if scheduler_failed else "背景排程未完整運作"
+            ),
             **scheduler_summary,
         )
+
+        if self.backup_status_provider is None:
+            components["backups"] = _component(
+                "warning",
+                "尚未設定資料庫備份健康檢查",
+                healthy=False,
+            )
+        else:
+            backup_status = self._safe_sync(
+                self.backup_status_provider,
+                fallback={"healthy": False, "status": "error", "error": "backup_status_check_failed"},
+            )
+            backup_healthy = bool(backup_status.get("healthy"))
+            backup_error = backup_status.get("error")
+            backup_details = {
+                key: value for key, value in backup_status.items()
+                if key not in {"status", "error"}
+            }
+            components["backups"] = _component(
+                "healthy" if backup_healthy else ("error" if backup_status.get("status") == "error" else "warning"),
+                "資料庫備份在有效期限內" if backup_healthy else "資料庫備份需要注意",
+                **backup_details,
+                error=backup_error,
+            )
 
         ws_status = self._safe_sync(self.ws_manager.get_status, fallback={
             "client_count": 0,

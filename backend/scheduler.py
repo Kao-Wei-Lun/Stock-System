@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 from contextlib import suppress
@@ -48,6 +49,11 @@ class SchedulerSettings:
     tw_full_history_sync_stop_time: time_of_day = time_of_day(8, 0)
     tw_full_history_retry_interval_seconds: int = 1800
     tw_full_history_retry_min_latest_coverage_pct: float = 80.0
+    auto_backup_enabled: bool = False
+    auto_backup_scope: str = "critical"
+    auto_backup_interval_hours: float = 24.0
+    auto_backup_max_age_hours: float = 36.0
+    auto_backup_initial_delay_seconds: float = 300.0
 
 
 @dataclass(slots=True)
@@ -70,6 +76,52 @@ class SchedulerDependencies:
     sync_paper_trading_margins: Any = None
     sync_taiwan_full_history: Any = None
     get_taiwan_analysis_kline_coverage: Any = None
+    create_mysql_backup: Any = None
+    get_mysql_backup_status: Any = None
+
+
+async def automatic_mysql_backup_loop(
+    *,
+    create_backup,
+    get_backup_status,
+    interval_hours: float,
+    initial_delay_seconds: float,
+    record_result=None,
+    logger: logging.Logger | None = None,
+) -> None:
+    """Keep a recent verified backup without blocking the event loop."""
+    log = logger or logging.getLogger(__name__)
+    if initial_delay_seconds > 0:
+        await asyncio.sleep(initial_delay_seconds)
+    while True:
+        started = time.perf_counter()
+        try:
+            status = await asyncio.to_thread(get_backup_status)
+            created = None
+            if not status.get("healthy"):
+                created = await asyncio.to_thread(create_backup)
+                status = await asyncio.to_thread(get_backup_status)
+            details = {
+                "created": bool(created),
+                "backup_id": (created or status).get("backup_id"),
+                "scope": (created or status).get("scope"),
+                "age_hours": status.get("age_hours"),
+            }
+            if record_result:
+                record_result("mysql-auto-backup", success=True, duration_seconds=time.perf_counter() - started, details=details)
+            log.info("Automatic MySQL backup check finished: %s", details)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if record_result:
+                record_result(
+                    "mysql-auto-backup",
+                    success=False,
+                    duration_seconds=time.perf_counter() - started,
+                    error=str(exc),
+                )
+            log.exception("Automatic MySQL backup failed: %s", exc)
+        await asyncio.sleep(max(60.0, float(interval_hours) * 3600.0))
 
 
 async def startup_download(
@@ -722,25 +774,58 @@ class BackgroundScheduler:
         self._deps = dependencies
         self._log = logger or logging.getLogger(__name__)
         self._tasks: list[asyncio.Task] = []
+        self._task_states: dict[str, dict[str, Any]] = {}
+        self._job_runs: dict[str, dict[str, Any]] = {}
 
     @property
     def task_count(self) -> int:
         return len(self._tasks)
 
     def health_summary(self) -> dict:
-        tasks = [
-            {
-                "name": task.get_name().replace("quantvision:", "", 1),
+        tasks = []
+        for task in self._tasks:
+            name = task.get_name().replace("quantvision:", "", 1)
+            tasks.append({
+                "name": name,
                 "done": task.done(),
                 "cancelled": task.cancelled(),
-            }
-            for task in self._tasks
-        ]
+                **self._task_states.get(name, {}),
+            })
+        failed_count = sum(1 for item in tasks if item.get("state") == "failed")
+        unexpected_stopped_count = sum(
+            1 for item in tasks
+            if item.get("persistent") and item.get("state") == "completed"
+        )
+        active_count = sum(1 for task in self._tasks if not task.done())
         return {
-            "running": bool(self._tasks),
+            "running": active_count > 0,
             "task_count": len(self._tasks),
-            "active_count": sum(1 for task in self._tasks if not task.done()),
+            "active_count": active_count,
+            "failed_count": failed_count,
+            "unexpected_stopped_count": unexpected_stopped_count,
             "tasks": tasks,
+            "jobs": dict(self._job_runs),
+        }
+
+    def record_job_result(
+        self,
+        name: str,
+        *,
+        success: bool,
+        duration_seconds: float,
+        details: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        finished_at = datetime.now().astimezone().isoformat()
+        previous = self._job_runs.get(name, {})
+        self._job_runs[name] = {
+            **previous,
+            "last_run_at": finished_at,
+            "last_duration_seconds": round(max(0.0, duration_seconds), 3),
+            "last_success_at": finished_at if success else previous.get("last_success_at"),
+            "last_failure_at": finished_at if not success else previous.get("last_failure_at"),
+            "last_error": None if success else str(error or "unknown error")[:500],
+            "details": details or {},
         }
 
     def start(self) -> None:
@@ -756,6 +841,7 @@ class BackgroundScheduler:
                     fetch_history_for_ticker=self._deps.fetch_history_for_ticker,
                     logger=self._log,
                 ),
+                persistent=False,
             )
         else:
             self._log.info("Startup Yahoo history prefetch skipped (STARTUP_DOWNLOAD_ENABLED=false).")
@@ -908,16 +994,73 @@ class BackgroundScheduler:
         else:
             self._log.info("Market intelligence sync skipped (MARKET_INTELLIGENCE_SYNC_ENABLED=false).")
 
+        if (
+            self._settings.auto_backup_enabled
+            and self._deps.create_mysql_backup
+            and self._deps.get_mysql_backup_status
+        ):
+            self._create_task(
+                "mysql-auto-backup",
+                automatic_mysql_backup_loop(
+                    create_backup=self._deps.create_mysql_backup,
+                    get_backup_status=self._deps.get_mysql_backup_status,
+                    interval_hours=self._settings.auto_backup_interval_hours,
+                    initial_delay_seconds=self._settings.auto_backup_initial_delay_seconds,
+                    record_result=self.record_job_result,
+                    logger=self._log,
+                ),
+            )
+        else:
+            self._log.info("Automatic MySQL backup skipped (AUTO_BACKUP_ENABLED=false or backup dependencies unavailable).")
+
     async def shutdown(self) -> None:
         for task in self._tasks:
             if not task.done():
                 task.cancel()
         for task in self._tasks:
-            with suppress(asyncio.CancelledError):
+            # Failures are already logged and retained in task telemetry.
+            with suppress(asyncio.CancelledError, Exception):
                 await task
         self._tasks.clear()
 
-    def _create_task(self, name: str, coroutine) -> asyncio.Task:
-        task = asyncio.create_task(coroutine, name=f"quantvision:{name}")
+    def _create_task(self, name: str, coroutine, *, persistent: bool = True) -> asyncio.Task:
+        async def tracked():
+            state = self._task_states[name]
+            state["state"] = "running"
+            state["started_at"] = datetime.now().astimezone().isoformat()
+            try:
+                result = await coroutine
+                state["state"] = "completed"
+                return result
+            except asyncio.CancelledError:
+                state["state"] = "cancelled"
+                raise
+            except Exception as exc:
+                state["state"] = "failed"
+                state["last_error"] = str(exc)[:500]
+                self._log.exception("Background task %s stopped unexpectedly: %s", name, exc)
+                raise
+            finally:
+                state["stopped_at"] = datetime.now().astimezone().isoformat()
+
+        self._task_states[name] = {
+            "state": "scheduled",
+            "persistent": bool(persistent),
+            "started_at": None,
+            "stopped_at": None,
+            "last_error": None,
+        }
+        task = asyncio.create_task(tracked(), name=f"quantvision:{name}")
+
+        def consume_result(finished: asyncio.Task) -> None:
+            if finished.cancelled():
+                # A task can be cancelled before ``tracked`` gets its first turn.
+                # Explicitly close the original coroutine to avoid leaking it.
+                if self._task_states[name]["state"] == "scheduled" and inspect.iscoroutine(coroutine):
+                    coroutine.close()
+                return
+            finished.exception()
+
+        task.add_done_callback(consume_result)
         self._tasks.append(task)
         return task

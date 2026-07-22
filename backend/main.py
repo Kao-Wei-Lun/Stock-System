@@ -35,6 +35,7 @@ from env_validation import (
     validate_runtime_environment,
 )
 from futopt_history_service import FutoptCandleRecorder
+from logging_config import configure_logging
 from macro_regime import build_macro_dashboard_payload
 from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
@@ -57,6 +58,7 @@ from providers import (
 from routers import alerts, assets, backtest, intelligence, journal, market_data, paper_trading, reports, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
+from mysql_backup import DEFAULT_BACKUP_DIR, MysqlSettings, create_backup, latest_backup_status, verify_backup
 from taifex_fetcher import taifex_fetcher
 from taiwan_history_backfill_service import TaiwanHistoryBackfillService, _normalize_intervals
 
@@ -65,10 +67,9 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger(__name__)
-
 load_dotenv()
+configure_logging()
+log = logging.getLogger(__name__)
 
 # ─── Configuration ───────────────────────────────────────────
 
@@ -148,6 +149,16 @@ MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS = read_float_env(
     "12",
     minimum=0,
 )
+AUTO_BACKUP_ENABLED = read_bool_env("AUTO_BACKUP_ENABLED", True)
+AUTO_BACKUP_SCOPE = read_text_env("AUTO_BACKUP_SCOPE", "critical").strip().lower() or "critical"
+if AUTO_BACKUP_SCOPE not in {"full", "critical"}:
+    raise RuntimeError("AUTO_BACKUP_SCOPE must be either 'full' or 'critical'")
+AUTO_BACKUP_INTERVAL_HOURS = read_float_env("AUTO_BACKUP_INTERVAL_HOURS", "24", minimum=1)
+AUTO_BACKUP_MAX_AGE_HOURS = read_float_env("AUTO_BACKUP_MAX_AGE_HOURS", "36", minimum=1)
+AUTO_BACKUP_INITIAL_DELAY_SECONDS = read_float_env("AUTO_BACKUP_INITIAL_DELAY_SECONDS", "300", minimum=0)
+AUTO_BACKUP_TIMEOUT_SECONDS = read_int_env("AUTO_BACKUP_TIMEOUT_SECONDS", "1800", minimum=60)
+AUTO_BACKUP_RETENTION_DAYS = read_int_env("AUTO_BACKUP_RETENTION_DAYS", "30", minimum=0)
+AUTO_BACKUP_KEEP_MINIMUM = read_int_env("AUTO_BACKUP_KEEP_MINIMUM", "7", minimum=1)
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
@@ -309,6 +320,31 @@ async def sync_paper_trading_margins(reason: str = "scheduled") -> dict:
     )
 
 
+def get_mysql_backup_health() -> dict:
+    return latest_backup_status(DEFAULT_BACKUP_DIR, max_age_hours=AUTO_BACKUP_MAX_AGE_HOURS)
+
+
+def get_scheduled_mysql_backup_health() -> dict:
+    return latest_backup_status(
+        DEFAULT_BACKUP_DIR,
+        max_age_hours=AUTO_BACKUP_MAX_AGE_HOURS,
+        scope=AUTO_BACKUP_SCOPE,
+    )
+
+
+def create_scheduled_mysql_backup() -> dict:
+    result = create_backup(
+        MysqlSettings.from_env(),
+        backup_dir=DEFAULT_BACKUP_DIR,
+        retention_days=AUTO_BACKUP_RETENTION_DAYS,
+        keep_minimum=AUTO_BACKUP_KEEP_MINIMUM,
+        scope=AUTO_BACKUP_SCOPE,
+        timeout_seconds=AUTO_BACKUP_TIMEOUT_SECONDS,
+    )
+    verification = verify_backup(Path(result["backup_dir"]) / result["manifest_file"])
+    return {**result, "verified": bool(verification.get("valid"))}
+
+
 background_scheduler = BackgroundScheduler(
     settings=SchedulerSettings(
         startup_download_enabled=STARTUP_DOWNLOAD_ENABLED,
@@ -347,6 +383,11 @@ background_scheduler = BackgroundScheduler(
         tw_full_history_sync_stop_time=TW_FULL_HISTORY_SYNC_STOP_TIME,
         tw_full_history_retry_interval_seconds=TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS,
         tw_full_history_retry_min_latest_coverage_pct=TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT,
+        auto_backup_enabled=AUTO_BACKUP_ENABLED,
+        auto_backup_scope=AUTO_BACKUP_SCOPE,
+        auto_backup_interval_hours=AUTO_BACKUP_INTERVAL_HOURS,
+        auto_backup_max_age_hours=AUTO_BACKUP_MAX_AGE_HOURS,
+        auto_backup_initial_delay_seconds=AUTO_BACKUP_INITIAL_DELAY_SECONDS,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -367,6 +408,8 @@ background_scheduler = BackgroundScheduler(
         sync_paper_trading_margins=sync_paper_trading_margins,
         sync_taiwan_full_history=sync_taiwan_full_history,
         get_taiwan_analysis_kline_coverage=db.get_tw_analysis_kline_coverage,
+        create_mysql_backup=create_scheduled_mysql_backup,
+        get_mysql_backup_status=get_scheduled_mysql_backup_health,
     ),
     logger=log,
 )
@@ -377,6 +420,7 @@ data_quality_service = DataQualityService(
     ws_manager=ws_manager,
     futopt_recorder=futopt_candle_recorder,
     futopt_enabled=FUTOPT_RECORDER_ENABLED,
+    backup_status_provider=get_mysql_backup_health,
 )
 
 

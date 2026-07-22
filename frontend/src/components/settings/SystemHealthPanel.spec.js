@@ -25,6 +25,10 @@ function snapshot() {
     ],
     components: {
       database: { status: "healthy", label: "MySQL 可用", connected: true, latency_ms: 1.5 },
+      backups: {
+        status: "healthy", label: "資料庫備份在有效期限內", scope: "critical",
+        created_at: "2026-07-22T01:00:00+00:00", age_hours: 3, size_bytes: 1048576,
+      },
       watchlist: {
         status: "warning",
         label: "觀察池存在過期或缺少行情",
@@ -51,6 +55,8 @@ describe("SystemHealthPanel", () => {
     expect(wrapper.text()).toContain("系統與資料品質");
     expect(wrapper.text()).toContain("需注意");
     expect(wrapper.text()).toContain("觀察池行情");
+    expect(wrapper.text()).toContain("重要資料");
+    expect(wrapper.text()).toContain("1.00 MB");
     expect(wrapper.text()).toContain("AAPL · 已過期");
     expect(dashboardApi.getSystemDataQuality).toHaveBeenCalledTimes(1);
     wrapper.unmount();

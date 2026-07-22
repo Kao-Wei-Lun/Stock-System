@@ -8,7 +8,7 @@
             {{ statusLabel(snapshot.status) }}
           </span>
         </div>
-        <p>集中檢查資料庫、排程、即時連線、觀察池行情與期貨 1 分 K 持久化狀態。</p>
+        <p>集中檢查資料庫、備份、排程、即時連線、觀察池行情與期貨 1 分 K 持久化狀態。</p>
       </div>
       <button type="button" :disabled="loading" data-testid="refresh-health" @click="loadSnapshot">
         {{ loading ? "檢查中" : "重新檢查" }}
@@ -92,6 +92,7 @@ const componentEntries = computed(() => Object.entries(snapshot.value?.component
 const COMPONENT_NAMES = {
   database: "資料庫",
   migrations: "資料庫版本",
+  backups: "資料庫備份",
   scheduler: "背景排程",
   websocket: "瀏覽器即時連線",
   fubon: "富邦行情 API",
@@ -123,7 +124,14 @@ function componentMetrics(key, item) {
     ],
     scheduler: [
       { label: "執行中任務", value: `${item.active_count || 0} / ${item.task_count || 0}` },
+      { label: "異常停止", value: `${item.failed_count || 0}` },
       { label: "排程啟動", value: yesNo(item.running) },
+    ],
+    backups: [
+      { label: "範圍", value: item.scope === "critical" ? "重要資料" : (item.scope === "full" ? "完整" : "—") },
+      { label: "備份時間", value: formatTime(item.created_at) },
+      { label: "距今", value: item.age_hours == null ? "—" : `${item.age_hours} 小時` },
+      { label: "大小", value: formatBytes(item.size_bytes) },
     ],
     websocket: [
       { label: "用戶端", value: `${item.client_count || 0}` },
@@ -150,6 +158,20 @@ function freshnessLabel(item) {
   if (!item.data_timestamp) return "無資料";
   if (item.is_stale) return `已過期 ${formatTime(item.data_timestamp)}`;
   return `最新 ${formatTime(item.data_timestamp)}`;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
 }
 
 function formatTime(value) {

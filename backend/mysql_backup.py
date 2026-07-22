@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -23,6 +24,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BACKUP_DIR = PROJECT_ROOT / "backups" / "mysql"
 DATABASE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 BACKUP_FORMAT_VERSION = 1
+BACKUP_SCOPES = {"full", "critical"}
+CRITICAL_SCOPE_EXCLUDED_DATA_TABLES = ("taiwan_chip_snapshots", "ohlcv")
 
 
 class BackupError(RuntimeError):
@@ -117,6 +120,17 @@ def _resolve_tool(explicit: str | None, env_name: str, fallback: str) -> str:
     path = Path(candidate).expanduser()
     if path.is_file():
         return str(path.resolve())
+    if os.name == "nt" and not explicit and not os.environ.get(env_name):
+        patterns = (
+            f"C:/Program Files/MySQL/MySQL Server */bin/{fallback}.exe",
+            f"C:/Program Files/MariaDB */bin/{fallback}.exe",
+        )
+        discovered = sorted(
+            (Path(item) for pattern in patterns for item in glob.glob(pattern)),
+            reverse=True,
+        )
+        if discovered:
+            return str(discovered[0].resolve())
     raise BackupError(f"Unable to find {fallback}; set {env_name} to the executable path")
 
 
@@ -142,10 +156,16 @@ def create_backup(
     backup_dir: Path = DEFAULT_BACKUP_DIR,
     retention_days: int = 30,
     keep_minimum: int = 7,
+    scope: str = "full",
+    timeout_seconds: int = 60 * 60,
     mysqldump_path: str | None = None,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    scope = str(scope or "full").strip().lower()
+    if scope not in BACKUP_SCOPES:
+        raise BackupError(f"Unsupported backup scope: {scope}")
+    timeout_seconds = max(1, int(timeout_seconds))
     tool = _resolve_tool(mysqldump_path, "MYSQLDUMP_PATH", "mysqldump")
     created_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     backup_id = created_at.strftime("%Y%m%dT%H%M%SZ")
@@ -155,22 +175,55 @@ def create_backup(
     manifest_path = backup_dir / f"quantvision_{backup_id}.manifest.json"
     partial_path = dump_path.with_suffix(".sql.part")
 
-    with mysql_defaults_file(settings) as defaults_path, partial_path.open("wb") as output:
-        command = [
-            tool,
-            f"--defaults-extra-file={defaults_path}",
-            "--single-transaction",
-            "--quick",
-            "--routines",
-            "--events",
-            "--triggers",
-            "--hex-blob",
-            "--skip-lock-tables",
-            f"--default-character-set={settings.charset}",
-            settings.database,
-        ]
-        completed = runner(command, stdout=output, stderr=subprocess.PIPE, check=False)
-    if completed.returncode != 0:
+    excluded_data_tables = list(CRITICAL_SCOPE_EXCLUDED_DATA_TABLES if scope == "critical" else ())
+    try:
+        with mysql_defaults_file(settings) as defaults_path, partial_path.open("wb") as output:
+            base_command = [
+                tool,
+                f"--defaults-extra-file={defaults_path}",
+                "--single-transaction",
+                "--quick",
+                "--hex-blob",
+                "--skip-lock-tables",
+                f"--default-character-set={settings.charset}",
+            ]
+            if scope == "critical":
+                # --ignore-table-data is unavailable in some MySQL releases.
+                # Two portable passes preserve every schema while omitting only
+                # the rebuildable high-volume table rows.
+                commands = [
+                    [*base_command, "--routines", "--events", "--triggers", "--no-data", settings.database],
+                    [
+                        *base_command,
+                        "--no-create-info",
+                        "--skip-triggers",
+                        *[
+                            f"--ignore-table={settings.database}.{table}"
+                            for table in excluded_data_tables
+                        ],
+                        settings.database,
+                    ],
+                ]
+            else:
+                commands = [[*base_command, "--routines", "--events", "--triggers", settings.database]]
+            completed = None
+            for command in commands:
+                completed = runner(
+                    command,
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=timeout_seconds,
+                )
+                if completed.returncode != 0:
+                    break
+    except subprocess.TimeoutExpired as exc:
+        partial_path.unlink(missing_ok=True)
+        raise BackupError(f"mysqldump timed out after {timeout_seconds} seconds") from exc
+    except Exception:
+        partial_path.unlink(missing_ok=True)
+        raise
+    if completed is None or completed.returncode != 0:
         partial_path.unlink(missing_ok=True)
         raise BackupError(f"mysqldump failed: {_safe_error(completed.stderr)}")
     if not partial_path.exists() or partial_path.stat().st_size == 0:
@@ -182,6 +235,9 @@ def create_backup(
         "format_version": BACKUP_FORMAT_VERSION,
         "backup_id": backup_id,
         "created_at": created_at.isoformat(),
+        "verified_at": created_at.isoformat(),
+        "scope": scope,
+        "excluded_data_tables": excluded_data_tables,
         "source": {
             "host": settings.host,
             "port": settings.port,
@@ -210,6 +266,77 @@ def create_backup(
         "manifest_file": manifest_path.name,
         "backup_dir": str(backup_dir),
         "removed_backup_ids": removed,
+    }
+
+
+def latest_backup_status(
+    backup_dir: Path = DEFAULT_BACKUP_DIR,
+    *,
+    max_age_hours: float = 36,
+    scope: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return a cheap health check without re-hashing multi-gigabyte dump files."""
+    requested_scope = str(scope).strip().lower() if scope else None
+    if requested_scope and requested_scope not in BACKUP_SCOPES:
+        raise BackupError(f"Unsupported backup scope: {requested_scope}")
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    candidates: list[tuple[datetime, Path, dict[str, Any]]] = []
+    invalid_manifests: list[str] = []
+    for manifest_path in Path(backup_dir).glob("quantvision_*.manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_scope = str(manifest.get("scope") or "full").lower()
+            if requested_scope and manifest_scope != requested_scope:
+                continue
+            created_at = datetime.fromisoformat(str(manifest["created_at"]))
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            candidates.append((created_at.astimezone(timezone.utc), manifest_path, manifest))
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            invalid_manifests.append(manifest_path.name)
+    if not candidates:
+        return {
+            "status": "warning",
+            "healthy": False,
+            "scope": requested_scope,
+            "error": "No verified backup manifest was found",
+            "invalid_manifests": invalid_manifests,
+        }
+    created_at, manifest_path, manifest = max(candidates, key=lambda item: item[0])
+    dump_name = Path(str(manifest.get("dump_file") or "")).name
+    dump_path = manifest_path.parent / dump_name
+    size_bytes = dump_path.stat().st_size if dump_path.is_file() else None
+    expected_size = manifest.get("size_bytes")
+    structurally_valid = bool(
+        manifest.get("format_version") == BACKUP_FORMAT_VERSION
+        and dump_name
+        and dump_name == manifest.get("dump_file")
+        and size_bytes == expected_size
+        and manifest.get("sha256")
+    )
+    age_hours = max(0.0, (reference - created_at).total_seconds() / 3600)
+    stale = age_hours > max(0.0, float(max_age_hours))
+    healthy = structurally_valid and not stale
+    error = None
+    if not structurally_valid:
+        error = "Latest backup files do not match the manifest"
+    elif stale:
+        error = f"Latest backup is older than {float(max_age_hours):g} hours"
+    return {
+        "status": "healthy" if healthy else "warning",
+        "healthy": healthy,
+        "scope": str(manifest.get("scope") or "full"),
+        "backup_id": manifest.get("backup_id"),
+        "created_at": created_at.isoformat(),
+        "age_hours": round(age_hours, 2),
+        "size_bytes": size_bytes,
+        "manifest_path": str(manifest_path.resolve()),
+        "dump_path": str(dump_path.resolve()),
+        "excluded_data_tables": manifest.get("excluded_data_tables") or [],
+        "checksum_recorded": bool(manifest.get("sha256")),
+        "error": error,
+        "invalid_manifests": invalid_manifests,
     }
 
 
@@ -358,6 +485,8 @@ def build_parser() -> argparse.ArgumentParser:
     backup_parser.add_argument("--backup-dir", type=Path, default=DEFAULT_BACKUP_DIR)
     backup_parser.add_argument("--retention-days", type=int, default=30)
     backup_parser.add_argument("--keep-minimum", type=int, default=7)
+    backup_parser.add_argument("--scope", choices=sorted(BACKUP_SCOPES), default="full")
+    backup_parser.add_argument("--timeout-seconds", type=int, default=60 * 60)
     backup_parser.add_argument("--mysqldump-path")
 
     verify_parser = subparsers.add_parser("verify", help="Verify a backup manifest and checksum")
@@ -383,6 +512,8 @@ def main(argv: list[str] | None = None) -> int:
                 backup_dir=args.backup_dir,
                 retention_days=args.retention_days,
                 keep_minimum=args.keep_minimum,
+                scope=args.scope,
+                timeout_seconds=args.timeout_seconds,
                 mysqldump_path=args.mysqldump_path,
             )
             verify_backup(Path(result["backup_dir"]) / result["manifest_file"])

@@ -8,6 +8,7 @@ from scheduler import (
     SchedulerDependencies,
     SchedulerSettings,
     _tw_history_retry_needed,
+    automatic_mysql_backup_loop,
     fubon_ws_listener_loop,
 )
 
@@ -134,6 +135,76 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
     await scheduler.shutdown()
 
     assert scheduler.task_count == 0
+
+
+@pytest.mark.anyio
+async def test_automatic_backup_creates_stale_backup_and_records_success():
+    created = []
+    records = []
+
+    def get_status():
+        return {"healthy": bool(created), "backup_id": "critical-1" if created else None, "scope": "critical"}
+
+    def create_backup():
+        created.append(True)
+        return {"backup_id": "critical-1", "scope": "critical"}
+
+    task = asyncio.create_task(automatic_mysql_backup_loop(
+        create_backup=create_backup,
+        get_backup_status=get_status,
+        interval_hours=24,
+        initial_delay_seconds=0,
+        record_result=lambda name, **result: records.append((name, result)),
+    ))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert created == [True]
+    assert records[0][0] == "mysql-auto-backup"
+    assert records[0][1]["success"] is True
+    assert records[0][1]["details"]["created"] is True
+
+
+@pytest.mark.anyio
+async def test_scheduler_health_exposes_failed_task_details():
+    async def fail():
+        raise RuntimeError("scheduled failure")
+
+    async def noop(*_args, **_kwargs):
+        await asyncio.sleep(3600)
+
+    scheduler = BackgroundScheduler(
+        settings=SchedulerSettings(
+            startup_download_enabled=False,
+            institutional_auto_sync_enabled=False,
+            taiwan_chip_auto_sync_enabled=False,
+            latest_data_sync_on_startup=False,
+            alert_evaluator_enabled=False,
+            market_intelligence_sync_enabled=False,
+            market_intelligence_startup_sync=False,
+            alert_poll_interval_seconds=3600,
+            app_tz=timezone.utc,
+            daily_latest_sync_time=time(23, 59),
+        ),
+        dependencies=SchedulerDependencies(
+            startup_download_tickers=[], fetch_history_for_ticker=noop,
+            sync_institutional_snapshot=noop, sync_taiwan_chip_snapshot=noop,
+            sync_tracked_market_data=noop, fetch_and_store_quote_snapshot=noop,
+            evaluate_active_alerts=noop, sync_market_intelligence_snapshot=noop,
+            get_subscribed_tickers=lambda: [], broadcast_to_ticker=noop,
+        ),
+    )
+    scheduler._create_task("failure-probe", fail())
+    await asyncio.sleep(0.02)
+
+    health = scheduler.health_summary()
+    failed = next(item for item in health["tasks"] if item["name"] == "failure-probe")
+    assert health["failed_count"] == 1
+    assert failed["state"] == "failed"
+    assert failed["last_error"] == "scheduled failure"
+    await scheduler.shutdown()
 
 
 def test_tw_history_retry_needed_checks_date_and_latest_coverage():

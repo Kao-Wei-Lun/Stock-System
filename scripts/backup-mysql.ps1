@@ -1,7 +1,10 @@
 param(
     [string]$BackupDir = "",
     [int]$RetentionDays = 30,
-    [int]$KeepMinimum = 7
+    [int]$KeepMinimum = 7,
+    [ValidateSet("full", "critical")]
+    [string]$Scope = "full",
+    [int]$TimeoutSeconds = 3600
 )
 
 Set-StrictMode -Version Latest
@@ -15,7 +18,9 @@ $arguments = @(
     (Join-Path $projectRoot "backend\mysql_backup.py"),
     "backup",
     "--retention-days", $RetentionDays,
-    "--keep-minimum", $KeepMinimum
+    "--keep-minimum", $KeepMinimum,
+    "--scope", $Scope,
+    "--timeout-seconds", $TimeoutSeconds
 )
 if ($BackupDir) {
     $arguments += @("--backup-dir", $BackupDir)
