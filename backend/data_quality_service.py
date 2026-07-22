@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from market_freshness import is_at_least_as_recent, market_aware_freshness
+from security_sanitizer import redact_sensitive_data
 
 
 STATUS_RANK = {"healthy": 0, "idle": 0, "warning": 1, "error": 2}
@@ -134,7 +135,7 @@ class DataQualityService:
             fallback={"status_check_failed": True},
         ) if self.fubon_pool is not None else {}
         fubon_error = fubon_result.get("error") if fubon_result.get("status_check_failed") else None
-        fubon_statuses = {} if fubon_error else fubon_result
+        fubon_statuses = {} if fubon_error else redact_sensitive_data(fubon_result)
         connected_accounts = sum(1 for item in fubon_statuses.values() if item.get("realtime_connected"))
         reconnect_attempts = sum(
             int(target.get("attempts") or 0)

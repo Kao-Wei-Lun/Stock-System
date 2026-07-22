@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from local_access import is_loopback_bind_host, parse_allowed_networks, split_csv
+
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
 FALSY_VALUES = {"0", "false", "no", "off"}
 PLACEHOLDER_PASSWORDS = {
@@ -138,6 +140,9 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture("MYSQL_DATABASE", lambda: read_required_text_env("MYSQL_DATABASE", env=source))
   capture("MYSQL_CHARSET", lambda: read_required_text_env("MYSQL_CHARSET", env=source))
   capture("APP_PORT", lambda: read_int_env("APP_PORT", "8001", minimum=1, maximum=65535, env=source))
+  capture("APP_BIND_HOST", lambda: read_text_env("APP_BIND_HOST", "127.0.0.1", env=source))
+  capture("ALLOW_LAN_ACCESS", lambda: read_bool_env("ALLOW_LAN_ACCESS", False, env=source))
+  capture("LAN_ALLOWED_NETWORKS", lambda: parse_allowed_networks(_read_raw_value("LAN_ALLOWED_NETWORKS", "", env=source)))
   capture("APP_TIMEZONE", lambda: read_timezone_env("APP_TIMEZONE", "Asia/Taipei", env=source))
   capture("DAILY_LATEST_SYNC_TIME", lambda: read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10", env=source))
   capture("TRACKED_MARKET_SYNC_TIME", lambda: read_hhmm_env("TRACKED_MARKET_SYNC_TIME", "18:10", env=source))
@@ -148,6 +153,16 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture("TW_FULL_HISTORY_SYNC_START", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "14:00", env=source))
   capture("TW_FULL_HISTORY_SYNC_STOP", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00", env=source))
   capture("FRONTEND_DEV_URL", lambda: read_url_env("FRONTEND_DEV_URL", "http://localhost:5173", env=source))
+  for origin in split_csv(_read_raw_value("LAN_ALLOWED_ORIGINS", "", env=source)):
+    capture(f"LAN_ALLOWED_ORIGIN:{origin}", lambda origin=origin: read_url_env("LAN_ALLOWED_ORIGIN", origin, env={}))
+
+  try:
+    bind_host = read_text_env("APP_BIND_HOST", "127.0.0.1", env=source)
+    allow_lan = read_bool_env("ALLOW_LAN_ACCESS", False, env=source)
+    if not is_loopback_bind_host(bind_host) and not allow_lan:
+      errors.append("ALLOW_LAN_ACCESS must be true before APP_BIND_HOST can expose a non-loopback interface")
+  except RuntimeError:
+    pass
 
   for key, default in (
     ("STARTUP_DOWNLOAD_ENABLED", False),

@@ -78,6 +78,26 @@ def test_validate_runtime_environment_requires_encrypt_key(monkeypatch):
         validate_runtime_environment()
 
 
+def test_validate_runtime_environment_rejects_external_bind_without_lan_opt_in(monkeypatch):
+    apply_env(monkeypatch, APP_BIND_HOST="0.0.0.0", ALLOW_LAN_ACCESS="false")
+
+    with pytest.raises(RuntimeError, match="ALLOW_LAN_ACCESS"):
+        validate_runtime_environment()
+
+
+def test_validate_runtime_environment_accepts_scoped_lan_access(monkeypatch):
+    apply_env(
+        monkeypatch,
+        APP_BIND_HOST="0.0.0.0",
+        ALLOW_LAN_ACCESS="true",
+        LAN_ALLOWED_NETWORKS="192.168.50.0/24",
+        LAN_ALLOWED_ORIGINS="http://192.168.50.10:5173",
+    )
+
+    validated = validate_runtime_environment()
+    assert validated["ALLOW_LAN_ACCESS"] is True
+
+
 def test_lifespan_validates_environment_before_startup(monkeypatch):
     calls: list[str] = []
 

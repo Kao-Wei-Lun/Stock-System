@@ -85,6 +85,28 @@ def test_create_fubon_account_rejects_invalid_ws_mode(client):
     assert response.status_code == 422
 
 
+def test_create_fubon_account_unwraps_secret_types_only_at_repository_boundary(client, monkeypatch):
+    repo = FakeRepo()
+    patch_repo(monkeypatch, repo)
+    reload_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(providers.fubon_realtime_pool, "reload_from_db", reload_mock)
+
+    response = client.post(
+        "/api/settings/fubon-accounts",
+        json={
+            "label": "Primary", "user_id": "P123456789", "password": "real-password",
+            "cert_path": "C:\\certs\\test.pfx", "cert_password": "cert-password",
+            "api_key": "A" * 64, "ws_mode": "Speed",
+        },
+    )
+
+    assert response.status_code == 201
+    saved = repo.create_account.await_args.args[0]
+    assert saved["password"] == "real-password"
+    assert saved["cert_password"] == "cert-password"
+    assert saved["api_key"] == "A" * 64
+
+
 def test_update_fubon_account_uses_partial_payload(client, monkeypatch):
     repo = FakeRepo()
     patch_repo(monkeypatch, repo)
@@ -164,6 +186,29 @@ def test_get_fubon_accounts_status_merges_runtime_state(client, monkeypatch):
     assert payload["accounts"][0]["realtime_assigned_count"] == 2
     assert payload["accounts"][0]["realtime_connected"] is True
     assert payload["realtime_diagnostics"]["TMFE6"]["last_channel"] == "books"
+
+
+def test_fubon_status_endpoint_redacts_nested_runtime_credentials(client, monkeypatch):
+    repo = FakeRepo()
+    repo.list_statuses.return_value = [{"id": 1, "connection_error": "password=database-secret"}]
+    patch_repo(monkeypatch, repo)
+    monkeypatch.setattr(
+        providers.fubon_realtime_pool,
+        "get_account_runtime_statuses",
+        lambda: {1: {"last_error": "api_key=TOP-SECRET"}},
+    )
+    monkeypatch.setattr(
+        providers.fubon_realtime_pool,
+        "get_ws_diagnostics",
+        lambda: {"auth": {"authorization": "Bearer secret-token"}},
+    )
+
+    response = client.get("/api/settings/fubon-accounts/status")
+    serialized = response.text
+    assert response.status_code == 200
+    assert "database-secret" not in serialized
+    assert "TOP-SECRET" not in serialized
+    assert "secret-token" not in serialized
 
 
 def test_reconnect_fubon_account_recovers_runtime_without_app_restart(client, monkeypatch):

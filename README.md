@@ -55,7 +55,10 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 系統預設只接受本機連線。若確定要讓區域網路中的其他裝置使用，才在啟動前的環境變數中將
 `APP_BIND_HOST`、`FRONTEND_BIND_HOST` 設為 `0.0.0.0`，並將
-`ALLOW_LAN_ACCESS` 設為 `true`。Docker Compose 可在 `.env` 另以
+`ALLOW_LAN_ACCESS` 設為 `true`。建議同時用 `LAN_ALLOWED_NETWORKS`
+限制為自己的網段（例如 `192.168.1.0/24`）；若從另一個開發伺服器來源
+連線，再將完整來源加入 `LAN_ALLOWED_ORIGINS`。系統會拒絕公開 IP、非 IP
+Host 與未授權網段。Docker Compose 可在 `.env` 另以
 `DOCKER_BIND_HOST` 控制主機端綁定。
 
 ## 啟動方式

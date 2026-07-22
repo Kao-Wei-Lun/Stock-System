@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from database import db
 from repositories.fubon_accounts import FubonAccountRepository
+from security_sanitizer import redact_sensitive_data, redact_sensitive_text, secret_values_from_account
 
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -15,10 +16,10 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 class FubonAccountCreate(BaseModel):
     label: str = Field(..., min_length=1, max_length=100)
     user_id: str = Field(..., min_length=5, max_length=50)
-    password: str = Field(..., min_length=1)
+    password: SecretStr
     cert_path: Optional[str] = Field(default=None, max_length=500)
-    cert_password: Optional[str] = None
-    api_key: str = Field(..., min_length=10)
+    cert_password: Optional[SecretStr] = None
+    api_key: SecretStr = Field(..., min_length=10)
     ws_mode: str = Field(default="Speed", pattern="^(Speed|Normal)$")
     is_enabled: bool = True
 
@@ -26,10 +27,10 @@ class FubonAccountCreate(BaseModel):
 class FubonAccountUpdate(BaseModel):
     label: Optional[str] = Field(default=None, min_length=1, max_length=100)
     user_id: Optional[str] = Field(default=None, min_length=5, max_length=50)
-    password: Optional[str] = None
+    password: Optional[SecretStr] = None
     cert_path: Optional[str] = Field(default=None, max_length=500)
-    cert_password: Optional[str] = None
-    api_key: Optional[str] = None
+    cert_password: Optional[SecretStr] = None
+    api_key: Optional[SecretStr] = None
     ws_mode: Optional[str] = Field(default=None, pattern="^(Speed|Normal)$")
     is_enabled: Optional[bool] = None
 
@@ -38,10 +39,18 @@ class FubonReconnectRequest(BaseModel):
     market_type: Optional[str] = Field(default=None, pattern="^(stock|futopt)$")
 
 
+def _account_model_payload(body: BaseModel, *, exclude_none: bool = False) -> dict:
+    payload = body.model_dump(exclude_none=exclude_none)
+    for key in ("password", "cert_password", "api_key"):
+        if isinstance(payload.get(key), SecretStr):
+            payload[key] = payload[key].get_secret_value()
+    return payload
+
+
 @router.get("/fubon-accounts")
 async def list_fubon_accounts():
     repo = FubonAccountRepository(db)
-    return {"accounts": await repo.list_accounts()}
+    return redact_sensitive_data({"accounts": await repo.list_accounts()})
 
 
 @router.post("/fubon-accounts", status_code=201)
@@ -50,9 +59,9 @@ async def create_fubon_account(body: FubonAccountCreate):
 
     repo = FubonAccountRepository(db)
     try:
-        account_id = await repo.create_account(body.model_dump())
+        account_id = await repo.create_account(_account_model_payload(body))
     except RuntimeError as exc:
-        raise HTTPException(500, str(exc)) from exc
+        raise HTTPException(500, redact_sensitive_text(exc)) from exc
     await fubon_realtime_pool.reload_from_db(db)
     return {"id": account_id, "message": "帳號已建立"}
 
@@ -70,7 +79,7 @@ async def get_fubon_accounts_status():
     get_diagnostics = getattr(fubon_realtime_pool, "get_ws_diagnostics", None)
     if callable(get_diagnostics):
         diagnostics = get_diagnostics()
-    return {"accounts": accounts, "realtime_diagnostics": diagnostics}
+    return redact_sensitive_data({"accounts": accounts, "realtime_diagnostics": diagnostics})
 
 
 @router.put("/fubon-accounts/{account_id}")
@@ -79,9 +88,9 @@ async def update_fubon_account(account_id: int, body: FubonAccountUpdate):
 
     repo = FubonAccountRepository(db)
     try:
-        updated = await repo.update_account(account_id, body.model_dump(exclude_none=True))
+        updated = await repo.update_account(account_id, _account_model_payload(body, exclude_none=True))
     except RuntimeError as exc:
-        raise HTTPException(500, str(exc)) from exc
+        raise HTTPException(500, redact_sensitive_text(exc)) from exc
     if updated == 0:
         raise HTTPException(404, "帳號不存在或沒有變更")
     await fubon_realtime_pool.reload_from_db(db)
@@ -139,7 +148,7 @@ async def test_fubon_account(account_id: int):
         "connected" if result.get("success") else "error",
         None if result.get("success") else result.get("message"),
     )
-    return result
+    return redact_sensitive_data(result, secrets=secret_values_from_account(account))
 
 
 @router.post("/fubon-accounts/{account_id}/reconnect")
@@ -158,8 +167,12 @@ async def reconnect_fubon_account(account_id: int, body: FubonReconnectRequest |
         market_type=body.market_type if body else None,
     )
     if not result.get("success"):
-        raise HTTPException(502, result.get("message") or "富邦重新連線失敗")
-    return {
+        safe_message = redact_sensitive_text(
+            result.get("message") or "富邦重新連線失敗",
+            secrets=secret_values_from_account(account),
+        )
+        raise HTTPException(502, safe_message)
+    return redact_sensitive_data({
         **result,
         "message": "富邦行情重新連線已啟動" if body and body.market_type else "富邦帳號已重新登入並恢復訂閱",
-    }
+    }, secrets=secret_values_from_account(account))

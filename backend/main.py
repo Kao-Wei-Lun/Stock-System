@@ -36,6 +36,7 @@ from env_validation import (
 )
 from futopt_history_service import FutoptCandleRecorder
 from logging_config import configure_logging
+from local_access import LocalAccessMiddleware, split_csv
 from macro_regime import build_macro_dashboard_payload
 from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
@@ -78,6 +79,8 @@ APP_PORT = read_int_env("APP_PORT", "8001", minimum=1, maximum=65535)
 APP_BIND_HOST = read_text_env("APP_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 FRONTEND_DEV_URL = read_url_env("FRONTEND_DEV_URL", "http://localhost:5173")
 ALLOW_LAN_ACCESS = read_bool_env("ALLOW_LAN_ACCESS", False)
+LAN_ALLOWED_NETWORKS = read_text_env("LAN_ALLOWED_NETWORKS", "")
+LAN_ALLOWED_ORIGINS = split_csv(read_text_env("LAN_ALLOWED_ORIGINS", ""))
 STARTUP_DOWNLOAD_ENABLED = read_bool_env("STARTUP_DOWNLOAD_ENABLED", False)
 INSTITUTIONAL_AUTO_SYNC_ENABLED = read_bool_env("INSTITUTIONAL_AUTO_SYNC_ENABLED", True)
 TAIWAN_CHIP_AUTO_SYNC_ENABLED = read_bool_env("TAIWAN_CHIP_AUTO_SYNC_ENABLED", True)
@@ -491,12 +494,6 @@ _install_quiet_router_lifespan(app)
 # ─── CORS ────────────────────────────────────────────────────
 
 local_origin_hosts = rf"localhost|127\.0\.0\.1|0\.0\.0\.0"
-if ALLOW_LAN_ACCESS:
-    local_origin_hosts += (
-        rf"|192\.168\.\d{{1,3}}\.\d{{1,3}}"
-        rf"|10\.\d{{1,3}}\.\d{{1,3}}\.\d{{1,3}}"
-        rf"|172\.(1[6-9]|2\d|3[0-1])\.\d{{1,3}}\.\d{{1,3}}"
-    )
 local_dev_origin_regex = rf"^https?://({local_origin_hosts})(:\d{{2,5}})?$"
 
 allowed_origins = list(
@@ -508,6 +505,8 @@ allowed_origins = list(
         f"http://127.0.0.1:{APP_PORT}",
     }
 )
+if ALLOW_LAN_ACCESS:
+    allowed_origins.extend(LAN_ALLOWED_ORIGINS)
 
 app.add_middleware(
     CORSMiddleware,
@@ -516,6 +515,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+)
+app.add_middleware(
+    LocalAccessMiddleware,
+    allow_lan=ALLOW_LAN_ACCESS,
+    allowed_networks=LAN_ALLOWED_NETWORKS,
 )
 
 if FRONTEND_DIST_DIR.exists():

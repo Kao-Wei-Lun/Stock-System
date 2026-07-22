@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from crypto_utils import decrypt_field, encrypt_field
+from security_sanitizer import redact_sensitive_text
 
 
 class FubonAccountRepository:
@@ -13,8 +14,12 @@ class FubonAccountRepository:
     def _with_decrypted_secrets(row: Dict[str, Any] | None) -> Optional[Dict[str, Any]]:
         if not row:
             return None
+        result = {
+            key: value for key, value in row.items()
+            if key not in {"password_enc", "cert_password_enc", "api_key_enc"}
+        }
         return {
-            **row,
+            **result,
             "is_active": bool(row.get("is_active")),
             "is_enabled": bool(row.get("is_enabled")),
             "password": decrypt_field(row.get("password_enc")),
@@ -25,12 +30,21 @@ class FubonAccountRepository:
     @staticmethod
     def _public_row(row: Dict[str, Any]) -> Dict[str, Any]:
         return {
-            **row,
+            "id": row.get("id"),
+            "label": row.get("label"),
+            "user_id": row.get("user_id"),
+            "cert_path": row.get("cert_path"),
+            "ws_mode": row.get("ws_mode"),
             "is_active": bool(row.get("is_active")),
             "is_enabled": bool(row.get("is_enabled")),
-            "password": "****",
-            "cert_password": "****" if row.get("has_cert_password") else "",
-            "api_key": "****",
+            "has_password": True,
+            "has_cert_password": bool(row.get("has_cert_password")),
+            "has_api_key": True,
+            "connection_status": row.get("connection_status"),
+            "connection_error": redact_sensitive_text(row.get("connection_error")),
+            "last_connected_at": row.get("last_connected_at"),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
         }
 
     async def list_accounts(self) -> List[Dict[str, Any]]:
@@ -70,6 +84,7 @@ class FubonAccountRepository:
                 **row,
                 "is_active": bool(row.get("is_active")),
                 "is_enabled": bool(row.get("is_enabled")),
+                "connection_error": redact_sensitive_text(row.get("connection_error")),
             }
             for row in rows
         ]
@@ -203,5 +218,5 @@ class FubonAccountRepository:
                 connection_error=%s
             WHERE id=%s
             """,
-            (status, error, account_id),
+            (status, redact_sensitive_text(error), account_id),
         )

@@ -7,6 +7,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
+from security_sanitizer import redact_sensitive_text, secret_values_from_account
+
 
 log = logging.getLogger(__name__)
 
@@ -166,12 +168,13 @@ class FubonSDKManager:
         try:
             sdk, ws_stock, ws_futopt, login_accounts = await asyncio.to_thread(self._login_sync, account)
         except Exception as exc:
+            safe_error = redact_sensitive_text(exc, secrets=secret_values_from_account(account))
             for target in old_targets:
                 self._best_effort_shutdown(target)
             self.connected = False
             if repo and account_id:
-                await repo.update_connection_status(account_id, "error", str(exc))
-            log.error("Fubon SDK initialization failed: %s", exc)
+                await repo.update_connection_status(account_id, "error", safe_error)
+            log.error("Fubon SDK initialization failed: %s", safe_error)
             return False
 
         for target in old_targets:
@@ -866,7 +869,7 @@ class FubonSDKManager:
             log.info("Fubon %s websocket closed during shutdown", market_type)
             return
         log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
-        self._ws_reconnect_last_error[market_type] = str(args or "disconnected")
+        self._ws_reconnect_last_error[market_type] = redact_sensitive_text(args or "disconnected")
         self._schedule_reconnect_ws_target(market_type)
 
     def _handle_ws_error(self, market_type: str, *args) -> None:
@@ -878,7 +881,7 @@ class FubonSDKManager:
                 f"Fubon {market_type} websocket authentication failed: {args or 'unknown'}"
             )
             return
-        self._ws_reconnect_last_error[market_type] = str(args or "websocket error")
+        self._ws_reconnect_last_error[market_type] = redact_sensitive_text(args or "websocket error")
         self._schedule_reconnect_ws_target(market_type)
 
     def _reconnect_ws_target(self, market_type: str) -> bool:
@@ -906,8 +909,9 @@ class FubonSDKManager:
         try:
             return self._reconnect_ws_target(normalized)
         except Exception as exc:
-            self._ws_reconnect_last_error[normalized] = str(exc)
-            log.warning("Fubon %s manual websocket reconnect failed: %s", normalized, exc)
+            safe_error = redact_sensitive_text(exc)
+            self._ws_reconnect_last_error[normalized] = safe_error
+            log.warning("Fubon %s manual websocket reconnect failed: %s", normalized, safe_error)
             self._schedule_reconnect_ws_target(normalized)
             return False
 
@@ -959,8 +963,9 @@ class FubonSDKManager:
             if started is False:
                 self._schedule_reconnect_ws_target(market_type)
         except Exception as exc:
-            self._ws_reconnect_last_error[market_type] = str(exc)
-            log.warning("Fubon %s websocket reconnect failed: %s", market_type, exc)
+            safe_error = redact_sensitive_text(exc)
+            self._ws_reconnect_last_error[market_type] = safe_error
+            log.warning("Fubon %s websocket reconnect failed: %s", market_type, safe_error)
             self._schedule_reconnect_ws_target(market_type)
 
     def _cancel_reconnect_timer(self, market_type: str, *, cancel_active: bool = True) -> None:
@@ -1281,7 +1286,12 @@ class FubonSDKManager:
                     log.info("Fubon %s websocket already running", market_type)
                     return True
                 self._ws_started_targets.discard(market_type)
-                log.warning("Fubon %s websocket %s failed: %s", market_type, method_name, exc)
+                log.warning(
+                    "Fubon %s websocket %s failed: %s",
+                    market_type,
+                    method_name,
+                    redact_sensitive_text(exc),
+                )
                 return False
         self._ws_started_targets.add(market_type)
         return True
@@ -1306,7 +1316,10 @@ async def test_fubon_login(account: dict) -> dict:
         targets = await asyncio.to_thread(manager._login_sync, account)
         return {"success": True, "message": "連線測試成功"}
     except Exception as exc:
-        return {"success": False, "message": str(exc)}
+        return {
+            "success": False,
+            "message": redact_sensitive_text(exc, secrets=secret_values_from_account(account)),
+        }
     finally:
         for target in targets:
             manager._best_effort_shutdown(target)

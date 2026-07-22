@@ -7,10 +7,17 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from security_sanitizer import redact_sensitive_text
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOG_PATH = PROJECT_ROOT / "log" / "backend.log"
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
+class RedactingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_sensitive_text(super().format(record))
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -33,7 +40,7 @@ def configure_logging(
     if any(getattr(handler, "_quantvision_managed", False) for handler in target.handlers):
         return target
 
-    formatter = logging.Formatter(LOG_FORMAT)
+    formatter = RedactingFormatter(LOG_FORMAT)
     console = logging.StreamHandler()
     console.setFormatter(formatter)
     console._quantvision_managed = True  # type: ignore[attr-defined]
