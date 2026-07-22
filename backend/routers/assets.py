@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -45,18 +46,23 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
+log = logging.getLogger(__name__)
 
 _fetch_and_store_quote_snapshot = None
 _latest_public_fx_provider = None
+_quote_refresh_timeout_seconds = 8.0
+_quote_refresh_tasks: Dict[str, asyncio.Task] = {}
+_fx_refresh_task: asyncio.Task | None = None
 _SNAPSHOT_LIMIT = 5000
 _LEDGER_PAGE_SIZE = 1000
 _AUTO_TRADE_SETTLEMENT_SOURCE = "trade_settlement_auto"
 
 
-def configure(*, fetch_and_store_quote_snapshot, latest_public_fx_provider=None) -> None:
-    global _fetch_and_store_quote_snapshot, _latest_public_fx_provider
+def configure(*, fetch_and_store_quote_snapshot, latest_public_fx_provider=None, quote_refresh_timeout_seconds=8.0) -> None:
+    global _fetch_and_store_quote_snapshot, _latest_public_fx_provider, _quote_refresh_timeout_seconds
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _latest_public_fx_provider = latest_public_fx_provider
+    _quote_refresh_timeout_seconds = max(0.1, float(quote_refresh_timeout_seconds))
 
 
 async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | None:
@@ -280,6 +286,51 @@ async def _sync_latest_public_fx_rates() -> List[Dict[str, Any]]:
     return await _load_all_asset_rows(db.list_asset_fx_rates)
 
 
+async def _load_asset_fx_rates(*, refresh: bool = False) -> List[Dict[str, Any]]:
+    """Return persisted FX rates promptly while deduplicating a public refresh.
+
+    Public providers can be slow or temporarily unreachable. Asset valuation must
+    remain usable in that case, so requests with existing rates use a short wait
+    budget and let one shared refresh finish in the background.
+    """
+    global _fx_refresh_task
+
+    stored_rates = await _load_all_asset_rows(db.list_asset_fx_rates)
+    if not refresh or _latest_public_fx_provider is None:
+        return stored_rates
+
+    task = _fx_refresh_task
+    if task is None or task.done():
+        task = asyncio.create_task(
+            _sync_latest_public_fx_rates(),
+            name="asset-public-fx-refresh",
+        )
+        _fx_refresh_task = task
+
+        def cleanup(done_task: asyncio.Task) -> None:
+            global _fx_refresh_task
+            if _fx_refresh_task is done_task:
+                _fx_refresh_task = None
+            if not done_task.cancelled():
+                done_task.exception()
+
+        task.add_done_callback(cleanup)
+
+    wait_budget = min(_quote_refresh_timeout_seconds, 1.5) if stored_rates else _quote_refresh_timeout_seconds
+    try:
+        refreshed_rates = await asyncio.wait_for(asyncio.shield(task), timeout=wait_budget)
+        return refreshed_rates or stored_rates
+    except TimeoutError:
+        log.warning(
+            "Public FX refresh is still running after %.1fs; using persisted rates",
+            wait_budget,
+        )
+        return stored_rates
+    except Exception as exc:  # noqa: BLE001 - asset valuation should retain persisted FX data
+        log.warning("Public FX refresh failed; using persisted rates: %s", exc)
+        return stored_rates
+
+
 async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
@@ -289,7 +340,7 @@ async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
 ]:
-    fx_loader = _sync_latest_public_fx_rates() if refresh_public_fx else _load_all_asset_rows(db.list_asset_fx_rates)
+    fx_loader = _load_asset_fx_rates(refresh=refresh_public_fx)
     (
         accounts,
         cash_entries,
@@ -320,12 +371,42 @@ async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
 
 async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str, Any] | None:
     normalized = normalize_ticker(ticker)
-    quote = None
-    if refresh and _fetch_and_store_quote_snapshot:
-        quote = await _fetch_and_store_quote_snapshot(normalized)
-    if not quote:
-        quote = await db.get_market_quote(normalized)
-    return quote
+    stored_quote = await db.get_market_quote(normalized)
+    if not refresh or not _fetch_and_store_quote_snapshot:
+        return stored_quote
+
+    task = _quote_refresh_tasks.get(normalized)
+    if task is None or task.done():
+        task = asyncio.create_task(
+            _fetch_and_store_quote_snapshot(normalized),
+            name=f"asset-quote-refresh:{normalized}",
+        )
+        _quote_refresh_tasks[normalized] = task
+
+        def cleanup(done_task: asyncio.Task, *, symbol: str = normalized) -> None:
+            if _quote_refresh_tasks.get(symbol) is done_task:
+                _quote_refresh_tasks.pop(symbol, None)
+            if not done_task.cancelled():
+                done_task.exception()
+
+        task.add_done_callback(cleanup)
+
+    # When a stored quote exists, keep the request responsive and let a slow
+    # provider finish in the background. A later read receives the refreshed row.
+    wait_budget = min(_quote_refresh_timeout_seconds, 1.5) if stored_quote else _quote_refresh_timeout_seconds
+    try:
+        quote = await asyncio.wait_for(asyncio.shield(task), timeout=wait_budget)
+        return quote or stored_quote
+    except TimeoutError:
+        log.warning(
+            "Asset quote refresh is still running for %s after %.1fs; using the latest stored quote",
+            normalized,
+            wait_budget,
+        )
+        return stored_quote
+    except Exception as exc:  # noqa: BLE001 - asset valuation should fall back to persisted data
+        log.warning("Asset quote refresh failed for %s; using the latest stored quote: %s", normalized, exc)
+        return stored_quote
 
 
 async def _persist_snapshot(snapshot: Dict[str, Any]) -> None:
@@ -1271,7 +1352,7 @@ async def list_asset_fx_rates(
     refresh_public: bool = Query(False),
 ):
     if refresh_public:
-        await _sync_latest_public_fx_rates()
+        await _load_asset_fx_rates(refresh=True)
     return {
         "items": await db.list_asset_fx_rates(
             owner_id=DEFAULT_OWNER_ID,

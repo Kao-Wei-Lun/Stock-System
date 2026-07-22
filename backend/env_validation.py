@@ -230,6 +230,10 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     lambda: read_int_env("FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS", "300", minimum=60, env=source),
   )
   capture(
+    "ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS",
+    lambda: read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1, env=source),
+  )
+  capture(
     "TW_FULL_HISTORY_DELAY_SECONDS",
     lambda: read_float_env("TW_FULL_HISTORY_DELAY_SECONDS", "0.8", minimum=0, env=source),
   )

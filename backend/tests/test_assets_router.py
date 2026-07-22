@@ -1,3 +1,4 @@
+import asyncio
 import copy
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -1031,6 +1032,114 @@ def test_asset_routes_refresh_use_latest_quote_and_public_fx(client, asset_store
     assert synced_rates[0]["snapshot_date"] == "2026-04-19"
     assert synced_rates[0]["rate"] == 32.5
     assert synced_rates[0]["source"] == "taifex_daily_reference"
+
+
+@pytest.mark.anyio
+async def test_asset_quote_refresh_timeout_falls_back_to_stored_quote(monkeypatch):
+    async def slow_refresh(_ticker):
+        await asyncio.sleep(1)
+        return {"ticker": "AAPL", "price": 999}
+
+    async def stored_quote(ticker):
+        return {"ticker": ticker, "price": 150, "source": "stored"}
+
+    monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", slow_refresh)
+    monkeypatch.setattr(main.assets, "_quote_refresh_timeout_seconds", 0.01)
+    monkeypatch.setattr(main.db, "get_market_quote", stored_quote)
+
+    result = await main.assets._fetch_latest_quote("AAPL", refresh=True)
+
+    assert result["price"] == 150
+    assert result["source"] == "stored"
+    pending = list(main.assets._quote_refresh_tasks.values())
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_concurrent_asset_reads_share_one_quote_refresh(monkeypatch):
+    calls = 0
+    release = asyncio.Event()
+
+    async def slow_refresh(_ticker):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return {"ticker": "AAPL", "price": 151, "source": "fresh"}
+
+    async def stored_quote(ticker):
+        return {"ticker": ticker, "price": 150, "source": "stored"}
+
+    monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", slow_refresh)
+    monkeypatch.setattr(main.assets, "_quote_refresh_timeout_seconds", 0.01)
+    monkeypatch.setattr(main.db, "get_market_quote", stored_quote)
+
+    results = await asyncio.gather(*(
+        main.assets._fetch_latest_quote("AAPL", refresh=True) for _ in range(5)
+    ))
+    assert calls == 1
+    assert {item["price"] for item in results} == {150}
+
+    release.set()
+    await asyncio.gather(*list(main.assets._quote_refresh_tasks.values()), return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_public_fx_refresh_timeout_falls_back_to_stored_rates(monkeypatch):
+    stored_rates = [{"from_currency": "USD", "to_currency": "TWD", "rate": 32.1}]
+
+    async def load_stored_rates(_fetcher):
+        return stored_rates
+
+    async def slow_refresh():
+        await asyncio.sleep(1)
+        return [{"from_currency": "USD", "to_currency": "TWD", "rate": 32.5}]
+
+    monkeypatch.setattr(main.assets, "_fx_refresh_task", None)
+    monkeypatch.setattr(main.assets, "_latest_public_fx_provider", object())
+    monkeypatch.setattr(main.assets, "_quote_refresh_timeout_seconds", 0.01)
+    monkeypatch.setattr(main.assets, "_load_all_asset_rows", load_stored_rates)
+    monkeypatch.setattr(main.assets, "_sync_latest_public_fx_rates", slow_refresh)
+
+    result = await main.assets._load_asset_fx_rates(refresh=True)
+
+    assert result == stored_rates
+    pending = main.assets._fx_refresh_task
+    assert pending is not None
+    pending.cancel()
+    await asyncio.gather(pending, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_concurrent_asset_reads_share_one_public_fx_refresh(monkeypatch):
+    calls = 0
+    release = asyncio.Event()
+    stored_rates = [{"from_currency": "USD", "to_currency": "TWD", "rate": 32.1}]
+
+    async def load_stored_rates(_fetcher):
+        return stored_rates
+
+    async def slow_refresh():
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return [{"from_currency": "USD", "to_currency": "TWD", "rate": 32.5}]
+
+    monkeypatch.setattr(main.assets, "_fx_refresh_task", None)
+    monkeypatch.setattr(main.assets, "_latest_public_fx_provider", object())
+    monkeypatch.setattr(main.assets, "_quote_refresh_timeout_seconds", 0.01)
+    monkeypatch.setattr(main.assets, "_load_all_asset_rows", load_stored_rates)
+    monkeypatch.setattr(main.assets, "_sync_latest_public_fx_rates", slow_refresh)
+
+    results = await asyncio.gather(*(main.assets._load_asset_fx_rates(refresh=True) for _ in range(5)))
+
+    assert calls == 1
+    assert results == [stored_rates] * 5
+    release.set()
+    pending = main.assets._fx_refresh_task
+    assert pending is not None
+    await pending
 
 
 def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):

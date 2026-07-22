@@ -138,6 +138,41 @@ async def test_scheduler_skips_optional_jobs_when_disabled():
 
 
 @pytest.mark.anyio
+async def test_scheduler_repeated_start_shutdown_does_not_leak_tasks():
+    async def noop(*_args, **_kwargs):
+        await asyncio.sleep(3600)
+
+    scheduler = BackgroundScheduler(
+        settings=SchedulerSettings(
+            startup_download_enabled=False,
+            institutional_auto_sync_enabled=False,
+            taiwan_chip_auto_sync_enabled=False,
+            latest_data_sync_on_startup=False,
+            alert_evaluator_enabled=False,
+            market_intelligence_sync_enabled=False,
+            market_intelligence_startup_sync=False,
+            alert_poll_interval_seconds=3600,
+            app_tz=timezone.utc,
+            daily_latest_sync_time=time(23, 59),
+        ),
+        dependencies=SchedulerDependencies(
+            startup_download_tickers=[], fetch_history_for_ticker=noop,
+            sync_institutional_snapshot=noop, sync_taiwan_chip_snapshot=noop,
+            sync_tracked_market_data=noop, fetch_and_store_quote_snapshot=noop,
+            evaluate_active_alerts=noop, sync_market_intelligence_snapshot=noop,
+            get_subscribed_tickers=lambda: [], broadcast_to_ticker=noop,
+        ),
+    )
+
+    for _ in range(10):
+        scheduler.start()
+        await asyncio.sleep(0)
+        assert scheduler.health_summary()["active_count"] == 2
+        await scheduler.shutdown()
+        assert scheduler.task_count == 0
+
+
+@pytest.mark.anyio
 async def test_automatic_backup_creates_stale_backup_and_records_success():
     created = []
     records = []

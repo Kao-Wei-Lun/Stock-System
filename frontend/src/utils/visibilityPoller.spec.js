@@ -60,4 +60,25 @@ describe("createVisibilityPoller", () => {
     expect(task).toHaveBeenCalledTimes(2);
     poller.stop();
   });
+
+  it("runs repeated cycles without overlap or leftover timers", async () => {
+    vi.useFakeTimers();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const task = vi.fn(async () => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await Promise.resolve();
+      concurrent -= 1;
+    });
+    const poller = createVisibilityPoller(task, { intervalMs: 100 });
+
+    poller.start({ immediate: true });
+    await vi.advanceTimersByTimeAsync(5000);
+    poller.stop();
+
+    expect(task.mock.calls.length).toBeGreaterThan(40);
+    expect(maxConcurrent).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

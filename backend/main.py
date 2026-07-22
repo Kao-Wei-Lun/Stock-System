@@ -124,6 +124,7 @@ FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
     minimum=60,
 )
 FUTOPT_RECORDER_POLL_SECONDS = read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5)
+ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS = read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
 TRACKED_MARKET_SYNC_TIME_RAW = read_hhmm_env("TRACKED_MARKET_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
@@ -541,6 +542,7 @@ market_data.configure(
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
     latest_public_fx_provider=latest_public_fx_provider,
+    quote_refresh_timeout_seconds=ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS,
 )
 
 intelligence.configure(
