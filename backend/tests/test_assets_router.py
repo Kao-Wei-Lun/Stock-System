@@ -83,6 +83,22 @@ def asset_store(monkeypatch):
     async def delete_asset_account(account_id, owner_id=1):
         return store["accounts"].pop(account_id, None) is not None
 
+    async def find_asset_trade_import_keys(import_keys, owner_id=1):
+        requested = set(import_keys)
+        return {
+            item["import_key"]: item["id"]
+            for item in store["trade_entries"].values()
+            if item.get("import_key") in requested
+        }
+
+    async def find_asset_cash_import_keys(import_keys, owner_id=1):
+        requested = set(import_keys)
+        return {
+            item["import_key"]: item["id"]
+            for item in store["cash_entries"].values()
+            if item.get("import_key") in requested
+        }
+
     async def list_asset_cash_ledger_entries(owner_id=1, account_id=None, date_from=None, date_to=None, limit=200):
         items = list(store["cash_entries"].values())
         if account_id is not None:
@@ -114,6 +130,7 @@ def asset_store(monkeypatch):
             "fx_rate_to_base": fx_rate_to_base,
             "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "source": payload.get("source") or "manual",
+            "import_key": payload.get("import_key"),
             "linked_trade_id": payload.get("linked_trade_id"),
             "linked_trade_role": payload.get("linked_trade_role"),
             "counterparty": payload.get("counterparty"),
@@ -190,6 +207,7 @@ def asset_store(monkeypatch):
             "fx_rate_to_base": fx_rate_to_base,
             "is_initial_balance": bool(payload.get("is_initial_balance", False)),
             "source": payload.get("source") or "manual",
+            "import_key": payload.get("import_key"),
             "note": payload.get("note"),
             "created_at": "2026-04-18T08:30:00+00:00",
             "updated_at": "2026-04-18T08:30:00+00:00",
@@ -438,6 +456,8 @@ def asset_store(monkeypatch):
     monkeypatch.setattr(main.db, "create_asset_account", create_asset_account)
     monkeypatch.setattr(main.db, "update_asset_account", update_asset_account)
     monkeypatch.setattr(main.db, "delete_asset_account", delete_asset_account)
+    monkeypatch.setattr(main.db, "find_asset_trade_import_keys", find_asset_trade_import_keys)
+    monkeypatch.setattr(main.db, "find_asset_cash_import_keys", find_asset_cash_import_keys)
     monkeypatch.setattr(main.db, "list_asset_cash_ledger_entries", list_asset_cash_ledger_entries)
     monkeypatch.setattr(main.db, "get_asset_cash_ledger_entry", get_asset_cash_ledger_entry)
     monkeypatch.setattr(main.db, "create_asset_cash_ledger_entry", create_asset_cash_ledger_entry)
@@ -1091,6 +1111,54 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert delete_override_response.status_code == 200
 
 
+def test_asset_csv_preview_validates_rows_and_marks_file_duplicates(client, asset_store):
+    account_response = client.post(
+        "/api/assets/accounts",
+        json={"name": "CSV Validation", "account_type": "brokerage", "base_currency": "TWD"},
+    )
+    account = account_response.json()
+    csv_text = "\n".join(
+        [
+            "trade_date,ticker,market,side,quantity,price,external_id",
+            "2026-04-01T09:00:00,2330,TW,buy,10,100,TX-001",
+            "2026-04-01T09:00:00,2330,TW,buy,10,100,TX-001",
+            "2026-04-02T09:00:00,2330,TW,buy,-1,100,TX-002",
+            "not-a-date,2330,TW,buy,5,100,TX-003",
+        ]
+    )
+
+    preview = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": csv_text, "default_account_id": account["id"], "dry_run": True},
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["summary"] == {
+        "input_count": 4,
+        "row_count": 2,
+        "valid_count": 2,
+        "importable_count": 1,
+        "duplicate_count": 1,
+        "file_duplicate_count": 1,
+        "database_duplicate_count": 0,
+        "error_count": 2,
+    }
+    assert payload["duplicates"][0]["import_status"] == "duplicate_in_file"
+    assert payload["duplicates"][0]["duplicate_of_row"] == 2
+    assert {item["row"] for item in payload["errors"]} == {4, 5}
+
+    imported = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": csv_text, "default_account_id": account["id"], "dry_run": False},
+    )
+    assert imported.status_code == 200
+    assert imported.json()["summary"]["created_count"] == 1
+    assert imported.json()["summary"]["skipped_count"] == 1
+    assert imported.json()["summary"]["error_count"] == 2
+    assert len(asset_store["trade_entries"]) == 1
+
+
 def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_store):
     account_response = client.post(
         "/api/assets/accounts",
@@ -1125,6 +1193,25 @@ def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_sto
     imported_trades_payload = import_trades_response.json()
     assert imported_trades_payload["summary"]["created_count"] == 1
     assert imported_trades_payload["items"][0]["ticker"] == "AAPL"
+    assert imported_trades_payload["items"][0]["import_key"]
+
+    repeated_trade_preview = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": trades_csv, "default_account_id": account["id"], "dry_run": True},
+    )
+    assert repeated_trade_preview.status_code == 200
+    assert repeated_trade_preview.json()["summary"]["importable_count"] == 0
+    assert repeated_trade_preview.json()["summary"]["database_duplicate_count"] == 1
+    assert repeated_trade_preview.json()["duplicates"][0]["existing_id"] == imported_trades_payload["items"][0]["id"]
+
+    repeated_trade_import = client.post(
+        "/api/assets/import/trades-csv",
+        json={"csv_text": trades_csv, "default_account_id": account["id"], "dry_run": False},
+    )
+    assert repeated_trade_import.status_code == 200
+    assert repeated_trade_import.json()["summary"]["created_count"] == 0
+    assert repeated_trade_import.json()["summary"]["skipped_count"] == 1
+    assert len(asset_store["trade_entries"]) == 1
 
     cash_csv = "\n".join(
         [
@@ -1145,6 +1232,14 @@ def test_asset_routes_support_csv_and_journal_import_workflows(client, asset_sto
     )
     assert import_cash_response.status_code == 200
     assert import_cash_response.json()["summary"]["created_count"] == 1
+
+    repeated_cash_preview = client.post(
+        "/api/assets/import/cash-csv",
+        json={"csv_text": cash_csv, "default_account_id": account["id"], "dry_run": True},
+    )
+    assert repeated_cash_preview.status_code == 200
+    assert repeated_cash_preview.json()["summary"]["database_duplicate_count"] == 1
+    assert repeated_cash_preview.json()["summary"]["importable_count"] == 0
 
     asset_store["journal_entries"] = [
         {

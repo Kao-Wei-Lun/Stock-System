@@ -570,13 +570,20 @@
         </div>
         <div class="asset-action-row">
           <button class="sync-btn" type="button" @click="$emit('import-asset-trades-csv', { dryRun: true })">預覽</button>
-          <button class="run-btn" type="button" @click="$emit('import-asset-trades-csv', { dryRun: false })">正式匯入</button>
+          <button data-testid="asset-trade-import-submit" class="run-btn" type="button" :disabled="!canImportTradeCsv" @click="$emit('import-asset-trades-csv', { dryRun: false })">正式匯入</button>
         </div>
+        <div class="bt-trade-sub">正式匯入前需先預覽，並修正所有錯誤列；重複列會自動略過。</div>
         <div class="asset-subsection">
           <div class="asset-card-title">結果</div>
           <div v-if="assetTradeImportResult" class="asset-result-box">
             <strong>{{ importSummaryLabel(assetTradeImportResult) }}</strong>
-            <div class="bt-trade-sub">錯誤 {{ assetTradeImportResult?.summary?.error_count || 0 }} 筆</div>
+            <div class="bt-trade-sub">重複 {{ assetTradeImportResult?.summary?.duplicate_count || 0 }} · 錯誤 {{ assetTradeImportResult?.summary?.error_count || 0 }} 筆</div>
+            <div v-if="assetTradeImportResult?.duplicates?.length" class="asset-import-issues">
+              <span v-for="item in assetTradeImportResult.duplicates.slice(0, 6)" :key="`trade-duplicate-${item.import_row}`">第 {{ item.import_row }} 列：{{ importDuplicateLabel(item) }}</span>
+            </div>
+            <div v-if="assetTradeImportResult?.errors?.length" class="asset-import-issues error">
+              <span v-for="item in assetTradeImportResult.errors.slice(0, 6)" :key="`trade-error-${item.row}`">第 {{ item.row }} 列：{{ item.message }}</span>
+            </div>
           </div>
           <div v-else class="bt-history-empty">先貼上 CSV 後預覽。</div>
         </div>
@@ -600,13 +607,20 @@
         </div>
         <div class="asset-action-row">
           <button class="sync-btn" type="button" @click="$emit('import-asset-cash-csv', { dryRun: true })">預覽</button>
-          <button class="run-btn" type="button" @click="$emit('import-asset-cash-csv', { dryRun: false })">正式匯入</button>
+          <button data-testid="asset-cash-import-submit" class="run-btn" type="button" :disabled="!canImportCashCsv" @click="$emit('import-asset-cash-csv', { dryRun: false })">正式匯入</button>
         </div>
+        <div class="bt-trade-sub">正式匯入前需先預覽，並修正所有錯誤列；重複列會自動略過。</div>
         <div class="asset-subsection">
           <div class="asset-card-title">結果</div>
           <div v-if="assetCashImportResult" class="asset-result-box">
             <strong>{{ importSummaryLabel(assetCashImportResult) }}</strong>
-            <div class="bt-trade-sub">錯誤 {{ assetCashImportResult?.summary?.error_count || 0 }} 筆</div>
+            <div class="bt-trade-sub">重複 {{ assetCashImportResult?.summary?.duplicate_count || 0 }} · 錯誤 {{ assetCashImportResult?.summary?.error_count || 0 }} 筆</div>
+            <div v-if="assetCashImportResult?.duplicates?.length" class="asset-import-issues">
+              <span v-for="item in assetCashImportResult.duplicates.slice(0, 6)" :key="`cash-duplicate-${item.import_row}`">第 {{ item.import_row }} 列：{{ importDuplicateLabel(item) }}</span>
+            </div>
+            <div v-if="assetCashImportResult?.errors?.length" class="asset-import-issues error">
+              <span v-for="item in assetCashImportResult.errors.slice(0, 6)" :key="`cash-error-${item.row}`">第 {{ item.row }} 列：{{ item.message }}</span>
+            </div>
           </div>
           <div v-else class="bt-history-empty">先貼上 CSV 後預覽。</div>
         </div>
@@ -879,6 +893,8 @@ const cashFlowTypes = [
 const reconciliationSummary = computed(() => props.assetReconciliation?.summary || {});
 const reconciliationItems = computed(() => props.assetReconciliation?.items || []);
 const reconciliationGapItems = computed(() => reconciliationItems.value.filter((item) => item?.has_gap));
+const canImportTradeCsv = computed(() => canSubmitCsvImport(props.assetTradeImportResult));
+const canImportCashCsv = computed(() => canSubmitCsvImport(props.assetCashImportResult));
 const isMaintenanceMode = computed(() => props.panelMode === "maintenance");
 
 function showsMaintenanceSection(sectionKey) {
@@ -1026,7 +1042,18 @@ function adjustmentLabel(item) {
 function importSummaryLabel(result) {
   const summary = result?.summary || {};
   if (summary.created_count != null) return `成功匯入 ${summary.created_count} / ${summary.row_count || summary.created_count} 筆`;
-  return `預覽 ${summary.row_count || 0} 筆`;
+  return `可匯入 ${summary.importable_count || 0} / ${summary.input_count ?? summary.row_count ?? 0} 筆`;
+}
+
+function canSubmitCsvImport(result) {
+  const summary = result?.summary || {};
+  return Boolean(result?.dry_run && Number(summary.importable_count || 0) > 0 && Number(summary.error_count || 0) === 0);
+}
+
+function importDuplicateLabel(item) {
+  if (item?.import_status === "duplicate_in_database") return `資料庫已存在 #${item.existing_id || "—"}`;
+  if (item?.import_status === "duplicate_in_file") return `與第 ${item.duplicate_of_row || "—"} 列重複`;
+  return "重複資料";
 }
 
 function heatmapTone(value) {
@@ -1415,6 +1442,25 @@ function holdingWeight(holding) {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.asset-import-issues {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--amber);
+  font-size: 10px;
+}
+
+.asset-import-issues.error {
+  color: var(--red);
+}
+
+.asset-action-row .run-btn:disabled {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text3);
+  opacity: 1;
 }
 
 .up {

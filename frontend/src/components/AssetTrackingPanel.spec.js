@@ -190,4 +190,36 @@ describe("AssetTrackingPanel", () => {
     expect(wrapper.get('[data-asset-section="cash"]').isVisible()).toBe(false);
     expect(wrapper.findAll('[data-asset-section="imports"]').every((item) => !item.isVisible())).toBe(true);
   });
+
+  it("requires an error-free CSV preview before formal import", async () => {
+    const wrapper = mount(AssetTrackingPanel, {
+      props: {
+        ...buildProps(),
+        maintenanceSection: "imports",
+        assetTradeImportResult: {
+          dry_run: true,
+          summary: { input_count: 3, importable_count: 1, duplicate_count: 1, error_count: 1 },
+          duplicates: [{ import_row: 3, import_status: "duplicate_in_file", duplicate_of_row: 2 }],
+          errors: [{ row: 4, message: "數量必須大於 0" }],
+        },
+      },
+    });
+
+    expect(wrapper.get('[data-testid="asset-trade-import-submit"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("可匯入 1 / 3 筆");
+    expect(wrapper.text()).toContain("第 3 列：與第 2 列重複");
+    expect(wrapper.text()).toContain("第 4 列：數量必須大於 0");
+
+    await wrapper.setProps({
+      assetTradeImportResult: {
+        dry_run: true,
+        summary: { input_count: 2, importable_count: 1, duplicate_count: 1, error_count: 0 },
+        duplicates: [{ import_row: 3, import_status: "duplicate_in_database", existing_id: 9 }],
+        errors: [],
+      },
+    });
+
+    expect(wrapper.get('[data-testid="asset-trade-import-submit"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("資料庫已存在 #9");
+  });
 });

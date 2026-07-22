@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import io
+import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -18,6 +20,11 @@ from asset_tracking_service import (
 )
 from data_fetcher import normalize_ticker
 from database import DEFAULT_OWNER_ID, db
+from database.helpers import (
+    _normalize_asset_cash_ledger_payload,
+    _normalize_asset_trade_payload,
+    _parse_datetime_value,
+)
 from schemas import (
     AssetAccountCreatePayload,
     AssetAccountUpdatePayload,
@@ -441,6 +448,36 @@ def _normalize_csv_row(row: Dict[str, Any]) -> Dict[str, str]:
     return normalized
 
 
+def _csv_import_error_message(exc: Exception) -> str:
+    message = str(exc)
+    if message.startswith("Asset account ") and message.endswith(" does not exist"):
+        account_id = message.removeprefix("Asset account ").removesuffix(" does not exist")
+        return f"資產帳戶 {account_id} 不存在"
+    translations = (
+        ("Asset trade quantity must be greater than 0", "交易數量必須大於 0"),
+        ("Asset trade price must be greater than 0", "交易價格必須大於 0"),
+        ("Asset trade side must be buy or sell", "交易方向必須為 buy 或 sell"),
+        ("Asset trade ticker is required", "交易商品代號不可空白"),
+        ("Asset trade trade_date is required", "交易日期不可空白"),
+        ("Asset cash ledger amount is required", "現金金額不可空白"),
+        ("Asset cash ledger flow_type is required", "現金流向類型不可空白"),
+        ("Asset cash ledger flow_date is required", "現金日期不可空白"),
+        ("Unable to parse trade_date", "無法解析交易日期"),
+        ("Unable to parse flow_date", "無法解析現金日期"),
+        ("Unable to parse account_id", "無法解析帳戶代號"),
+        (
+            "CSV row is missing account_id/account_name and no default_account_id was provided",
+            "CSV 列缺少 account_id/account_name，且未選擇預設帳戶",
+        ),
+        ("Unable to resolve account_name", "無法依帳戶名稱找到資產帳戶"),
+    )
+    for source, translated in translations:
+        if source in message:
+            suffix = message.split(source, 1)[1]
+            return f"{translated}{suffix}"
+    return f"資料格式錯誤：{message}"
+
+
 def _build_account_lookups(accounts: List[Dict[str, Any]]) -> tuple[Dict[int, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     by_id = {int(account["id"]): account for account in accounts if account.get("id") is not None}
     by_name = {str(account.get("name") or "").strip().lower(): account for account in accounts if account.get("name")}
@@ -559,6 +596,7 @@ def _run_csv_import(
     default_account_id: int | None,
     accounts: List[Dict[str, Any]],
     parser,
+    item_type: str,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     normalized_csv = _normalize_csv_text(csv_text)
     if not normalized_csv:
@@ -577,17 +615,134 @@ def _run_csv_import(
         if not any(row.values()):
             continue
         try:
-            items.append(
-                parser(
-                    row,
-                    default_account_id=default_account_id,
-                    accounts_by_id=accounts_by_id,
-                    accounts_by_name=accounts_by_name,
-                )
+            parsed = parser(
+                row,
+                default_account_id=default_account_id,
+                accounts_by_id=accounts_by_id,
+                accounts_by_name=accounts_by_name,
             )
+            normalized = (
+                _normalize_asset_trade_payload(parsed)
+                if item_type == "trade"
+                else _normalize_asset_cash_ledger_payload(parsed)
+            )
+            date_field = "trade_date" if item_type == "trade" else "flow_date"
+            if _parse_datetime_value(normalized.get(date_field)) is None:
+                raise ValueError(f"Unable to parse {date_field} {normalized.get(date_field)!r}")
+            reference = next(
+                (
+                    row.get(key)
+                    for key in ("external_id", "transaction_id", "trade_id", "order_id", "reference_id")
+                    if row.get(key)
+                ),
+                None,
+            )
+            normalized["import_key"] = _build_asset_import_key(item_type, normalized, reference=reference)
+            normalized["import_row"] = index
+            normalized["import_reference"] = reference
+            normalized["import_status"] = "importable"
+            items.append(normalized)
         except Exception as exc:  # noqa: BLE001 - collect row-level import issues
-            errors.append({"row": index, "message": str(exc), "payload": row})
+            errors.append({"row": index, "message": _csv_import_error_message(exc), "payload": row})
+    seen_rows: Dict[str, int] = {}
+    for item in items:
+        import_key = str(item.get("import_key") or "")
+        if import_key in seen_rows:
+            item["import_status"] = "duplicate_in_file"
+            item["duplicate_of_row"] = seen_rows[import_key]
+        else:
+            seen_rows[import_key] = int(item["import_row"])
     return items, errors
+
+
+def _canonical_import_number(value: Any) -> str:
+    return format(float(value or 0), ".12g")
+
+
+def _canonical_import_datetime(value: Any) -> str:
+    parsed = _parse_datetime_value(value)
+    if parsed is None:
+        return ""
+    return parsed.isoformat(timespec="microseconds")
+
+
+def _build_asset_import_key(item_type: str, item: Dict[str, Any], *, reference: str | None = None) -> str:
+    if reference:
+        identity: Dict[str, Any] = {
+            "type": item_type,
+            "account_id": int(item.get("account_id") or 0),
+            "reference": str(reference).strip(),
+        }
+    elif item_type == "trade":
+        identity = {
+            "type": "trade",
+            "account_id": int(item.get("account_id") or 0),
+            "date": _canonical_import_datetime(item.get("trade_date")),
+            "ticker": str(item.get("ticker") or "").strip().upper(),
+            "side": str(item.get("side") or "").strip().lower(),
+            "quantity": _canonical_import_number(item.get("quantity")),
+            "price": _canonical_import_number(item.get("price")),
+            "fee": _canonical_import_number(item.get("fee_amount")),
+            "tax": _canonical_import_number(item.get("tax_amount")),
+            "currency": str(item.get("currency") or "").strip().upper(),
+        }
+    else:
+        identity = {
+            "type": "cash",
+            "account_id": int(item.get("account_id") or 0),
+            "date": _canonical_import_datetime(item.get("flow_date")),
+            "flow_type": str(item.get("flow_type") or "").strip().lower(),
+            "amount": _canonical_import_number(item.get("amount")),
+            "currency": str(item.get("currency") or "").strip().upper(),
+            "counterparty": str(item.get("counterparty") or "").strip().lower(),
+        }
+    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _mark_database_duplicates(
+    items: List[Dict[str, Any]],
+    existing_items: List[Dict[str, Any]],
+    *,
+    item_type: str,
+    stored_import_keys: Dict[str, int] | None = None,
+) -> None:
+    existing_keys: Dict[str, Any] = dict(stored_import_keys or {})
+    for existing in existing_items:
+        import_key = str(existing.get("import_key") or "") or _build_asset_import_key(item_type, existing)
+        existing_keys.setdefault(import_key, existing.get("id"))
+    for item in items:
+        if item.get("import_status") != "importable":
+            continue
+        existing_id = existing_keys.get(str(item.get("import_key") or ""))
+        if existing_id is not None:
+            item["import_status"] = "duplicate_in_database"
+            item["existing_id"] = existing_id
+
+
+def _csv_import_summary(items: List[Dict[str, Any]], errors: List[Dict[str, Any]], **extra: Any) -> Dict[str, Any]:
+    file_duplicates = sum(1 for item in items if item.get("import_status") == "duplicate_in_file")
+    database_duplicates = sum(1 for item in items if item.get("import_status") == "duplicate_in_database")
+    importable_count = sum(1 for item in items if item.get("import_status") == "importable")
+    return {
+        "input_count": len(items) + len(errors),
+        "row_count": len(items),
+        "valid_count": len(items),
+        "importable_count": importable_count,
+        "duplicate_count": file_duplicates + database_duplicates,
+        "file_duplicate_count": file_duplicates,
+        "database_duplicate_count": database_duplicates,
+        "error_count": len(errors),
+        **extra,
+    }
+
+
+def _asset_import_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in item.items()
+        if key not in {"import_row", "import_reference", "import_status", "duplicate_of_row", "existing_id"}
+    }
 
 
 def _map_journal_entry_to_asset_trades(entry: Dict[str, Any], account_id: int) -> Dict[str, Any]:
@@ -1104,62 +1259,122 @@ async def delete_asset_reconciliation_snapshot(snapshot_id: int):
 
 @router.post("/import/trades-csv")
 async def import_asset_trades_csv(payload: AssetCsvImportPayload):
-    accounts = await db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID)
+    accounts, existing_trades = await asyncio.gather(
+        db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID),
+        db.list_asset_trade_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT),
+    )
     try:
         items, errors = _run_csv_import(
             payload.csv_text,
             default_account_id=payload.default_account_id,
             accounts=accounts,
             parser=_parse_trade_csv_payload,
+            item_type="trade",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    stored_import_keys = await db.find_asset_trade_import_keys(
+        [str(item.get("import_key") or "") for item in items],
+        owner_id=DEFAULT_OWNER_ID,
+    )
+    _mark_database_duplicates(
+        items,
+        existing_trades,
+        item_type="trade",
+        stored_import_keys=stored_import_keys,
+    )
+    duplicates = [item for item in items if item.get("import_status") != "importable"]
     if payload.dry_run:
-        return {"dry_run": True, "summary": {"row_count": len(items), "error_count": len(errors)}, "items": items, "errors": errors}
+        return {
+            "dry_run": True,
+            "summary": _csv_import_summary(items, errors),
+            "items": items,
+            "duplicates": duplicates,
+            "errors": errors,
+        }
 
     created = []
     row_errors = list(errors)
-    for index, item in enumerate(items, start=1):
+    for item in items:
+        if item.get("import_status") != "importable":
+            continue
         try:
-            created.append(await _create_trade_entry_with_settlement_sync(item))
+            created.append(await _create_trade_entry_with_settlement_sync(_asset_import_payload(item)))
         except Exception as exc:  # noqa: BLE001
-            row_errors.append({"row": index, "message": str(exc), "payload": item})
+            row_errors.append({"row": item.get("import_row"), "message": str(exc), "payload": item})
     return {
         "dry_run": False,
-        "summary": {"row_count": len(items), "created_count": len(created), "error_count": len(row_errors)},
+        "summary": _csv_import_summary(
+            items,
+            errors,
+            created_count=len(created),
+            skipped_count=len(duplicates),
+            error_count=len(row_errors),
+        ),
         "items": created,
+        "duplicates": duplicates,
         "errors": row_errors,
     }
 
 
 @router.post("/import/cash-csv")
 async def import_asset_cash_csv(payload: AssetCsvImportPayload):
-    accounts = await db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID)
+    accounts, existing_cash = await asyncio.gather(
+        db.list_asset_accounts(owner_id=DEFAULT_OWNER_ID),
+        db.list_asset_cash_ledger_entries(owner_id=DEFAULT_OWNER_ID, limit=_SNAPSHOT_LIMIT),
+    )
     try:
         items, errors = _run_csv_import(
             payload.csv_text,
             default_account_id=payload.default_account_id,
             accounts=accounts,
             parser=_parse_cash_csv_payload,
+            item_type="cash",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    stored_import_keys = await db.find_asset_cash_import_keys(
+        [str(item.get("import_key") or "") for item in items],
+        owner_id=DEFAULT_OWNER_ID,
+    )
+    _mark_database_duplicates(
+        items,
+        existing_cash,
+        item_type="cash",
+        stored_import_keys=stored_import_keys,
+    )
+    duplicates = [item for item in items if item.get("import_status") != "importable"]
     if payload.dry_run:
-        return {"dry_run": True, "summary": {"row_count": len(items), "error_count": len(errors)}, "items": items, "errors": errors}
+        return {
+            "dry_run": True,
+            "summary": _csv_import_summary(items, errors),
+            "items": items,
+            "duplicates": duplicates,
+            "errors": errors,
+        }
 
     created = []
     row_errors = list(errors)
-    for index, item in enumerate(items, start=1):
+    for item in items:
+        if item.get("import_status") != "importable":
+            continue
         try:
-            created.append(await db.create_asset_cash_ledger_entry(item, owner_id=DEFAULT_OWNER_ID))
+            created.append(await db.create_asset_cash_ledger_entry(_asset_import_payload(item), owner_id=DEFAULT_OWNER_ID))
         except Exception as exc:  # noqa: BLE001
-            row_errors.append({"row": index, "message": str(exc), "payload": item})
+            row_errors.append({"row": item.get("import_row"), "message": str(exc), "payload": item})
     return {
         "dry_run": False,
-        "summary": {"row_count": len(items), "created_count": len(created), "error_count": len(row_errors)},
+        "summary": _csv_import_summary(
+            items,
+            errors,
+            created_count=len(created),
+            skipped_count=len(duplicates),
+            error_count=len(row_errors),
+        ),
         "items": created,
+        "duplicates": duplicates,
         "errors": row_errors,
     }
 

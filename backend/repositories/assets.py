@@ -26,6 +26,44 @@ from database.helpers import (
 
 
 class AssetMixin:
+    async def _find_asset_import_keys(
+        self,
+        table_name: str,
+        import_keys: List[str],
+        *,
+        owner_id: int,
+    ) -> Dict[str, int]:
+        allowed_tables = {"asset_trade_ledger", "asset_cash_ledger"}
+        if table_name not in allowed_tables:
+            raise ValueError("Unsupported asset import table")
+        normalized_keys = list(dict.fromkeys(str(key or "").strip() for key in import_keys if str(key or "").strip()))
+        if not normalized_keys:
+            return {}
+        placeholders = ", ".join(["%s"] * len(normalized_keys))
+        rows = await self._fetchall(
+            f"""
+            SELECT `id`, `import_key`
+            FROM `{table_name}`
+            WHERE `owner_id`=%s AND `import_key` IN ({placeholders})
+            """,
+            tuple([owner_id, *normalized_keys]),
+        )
+        return {str(row["import_key"]): int(row["id"]) for row in rows if row.get("import_key")}
+
+    async def find_asset_trade_import_keys(
+        self,
+        import_keys: List[str],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, int]:
+        return await self._find_asset_import_keys("asset_trade_ledger", import_keys, owner_id=owner_id)
+
+    async def find_asset_cash_import_keys(
+        self,
+        import_keys: List[str],
+        owner_id: int = DEFAULT_OWNER_ID,
+    ) -> Dict[str, int]:
+        return await self._find_asset_import_keys("asset_cash_ledger", import_keys, owner_id=owner_id)
+
     async def list_asset_accounts(self, owner_id: int = DEFAULT_OWNER_ID) -> List[Dict[str, Any]]:
         rows = await self._fetchall(
             """
@@ -189,9 +227,9 @@ class AssetMixin:
             """
             INSERT INTO `asset_cash_ledger`
                 (`owner_id`, `account_id`, `flow_date`, `flow_type`, `amount`, `currency`,
-                 `fx_rate_to_base`, `is_initial_balance`, `source`, `linked_trade_id`,
-                 `linked_trade_role`, `counterparty`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `fx_rate_to_base`, `is_initial_balance`, `source`, `import_key`,
+                 `linked_trade_id`, `linked_trade_role`, `counterparty`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -203,6 +241,7 @@ class AssetMixin:
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
                 normalized["source"],
+                normalized["import_key"],
                 normalized["linked_trade_id"],
                 normalized["linked_trade_role"],
                 normalized["counterparty"],
@@ -235,6 +274,7 @@ class AssetMixin:
                 `fx_rate_to_base`=%s,
                 `is_initial_balance`=%s,
                 `source`=%s,
+                `import_key`=%s,
                 `linked_trade_id`=%s,
                 `linked_trade_role`=%s,
                 `counterparty`=%s,
@@ -250,6 +290,7 @@ class AssetMixin:
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
                 normalized["source"],
+                normalized["import_key"],
                 normalized["linked_trade_id"],
                 normalized["linked_trade_role"],
                 normalized["counterparty"],
@@ -350,8 +391,8 @@ class AssetMixin:
                 (`owner_id`, `account_id`, `trade_date`, `ticker`, `display_name`, `market`,
                  `asset_type`, `currency`, `side`, `quantity`, `price`, `gross_amount`,
                  `fee_amount`, `tax_amount`, `net_amount`, `fx_rate_to_base`,
-                 `is_initial_balance`, `source`, `note`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 `is_initial_balance`, `source`, `import_key`, `note`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 owner_id,
@@ -372,6 +413,7 @@ class AssetMixin:
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
                 normalized["source"],
+                normalized["import_key"],
                 normalized["note"],
             ),
         )
@@ -410,6 +452,7 @@ class AssetMixin:
                 `fx_rate_to_base`=%s,
                 `is_initial_balance`=%s,
                 `source`=%s,
+                `import_key`=%s,
                 `note`=%s
             WHERE `id`=%s AND `owner_id`=%s
             """,
@@ -431,6 +474,7 @@ class AssetMixin:
                 normalized["fx_rate_to_base"],
                 normalized["is_initial_balance"],
                 normalized["source"],
+                normalized["import_key"],
                 normalized["note"],
                 entry_id,
                 owner_id,

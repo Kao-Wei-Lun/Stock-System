@@ -21,8 +21,8 @@ class HealthyDatabase:
 
     async def get_migration_status(self):
         return {
-            "current_version": "20260722_0001",
-            "applied_versions": ["20260722_0001"],
+            "current_version": "20260722_0002",
+            "applied_versions": ["20260722_0001", "20260722_0002"],
             "unknown_applied_versions": [],
             "pending": [],
             "pending_count": 0,

@@ -407,6 +407,7 @@ def _deserialize_asset_cash_ledger_entry(row: Optional[Dict[str, Any]]) -> Optio
         "fx_rate_to_base": row.get("fx_rate_to_base"),
         "is_initial_balance": bool(row.get("is_initial_balance", False)),
         "source": row.get("source") or "manual",
+        "import_key": row.get("import_key"),
         "linked_trade_id": row.get("linked_trade_id"),
         "linked_trade_role": row.get("linked_trade_role"),
         "counterparty": row.get("counterparty"),
@@ -438,6 +439,7 @@ def _deserialize_asset_trade_entry(row: Optional[Dict[str, Any]]) -> Optional[Di
         "fx_rate_to_base": row.get("fx_rate_to_base"),
         "is_initial_balance": bool(row.get("is_initial_balance", False)),
         "source": row.get("source"),
+        "import_key": row.get("import_key"),
         "note": row.get("note"),
         "created_at": _datetime_to_iso(row.get("created_at")),
         "updated_at": _datetime_to_iso(row.get("updated_at")),
@@ -948,6 +950,7 @@ def _normalize_asset_cash_ledger_payload(
         "fx_rate_to_base": fx_rate_to_base or 1.0,
         "is_initial_balance": _coerce_bool(source.get("is_initial_balance"), False),
         "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "import_key": _optional_string(source.get("import_key"), max_length=64),
         "linked_trade_id": _optional_int(source.get("linked_trade_id")),
         "linked_trade_role": _optional_string(source.get("linked_trade_role"), max_length=32),
         "counterparty": _optional_string(source.get("counterparty"), max_length=128),
@@ -1000,6 +1003,7 @@ def _normalize_asset_trade_payload(
         "fx_rate_to_base": fx_rate_to_base or 1.0,
         "is_initial_balance": _coerce_bool(source.get("is_initial_balance"), False),
         "source": _optional_string(source.get("source"), max_length=64) or "manual",
+        "import_key": _optional_string(source.get("import_key"), max_length=64),
         "note": _optional_string(source.get("note"), max_length=4000),
     }
 

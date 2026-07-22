@@ -17,6 +17,7 @@ from models.schema import (
 
 MIGRATION_TABLE = "schema_migrations"
 BASELINE_SCHEMA_CHECKSUM = "f935b31f6cc21b27ba44c87c6cf95b1c135b428cfa3cd687fe59b2fcf7fa447b"
+ASSET_IMPORT_DEDUPE_CHECKSUM = "9790c8b4e2025cfa99df6426c8988c92010b60e47bcf453351e8caa3b7bd08ab"
 CREATE_MIGRATION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS `schema_migrations` (
     `version` VARCHAR(64) NOT NULL,
@@ -62,6 +63,48 @@ def _baseline_planner(state: SchemaState) -> List[str]:
     return build_schema_plan(state.tables, state.columns, state.indexes)
 
 
+ASSET_IMPORT_DEDUPE_SQL = {
+    "asset_trade_ledger": {
+        "column": """
+            ALTER TABLE `asset_trade_ledger`
+            ADD COLUMN `import_key` CHAR(64) NULL AFTER `source`
+        """.strip(),
+        "index": """
+            ALTER TABLE `asset_trade_ledger`
+            ADD UNIQUE INDEX `uq_asset_trade_ledger_owner_import_key` (`owner_id`, `import_key`)
+        """.strip(),
+    },
+    "asset_cash_ledger": {
+        "column": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD COLUMN `import_key` CHAR(64) NULL AFTER `source`
+        """.strip(),
+        "index": """
+            ALTER TABLE `asset_cash_ledger`
+            ADD UNIQUE INDEX `uq_asset_cash_ledger_owner_import_key` (`owner_id`, `import_key`)
+        """.strip(),
+    },
+}
+
+
+def _asset_import_dedupe_checksum() -> str:
+    encoded = json.dumps(ASSET_IMPORT_DEDUPE_SQL, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _asset_import_dedupe_planner(state: SchemaState) -> List[str]:
+    statements: list[str] = []
+    for table_name, definitions in ASSET_IMPORT_DEDUPE_SQL.items():
+        # On a new database the baseline table is created earlier in the same
+        # apply operation, so absent tables still need their follow-up ALTERs.
+        if table_name not in state.tables or "import_key" not in state.columns.get(table_name, set()):
+            statements.append(definitions["column"])
+        index_name = f"uq_{table_name}_owner_import_key"
+        if table_name not in state.tables or index_name not in state.indexes.get(table_name, set()):
+            statements.append(definitions["index"])
+    return statements
+
+
 # When desired schema definitions change, add a new MigrationSpec instead of
 # editing the baseline version or its frozen checksum. The helper above can be
 # used to calculate the checksum for a newly introduced schema snapshot.
@@ -71,6 +114,12 @@ MIGRATIONS: tuple[MigrationSpec, ...] = (
         description="Baseline QuantVision schema",
         checksum=BASELINE_SCHEMA_CHECKSUM,
         planner=_baseline_planner,
+    ),
+    MigrationSpec(
+        version="20260722_0002",
+        description="Add durable asset CSV import deduplication keys",
+        checksum=ASSET_IMPORT_DEDUPE_CHECKSUM,
+        planner=_asset_import_dedupe_planner,
     ),
 )
 

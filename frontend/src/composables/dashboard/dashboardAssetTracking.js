@@ -576,6 +576,7 @@ export function createDashboardAssetTracking({
 
   function updateAssetTradeImportField(key, value) {
     if (!Object.prototype.hasOwnProperty.call(assetTradeImportForm, key)) return;
+    assetTradeImportResult.value = null;
     assetTradeImportForm[key] = key === "default_account_id"
       ? (value === "" ? "" : Number(value))
       : key === "dry_run"
@@ -585,6 +586,7 @@ export function createDashboardAssetTracking({
 
   function updateAssetCashImportField(key, value) {
     if (!Object.prototype.hasOwnProperty.call(assetCashImportForm, key)) return;
+    assetCashImportResult.value = null;
     assetCashImportForm[key] = key === "default_account_id"
       ? (value === "" ? "" : Number(value))
       : key === "dry_run"
@@ -999,8 +1001,10 @@ export function createDashboardAssetTracking({
       pushNotification({
         icon: dryRun ? "📄" : "📥",
         title: dryRun ? "交易 CSV 預覽完成" : "交易 CSV 已匯入",
-        msg: `成功 ${result?.summary?.created_count ?? result?.summary?.row_count ?? 0} 筆`,
-        type: "success",
+        msg: dryRun
+          ? `可匯入 ${result?.summary?.importable_count || 0}、重複 ${result?.summary?.duplicate_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`
+          : `新增 ${result?.summary?.created_count || 0}、略過 ${result?.summary?.skipped_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`,
+        type: result?.summary?.error_count ? "error" : "success",
       });
     } catch (error) {
       console.error(error);
@@ -1022,8 +1026,10 @@ export function createDashboardAssetTracking({
       pushNotification({
         icon: dryRun ? "📄" : "📥",
         title: dryRun ? "現金 CSV 預覽完成" : "現金 CSV 已匯入",
-        msg: `成功 ${result?.summary?.created_count ?? result?.summary?.row_count ?? 0} 筆`,
-        type: "success",
+        msg: dryRun
+          ? `可匯入 ${result?.summary?.importable_count || 0}、重複 ${result?.summary?.duplicate_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`
+          : `新增 ${result?.summary?.created_count || 0}、略過 ${result?.summary?.skipped_count || 0}、錯誤 ${result?.summary?.error_count || 0} 筆`,
+        type: result?.summary?.error_count ? "error" : "success",
       });
     } catch (error) {
       console.error(error);
