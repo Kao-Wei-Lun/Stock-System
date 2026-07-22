@@ -299,6 +299,55 @@ def test_run_scheduled_reconnect_cleans_timer_and_reconnects():
     assert timer.cancelled is False
 
 
+def test_failed_reconnect_is_rescheduled_with_exponential_backoff(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+    timers = []
+
+    class FakeTimer:
+        def __init__(self, interval, callback):
+            self.interval = interval
+            self.callback = callback
+            self.alive = False
+            self.daemon = False
+            timers.append(self)
+
+        def start(self):
+            self.alive = True
+
+        def is_alive(self):
+            return self.alive
+
+        def cancel(self):
+            self.alive = False
+
+    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
+    manager._reconnect_ws_target = lambda _market_type: False
+
+    manager._schedule_reconnect_ws_target("stock")
+    assert timers[0].interval == 1.0
+    timers[0].alive = False
+    manager._run_scheduled_reconnect("stock")
+
+    assert manager._ws_reconnect_attempts["stock"] == 1
+    assert len(timers) == 2
+    assert timers[1].interval == 2.0
+    assert manager.get_reconnect_status()["stock"]["pending"] is True
+
+
+def test_ws_connect_resets_reconnect_state():
+    manager = FubonSDKManager()
+    manager._ws_reconnect_attempts["futopt"] = 4
+    manager._ws_reconnect_last_error["futopt"] = "temporary failure"
+
+    manager._handle_ws_connect("futopt")
+
+    status = manager.get_reconnect_status()["futopt"]
+    assert status["attempts"] == 0
+    assert status["last_error"] is None
+    assert status["last_success_at"] is not None
+
+
 class FakeSnapshotApi:
     def __init__(self):
         self.calls = []

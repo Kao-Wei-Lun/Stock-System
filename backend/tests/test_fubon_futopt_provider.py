@@ -1,7 +1,20 @@
+from datetime import date
+
 import pytest
 
 import fubon_futopt_provider as futopt_module
 from fubon_futopt_provider import FubonFutoptProvider
+
+
+class FixedContractDate(date):
+    @classmethod
+    def today(cls):
+        return cls(2026, 5, 4)
+
+
+@pytest.fixture(autouse=True)
+def freeze_contract_resolution_date(monkeypatch):
+    monkeypatch.setattr(futopt_module, "date", FixedContractDate)
 
 
 class StubFutoptManager:

@@ -1,11 +1,15 @@
 import { ref } from "vue";
 
 const RECONNECT_DELAY_MS = 5000;
+const HEARTBEAT_INTERVAL_MS = 15000;
+const HEARTBEAT_TIMEOUT_MS = 35000;
 const sharedConnectionState = ref(false);
 
 let sharedSocket = null;
 let sharedSocketUrl = "";
 let reconnectTimer = null;
+let heartbeatTimer = null;
+let lastServerMessageAt = 0;
 let activeConsumers = 0;
 let intentionalClose = false;
 
@@ -16,6 +20,25 @@ function clearReconnectTimer() {
   if (!reconnectTimer) return;
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
+}
+
+function clearHeartbeatTimer() {
+  if (!heartbeatTimer) return;
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
+function startHeartbeat() {
+  clearHeartbeatTimer();
+  lastServerMessageAt = Date.now();
+  heartbeatTimer = setInterval(() => {
+    if (!sharedSocket || sharedSocket.readyState !== 1) return;
+    if (Date.now() - lastServerMessageAt > HEARTBEAT_TIMEOUT_MS) {
+      sharedSocket.close();
+      return;
+    }
+    sendPayload({ action: "ping" });
+  }, HEARTBEAT_INTERVAL_MS);
 }
 
 function sendPayload(payload) {
@@ -38,6 +61,7 @@ function scheduleReconnect() {
 function handleSocketOpen() {
   clearReconnectTimer();
   sharedConnectionState.value = true;
+  startHeartbeat();
   subscribedTickers.forEach((ticker) => {
     sendPayload({ action: "subscribe", ticker });
   });
@@ -45,13 +69,17 @@ function handleSocketOpen() {
 
 function handleSocketMessage(event) {
   try {
-    broadcastMessage(JSON.parse(event.data));
+    lastServerMessageAt = Date.now();
+    const message = JSON.parse(event.data);
+    if (message?.type === "pong") return;
+    broadcastMessage(message);
   } catch (error) {
     console.error(error);
   }
 }
 
 function handleSocketClose() {
+  clearHeartbeatTimer();
   const shouldReconnect = !intentionalClose && activeConsumers > 0;
   intentionalClose = false;
   sharedSocket = null;
@@ -74,6 +102,7 @@ function connectSharedSocket() {
 
 function releaseSharedSocket() {
   clearReconnectTimer();
+  clearHeartbeatTimer();
   subscribedTickers.clear();
   if (sharedSocket && sharedSocket.readyState < 2) {
     intentionalClose = true;
@@ -87,6 +116,7 @@ function releaseSharedSocket() {
 function shutdownSharedRealtime({ clearListeners = false } = {}) {
   activeConsumers = 0;
   clearReconnectTimer();
+  clearHeartbeatTimer();
   subscribedTickers.clear();
   if (clearListeners) messageListeners.clear();
   if (sharedSocket && sharedSocket.readyState < 2) {

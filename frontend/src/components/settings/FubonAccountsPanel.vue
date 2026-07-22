@@ -72,6 +72,9 @@
 
         <div class="account-actions">
           <button type="button" :disabled="isBusy(account.id)" @click="testAccount(account)">測試連線</button>
+          <button type="button" :disabled="isBusy(account.id) || !account.is_enabled" @click="reconnect(account)">
+            重新連線
+          </button>
           <button type="button" :disabled="isBusy(account.id)" @click="openEditModal(account)">編輯</button>
           <button type="button" :disabled="account.is_active || isBusy(account.id)" @click="activate(account)">
             設為使用中
@@ -107,6 +110,7 @@ const {
   deleteAccount,
   activateAccount,
   testConnection,
+  reconnectAccount,
   startStatusPolling,
   stopStatusPolling,
 } = useFubonAccounts();
@@ -184,6 +188,19 @@ async function testAccount(account) {
     setMessage(result.success ? "success" : "error", result.message || "連線測試完成");
   } catch (err) {
     setMessage("error", err?.message || "連線測試失敗");
+  } finally {
+    setBusy(account.id, false);
+  }
+}
+
+async function reconnect(account) {
+  setBusy(account.id, true);
+  setMessage("success", "");
+  try {
+    const result = await reconnectAccount(account.id);
+    setMessage(result.success ? "success" : "error", result.message || "富邦重新連線已啟動");
+  } catch (err) {
+    setMessage("error", err?.message || "富邦重新連線失敗");
   } finally {
     setBusy(account.id, false);
   }

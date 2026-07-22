@@ -34,6 +34,10 @@ class FubonAccountUpdate(BaseModel):
     is_enabled: Optional[bool] = None
 
 
+class FubonReconnectRequest(BaseModel):
+    market_type: Optional[str] = Field(default=None, pattern="^(stock|futopt)$")
+
+
 @router.get("/fubon-accounts")
 async def list_fubon_accounts():
     repo = FubonAccountRepository(db)
@@ -136,3 +140,26 @@ async def test_fubon_account(account_id: int):
         None if result.get("success") else result.get("message"),
     )
     return result
+
+
+@router.post("/fubon-accounts/{account_id}/reconnect")
+async def reconnect_fubon_account(account_id: int, body: FubonReconnectRequest | None = None):
+    from providers import fubon_realtime_pool
+
+    repo = FubonAccountRepository(db)
+    account = await repo.get_account_with_secrets(account_id)
+    if not account:
+        raise HTTPException(404, "富邦帳號不存在")
+    if not account.get("is_enabled"):
+        raise HTTPException(400, "富邦帳號已停用")
+
+    result = await fubon_realtime_pool.reconnect_account(
+        account_id,
+        market_type=body.market_type if body else None,
+    )
+    if not result.get("success"):
+        raise HTTPException(502, result.get("message") or "富邦重新連線失敗")
+    return {
+        **result,
+        "message": "富邦行情重新連線已啟動" if body and body.market_type else "富邦帳號已重新登入並恢復訂閱",
+    }

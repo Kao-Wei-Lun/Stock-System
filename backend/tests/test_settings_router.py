@@ -164,3 +164,47 @@ def test_get_fubon_accounts_status_merges_runtime_state(client, monkeypatch):
     assert payload["accounts"][0]["realtime_assigned_count"] == 2
     assert payload["accounts"][0]["realtime_connected"] is True
     assert payload["realtime_diagnostics"]["TMFE6"]["last_channel"] == "books"
+
+
+def test_reconnect_fubon_account_recovers_runtime_without_app_restart(client, monkeypatch):
+    repo = FakeRepo()
+    repo.get_account_with_secrets.return_value = {
+        **MOCK_ACCOUNT,
+        "password": "secret",
+        "api_key": "A" * 64,
+        "is_enabled": True,
+    }
+    patch_repo(monkeypatch, repo)
+    reconnect_mock = AsyncMock(
+        return_value={"success": True, "account_id": 1, "market_type": "all"}
+    )
+    monkeypatch.setattr(providers.fubon_realtime_pool, "reconnect_account", reconnect_mock)
+
+    response = client.post("/api/settings/fubon-accounts/1/reconnect")
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    reconnect_mock.assert_awaited_once_with(1, market_type=None)
+
+
+def test_reconnect_fubon_account_can_target_futopt_websocket(client, monkeypatch):
+    repo = FakeRepo()
+    repo.get_account_with_secrets.return_value = {
+        **MOCK_ACCOUNT,
+        "password": "secret",
+        "api_key": "A" * 64,
+        "is_enabled": True,
+    }
+    patch_repo(monkeypatch, repo)
+    reconnect_mock = AsyncMock(
+        return_value={"success": True, "account_id": 1, "market_type": "futopt"}
+    )
+    monkeypatch.setattr(providers.fubon_realtime_pool, "reconnect_account", reconnect_mock)
+
+    response = client.post(
+        "/api/settings/fubon-accounts/1/reconnect",
+        json={"market_type": "futopt"},
+    )
+
+    assert response.status_code == 200
+    reconnect_mock.assert_awaited_once_with(1, market_type="futopt")

@@ -139,4 +139,38 @@ describe("dashboardRealtime", () => {
 
     realtime.disconnect();
   });
+
+  it("sends heartbeat pings and keeps pong messages internal", () => {
+    const messages = [];
+    const realtime = createDashboardRealtime({
+      wsUrl: "ws://localhost:8001/ws",
+      onMessage: (message) => messages.push(message),
+    });
+    realtime.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+
+    vi.advanceTimersByTime(15000);
+    expect(socket.sent).toContain(JSON.stringify({ action: "ping" }));
+
+    socket.receive({ type: "pong" });
+    expect(messages).toEqual([]);
+    expect(realtime.wsConnected.value).toBe(true);
+    realtime.disconnect();
+  });
+
+  it("closes a silent websocket and reconnects after the heartbeat timeout", () => {
+    const realtime = createDashboardRealtime({ wsUrl: "ws://localhost:8001/ws" });
+    realtime.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+
+    vi.advanceTimersByTime(45000);
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(realtime.wsConnected.value).toBe(false);
+
+    vi.advanceTimersByTime(5000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    realtime.disconnect();
+  });
 });

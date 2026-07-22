@@ -69,6 +69,9 @@ def test_paper_replay_auto_syncs_missing_futopt_minute_bars(client, monkeypatch)
             "cost_model": {},
         }
 
+    async def fake_ensure_account_margin_current(_db, _provider, account, **_kwargs):
+        return account
+
     async def fake_save_records(*args, **kwargs):
         return None
 
@@ -81,6 +84,11 @@ def test_paper_replay_auto_syncs_missing_futopt_minute_bars(client, monkeypatch)
     monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_equity_snapshots", fake_save_records)
     monkeypatch.setattr(main.paper_trading.db, "save_paper_trading_risk_events", fake_save_records)
     monkeypatch.setattr(main.paper_trading.fubon_futopt_provider, "fetch_intraday_ohlc", fake_fetch_intraday_ohlc)
+    monkeypatch.setattr(
+        main.paper_trading,
+        "ensure_account_margin_current",
+        fake_ensure_account_margin_current,
+    )
 
     response = client.post(
         "/api/paper-trading/replay/run",

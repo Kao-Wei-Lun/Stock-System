@@ -95,6 +95,15 @@ export function useFubonAccounts() {
     return data;
   }
 
+  async function reconnectAccount(id, marketType = null) {
+    const options = marketType
+      ? jsonRequest("POST", { market_type: marketType })
+      : { method: "POST" };
+    const data = await request(`/api/settings/fubon-accounts/${id}/reconnect`, options);
+    await refreshStatuses();
+    return data;
+  }
+
   function startStatusPolling() {
     stopStatusPolling();
     statusPolling.value = window.setInterval(() => {
@@ -121,6 +130,7 @@ export function useFubonAccounts() {
     deleteAccount,
     activateAccount,
     testConnection,
+    reconnectAccount,
     startStatusPolling,
     stopStatusPolling,
   };

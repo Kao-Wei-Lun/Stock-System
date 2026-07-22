@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 
@@ -101,6 +102,7 @@ def _build_futopt_estimate_margin_order(
 
 class FubonSDKManager:
     _RECONNECT_DELAY_SECONDS = 1.0
+    _RECONNECT_MAX_DELAY_SECONDS = 30.0
 
     def __init__(self):
         self._sdk = None
@@ -121,6 +123,9 @@ class FubonSDKManager:
         self._pending_subscription_acks: Dict[str, list[asyncio.Future[str]]] = {}
         self._ws_reconnect_timers: Dict[str, threading.Timer] = {}
         self._ws_reconnect_lock = threading.Lock()
+        self._ws_reconnect_attempts: Dict[str, int] = {"stock": 0, "futopt": 0}
+        self._ws_reconnect_last_error: Dict[str, str | None] = {"stock": None, "futopt": None}
+        self._ws_reconnect_last_success_at: Dict[str, str | None] = {"stock": None, "futopt": None}
         self.connected = False
 
     @property
@@ -788,6 +793,9 @@ class FubonSDKManager:
         self._subscription_id_to_key = {}
         self._pending_subscription_acks = {}
         self._cancel_all_reconnect_timers()
+        self._ws_reconnect_attempts = {"stock": 0, "futopt": 0}
+        self._ws_reconnect_last_error = {"stock": None, "futopt": None}
+        self._ws_reconnect_last_success_at = {"stock": None, "futopt": None}
         self._attached_targets = set()
         self.connected = False
 
@@ -846,6 +854,9 @@ class FubonSDKManager:
         if self._shutting_down:
             return
         self._cancel_reconnect_timer(market_type)
+        self._ws_reconnect_attempts[market_type] = 0
+        self._ws_reconnect_last_error[market_type] = None
+        self._ws_reconnect_last_success_at[market_type] = datetime.now(timezone.utc).isoformat()
         self._ws_started_targets.add(market_type)
         log.info("Fubon %s websocket connected", market_type)
 
@@ -855,6 +866,7 @@ class FubonSDKManager:
             log.info("Fubon %s websocket closed during shutdown", market_type)
             return
         log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
+        self._ws_reconnect_last_error[market_type] = str(args or "disconnected")
         self._schedule_reconnect_ws_target(market_type)
 
     def _handle_ws_error(self, market_type: str, *args) -> None:
@@ -865,15 +877,18 @@ class FubonSDKManager:
             self._invalidate_marketdata_session(
                 f"Fubon {market_type} websocket authentication failed: {args or 'unknown'}"
             )
-
-    def _reconnect_ws_target(self, market_type: str) -> None:
-        if not self.connected:
             return
+        self._ws_reconnect_last_error[market_type] = str(args or "websocket error")
+        self._schedule_reconnect_ws_target(market_type)
+
+    def _reconnect_ws_target(self, market_type: str) -> bool:
+        if not self.connected:
+            return False
         target = self._ws_stock if market_type == "stock" else self._ws_futopt
         self._best_effort_shutdown(target)
         started = self.start_ws_stock() if market_type == "stock" else self.start_ws_futopt()
         if not started:
-            return
+            return False
         self._restore_ws_subscriptions(
             {
                 key: payload
@@ -881,6 +896,36 @@ class FubonSDKManager:
                 if key.startswith(f"{market_type}:")
             }
         )
+        return True
+
+    def force_reconnect_ws(self, market_type: str) -> bool:
+        normalized = str(market_type or "").strip().lower()
+        if normalized not in {"stock", "futopt"}:
+            raise ValueError("market_type must be stock or futopt")
+        self._cancel_reconnect_timer(normalized)
+        try:
+            return self._reconnect_ws_target(normalized)
+        except Exception as exc:
+            self._ws_reconnect_last_error[normalized] = str(exc)
+            log.warning("Fubon %s manual websocket reconnect failed: %s", normalized, exc)
+            self._schedule_reconnect_ws_target(normalized)
+            return False
+
+    def get_reconnect_status(self) -> dict[str, dict[str, Any]]:
+        with self._ws_reconnect_lock:
+            pending = {
+                market_type: bool(timer and timer.is_alive())
+                for market_type, timer in self._ws_reconnect_timers.items()
+            }
+        return {
+            market_type: {
+                "attempts": int(self._ws_reconnect_attempts.get(market_type, 0)),
+                "pending": bool(pending.get(market_type)),
+                "last_error": self._ws_reconnect_last_error.get(market_type),
+                "last_success_at": self._ws_reconnect_last_success_at.get(market_type),
+            }
+            for market_type in ("stock", "futopt")
+        }
 
     def _schedule_reconnect_ws_target(self, market_type: str) -> None:
         if not self.connected or self._shutting_down:
@@ -891,8 +936,13 @@ class FubonSDKManager:
             if existing and existing.is_alive():
                 return
 
+            attempts = max(0, int(self._ws_reconnect_attempts.get(market_type, 0)))
+            delay_seconds = min(
+                self._RECONNECT_MAX_DELAY_SECONDS,
+                self._RECONNECT_DELAY_SECONDS * (2 ** min(attempts, 8)),
+            )
             timer = threading.Timer(
-                self._RECONNECT_DELAY_SECONDS,
+                delay_seconds,
                 lambda mt=market_type: self._run_scheduled_reconnect(mt),
             )
             timer.daemon = True
@@ -903,10 +953,15 @@ class FubonSDKManager:
         self._cancel_reconnect_timer(market_type, cancel_active=False)
         if self._shutting_down or not self.connected:
             return
+        self._ws_reconnect_attempts[market_type] = self._ws_reconnect_attempts.get(market_type, 0) + 1
         try:
-            self._reconnect_ws_target(market_type)
+            started = self._reconnect_ws_target(market_type)
+            if started is False:
+                self._schedule_reconnect_ws_target(market_type)
         except Exception as exc:
+            self._ws_reconnect_last_error[market_type] = str(exc)
             log.warning("Fubon %s websocket reconnect failed: %s", market_type, exc)
+            self._schedule_reconnect_ws_target(market_type)
 
     def _cancel_reconnect_timer(self, market_type: str, *, cancel_active: bool = True) -> None:
         with self._ws_reconnect_lock:

@@ -45,12 +45,16 @@ class FubonRealtimeSubscriptionPool:
         store_quote: Optional[Callable[[dict], Awaitable[Any]]] = None,
         notification_ttl_seconds: float = 600.0,
         subscription_timeout_seconds: float = 2.5,
+        full_quote_stale_seconds: float = 20.0,
+        utcnow: Optional[Callable[[], datetime]] = None,
     ):
         self._primary_manager = primary_manager
         self._resolve_futopt_contract = resolve_futopt_contract
         self._store_quote = store_quote
         self._notification_ttl_seconds = notification_ttl_seconds
         self._subscription_timeout_seconds = subscription_timeout_seconds
+        self._full_quote_stale_seconds = max(1.0, float(full_quote_stale_seconds))
+        self._utcnow = utcnow or (lambda: datetime.now(timezone.utc))
         self._db = None
         self._managers: Dict[int, FubonSDKManager] = {}
         self._manager_bridge_handlers: Dict[int, Callable[[dict], None]] = {}
@@ -62,6 +66,7 @@ class FubonRealtimeSubscriptionPool:
         self._pending_tasks: dict[str, asyncio.Task] = {}
         self._last_shortage_notifications: dict[str, float] = {}
         self._ws_diagnostics: dict[str, dict[str, Any]] = {}
+        self._recovery_lock = asyncio.Lock()
 
     @property
     def connected(self) -> bool:
@@ -240,7 +245,7 @@ class FubonRealtimeSubscriptionPool:
         if not normalized or not normalized_channel:
             return
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = self._utcnow().isoformat()
         keys = {normalized}
         for item in target_tickers:
             target = normalize_ticker(item)
@@ -276,23 +281,56 @@ class FubonRealtimeSubscriptionPool:
             diagnostic["last_channel"] = normalized_channel
 
     def get_ws_diagnostics(self) -> dict[str, dict[str, Any]]:
-        return {
-            ticker: {
+        now = self._utcnow()
+        result: dict[str, dict[str, Any]] = {}
+        for ticker, payload in sorted(self._ws_diagnostics.items()):
+            channels: dict[str, dict[str, Any]] = {}
+            for channel, channel_payload in sorted(payload.get("channels", {}).items()):
+                age_seconds = self._age_seconds(channel_payload.get("last_seen_at"), now)
+                channels[channel] = {
+                    **channel_payload,
+                    "age_seconds": age_seconds,
+                    "is_fresh": age_seconds is not None and age_seconds <= self._full_quote_stale_seconds,
+                }
+            last_seen_age_seconds = self._age_seconds(payload.get("last_seen_at"), now)
+            result[ticker] = {
                 **payload,
-                "channels": {
-                    channel: dict(channel_payload)
-                    for channel, channel_payload in sorted(payload.get("channels", {}).items())
-                },
+                "age_seconds": last_seen_age_seconds,
+                "is_fresh": last_seen_age_seconds is not None
+                and last_seen_age_seconds <= self._full_quote_stale_seconds,
+                "channels": channels,
             }
-            for ticker, payload in sorted(self._ws_diagnostics.items())
-        }
+        return result
+
+    @staticmethod
+    def _age_seconds(value: Any, now: datetime) -> float | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, (now - parsed.astimezone(timezone.utc)).total_seconds())
+
+    def _has_fresh_quote_channel(self, ticker: str) -> bool:
+        diagnostic = self._ws_diagnostics.get(normalize_ticker(ticker)) or {}
+        quote_state = (diagnostic.get("channels") or {}).get("quote") or {}
+        age_seconds = self._age_seconds(quote_state.get("last_seen_at"), self._utcnow())
+        return age_seconds is not None and age_seconds <= self._full_quote_stale_seconds
 
     def supports_full_ws_quotes_for_ticker(self, ticker: str) -> bool:
         assignment = self._assignments.get(normalize_ticker(ticker))
         if not assignment:
             return False
         manager = self._managers.get(assignment.account_id)
-        return bool(manager and manager.connected and manager.ws_mode == "Normal")
+        return bool(
+            manager
+            and manager.connected
+            and manager.ws_mode == "Normal"
+            and self._has_fresh_quote_channel(ticker)
+        )
 
     def get_account_runtime_statuses(self) -> dict[int, dict[str, Any]]:
         assigned_by_account: dict[int, list[RealtimeAssignment]] = defaultdict(list)
@@ -316,15 +354,74 @@ class FubonRealtimeSubscriptionPool:
                 ],
                 "realtime_ws_mode": manager.ws_mode,
                 "realtime_connected": bool(manager.connected),
+                "realtime_reconnect": manager.get_reconnect_status()
+                if hasattr(manager, "get_reconnect_status")
+                else {},
             }
         return result
 
+    async def reconnect_account(self, account_id: int, market_type: str | None = None) -> dict[str, Any]:
+        """Recover one configured account without restarting the FastAPI process."""
+        from repositories.fubon_accounts import FubonAccountRepository
+
+        normalized_market = str(market_type or "").strip().lower() or None
+        if normalized_market not in {None, "stock", "futopt"}:
+            raise ValueError("market_type must be stock or futopt")
+        if self._db is None:
+            return {"success": False, "account_id": account_id, "message": "database is not configured"}
+
+        async with self._recovery_lock:
+            manager = self._managers.get(int(account_id))
+            if normalized_market and manager and manager.connected:
+                success = bool(manager.force_reconnect_ws(normalized_market))
+                return {
+                    "success": success,
+                    "account_id": int(account_id),
+                    "market_type": normalized_market,
+                    "message": "websocket reconnect started" if success else "websocket reconnect failed",
+                }
+
+            repo = FubonAccountRepository(self._db)
+            account = await repo.get_account_with_secrets(int(account_id))
+            if not account:
+                return {"success": False, "account_id": int(account_id), "message": "account not found"}
+            if not account.get("is_enabled"):
+                return {"success": False, "account_id": int(account_id), "message": "account is disabled"}
+
+            if manager is None:
+                manager = self._primary_manager if account.get("is_active") else FubonSDKManager()
+                self._managers[int(account_id)] = manager
+
+            bridge = self._manager_bridge_handlers.pop(int(account_id), None)
+            if bridge:
+                manager.unregister_message_handler(bridge)
+            manager.shutdown()
+
+            success = await manager._init_with_account(account, repo)
+            self._managers[int(account_id)] = manager
+            self._attach_bridge_handler(int(account_id), manager)
+            if success:
+                manager.start_ws_stock()
+                manager.start_ws_futopt()
+            await self._rebalance_assignments()
+            return {
+                "success": bool(success),
+                "account_id": int(account_id),
+                "market_type": "all",
+                "message": "account reconnected" if success else "account reconnect failed",
+            }
+
     async def refresh_session_assignments(self) -> None:
         """Re-subscribe futures/options streams when TAIFEX switches day/night sessions."""
-        if self._db is not None and self._managers and not any(manager.connected for manager in self._managers.values()):
-            log.warning("All Fubon websocket managers are disconnected; reloading enabled accounts")
-            await self.reload_from_db(self._db)
-            return
+        disconnected_ids = [
+            account_id for account_id, manager in list(self._managers.items()) if not manager.connected
+        ]
+        for account_id in disconnected_ids:
+            log.warning("Fubon account %s is disconnected; attempting isolated recovery", account_id)
+            try:
+                await self.reconnect_account(account_id)
+            except Exception as exc:
+                log.warning("Fubon account %s recovery failed: %s", account_id, exc)
 
         desired_after_hours = is_futopt_after_hours()
         stale_tickers = [

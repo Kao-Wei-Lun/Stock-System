@@ -1,4 +1,6 @@
 import pytest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import fubon_realtime_pool as realtime_pool_module
 from fubon_realtime_pool import FubonRealtimeSubscriptionPool
@@ -177,6 +179,51 @@ def test_realtime_pool_records_ws_message_diagnostics():
     assert diagnostics["TMFE6"]["channels"]["books"]["market_type"] == "futopt"
     assert diagnostics["TMFE6"]["channels"]["books"]["account_id"] == 1
     assert diagnostics["TMF"]["channels"]["books"]["count"] == 1
+
+
+@pytest.mark.anyio
+async def test_full_ws_quote_support_requires_recent_quote_message():
+    now = datetime(2026, 7, 22, 1, 0, tzinfo=timezone.utc)
+    clock = {"now": now}
+    primary = FakeManager(1, ws_mode="Normal")
+    pool = FubonRealtimeSubscriptionPool(
+        primary,
+        full_quote_stale_seconds=20,
+        utcnow=lambda: clock["now"],
+    )
+    pool._managers = {1: primary}
+    await pool.set_source_tickers("ws", ["2330.TW"])
+
+    assert pool.supports_full_ws_quotes_for_ticker("2330.TW") is False
+
+    pool.record_ws_message(
+        "2330.TW",
+        "quote",
+        market_type="stock",
+        account_id=1,
+        target_tickers=("2330.TW",),
+    )
+    assert pool.supports_full_ws_quotes_for_ticker("2330.TW") is True
+
+    clock["now"] = now + timedelta(seconds=21)
+    assert pool.supports_full_ws_quotes_for_ticker("2330.TW") is False
+    diagnostics = pool.get_ws_diagnostics()
+    assert diagnostics["2330.TW"]["channels"]["quote"]["age_seconds"] == 21
+    assert diagnostics["2330.TW"]["channels"]["quote"]["is_fresh"] is False
+
+
+@pytest.mark.anyio
+async def test_session_refresh_recovers_each_disconnected_account_without_full_reload():
+    primary = FakeManager(1)
+    secondary = FakeManager(2)
+    secondary.connected = False
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._managers = {1: primary, 2: secondary}
+    pool.reconnect_account = AsyncMock(return_value={"success": True})
+
+    await pool.refresh_session_assignments()
+
+    pool.reconnect_account.assert_awaited_once_with(2)
 
 
 @pytest.mark.anyio

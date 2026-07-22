@@ -122,7 +122,7 @@ if exist "%PROJECT_ROOT%\docs\fubon_neo-2.2.8-cp37-abi3-win_amd64.whl" (
 
 echo [INFO] Starting backend API on port %BACKEND_PORT%...
 cd /d "%PROJECT_ROOT%\backend"
-"%VENV_PYTHON%" -X utf8 -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload --no-use-colors
+"%VENV_PYTHON%" -X utf8 -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --no-use-colors
 exit /b %errorlevel%
 
 :resolve_python

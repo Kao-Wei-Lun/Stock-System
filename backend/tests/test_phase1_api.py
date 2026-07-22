@@ -264,6 +264,7 @@ def phase1_store(monkeypatch):
     monkeypatch.setattr(main.db, "get_market_quote", get_market_quote)
     monkeypatch.setattr(main.db, "get_ohlcv", get_ohlcv)
     monkeypatch.setattr(main.fetcher, "fetch_realtime_quote", fetch_realtime_quote)
+    monkeypatch.setattr(main.background_tasks.quote_provider, "fetch_quote", fetch_realtime_quote)
     monkeypatch.setattr(main.fetcher, "fetch_and_store", fetch_and_store)
 
     return store

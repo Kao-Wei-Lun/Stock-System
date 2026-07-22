@@ -1026,7 +1026,7 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert fx_rate_response.status_code == 200
     fx_rate_payload = fx_rate_response.json()
 
-    performance_response = client.get("/api/assets/performance?range=90d&refresh=false")
+    performance_response = client.get("/api/assets/performance?range=all&refresh=false")
     assert performance_response.status_code == 200
     performance_payload = performance_response.json()
     assert performance_payload["summary"]["true_performance_base"] == -15000
@@ -1044,14 +1044,14 @@ def test_asset_routes_support_advanced_tracking_workflows(client, asset_store):
     assert portfolio_payload["summary"]["total_asset_value_base"] == 85000
     assert portfolio_payload["holdings"][0]["manual_price_override_id"] == override_payload["id"]
 
-    alerts_response = client.get("/api/assets/alerts/current?refresh=false&performance_range=90d")
+    alerts_response = client.get("/api/assets/alerts/current?refresh=false&performance_range=all")
     assert alerts_response.status_code == 200
     alert_codes = {item["code"] for item in alerts_response.json()["items"]}
     assert {"concentration", "holding_drawdown", "portfolio_drawdown"} <= alert_codes
 
     recompute_response = client.post(
         "/api/assets/recompute",
-        json={"refresh": False, "performance_range": "90d"},
+        json={"refresh": False, "performance_range": "all"},
     )
     assert recompute_response.status_code == 200
     assert recompute_response.json()["performance_summary"]["true_performance_base"] == -15000

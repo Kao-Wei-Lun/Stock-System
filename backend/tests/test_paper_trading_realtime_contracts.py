@@ -125,6 +125,10 @@ async def fake_resolve_contract(symbol, *, session="REGULAR"):
     }
 
 
+async def fake_ensure_account_margin_current(_db, _provider, account, **_kwargs):
+    return account
+
+
 def _candle(symbol: str) -> dict:
     return {
         "event": "data",
@@ -151,6 +155,11 @@ def test_realtime_bot_start_resolves_nearest_fubon_contracts(client, monkeypatch
         main.paper_trading.fubon_futopt_provider,
         "resolve_contract",
         fake_resolve_contract,
+    )
+    monkeypatch.setattr(
+        main.paper_trading,
+        "ensure_account_margin_current",
+        fake_ensure_account_margin_current,
     )
 
     try:
@@ -191,6 +200,11 @@ def test_start_all_realtime_bots_starts_each_bot(client, monkeypatch):
         main.paper_trading.fubon_futopt_provider,
         "resolve_contract",
         fake_resolve_contract,
+    )
+    monkeypatch.setattr(
+        main.paper_trading,
+        "ensure_account_margin_current",
+        fake_ensure_account_margin_current,
     )
 
     try:
