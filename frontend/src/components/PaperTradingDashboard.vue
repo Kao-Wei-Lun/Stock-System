@@ -678,6 +678,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
+import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 const API = "/api/paper-trading";
 const DEFAULT_INITIAL_MARGIN = 28900;
@@ -709,7 +710,6 @@ const refreshingAccountMargins = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
-let _pollTimer = null;
 let _riskSizingTimer = null;
 
 const v2VariantOptions = [
@@ -1234,13 +1234,14 @@ async function pollRunningBots() {
   }
 }
 
+const botPoller = createVisibilityPoller(pollRunningBots, { intervalMs: 3000 });
+
 function startPolling() {
-  stopPolling();
-  _pollTimer = setInterval(pollRunningBots, 3000);
+  botPoller.start();
 }
 
 function stopPolling() {
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  botPoller.stop();
 }
 
 // ─── Formatters ──────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 async function request(path, options = {}) {
   const response = await fetch(path, options);
@@ -24,7 +25,7 @@ export function useFubonAccounts() {
   const accounts = ref([]);
   const loading = ref(false);
   const error = ref("");
-  const statusPolling = ref(null);
+  const statusPoller = createVisibilityPoller(refreshStatuses, { intervalMs: 10_000 });
 
   const activeAccount = computed(() => accounts.value.find((account) => account.is_active) || null);
 
@@ -105,17 +106,11 @@ export function useFubonAccounts() {
   }
 
   function startStatusPolling() {
-    stopStatusPolling();
-    statusPolling.value = window.setInterval(() => {
-      refreshStatuses().catch(() => {});
-    }, 10_000);
+    statusPoller.start();
   }
 
   function stopStatusPolling() {
-    if (statusPolling.value) {
-      window.clearInterval(statusPolling.value);
-      statusPolling.value = null;
-    }
+    statusPoller.stop();
   }
 
   return {

@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 const ONBOARDING_DISMISS_KEY = "quantvision:fubon-onboarding-dismissed";
 
@@ -45,7 +46,6 @@ export function useFubonWorkspaceStatus({ pollMs = 15_000 } = {}) {
   const fubonStatus = ref("unconfigured");
   const showFubonOnboardingBanner = ref(false);
   const dismissed = ref(false);
-  let pollingId = null;
 
   async function refreshFubonWorkspaceStatus() {
     try {
@@ -65,28 +65,18 @@ export function useFubonWorkspaceStatus({ pollMs = 15_000 } = {}) {
     writeDismissedFlag(true);
   }
 
-  function stopPolling() {
-    if (pollingId !== null) {
-      window.clearInterval(pollingId);
-      pollingId = null;
-    }
-  }
-
-  function startPolling() {
-    stopPolling();
-    pollingId = window.setInterval(() => {
-      refreshFubonWorkspaceStatus().catch(() => {});
-    }, pollMs);
-  }
+  const statusPoller = createVisibilityPoller(refreshFubonWorkspaceStatus, {
+    intervalMs: pollMs,
+    runImmediately: true,
+  });
 
   onMounted(() => {
     dismissed.value = readDismissedFlag();
-    void refreshFubonWorkspaceStatus();
-    startPolling();
+    statusPoller.start();
   });
 
   onBeforeUnmount(() => {
-    stopPolling();
+    statusPoller.stop();
   });
 
   return {

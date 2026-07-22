@@ -81,11 +81,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { dashboardApi } from "../../api/dashboardApi";
+import { createVisibilityPoller } from "../../utils/visibilityPoller";
 
 const snapshot = ref(null);
 const loading = ref(false);
 const error = ref("");
-let refreshTimer = null;
 
 const componentEntries = computed(() => Object.entries(snapshot.value?.components || {}));
 
@@ -202,13 +202,17 @@ async function loadSnapshot() {
   }
 }
 
+const refreshPoller = createVisibilityPoller(loadSnapshot, {
+  intervalMs: 30_000,
+  runImmediately: true,
+});
+
 onMounted(() => {
-  loadSnapshot();
-  refreshTimer = window.setInterval(loadSnapshot, 30_000);
+  refreshPoller.start();
 });
 
 onBeforeUnmount(() => {
-  if (refreshTimer != null) window.clearInterval(refreshTimer);
+  refreshPoller.stop();
 });
 </script>
 

@@ -16,6 +16,7 @@ import {
 } from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeBookLevels, mergeRealtimeQuote } from "../utils/realtimeQuote";
+import { createVisibilityPoller } from "../utils/visibilityPoller";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
@@ -997,9 +998,17 @@ export function useDashboard() {
   }
 
   let clockTimer = null;
-  let watchlistTimer = null;
-  let alertPollingTimer = null;
-  let futoptFallbackTimer = null;
+  const watchlistPoller = createVisibilityPoller(
+    () => Promise.all([loadWatchlist(), loadMarketSnapshots()]),
+    { intervalMs: 60_000 },
+  );
+  const alertPoller = createVisibilityPoller(
+    () => Promise.all([loadAlerts(), loadNotifications()]),
+    { intervalMs: 30_000 },
+  );
+  const futoptFallbackPoller = createVisibilityPoller(refreshFutoptRealtimeFallback, {
+    intervalMs: FUTOPT_REST_POLL_MS,
+  });
   let futoptFallbackInFlight = false;
   let lastFutoptQuoteOrCandleAt = 0;
 
@@ -2974,24 +2983,16 @@ export function useDashboard() {
     await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
     void loadTickerIntelligence(currentTicker.value);
     void ensureInstitutionalOverlayForTicker(currentTicker.value);
-    watchlistTimer = window.setInterval(() => {
-      void loadWatchlist();
-      void loadMarketSnapshots();
-    }, 60000);
-    alertPollingTimer = window.setInterval(() => {
-      void loadAlerts();
-      void loadNotifications();
-    }, 30000);
-    futoptFallbackTimer = window.setInterval(() => {
-      void refreshFutoptRealtimeFallback();
-    }, FUTOPT_REST_POLL_MS);
+    watchlistPoller.start();
+    alertPoller.start();
+    futoptFallbackPoller.start();
   });
 
   onBeforeUnmount(() => {
     if (clockTimer) clearInterval(clockTimer);
-    if (watchlistTimer) clearInterval(watchlistTimer);
-    if (alertPollingTimer) clearInterval(alertPollingTimer);
-    if (futoptFallbackTimer) clearInterval(futoptFallbackTimer);
+    watchlistPoller.stop();
+    alertPoller.stop();
+    futoptFallbackPoller.stop();
     dashboardRealtime.disconnect();
   });
 
