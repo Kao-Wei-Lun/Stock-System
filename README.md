@@ -133,6 +133,33 @@ Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook
 
 ## 常用指令
 
+### MySQL 備份與安全還原
+
+備份會寫入 `backups/mysql`，並產生 SHA-256 manifest。備份密碼只會放在短暫的
+MySQL client option file，不會出現在命令列或 manifest：
+
+```powershell
+scripts\backup-mysql.ps1
+```
+
+檢查備份完整性：
+
+```powershell
+python backend\mysql_backup.py verify backups\mysql\quantvision_YYYYMMDDTHHMMSSZ.manifest.json
+```
+
+還原預設只能寫入新的測試資料庫。建議先執行 dry-run，再正式還原：
+
+```powershell
+scripts\restore-mysql.ps1 `
+  -Manifest backups\mysql\quantvision_YYYYMMDDTHHMMSSZ.manifest.json `
+  -TargetDatabase quantvision_restore_test `
+  -DryRun
+```
+
+若 `mysqldump` 或 `mysql` 不在 PATH，可設定 `MYSQLDUMP_PATH` 與
+`MYSQL_CLIENT_PATH`。不要在尚未驗證備份前使用 `AllowSourceOverwrite`。
+
 ### 單獨啟動前端
 
 ```bash

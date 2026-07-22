@@ -17,6 +17,7 @@ __pycache__/
 *.db-wal
 log/
 backend/log/
+backups/
 
 # IDE
 .vscode/
