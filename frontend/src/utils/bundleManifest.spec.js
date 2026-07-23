@@ -48,5 +48,7 @@ describe("bundle manifest performance gate", () => {
     expect(result.engines_are_mutually_exclusive).toBe(true);
     expect(result.legacy_engine_files).toEqual([]);
     expect(result.lwc_engine_files).toEqual([]);
+    expect(result.legacy_dynamic_files).toEqual(["assets/legacy-chart-engine.js"]);
+    expect(result.lwc_dynamic_files).toEqual(["assets/lwc-chart-engine.js"]);
   });
 });

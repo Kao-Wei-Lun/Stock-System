@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:14:30+08:00",
+  "scope": "phase-8-production-bundle",
+  "before": {
+    "static_file_count": 7,
+    "static_gzip_bytes": 226829,
+    "legacy_engine_static": true,
+    "lwc_engine_static": true,
+    "external_font_css": true
+  },
+  "after": {
+    "static_file_count": 5,
+    "static_gzip_bytes": 140046,
+    "static_gzip_reduction_pct": 38.26,
+    "legacy_engine_static": false,
+    "lwc_engine_static": false,
+    "legacy_selected_gzip_bytes": 158046,
+    "lwc_selected_gzip_bytes": 208407,
+    "engines_are_mutually_exclusive": true,
+    "external_font_css": false,
+    "local_font_assets": [
+      {
+        "family": "JetBrains Mono",
+        "file_type": "woff2-variable-latin",
+        "bytes": 40400
+      },
+      {
+        "family": "Syne",
+        "file_type": "woff2-variable-latin",
+        "bytes": 34610
+      }
+    ]
+  },
+  "gate": {
+    "default_legacy_selected_gzip_under_190kb": true,
+    "unused_engine_download_bytes": 0,
+    "external_font_requests": 0,
+    "bundle_manifest_enforce_passed": true
+  },
+  "notes": [
+    "LWC selected total remains above the final 190 KB target and is scheduled for route-controller reduction in Phase 13.",
+    "Only Latin variable font subsets are bundled; Traditional Chinese glyphs continue to use the operating-system fallback."
+  ],
+  "contains_sensitive_payloads": false
+}

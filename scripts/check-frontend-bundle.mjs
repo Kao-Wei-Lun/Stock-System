@@ -25,6 +25,18 @@ function collectStaticImports(manifest, startKeys) {
   return visited;
 }
 
+function isLegacyEngine(key, value) {
+  return key.endsWith("composables/useChartEngine.js")
+    || String(value?.file || "").includes("legacy-chart-engine")
+    || String(value?.file || "").includes("useChartEngine");
+}
+
+function isLwcEngine(key, value) {
+  return key.endsWith("composables/useLWCChart.js")
+    || String(value?.file || "").includes("lwc-chart-engine")
+    || String(value?.file || "").includes("useLWCChart");
+}
+
 export function analyzeBundleManifest(manifest, { distDir = null } = {}) {
   const terminalWorkspace = resolveManifestEntry(
     manifest,
@@ -38,15 +50,27 @@ export function analyzeBundleManifest(manifest, { distDir = null } = {}) {
   const files = [...staticKeys]
     .map((key) => manifest[key]?.file)
     .filter(Boolean);
-  const legacyFiles = files.filter((file) => file.includes("legacy-chart-engine"));
-  const lwcFiles = files.filter((file) => file.includes("lwc-chart-engine"));
-  let gzipBytes = null;
-  if (distDir) {
-    gzipBytes = files.reduce((total, file) => {
+  const legacyEntries = Object.entries(manifest).filter(([key, value]) => isLegacyEngine(key, value));
+  const lwcEntries = Object.entries(manifest).filter(([key, value]) => isLwcEngine(key, value));
+  const legacyFiles = legacyEntries
+    .filter(([key]) => staticKeys.has(key))
+    .map(([, value]) => value.file);
+  const lwcFiles = lwcEntries
+    .filter(([key]) => staticKeys.has(key))
+    .map(([, value]) => value.file);
+  const gzipSize = (targetFiles) => {
+    if (!distDir) return null;
+    return targetFiles.reduce((total, file) => {
       const filePath = path.join(distDir, file);
       return fs.existsSync(filePath) ? total + gzipSync(fs.readFileSync(filePath)).length : total;
     }, 0);
+  };
+  let gzipBytes = null;
+  if (distDir) {
+    gzipBytes = gzipSize(files);
   }
+  const legacyDynamicFiles = legacyEntries.map(([, value]) => value.file).filter((file) => !files.includes(file));
+  const lwcDynamicFiles = lwcEntries.map(([, value]) => value.file).filter((file) => !files.includes(file));
 
   return {
     terminal_workspace_found: Boolean(terminalWorkspace),
@@ -55,6 +79,10 @@ export function analyzeBundleManifest(manifest, { distDir = null } = {}) {
     static_gzip_bytes: gzipBytes,
     legacy_engine_files: legacyFiles,
     lwc_engine_files: lwcFiles,
+    legacy_dynamic_files: legacyDynamicFiles,
+    lwc_dynamic_files: lwcDynamicFiles,
+    legacy_selected_gzip_bytes: gzipBytes == null ? null : gzipBytes + gzipSize(legacyDynamicFiles),
+    lwc_selected_gzip_bytes: gzipBytes == null ? null : gzipBytes + gzipSize(lwcDynamicFiles),
     engines_are_mutually_exclusive: !(legacyFiles.length && lwcFiles.length),
   };
 }

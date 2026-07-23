@@ -7,6 +7,7 @@ import {
   QV_PERFORMANCE_MARKS,
   startQuantVisionPerformanceObserver,
 } from "./utils/performanceMarks";
+import "./styles/fonts.css";
 import "./styles/dashboard.css";
 
 startQuantVisionPerformanceObserver();

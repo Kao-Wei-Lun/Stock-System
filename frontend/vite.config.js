@@ -29,18 +29,6 @@ export default defineConfig(({ command }) => {
     },
     build: {
       manifest: true,
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes("useChartEngine.js")) return "legacy-chart-engine";
-            if (id.includes("useLWCChart.js") || id.includes("useLWCIndicators.js") || id.includes("useLWCDrawings.js")) {
-              return "lwc-chart-engine";
-            }
-            if (id.includes("lightweight-charts")) return "lwc-chart-engine";
-            return undefined;
-          },
-        },
-      },
     },
   };
 });
