@@ -10,6 +10,7 @@ import {
 
 import { fmtPrice, fmtVol } from "../utils/formatters";
 import { isRenderableOhlcRow } from "../utils/chartOhlc";
+import { CHART_UPDATE_KIND, classifyChartDataUpdate } from "../utils/chartUpdatePlan";
 import { buildLWCIndicatorModel } from "./useLWCIndicators";
 import { useLWCDrawings } from "./useLWCDrawings";
 
@@ -143,6 +144,40 @@ function isIgnorableSeriesError(error) {
   return message.includes("Value is undefined") || message.includes("Assertion failed");
 }
 
+function mapChartRow(row, index) {
+  if (!isRenderableOhlcRow(row)) return null;
+  const time = toChartTime(row?.date);
+  const open = Number(row.open ?? row.close);
+  const high = Number(row.high ?? row.close);
+  const low = Number(row.low ?? row.close);
+  const close = Number(row.close ?? row.open);
+  return {
+    index,
+    raw: row,
+    time,
+    ohlcv: {
+      time,
+      open,
+      high,
+      low,
+      close,
+      volume: Math.max(0, Number(row.volume ?? 0)),
+    },
+    candle: { time, open, high, low, close },
+    line: { time, value: close },
+    area: { time, value: close },
+    volume: {
+      time,
+      value: Math.max(0, Number(row.volume ?? 0)),
+      color: close >= open ? "rgba(0, 217, 163, 0.76)" : "rgba(255, 77, 106, 0.76)",
+    },
+  };
+}
+
+function mapChartRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map(mapChartRow).filter(Boolean);
+}
+
 export function useLWCChart({
   chartContainer,
   props,
@@ -154,46 +189,37 @@ export function useLWCChart({
   const resizeObserver = shallowRef(null);
   const dynamicSeries = ref([]);
   const dynamicPriceLines = ref([]);
+  let dynamicSeriesBindings = [];
   const chartMode = ref("candles");
   const priceScaleMode = ref("linear");
   const visibleLogicalRange = ref(null);
   let resizeFrameId = null;
+  let previousRawRows = Array.isArray(props.ohlcData) ? props.ohlcData : [];
+  let lastChartUpdateKind = CHART_UPDATE_KIND.fullReset;
+  const chartRows = shallowRef(mapChartRows(previousRawRows));
 
-  const chartRows = computed(() => (
-    Array.isArray(props.ohlcData)
-      ? props.ohlcData
-        .map((row, index) => {
-          if (!isRenderableOhlcRow(row)) return null;
-          const time = toChartTime(row?.date);
-          const open = Number(row.open ?? row.close);
-          const high = Number(row.high ?? row.close);
-          const low = Number(row.low ?? row.close);
-          const close = Number(row.close ?? row.open);
-          return {
-            index,
-            raw: row,
-            time,
-            ohlcv: {
-              time,
-              open,
-              high,
-              low,
-              close,
-              volume: Math.max(0, Number(row.volume ?? 0)),
-            },
-            candle: { time, open, high, low, close },
-            line: { time, value: close },
-            area: { time, value: close },
-            volume: {
-              time,
-              value: Math.max(0, Number(row.volume ?? 0)),
-              color: close >= open ? "rgba(0, 217, 163, 0.76)" : "rgba(255, 77, 106, 0.76)",
-            },
-          };
-        })
-        .filter(Boolean)
-      : []
-  ));
+  watch(
+    () => props.ohlcData,
+    (nextRows) => {
+      const normalizedRows = Array.isArray(nextRows) ? nextRows : [];
+      const updateKind = classifyChartDataUpdate(previousRawRows, normalizedRows);
+      const nextMappedRow = mapChartRow(normalizedRows.at(-1), normalizedRows.length - 1);
+      lastChartUpdateKind = updateKind;
+      if (
+        updateKind === CHART_UPDATE_KIND.lastBar
+        && nextMappedRow
+        && chartRows.value.length === normalizedRows.length
+      ) {
+        chartRows.value = [...chartRows.value.slice(0, -1), nextMappedRow];
+      } else if (updateKind === CHART_UPDATE_KIND.appendBar && nextMappedRow) {
+        chartRows.value = [...chartRows.value, nextMappedRow];
+      } else if (updateKind === CHART_UPDATE_KIND.fullReset) {
+        chartRows.value = mapChartRows(normalizedRows);
+      }
+      previousRawRows = normalizedRows;
+    },
+    { flush: "sync" },
+  );
 
   const indicatorRows = computed(() => chartRows.value.map((entry) => entry.ohlcv));
   const indicatorModel = computed(() => buildLWCIndicatorModel({
@@ -341,6 +367,7 @@ export function useLWCChart({
     clearTrackedPriceLines();
     const staleSeries = [...dynamicSeries.value].reverse();
     dynamicSeries.value = [];
+    dynamicSeriesBindings = [];
     staleSeries.forEach((series) => removeSeriesSafely(series));
   }
 
@@ -417,6 +444,7 @@ export function useLWCChart({
       });
       series.setData(descriptor.data);
       dynamicSeries.value.push(series);
+      dynamicSeriesBindings.push({ series, descriptor });
     });
 
     let paneIndex = volumeSeries.value ? 2 : 1;
@@ -427,6 +455,7 @@ export function useLWCChart({
         series.setData(descriptor.data);
         createdSeries.push(series);
         dynamicSeries.value.push(series);
+        dynamicSeriesBindings.push({ series, descriptor });
       });
 
       const lineHost = createdSeries.find((series, index) => panel.series[index]?.type === "line") || createdSeries[0];
@@ -450,6 +479,32 @@ export function useLWCChart({
     applyPaneStretchFactors(indicatorModel.value.panels.length);
     if (currentRange) {
       setLogicalRange(currentRange);
+    }
+  }
+
+  function updateIndicatorPanesLast() {
+    const descriptors = [
+      ...indicatorModel.value.overlays,
+      ...indicatorModel.value.panels.flatMap((panel) => panel.series),
+    ];
+    if (descriptors.length !== dynamicSeriesBindings.length) {
+      syncIndicatorPanes();
+      return;
+    }
+    for (let index = 0; index < descriptors.length; index += 1) {
+      const descriptor = descriptors[index];
+      const binding = dynamicSeriesBindings[index];
+      const lastPoint = descriptor.data?.at(-1);
+      if (!lastPoint || lastPoint.time == null) continue;
+      try {
+        binding.series.update(lastPoint);
+        binding.descriptor = descriptor;
+      } catch (error) {
+        if (!isIgnorableSeriesError(error)) {
+          syncIndicatorPanes();
+          return;
+        }
+      }
     }
   }
 
@@ -707,6 +762,7 @@ export function useLWCChart({
 
       // ─── 增量更新：長度相同 → 只有最後一根 K 棒被即時報價更新 ───
       const isIncrementalUpdate =
+        lastChartUpdateKind === CHART_UPDATE_KIND.lastBar &&
         mainSeries.value &&
         previousRows?.length > 0 &&
         rows.length === previousRows.length &&
@@ -729,6 +785,7 @@ export function useLWCChart({
               volumeSeries.value.update(lastEntry.volume);
             } catch { /* ignore */ }
           }
+          updateIndicatorPanesLast();
           drawingsBridge.scheduleRender();
           return;
         }
@@ -736,6 +793,7 @@ export function useLWCChart({
 
       // ─── 新增 K 棒：長度多 1 根 ───
       const isNewBar =
+        lastChartUpdateKind === CHART_UPDATE_KIND.appendBar &&
         mainSeries.value &&
         previousRows?.length > 0 &&
         rows.length === previousRows.length + 1;
@@ -759,7 +817,7 @@ export function useLWCChart({
               volumeSeries.value.update(lastEntry.volume);
             } catch { /* ignore */ }
           }
-          syncIndicatorPanes();
+          updateIndicatorPanesLast();
           drawingsBridge.scheduleRender();
           return;
         }
@@ -769,11 +827,7 @@ export function useLWCChart({
       // 判斷資料是否發生結構性變化（切周期/切標的/初始載入），
       // 而非僅切換圖表模式（candle→line）。
       // 只有 chartMode 切換時才保留舊的 visible range。
-      const isDataStructureChange =
-        !previousRows?.length ||
-        rows.length !== previousRows.length ||
-        rows[0]?.time !== previousRows[0]?.time ||
-        rows[rows.length - 1]?.time !== previousRows[previousRows.length - 1]?.time;
+      const isDataStructureChange = lastChartUpdateKind === CHART_UPDATE_KIND.fullReset;
 
       createMainSeries(!isDataStructureChange);
       applyTimeScaleOptions();
@@ -787,7 +841,6 @@ export function useLWCChart({
       }
       drawingsBridge.scheduleRender();
     },
-    { deep: true },
   );
 
   watch(

@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, reactive, ref } from "vue";
 import { mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const lwcMocks = vi.hoisted(() => {
   const seriesInstances = [];
@@ -23,6 +23,8 @@ const lwcMocks = vi.hoisted(() => {
       };
       const instance = {
         setData: vi.fn(),
+        update: vi.fn(),
+        applyOptions: vi.fn(),
         priceScaleApi,
         priceScale: vi.fn(() => priceScaleApi),
         createPriceLine: vi.fn(() => ({})),
@@ -74,8 +76,18 @@ vi.mock("./useLWCDrawings", () => ({
 }));
 
 import { useLWCChart } from "./useLWCChart";
+import { buildLWCIndicatorModel } from "./useLWCIndicators";
 
 describe("useLWCChart", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    lwcMocks.seriesInstances.length = 0;
+    vi.mocked(buildLWCIndicatorModel).mockImplementation(() => ({
+      overlays: [],
+      panels: [],
+    }));
+  });
+
   it("maps candles mode to candle series data when initializing LWC", async () => {
     const emit = vi.fn();
     const props = reactive({
@@ -143,6 +155,91 @@ describe("useLWCChart", () => {
       day: 1,
     });
 
+    wrapper.unmount();
+  });
+
+  it("updates only the last point for current and appended realtime bars", async () => {
+    const first = { date: "2026-04-01", open: 10, high: 12, low: 9, close: 11, volume: 1000 };
+    const second = { date: "2026-04-02", open: 11, high: 13, low: 10, close: 12, volume: 1200 };
+    const props = reactive({
+      ohlcData: [first, second],
+      activeInd: {},
+      activePanels: {},
+      indicatorSettings: {},
+      cleanChartMode: false,
+      currentInterval: "1d",
+      currentTicker: "AAPL",
+      isFullscreen: false,
+    });
+    const wrapper = mount(defineComponent({
+      setup() {
+        const container = ref(null);
+        useLWCChart({ chartContainer: container, props, emit: vi.fn() });
+        return { container };
+      },
+      template: "<div ref='container' style='width: 640px; height: 420px;'></div>",
+    }));
+    await nextTick();
+    await nextTick();
+
+    const mainSeries = lwcMocks.seriesInstances[0];
+    const initialSetDataCalls = mainSeries.setData.mock.calls.length;
+    const updatedSecond = { ...second, high: 14, close: 13 };
+    props.ohlcData = [first, updatedSecond];
+    await nextTick();
+
+    expect(mainSeries.update).toHaveBeenLastCalledWith(expect.objectContaining({ high: 14, close: 13 }));
+    expect(mainSeries.setData).toHaveBeenCalledTimes(initialSetDataCalls);
+
+    const third = { date: "2026-04-03", open: 13, high: 15, low: 12, close: 14, volume: 1300 };
+    props.ohlcData = [first, updatedSecond, third];
+    await nextTick();
+
+    expect(mainSeries.update).toHaveBeenLastCalledWith(expect.objectContaining({ high: 15, close: 14 }));
+    expect(mainSeries.setData).toHaveBeenCalledTimes(initialSetDataCalls);
+    wrapper.unmount();
+  });
+
+  it("updates indicator tails without recreating panes on a realtime bar", async () => {
+    vi.mocked(buildLWCIndicatorModel).mockImplementation(({ rows }) => ({
+      overlays: [{
+        key: "test-ma",
+        type: "line",
+        options: {},
+        data: rows.map((row) => ({ time: row.time, value: row.close })),
+      }],
+      panels: [],
+    }));
+    const first = { date: "2026-04-01", open: 10, high: 12, low: 9, close: 11, volume: 1000 };
+    const second = { date: "2026-04-02", open: 11, high: 13, low: 10, close: 12, volume: 1200 };
+    const props = reactive({
+      ohlcData: [first, second],
+      activeInd: { ma20: true },
+      activePanels: {},
+      indicatorSettings: {},
+      cleanChartMode: false,
+      currentInterval: "1d",
+      currentTicker: "AAPL",
+      isFullscreen: false,
+    });
+    const wrapper = mount(defineComponent({
+      setup() {
+        const container = ref(null);
+        useLWCChart({ chartContainer: container, props, emit: vi.fn() });
+        return { container };
+      },
+      template: "<div ref='container' style='width: 640px; height: 420px;'></div>",
+    }));
+    await nextTick();
+    await nextTick();
+
+    const indicatorSeries = lwcMocks.seriesInstances[2];
+    const createdSeriesCount = lwcMocks.chartApi.addSeries.mock.calls.length;
+    props.ohlcData = [first, { ...second, close: 13 }];
+    await nextTick();
+
+    expect(indicatorSeries.update).toHaveBeenCalledWith(expect.objectContaining({ value: 13 }));
+    expect(lwcMocks.chartApi.addSeries).toHaveBeenCalledTimes(createdSeriesCount);
     wrapper.unmount();
   });
 });

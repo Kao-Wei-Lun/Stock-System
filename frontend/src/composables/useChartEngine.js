@@ -27,6 +27,7 @@ import {
   calcWilliamsR,
 } from "../utils/indicatorUtils";
 import { fmtPrice, fmtVol } from "../utils/formatters";
+import { CHART_UPDATE_KIND, classifyChartDataUpdate } from "../utils/chartUpdatePlan";
 
 const PAD = { top: 20, right: 70, bottom: 22, left: 10 };
 const DEFAULT_VISIBLE_BARS = 120;
@@ -316,19 +317,6 @@ export function useChartEngine({
     const startIndex = clamp(viewport.startIndex, 0, maxStart);
     return props.ohlcData.slice(startIndex, startIndex + visibleCount);
   });
-  const dataSignature = computed(() => {
-    if (!props.ohlcData.length) return "empty";
-    const first = props.ohlcData[0];
-    const last = props.ohlcData[props.ohlcData.length - 1];
-    return [
-      props.ohlcData.length,
-      first?.date ?? "",
-      first?.close ?? "",
-      last?.date ?? "",
-      last?.close ?? "",
-    ].join("|");
-  });
-
   const visibleRangeLabel = computed(() => {
     if (!visibleData.value.length) return "無資料";
     return `${visibleData.value[0].date} → ${visibleData.value[visibleData.value.length - 1].date}`;
@@ -3405,38 +3393,50 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
   onBeforeUnmount(unmountEngine, lifecycleTarget);
 
-  watch(
-    () => props.ohlcData.length,
-    (nextLength, previousLength) => {
-      const wasAnchoredToLatest =
-        previousLength === 0
-        || viewport.startIndex + Math.min(viewport.visibleCount, previousLength) >= previousLength - 1;
-      syncViewport({ anchorLatest: wasAnchoredToLatest || nextLength <= viewport.visibleCount });
-      scheduleRender();
-    },
-  );
-
-  watch(
-    dataSignature,
-    (nextSignature, previousSignature) => {
-      if (!previousSignature || nextSignature === previousSignature) return;
-      draftDrawing.value = null;
-      selectionBox.active = false;
-      dragMode.value = "none";
-      isDragging.value = false;
-      resetDrawingDragState();
-      viewHistory.value = [];
-      viewHistoryIndex.value = -1;
-      resetYScale({ render: false, commit: false });
-      scheduleRender();
-      nextTick(() => rememberViewState());
-    },
-  );
+  const resetForStructuralDataChange = () => {
+    draftDrawing.value = null;
+    selectionBox.active = false;
+    dragMode.value = "none";
+    isDragging.value = false;
+    resetDrawingDragState();
+    viewHistory.value = [];
+    viewHistoryIndex.value = -1;
+    resetYScale({ render: false, commit: false });
+    nextTick(() => rememberViewState());
+  };
 
   watch(
     () => props.ohlcData,
-    () => scheduleRender(),
-    { deep: true },
+    (nextRows, previousRows) => {
+      const updateKind = classifyChartDataUpdate(previousRows, nextRows);
+      const previousLength = Array.isArray(previousRows) ? previousRows.length : 0;
+      if (updateKind === CHART_UPDATE_KIND.appendBar || updateKind === CHART_UPDATE_KIND.fullReset) {
+        const wasAnchoredToLatest =
+          previousLength === 0
+          || viewport.startIndex + Math.min(viewport.visibleCount, previousLength) >= previousLength - 1;
+        syncViewport({
+          anchorLatest: updateKind === CHART_UPDATE_KIND.fullReset
+            || wasAnchoredToLatest
+            || nextRows.length <= viewport.visibleCount,
+        });
+      }
+      if (updateKind === CHART_UPDATE_KIND.fullReset) {
+        resetForStructuralDataChange();
+      }
+      if (updateKind !== CHART_UPDATE_KIND.noop) {
+        scheduleRender();
+      }
+    },
+  );
+
+  watch(
+    () => [props.currentTicker, props.currentInterval],
+    ([nextTicker, nextInterval], [previousTicker, previousInterval]) => {
+      if (nextTicker === previousTicker && nextInterval === previousInterval) return;
+      resetForStructuralDataChange();
+      syncViewport({ anchorLatest: true });
+      scheduleRender();
+    },
   );
 
   watch(

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:38:00+08:00",
+  "scope": "phase-11-incremental-chart-updates",
+  "paths": {
+    "same_bucket": "last-bar",
+    "length_plus_one": "append-bar",
+    "history_ticker_or_interval_change": "full-reset"
+  },
+  "legacy": {
+    "deep_ohlc_watch_removed": true,
+    "realtime_view_state_reset_removed": true,
+    "structural_reset_only": true,
+    "canvas_instance_reused": true
+  },
+  "lightweight_charts": {
+    "full_400_row_mapping_per_quote_removed": true,
+    "main_series_update_used": true,
+    "volume_series_update_used": true,
+    "indicator_tail_update_used": true,
+    "indicator_pane_recreation_per_quote_removed": true
+  },
+  "operation_model_for_1000_same_bucket_updates": {
+    "before_row_mappings": 400000,
+    "after_row_mappings": 1000,
+    "row_mapping_reduction_pct": 99.75,
+    "note": "This deterministic operation count excludes the additional Phase 10 animation-frame coalescing reduction."
+  },
+  "full_gate": {
+    "backend_passed": 495,
+    "frontend_passed": 233,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true
+  },
+  "contains_sensitive_payloads": false
+}
