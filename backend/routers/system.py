@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from data_fetcher import normalize_ticker
 from providers import ws_manager
+from realtime_performance import realtime_performance_metrics
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,22 @@ async def system_data_quality():
     if _DATA_QUALITY_SERVICE is None:
         return JSONResponse({"status": "error", "detail": "Data quality service is not configured"}, status_code=503)
     return await _DATA_QUALITY_SERVICE.build_snapshot()
+
+
+@router.get("/api/system/performance")
+async def system_performance():
+    """Return bounded runtime timings without exposing payloads or SQL text."""
+
+    database = (
+        _DATABASE.get_performance_status()
+        if _DATABASE is not None and hasattr(_DATABASE, "get_performance_status")
+        else {"configured": False, "pool": {"size": 0, "free": 0, "maxsize": 0}}
+    )
+    return {
+        "database": database,
+        "realtime": realtime_performance_metrics.snapshot(),
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.websocket("/ws")

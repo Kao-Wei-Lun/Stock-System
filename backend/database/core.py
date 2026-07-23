@@ -1,5 +1,6 @@
 import asyncio
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from pymysql.err import OperationalError
 
 from env_validation import read_int_env, read_text_env, read_timezone_env
+from performance_timing import record_server_timing
 from .helpers import _build_mysql_error_message, _build_mysql_connection_error_message, _escape_identifier
 from .migrations import (
     CREATE_MIGRATION_TABLE_SQL,
@@ -40,6 +42,46 @@ class DatabaseCore:
             f"quantvision_db_transaction_{id(self)}",
             default=None,
         )
+        self._db_wait_samples: deque[float] = deque(maxlen=512)
+        self._db_query_samples: deque[float] = deque(maxlen=512)
+
+    @staticmethod
+    def _timing_summary(samples: deque[float]) -> Dict[str, Any]:
+        values = sorted(samples)
+        if not values:
+            return {"count": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+
+        def percentile(ratio: float) -> float:
+            index = max(0, min(len(values) - 1, int((len(values) - 1) * ratio + 0.999999)))
+            return round(values[index], 3)
+
+        return {
+            "count": len(values),
+            "p50_ms": percentile(0.50),
+            "p95_ms": percentile(0.95),
+            "max_ms": round(values[-1], 3),
+        }
+
+    def _record_db_timing(self, metric: str, duration_ms: float) -> None:
+        duration = max(0.0, float(duration_ms))
+        if metric == "db_wait":
+            self._db_wait_samples.append(duration)
+        elif metric == "db_query":
+            self._db_query_samples.append(duration)
+        record_server_timing(metric, duration)
+
+    def get_performance_status(self) -> Dict[str, Any]:
+        pool = self._pool
+        return {
+            "configured": pool is not None,
+            "pool": {
+                "size": int(getattr(pool, "size", 0) or 0) if pool is not None else 0,
+                "free": int(getattr(pool, "freesize", 0) or 0) if pool is not None else 0,
+                "maxsize": int(getattr(pool, "maxsize", 0) or 0) if pool is not None else 0,
+            },
+            "wait": self._timing_summary(self._db_wait_samples),
+            "query": self._timing_summary(self._db_query_samples),
+        }
 
     async def connect(self):
         try:
@@ -136,7 +178,9 @@ class DatabaseCore:
         if self.in_transaction:
             raise RuntimeError("Nested database transactions are not supported")
         async with self._lock:
+            wait_started = time.perf_counter()
             async with self._pool.acquire() as conn:
+                self._record_db_timing("db_wait", (time.perf_counter() - wait_started) * 1000)
                 await conn.begin()
                 token = self._transaction_connection.set(conn)
                 try:
@@ -245,45 +289,85 @@ class DatabaseCore:
         transaction_conn = self._transaction_connection.get()
         if transaction_conn is not None:
             async with transaction_conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, params)
-                return await cur.fetchone()
+                query_started = time.perf_counter()
+                try:
+                    await cur.execute(sql, params)
+                    return await cur.fetchone()
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
+        wait_started = time.perf_counter()
         async with self._pool.acquire() as conn:
+            self._record_db_timing("db_wait", (time.perf_counter() - wait_started) * 1000)
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, params)
-                return await cur.fetchone()
+                query_started = time.perf_counter()
+                try:
+                    await cur.execute(sql, params)
+                    return await cur.fetchone()
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
 
     async def _fetchall(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
         transaction_conn = self._transaction_connection.get()
         if transaction_conn is not None:
             async with transaction_conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, params)
-                return list(await cur.fetchall())
+                query_started = time.perf_counter()
+                try:
+                    await cur.execute(sql, params)
+                    return list(await cur.fetchall())
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
+        wait_started = time.perf_counter()
         async with self._pool.acquire() as conn:
+            self._record_db_timing("db_wait", (time.perf_counter() - wait_started) * 1000)
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, params)
-                rows = await cur.fetchall()
+                query_started = time.perf_counter()
+                try:
+                    await cur.execute(sql, params)
+                    rows = await cur.fetchall()
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
         return list(rows)
 
     async def _execute(self, sql: str, params: tuple = ()) -> int:
         transaction_conn = self._transaction_connection.get()
         if transaction_conn is not None:
             async with transaction_conn.cursor() as cur:
-                await cur.execute(sql, params)
-                return cur.rowcount
-        async with self._lock:
-            async with self._pool.acquire() as conn:
-                async with conn.cursor() as cur:
+                query_started = time.perf_counter()
+                try:
                     await cur.execute(sql, params)
                     return cur.rowcount
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
+        wait_started = time.perf_counter()
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                self._record_db_timing("db_wait", (time.perf_counter() - wait_started) * 1000)
+                async with conn.cursor() as cur:
+                    query_started = time.perf_counter()
+                    try:
+                        await cur.execute(sql, params)
+                        return cur.rowcount
+                    finally:
+                        self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
 
     async def _execute_insert(self, sql: str, params: tuple = ()) -> int:
         transaction_conn = self._transaction_connection.get()
         if transaction_conn is not None:
             async with transaction_conn.cursor() as cur:
-                await cur.execute(sql, params)
-                return cur.lastrowid
-        async with self._lock:
-            async with self._pool.acquire() as conn:
-                async with conn.cursor() as cur:
+                query_started = time.perf_counter()
+                try:
                     await cur.execute(sql, params)
                     return cur.lastrowid
+                finally:
+                    self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)
+        wait_started = time.perf_counter()
+        async with self._lock:
+            async with self._pool.acquire() as conn:
+                self._record_db_timing("db_wait", (time.perf_counter() - wait_started) * 1000)
+                async with conn.cursor() as cur:
+                    query_started = time.perf_counter()
+                    try:
+                        await cur.execute(sql, params)
+                        return cur.lastrowid
+                    finally:
+                        self._record_db_timing("db_query", (time.perf_counter() - query_started) * 1000)

@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 from fubon_quote_provider import build_fubon_quote_payload, fubon_timestamp_to_iso
 from fubon_symbols import fubon_market_to_ticker
+from realtime_performance import realtime_performance_metrics
 
 
 @dataclass(slots=True)
@@ -544,6 +545,7 @@ async def fubon_ws_listener_loop(
     store_quote_to_db=None,
     session_refresh_seconds: float = 30.0,
     logger: logging.Logger | None = None,
+    performance_metrics=None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
     if not fubon_manager:
@@ -551,12 +553,19 @@ async def fubon_ws_listener_loop(
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
+    metrics = performance_metrics or realtime_performance_metrics
 
     def _on_fubon_message(message: dict) -> None:
         if loop.is_closed():
             return
+        received_at = time.perf_counter()
+
+        def _enqueue() -> None:
+            queue.put_nowait((received_at, message))
+            metrics.record_ingress(message.get("channel"), queue.qsize())
+
         try:
-            loop.call_soon_threadsafe(queue.put_nowait, message)
+            loop.call_soon_threadsafe(_enqueue)
         except RuntimeError:
             return
 
@@ -578,7 +587,7 @@ async def fubon_ws_listener_loop(
                 last_session_refresh = time.monotonic()
 
             try:
-                message = await asyncio.wait_for(queue.get(), timeout=60)
+                received_at, message = await asyncio.wait_for(queue.get(), timeout=60)
             except asyncio.TimeoutError:
                 continue
 
@@ -626,6 +635,7 @@ async def fubon_ws_listener_loop(
                                 "ts": int(time.time() * 1000),
                             },
                         )
+                        metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
                     continue
 
                 if channel == "trades":
@@ -644,6 +654,7 @@ async def fubon_ws_listener_loop(
                                 "ts": int(time.time() * 1000),
                             },
                         )
+                        metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
                     continue
 
                 if channel == "books":
@@ -657,6 +668,7 @@ async def fubon_ws_listener_loop(
                                 "ts": int(time.time() * 1000),
                             },
                         )
+                        metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
                     continue
 
                 if channel == "candles":
@@ -673,6 +685,7 @@ async def fubon_ws_listener_loop(
                                 "ts": int(time.time() * 1000),
                             },
                         )
+                        metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
             except Exception as exc:
                 log.warning("Fubon websocket message handling failed: %s", exc)
                 await asyncio.sleep(1)

@@ -71,6 +71,9 @@ async def test_transaction_reuses_one_connection_and_commits():
     assert database._pool.connection.begin_count == 1
     assert database._pool.connection.commit_count == 1
     assert database._pool.connection.rollback_count == 0
+    performance = database.get_performance_status()
+    assert performance["wait"]["count"] == 1
+    assert performance["query"]["count"] == 2
 
 
 @pytest.mark.anyio

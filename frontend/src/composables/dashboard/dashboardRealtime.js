@@ -1,5 +1,7 @@
 import { ref } from "vue";
 
+import { recordQuantVisionRealtimeMessage } from "../../utils/performanceMarks";
+
 const RECONNECT_DELAY_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const HEARTBEAT_TIMEOUT_MS = 35000;
@@ -72,6 +74,7 @@ function handleSocketMessage(event) {
     lastServerMessageAt = Date.now();
     const message = JSON.parse(event.data);
     if (message?.type === "pong") return;
+    recordQuantVisionRealtimeMessage(message);
     broadcastMessage(message);
   } catch (error) {
     console.error(error);

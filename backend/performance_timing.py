@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextvars import ContextVar
 from typing import Any
 from uuid import uuid4
 
@@ -14,14 +15,34 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 log = logging.getLogger(__name__)
 _METRIC_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_CURRENT_SERVER_TIMINGS: ContextVar[dict[str, float] | None] = ContextVar(
+    "quantvision_server_timings",
+    default=None,
+)
+
+
+def _normalize_metric(metric: str) -> str:
+    name = str(metric or "").strip().lower()
+    if not _METRIC_NAME_RE.fullmatch(name):
+        raise ValueError("Server timing metric names must be short lowercase identifiers")
+    return name
+
+
+def record_server_timing(metric: str, duration_ms: float) -> None:
+    """Accumulate a timing component for the active HTTP request, if any."""
+
+    name = _normalize_metric(metric)
+    timings = _CURRENT_SERVER_TIMINGS.get()
+    if timings is None:
+        return
+    duration = max(float(duration_ms), 0.0)
+    timings[name] = timings.get(name, 0.0) + duration
 
 
 def add_server_timing(target: Any, metric: str, duration_ms: float) -> None:
     """Record a safe timing component on a request/scope for the response header."""
 
-    name = str(metric or "").strip().lower()
-    if not _METRIC_NAME_RE.fullmatch(name):
-        raise ValueError("Server timing metric names must be short lowercase identifiers")
+    name = _normalize_metric(metric)
     duration = max(float(duration_ms), 0.0)
     scope = getattr(target, "scope", target)
     state = scope.setdefault("state", {})
@@ -48,7 +69,10 @@ class RequestTimingMiddleware:
 
         started_at = time.perf_counter()
         request_id = str(uuid4())
-        scope.setdefault("state", {})["request_id"] = request_id
+        state = scope.setdefault("state", {})
+        state["request_id"] = request_id
+        timings = state.setdefault("server_timings", {})
+        timing_token = _CURRENT_SERVER_TIMINGS.set(timings)
         response_started = False
 
         async def send_with_timing(message: Message) -> None:
@@ -74,4 +98,5 @@ class RequestTimingMiddleware:
                 status_code=500,
             )
             await response(scope, receive, send_with_timing)
-
+        finally:
+            _CURRENT_SERVER_TIMINGS.reset(timing_token)

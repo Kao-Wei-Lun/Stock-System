@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
-from performance_timing import RequestTimingMiddleware, add_server_timing
+from performance_timing import RequestTimingMiddleware, add_server_timing, record_server_timing
 
 
 _TOTAL_RE = re.compile(r"(?:^|, )total;dur=([0-9]+(?:\.[0-9]+)?)")
@@ -18,6 +18,8 @@ def _build_app():
     @app.get("/ok")
     async def ok(request: Request):
         add_server_timing(request, "db", 1.25)
+        record_server_timing("db_query", 2)
+        record_server_timing("db_query", 3)
         return {"ok": True}
 
     @app.get("/not-found")
@@ -48,6 +50,7 @@ def test_timing_header_includes_safe_component_metrics():
         response = client.get("/ok")
 
     assert "db;dur=1.25" in response.headers["server-timing"]
+    assert "db_query;dur=5.00" in response.headers["server-timing"]
 
 
 def test_unhandled_exception_response_does_not_expose_private_detail():
@@ -66,3 +69,5 @@ def test_server_timing_rejects_unsafe_metric_names():
     with pytest.raises(ValueError):
         add_server_timing(scope, "sql SELECT secret", 1)
 
+    with pytest.raises(ValueError):
+        record_server_timing("sql SELECT secret", 1)

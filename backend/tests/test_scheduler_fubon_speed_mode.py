@@ -9,6 +9,7 @@ from scheduler import fubon_ws_listener_loop
 async def test_fubon_ws_listener_broadcasts_trade_messages_as_quotes():
     messages = []
     stored_quotes = []
+    performance_events = []
 
     async def broadcast_to_ticker(ticker, payload):
         messages.append((ticker, payload))
@@ -16,6 +17,13 @@ async def test_fubon_ws_listener_broadcasts_trade_messages_as_quotes():
     async def store_quote_to_db(payload):
         stored_quotes.append(payload)
         return payload
+
+    class FakePerformanceMetrics:
+        def record_ingress(self, channel, queue_depth):
+            performance_events.append(("ingress", channel, queue_depth))
+
+        def record_broadcast(self, duration_ms):
+            performance_events.append(("broadcast", duration_ms))
 
     class FakeFubonManager:
         def __init__(self):
@@ -35,6 +43,7 @@ async def test_fubon_ws_listener_broadcasts_trade_messages_as_quotes():
             fubon_manager=manager,
             broadcast_to_ticker=broadcast_to_ticker,
             store_quote_to_db=store_quote_to_db,
+            performance_metrics=FakePerformanceMetrics(),
         )
     )
 
@@ -70,3 +79,6 @@ async def test_fubon_ws_listener_broadcasts_trade_messages_as_quotes():
     assert messages[0][1]["type"] == "quote"
     assert messages[0][1]["data"]["price"] == 568
     assert messages[0][1]["data"]["bid"] == 567
+    assert performance_events[0][0:2] == ("ingress", "trades")
+    assert performance_events[1][0] == "broadcast"
+    assert performance_events[1][1] >= 0

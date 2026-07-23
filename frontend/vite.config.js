@@ -28,6 +28,7 @@ export default defineConfig(({ command }) => {
       port: 4173,
     },
     build: {
+      manifest: true,
       rollupOptions: {
         output: {
           manualChunks(id) {

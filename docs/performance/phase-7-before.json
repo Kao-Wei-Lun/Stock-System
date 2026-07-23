@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:09:34+08:00",
+  "baseline_commit": "ff543c3",
+  "scope": "phase-7-before",
+  "http_reference": {
+    "artifact": "docs/performance/phase-6-final.json",
+    "symbol": "*TMFF",
+    "interval": "1m",
+    "limit": 400,
+    "warm_total_median_ms": 30.99,
+    "warm_total_p95_ms": 35.58,
+    "gzip_bytes": 7881
+  },
+  "production_bundle": {
+    "command": "npx vite build --manifest",
+    "static_file_count": 7,
+    "static_gzip_bytes": 226829,
+    "legacy_engine_static": true,
+    "lwc_engine_static": true,
+    "engines_are_mutually_exclusive": false,
+    "static_files": [
+      "entry",
+      "legacy-chart-engine",
+      "terminal-workspace",
+      "app",
+      "visibility-poller",
+      "lwc-chart-engine",
+      "journal-entry-form"
+    ]
+  },
+  "known_runtime_gaps": {
+    "db_wait_timing": false,
+    "db_query_timing": false,
+    "realtime_ingress_to_broadcast": false,
+    "persistence_queue_age": false,
+    "browser_long_tasks": false,
+    "realtime_message_to_paint": false
+  },
+  "contains_sensitive_payloads": false
+}
