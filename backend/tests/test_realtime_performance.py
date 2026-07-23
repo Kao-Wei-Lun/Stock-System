@@ -35,6 +35,7 @@ async def test_system_performance_returns_database_and_realtime_status(monkeypat
             }
 
     monkeypatch.setattr(system, "_DATABASE", FakeDatabase())
+    monkeypatch.setattr(system, "_QUOTE_PERSISTENCE_BUFFER", None)
     system.realtime_performance_metrics.reset()
     system.realtime_performance_metrics.record_broadcast(4.25)
 
@@ -42,4 +43,5 @@ async def test_system_performance_returns_database_and_realtime_status(monkeypat
 
     assert payload["database"]["pool"]["maxsize"] == 10
     assert payload["realtime"]["broadcast_latency"]["p95_ms"] == 4.25
+    assert payload["quote_persistence"]["pending"] == 0
     assert payload["time"]

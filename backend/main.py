@@ -39,6 +39,7 @@ from frontend_static import SPAStaticFiles
 from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
 from performance_timing import RequestTimingMiddleware
+from realtime_quote_persistence import RealtimeQuotePersistenceBuffer
 from macro_regime import build_macro_dashboard_payload
 from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
@@ -141,6 +142,19 @@ INSTITUTIONAL_SYNC_TIME_RAW = read_hhmm_env("INSTITUTIONAL_SYNC_TIME", "19:00")
 PAPER_MARGIN_SYNC_TIME_RAW = read_hhmm_env("PAPER_MARGIN_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
 REALTIME_POLL_INTERVAL_SECONDS = read_float_env("REALTIME_POLL_INTERVAL_SECONDS", "15", minimum=1)
 REALTIME_PER_TICKER_DELAY_SECONDS = read_float_env("REALTIME_PER_TICKER_DELAY_SECONDS", "0.2", minimum=0)
+REALTIME_QUOTE_PERSIST_INTERVAL_MS = read_int_env(
+    "REALTIME_QUOTE_PERSIST_INTERVAL_MS",
+    "500",
+    minimum=250,
+    maximum=2000,
+)
+REALTIME_QUOTE_PERSIST_CAPACITY = read_int_env(
+    "REALTIME_QUOTE_PERSIST_CAPACITY",
+    "500",
+    minimum=1,
+    maximum=5000,
+)
+REALTIME_QUOTE_PERSIST_ASYNC_ENABLED = read_bool_env("REALTIME_QUOTE_PERSIST_ASYNC_ENABLED", True)
 FUBON_WS_SESSION_REFRESH_SECONDS = read_float_env("FUBON_WS_SESSION_REFRESH_SECONDS", "30", minimum=1)
 LATEST_SYNC_STARTUP_DELAY_SECONDS = read_float_env("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15", minimum=0)
 FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS = read_float_env(
@@ -305,6 +319,12 @@ get_tracked_sync_tickers = background_tasks.get_tracked_sync_tickers
 sync_tracked_market_data = background_tasks.sync_tracked_market_data
 fetch_and_store_quote_snapshot = background_tasks.fetch_and_store_quote_snapshot
 store_realtime_quote = background_tasks.store_realtime_quote
+quote_persistence_buffer = RealtimeQuotePersistenceBuffer(
+    background_tasks.persist_realtime_quote,
+    flush_interval_ms=REALTIME_QUOTE_PERSIST_INTERVAL_MS,
+    capacity=REALTIME_QUOTE_PERSIST_CAPACITY,
+    logger=log,
+)
 sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
 fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
 sync_taiwan_full_history = tw_history_backfill_service.sync_history
@@ -415,7 +435,11 @@ background_scheduler = BackgroundScheduler(
         sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
         get_subscribed_tickers=ws_manager.get_subscribed_tickers,
         broadcast_to_ticker=ws_manager.broadcast_to_ticker,
-        store_quote_to_db=store_realtime_quote,
+        store_quote_to_db=(
+            quote_persistence_buffer.enqueue
+            if REALTIME_QUOTE_PERSIST_ASYNC_ENABLED
+            else store_realtime_quote
+        ),
         fubon_manager=fubon_realtime_pool,
         skip_poll_for_ticker=lambda ticker: fubon_realtime_pool.supports_full_ws_quotes_for_ticker(ticker),
         archive_fubon_market_snapshot=fubon_market_snapshot_provider.archive_daily_snapshot,
@@ -458,6 +482,7 @@ async def lifespan(app: FastAPI):
     background_scheduler.start()
     yield
     await background_scheduler.shutdown()
+    await quote_persistence_buffer.shutdown()
     await futopt_refresh_coordinator.shutdown()
     fubon_realtime_pool.shutdown()
     fubon_manager.shutdown()
@@ -574,6 +599,7 @@ system.configure(
     scheduler=background_scheduler,
     database=db,
     data_quality_service=data_quality_service,
+    quote_persistence_buffer=quote_persistence_buffer,
 )
 
 app.include_router(watchlist.router)

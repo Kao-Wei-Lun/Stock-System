@@ -19,17 +19,28 @@ _FRONTEND_DIST_DIR: Path | None = None
 _SCHEDULER = None
 _DATABASE = None
 _DATA_QUALITY_SERVICE = None
+_QUOTE_PERSISTENCE_BUFFER = None
 
 router = APIRouter(tags=["system"])
 
 
-def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None, database=None, data_quality_service=None):
+def configure(
+    *,
+    frontend_dev_url: str,
+    frontend_dist_dir: Path,
+    scheduler=None,
+    database=None,
+    data_quality_service=None,
+    quote_persistence_buffer=None,
+):
     global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
+    global _QUOTE_PERSISTENCE_BUFFER
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
     _DATABASE = database
     _DATA_QUALITY_SERVICE = data_quality_service
+    _QUOTE_PERSISTENCE_BUFFER = quote_persistence_buffer
 
 
 def _frontend_ready() -> bool:
@@ -96,6 +107,11 @@ async def system_performance():
     return {
         "database": database,
         "realtime": realtime_performance_metrics.snapshot(),
+        "quote_persistence": (
+            _QUOTE_PERSISTENCE_BUFFER.status()
+            if _QUOTE_PERSISTENCE_BUFFER is not None
+            else {"running": False, "pending": 0, "configured": False}
+        ),
         "time": datetime.now(timezone.utc).isoformat(),
     }
 

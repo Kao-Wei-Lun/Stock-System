@@ -624,8 +624,6 @@ async def fubon_ws_listener_loop(
                         quote_payload = build_fubon_quote_payload(target_ticker, raw, source="fubon_neo")
                         if not quote_payload:
                             continue
-                        if callable(store_quote_to_db):
-                            await store_quote_to_db(quote_payload)
                         await broadcast_to_ticker(
                             target_ticker,
                             {
@@ -636,6 +634,8 @@ async def fubon_ws_listener_loop(
                             },
                         )
                         metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
+                        if callable(store_quote_to_db):
+                            await store_quote_to_db(quote_payload)
                     continue
 
                 if channel == "trades":
@@ -643,8 +643,6 @@ async def fubon_ws_listener_loop(
                         quote_payload = build_fubon_quote_payload(target_ticker, raw, source="fubon_neo")
                         if not quote_payload:
                             continue
-                        if callable(store_quote_to_db):
-                            await store_quote_to_db(quote_payload)
                         await broadcast_to_ticker(
                             target_ticker,
                             {
@@ -655,6 +653,8 @@ async def fubon_ws_listener_loop(
                             },
                         )
                         metrics.record_broadcast((time.perf_counter() - received_at) * 1000)
+                        if callable(store_quote_to_db):
+                            await store_quote_to_db(quote_payload)
                     continue
 
                 if channel == "books":

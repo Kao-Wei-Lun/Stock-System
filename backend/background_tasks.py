@@ -173,6 +173,16 @@ class BackgroundTaskService:
             return None
         return await self.db.upsert_market_quote(merged)
 
+    async def persist_realtime_quote(self, quote: dict | None) -> dict | None:
+        """Persist an already coalesced snapshot without adding a read-before-write query."""
+        if not quote:
+            return None
+        incoming = dict(quote)
+        incoming["ticker"] = normalize_ticker(incoming.get("ticker"))
+        if not incoming["ticker"]:
+            return None
+        return await self.db.upsert_market_quote(incoming)
+
     async def sync_market_intelligence_snapshot(self, reason: str = "manual") -> dict:
         tickers = await self.get_tracked_sync_tickers()
         macro_items = await self.macro_snapshot_provider.sync_macro_snapshots()

@@ -588,6 +588,11 @@ class MarketDataMixin:
 
     async def upsert_market_quote(self, quote: Dict[str, Any]) -> Dict[str, Any]:
         normalized = _normalize_quote_payload(quote)
+        payload_json = {
+            key: value
+            for key, value in normalized.items()
+            if value is not None and value != "" and value != []
+        }
         await self._execute(
             """
             INSERT INTO `market_quotes_latest`
@@ -597,22 +602,66 @@ class MarketDataMixin:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             AS `incoming`
             ON DUPLICATE KEY UPDATE
-                `source`=`incoming`.`source`,
-                `quote_type`=`incoming`.`quote_type`,
-                `is_delayed`=`incoming`.`is_delayed`,
-                `name`=`incoming`.`name`,
-                `currency`=`incoming`.`currency`,
-                `price`=`incoming`.`price`,
-                `open`=`incoming`.`open`,
-                `high`=`incoming`.`high`,
-                `low`=`incoming`.`low`,
-                `prev_close`=`incoming`.`prev_close`,
-                `change_amount`=`incoming`.`change_amount`,
-                `change_pct`=`incoming`.`change_pct`,
-                `volume`=`incoming`.`volume`,
-                `market_cap`=`incoming`.`market_cap`,
-                `quote_timestamp`=`incoming`.`quote_timestamp`,
-                `payload_json`=`incoming`.`payload_json`
+                `source`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(NULLIF(`incoming`.`source`, ''), `market_quotes_latest`.`source`),
+                    `market_quotes_latest`.`source`),
+                `quote_type`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(NULLIF(`incoming`.`quote_type`, ''), `market_quotes_latest`.`quote_type`),
+                    `market_quotes_latest`.`quote_type`),
+                `is_delayed`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    `incoming`.`is_delayed`, `market_quotes_latest`.`is_delayed`),
+                `name`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(NULLIF(`incoming`.`name`, `incoming`.`ticker`), `market_quotes_latest`.`name`, `incoming`.`name`),
+                    `market_quotes_latest`.`name`),
+                `currency`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`currency`, `market_quotes_latest`.`currency`),
+                    `market_quotes_latest`.`currency`),
+                `price`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`price`, `market_quotes_latest`.`price`), `market_quotes_latest`.`price`),
+                `open`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`open`, `market_quotes_latest`.`open`), `market_quotes_latest`.`open`),
+                `high`=CASE
+                    WHEN `market_quotes_latest`.`high` IS NULL THEN `incoming`.`high`
+                    WHEN `incoming`.`high` IS NULL THEN `market_quotes_latest`.`high`
+                    ELSE GREATEST(`market_quotes_latest`.`high`, `incoming`.`high`) END,
+                `low`=CASE
+                    WHEN `market_quotes_latest`.`low` IS NULL THEN `incoming`.`low`
+                    WHEN `incoming`.`low` IS NULL THEN `market_quotes_latest`.`low`
+                    ELSE LEAST(`market_quotes_latest`.`low`, `incoming`.`low`) END,
+                `prev_close`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`prev_close`, `market_quotes_latest`.`prev_close`),
+                    `market_quotes_latest`.`prev_close`),
+                `change_amount`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`change_amount`, `market_quotes_latest`.`change_amount`),
+                    `market_quotes_latest`.`change_amount`),
+                `change_pct`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`change_pct`, `market_quotes_latest`.`change_pct`),
+                    `market_quotes_latest`.`change_pct`),
+                `volume`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`volume`, `market_quotes_latest`.`volume`), `market_quotes_latest`.`volume`),
+                `market_cap`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    COALESCE(`incoming`.`market_cap`, `market_quotes_latest`.`market_cap`),
+                    `market_quotes_latest`.`market_cap`),
+                `payload_json`=IF(`incoming`.`quote_timestamp` IS NULL OR `market_quotes_latest`.`quote_timestamp` IS NULL
+                    OR `incoming`.`quote_timestamp` >= `market_quotes_latest`.`quote_timestamp`,
+                    JSON_MERGE_PATCH(`market_quotes_latest`.`payload_json`, `incoming`.`payload_json`),
+                    `market_quotes_latest`.`payload_json`),
+                `quote_timestamp`=CASE
+                    WHEN `incoming`.`quote_timestamp` IS NULL THEN `market_quotes_latest`.`quote_timestamp`
+                    WHEN `market_quotes_latest`.`quote_timestamp` IS NULL THEN `incoming`.`quote_timestamp`
+                    ELSE GREATEST(`market_quotes_latest`.`quote_timestamp`, `incoming`.`quote_timestamp`) END
             """,
             (
                 normalized["ticker"],
@@ -631,13 +680,10 @@ class MarketDataMixin:
                 normalized["volume"],
                 normalized["market_cap"],
                 _parse_datetime_value(normalized.get("quote_timestamp")),
-                _json_dumps(normalized),
+                _json_dumps(payload_json),
             ),
         )
-        quote_row = await self.get_market_quote(normalized["ticker"])
-        if not quote_row:
-            raise RuntimeError("Market quote was not persisted")
-        return quote_row
+        return normalized
 
     async def get_market_quote(self, ticker: str) -> Optional[Dict[str, Any]]:
         row = await self._fetchone(

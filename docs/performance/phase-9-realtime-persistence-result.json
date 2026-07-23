@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:24:00+08:00",
+  "scope": "phase-9-realtime-persistence",
+  "implementation": {
+    "broadcast_before_persistence": true,
+    "default_flush_interval_ms": 500,
+    "allowed_flush_interval_ms": [250, 2000],
+    "default_ticker_capacity": 500,
+    "latest_state_coalescing": true,
+    "read_before_write_removed_from_realtime_worker": true,
+    "read_after_write_removed": true,
+    "shutdown_timeout_seconds": 5,
+    "synchronous_rollback_flag": "REALTIME_QUOTE_PERSIST_ASYNC_ENABLED"
+  },
+  "targeted_tests": {
+    "passed": 28,
+    "slow_database_does_not_block_broadcast": true,
+    "one_hundred_updates_coalesced_to_one_write": true,
+    "timestamp_and_session_extrema_merge": true,
+    "failed_write_requeued": true,
+    "bounded_capacity": true,
+    "shutdown_drain": true
+  },
+  "full_gate": {
+    "backend_passed": 495,
+    "frontend_passed": 223,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true
+  },
+  "notes": [
+    "The repository test verifies one SQL statement per upsert and partial-field preservation rules.",
+    "A live MySQL/Fubon soak is deferred to the final Phase 15 operating gate because credentials and market-session availability are environment dependent."
+  ],
+  "contains_sensitive_payloads": false
+}
