@@ -148,6 +148,10 @@ const props = defineProps({
   marketStatus: { type: Object, required: true },
   wsConnected: { type: Boolean, required: true },
   fubonStatus: { type: String, default: "unconfigured" },
+  fubonProgress: {
+    type: Object,
+    default: () => ({ connected: 0, configured: 0 }),
+  },
   activeQuote: { type: Object, default: () => ({}) },
 });
 
@@ -190,7 +194,9 @@ const quoteStatusClass = computed(() => ({
 
 const fubonStatusLabel = computed(() => ({
   connected: "富邦即時",
-  connecting: "連線中",
+  connecting: props.fubonProgress?.configured > 0
+    ? `連線中 ${props.fubonProgress.connected || 0}/${props.fubonProgress.configured}`
+    : "連線中",
   error: "連線錯誤",
   disconnected: "富邦待命",
   unconfigured: "未設定",

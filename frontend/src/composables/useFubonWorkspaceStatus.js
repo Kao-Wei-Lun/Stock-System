@@ -30,11 +30,16 @@ async function requestFubonStatuses() {
   if (!response.ok) {
     throw new Error(payload?.detail || `HTTP ${response.status}`);
   }
-  return payload?.accounts || [];
+  return {
+    accounts: payload?.accounts || [],
+    warmup: payload?.warmup || null,
+  };
 }
 
-function resolveStatus(accounts) {
+function resolveStatus(accounts, warmup) {
   if (!accounts.length) return "unconfigured";
+  if (["scheduled", "running"].includes(warmup?.state)) return "connecting";
+  if (warmup?.state === "failed" && !(warmup?.connected_account_count > 0)) return "error";
   const activeAccount = accounts.find((account) => account.is_active)
     || accounts.find((account) => account.is_enabled)
     || accounts[0];
@@ -44,14 +49,26 @@ function resolveStatus(accounts) {
 export function useFubonWorkspaceStatus({ pollMs = 15_000 } = {}) {
   const accounts = ref([]);
   const fubonStatus = ref("unconfigured");
+  const fubonProgress = ref({
+    state: "unconfigured",
+    connected: 0,
+    configured: 0,
+  });
   const showFubonOnboardingBanner = ref(false);
   const dismissed = ref(false);
 
   async function refreshFubonWorkspaceStatus() {
     try {
-      const nextAccounts = await requestFubonStatuses();
+      const payload = await requestFubonStatuses();
+      const nextAccounts = payload.accounts;
+      const warmup = payload.warmup;
       accounts.value = nextAccounts;
-      fubonStatus.value = resolveStatus(nextAccounts);
+      fubonStatus.value = resolveStatus(nextAccounts, warmup);
+      fubonProgress.value = {
+        state: warmup?.state || fubonStatus.value,
+        connected: Number(warmup?.connected_account_count || 0),
+        configured: Number(warmup?.configured_account_count ?? nextAccounts.length),
+      };
       showFubonOnboardingBanner.value = !dismissed.value && nextAccounts.length === 0;
     } catch {
       fubonStatus.value = accounts.value.length ? "error" : "unconfigured";
@@ -82,6 +99,7 @@ export function useFubonWorkspaceStatus({ pollMs = 15_000 } = {}) {
   return {
     accounts,
     fubonStatus,
+    fubonProgress,
     showFubonOnboardingBanner,
     dismissFubonOnboardingBanner,
     refreshFubonWorkspaceStatus,

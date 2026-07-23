@@ -81,4 +81,28 @@ describe("useFubonWorkspaceStatus", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("reports provider warmup progress while accounts initialize", async () => {
+    globalThis.fetch.mockResolvedValue(buildJsonResponse({
+      accounts: [
+        { id: 1, is_active: true, is_enabled: true, connection_status: "connected" },
+        { id: 2, is_active: false, is_enabled: true, connection_status: "connecting" },
+      ],
+      warmup: {
+        state: "running",
+        connected_account_count: 1,
+        configured_account_count: 2,
+      },
+    }));
+
+    const wrapper = mount(Harness);
+    await flushPromises();
+
+    expect(wrapper.vm.fubonStatus).toBe("connecting");
+    expect(wrapper.vm.fubonProgress).toEqual({
+      state: "running",
+      connected: 1,
+      configured: 2,
+    });
+  });
 });

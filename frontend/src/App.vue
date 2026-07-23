@@ -13,6 +13,7 @@
       :market-status="marketStatus"
       :ws-connected="wsConnected"
       :fubon-status="fubonStatus"
+      :fubon-progress="fubonProgress"
       :active-quote="quote"
       @navigate="handleNavigate"
       @set-review-tab="handleReviewTabChange"
@@ -495,6 +496,7 @@ const terminalLeftCollapsed = ref(true);
 const terminalRightCollapsed = ref(true);
 const {
   fubonStatus,
+  fubonProgress,
   showFubonOnboardingBanner,
   dismissFubonOnboardingBanner,
 } = useFubonWorkspaceStatus();

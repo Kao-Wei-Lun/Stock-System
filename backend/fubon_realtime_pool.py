@@ -70,6 +70,12 @@ class FubonRealtimeSubscriptionPool:
         self._last_shortage_notifications: dict[str, float] = {}
         self._ws_diagnostics: dict[str, dict[str, Any]] = {}
         self._recovery_lock = asyncio.Lock()
+        self._reload_lock = asyncio.Lock()
+        self._warmup_task: asyncio.Task | None = None
+        self._warmup_state = "idle"
+        self._warmup_started_at: str | None = None
+        self._warmup_completed_at: str | None = None
+        self._warmup_error: str | None = None
 
     @property
     def connected(self) -> bool:
@@ -90,11 +96,80 @@ class FubonRealtimeSubscriptionPool:
     def configure_store_quote(self, handler: Optional[Callable[[dict], Awaitable[Any]]]) -> None:
         self._store_quote = handler
 
+    def get_warmup_status(self) -> dict[str, Any]:
+        configured_count = len(self._managers)
+        connected_count = sum(1 for manager in self._managers.values() if manager.connected)
+        return {
+            "state": self._warmup_state,
+            "started_at": self._warmup_started_at,
+            "completed_at": self._warmup_completed_at,
+            "error": self._warmup_error,
+            "configured_account_count": configured_count,
+            "connected_account_count": connected_count,
+            "connected": connected_count > 0,
+            "complete": self._warmup_state in {"ready", "failed", "cancelled", "stopped"},
+        }
+
+    def start_background_warmup(self, db) -> asyncio.Task:
+        """Start provider initialization without blocking FastAPI readiness."""
+        self._db = db
+        task = self._warmup_task
+        if task is not None and not task.done():
+            return task
+        self._warmup_state = "scheduled"
+        self._warmup_started_at = None
+        self._warmup_completed_at = None
+        self._warmup_error = None
+        self._warmup_task = asyncio.create_task(
+            self._run_background_warmup(db),
+            name="fubon-provider-warmup",
+        )
+        return self._warmup_task
+
+    async def _run_background_warmup(self, db) -> bool:
+        self._warmup_state = "running"
+        self._warmup_started_at = self._utcnow().isoformat()
+        try:
+            connected = await self.init_from_db(db)
+            await self.sync_watchlist_from_db(db)
+        except asyncio.CancelledError:
+            self._warmup_state = "cancelled"
+            self._warmup_completed_at = self._utcnow().isoformat()
+            raise
+        except Exception as exc:
+            self._warmup_state = "failed"
+            self._warmup_error = str(exc)[:300]
+            self._warmup_completed_at = self._utcnow().isoformat()
+            log.exception("Fubon provider background warmup failed: %s", exc)
+            return False
+        self._warmup_state = "ready"
+        self._warmup_completed_at = self._utcnow().isoformat()
+        return bool(connected)
+
+    async def wait_for_warmup(self, timeout: float | None = None) -> bool:
+        task = self._warmup_task
+        if task is None:
+            return bool(self.connected)
+        try:
+            if timeout is None:
+                return bool(await asyncio.shield(task))
+            return bool(await asyncio.wait_for(asyncio.shield(task), timeout=max(0.0, float(timeout))))
+        except asyncio.TimeoutError:
+            return False
+        except asyncio.CancelledError:
+            if task.cancelled():
+                return False
+            raise
+
     async def init_from_db(self, db) -> bool:
         self._db = db
         return await self.reload_from_db(db)
 
     async def reload_from_db(self, db=None) -> bool:
+        async with self._reload_lock:
+            return await self._reload_from_db_locked(db)
+
+    async def _reload_from_db_locked(self, db=None) -> bool:
         from repositories.fubon_accounts import FubonAccountRepository
 
         self._db = db or self._db
@@ -112,11 +187,15 @@ class FubonRealtimeSubscriptionPool:
         primary_id = int(primary_account["id"]) if primary_account and primary_account.get("id") is not None else None
 
         if primary_account and primary_id is not None:
-            await self._primary_manager._init_with_account(primary_account, repo)
-            self._primary_manager.start_ws_stock()
-            self._primary_manager.start_ws_futopt()
             self._managers[primary_id] = self._primary_manager
             self._attach_bridge_handler(primary_id, self._primary_manager)
+            try:
+                initialized = await self._primary_manager._init_with_account(primary_account, repo)
+                if initialized:
+                    self._primary_manager.start_ws_stock()
+                    self._primary_manager.start_ws_futopt()
+            except Exception as exc:
+                log.warning("Fubon primary account %s warmup failed: %s", primary_id, exc)
 
         removed_ids = [account_id for account_id in list(self._managers.keys()) if account_id not in desired_ids]
         for account_id in removed_ids:
@@ -136,12 +215,28 @@ class FubonRealtimeSubscriptionPool:
                 manager = FubonSDKManager()
                 self._managers[account_id] = manager
                 self._attach_bridge_handler(account_id, manager)
-            await manager._init_with_account(account, repo)
-            manager.start_ws_stock()
-            manager.start_ws_futopt()
+            try:
+                initialized = await manager._init_with_account(account, repo)
+                if initialized:
+                    manager.start_ws_stock()
+                    manager.start_ws_futopt()
+            except Exception as exc:
+                log.warning("Fubon account %s warmup failed: %s", account_id, exc)
 
         await self._rebalance_assignments()
         return self.connected
+
+    async def shutdown_async(self, *, shutdown_primary: bool = False) -> None:
+        task = self._warmup_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self.shutdown(shutdown_primary=shutdown_primary)
+        self._warmup_state = "stopped"
+        self._warmup_completed_at = self._utcnow().isoformat()
 
     def shutdown(self, *, shutdown_primary: bool = False) -> None:
         for task in list(self._pending_tasks.values()):

@@ -1,9 +1,12 @@
+import asyncio
+
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import fubon_realtime_pool as realtime_pool_module
 from fubon_realtime_pool import FubonRealtimeSubscriptionPool
+import repositories.fubon_accounts as fubon_accounts_repository
 
 
 class FakeManager:
@@ -60,6 +63,107 @@ class FakeDb:
     async def create_notification(self, payload):
         self.notifications.append(payload)
         return payload
+
+
+class WarmupManager(FakeManager):
+    def __init__(self, account_id, *, release=None, fail=False):
+        super().__init__(account_id)
+        self.connected = False
+        self.release = release
+        self.fail = fail
+        self.init_calls = []
+        self.stock_started = 0
+        self.futopt_started = 0
+
+    async def _init_with_account(self, account, _repo):
+        self.init_calls.append(account["id"])
+        if self.release is not None:
+            await self.release.wait()
+        if self.fail:
+            raise RuntimeError("account login failed")
+        self.connected = True
+        return True
+
+    def start_ws_stock(self):
+        self.stock_started += 1
+
+    def start_ws_futopt(self):
+        self.futopt_started += 1
+
+
+class WarmupDb(FakeDb):
+    async def get_watchlist_groups(self):
+        return []
+
+
+class WarmupRepo:
+    accounts = []
+
+    def __init__(self, _db):
+        pass
+
+    async def list_enabled_accounts_with_secrets(self):
+        return list(self.accounts)
+
+
+@pytest.mark.anyio
+async def test_background_warmup_does_not_block_application_readiness(monkeypatch):
+    release = asyncio.Event()
+    primary = WarmupManager(1, release=release)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    WarmupRepo.accounts = [{"id": 1, "is_active": True, "is_enabled": True}]
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", WarmupRepo)
+
+    task = pool.start_background_warmup(WarmupDb())
+    assert pool.get_warmup_status()["state"] == "scheduled"
+    await asyncio.sleep(0)
+    assert pool.get_warmup_status()["state"] == "running"
+    assert task.done() is False
+
+    release.set()
+    assert await task is True
+    status = pool.get_warmup_status()
+    assert status["state"] == "ready"
+    assert status["connected_account_count"] == 1
+    assert primary.stock_started == 1
+    assert primary.futopt_started == 1
+
+
+@pytest.mark.anyio
+async def test_account_warmup_failure_does_not_cancel_remaining_accounts(monkeypatch):
+    primary = WarmupManager(1, fail=True)
+    secondary = WarmupManager(2)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    WarmupRepo.accounts = [
+        {"id": 1, "is_active": True, "is_enabled": True},
+        {"id": 2, "is_active": False, "is_enabled": True},
+    ]
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", WarmupRepo)
+    monkeypatch.setattr(realtime_pool_module, "FubonSDKManager", lambda: secondary)
+
+    connected = await pool.init_from_db(WarmupDb())
+
+    assert connected is True
+    assert primary.connected is False
+    assert secondary.connected is True
+    assert secondary.stock_started == 1
+    assert secondary.futopt_started == 1
+
+
+@pytest.mark.anyio
+async def test_async_shutdown_cancels_incomplete_provider_warmup(monkeypatch):
+    release = asyncio.Event()
+    primary = WarmupManager(1, release=release)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    WarmupRepo.accounts = [{"id": 1, "is_active": True, "is_enabled": True}]
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", WarmupRepo)
+
+    task = pool.start_background_warmup(WarmupDb())
+    await asyncio.sleep(0)
+    await pool.shutdown_async()
+
+    assert task.done() is True
+    assert pool.get_warmup_status()["state"] == "stopped"
 
 
 @pytest.mark.anyio

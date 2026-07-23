@@ -73,13 +73,30 @@ async def get_fubon_accounts_status():
     repo = FubonAccountRepository(db)
     accounts = await repo.list_statuses()
     runtime = fubon_realtime_pool.get_account_runtime_statuses()
+    get_warmup_status = getattr(fubon_realtime_pool, "get_warmup_status", None)
+    warmup = get_warmup_status() if callable(get_warmup_status) else {
+        "state": "unconfigured",
+        "configured_account_count": len(accounts),
+        "connected_account_count": 0,
+        "complete": True,
+    }
     for account in accounts:
         account.update(runtime.get(int(account.get("id") or 0), {}))
+        if (
+            warmup.get("state") in {"scheduled", "running"}
+            and account.get("is_enabled")
+            and not account.get("realtime_connected")
+        ):
+            account["connection_status"] = "connecting"
     diagnostics = {}
     get_diagnostics = getattr(fubon_realtime_pool, "get_ws_diagnostics", None)
     if callable(get_diagnostics):
         diagnostics = get_diagnostics()
-    return redact_sensitive_data({"accounts": accounts, "realtime_diagnostics": diagnostics})
+    return redact_sensitive_data({
+        "accounts": accounts,
+        "realtime_diagnostics": diagnostics,
+        "warmup": warmup,
+    })
 
 
 @router.put("/fubon-accounts/{account_id}")

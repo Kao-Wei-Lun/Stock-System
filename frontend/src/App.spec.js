@@ -374,6 +374,7 @@ const dashboardMock = {
 
 const fubonWorkspaceStatusMock = {
   fubonStatus: ref("unconfigured"),
+  fubonProgress: ref({ state: "unconfigured", connected: 0, configured: 0 }),
   showFubonOnboardingBanner: ref(false),
   dismissFubonOnboardingBanner: noop,
 };
@@ -391,6 +392,7 @@ import App from "./App.vue";
 describe("App", () => {
   beforeEach(() => {
     fubonWorkspaceStatusMock.fubonStatus.value = "unconfigured";
+    fubonWorkspaceStatusMock.fubonProgress.value = { state: "unconfigured", connected: 0, configured: 0 };
     fubonWorkspaceStatusMock.showFubonOnboardingBanner.value = false;
     fubonWorkspaceStatusMock.dismissFubonOnboardingBanner = vi.fn();
     dashboardMock.bootstrapWorkspace = vi.fn().mockResolvedValue([]);

@@ -499,19 +499,23 @@ async def lifespan(app: FastAPI):
         MARKET_OVERVIEW_GROUP_NAME, MARKET_OVERVIEW_TICKERS, sort_order=999,
     )
     if getattr(db, "_pool", None) is not None:
-        await fubon_realtime_pool.init_from_db(db)
-        await fubon_realtime_pool.sync_watchlist_from_db(db)
+        # Database-backed screens are ready before external providers finish
+        # their multi-account login sequence. The pool exposes warmup progress
+        # through readiness and settings APIs while initialization continues.
+        fubon_realtime_pool.start_background_warmup(db)
     background_scheduler.start()
-    yield
-    await background_scheduler.shutdown()
-    await quote_persistence_buffer.shutdown()
-    await futopt_refresh_coordinator.shutdown()
-    await assets.shutdown()
-    await backtest_workload_executor.shutdown()
-    fubon_realtime_pool.shutdown()
-    fubon_manager.shutdown()
-    await db.close()
-    log.info("QuantVision Pro backend stopped")
+    try:
+        yield
+    finally:
+        await background_scheduler.shutdown()
+        await quote_persistence_buffer.shutdown()
+        await futopt_refresh_coordinator.shutdown()
+        await assets.shutdown()
+        await backtest_workload_executor.shutdown()
+        await fubon_realtime_pool.shutdown_async()
+        fubon_manager.shutdown()
+        await db.close()
+        log.info("QuantVision Pro backend stopped")
 
 
 app = FastAPI(title="QuantVision Pro API", version="1.0.0", lifespan=lifespan)
@@ -629,6 +633,7 @@ system.configure(
     quote_persistence_buffer=quote_persistence_buffer,
     backtest_workload_executor=backtest_workload_executor,
     asset_quote_status_provider=assets.performance_status,
+    provider_warmup_status_provider=fubon_realtime_pool.get_warmup_status,
 )
 
 app.include_router(watchlist.router)

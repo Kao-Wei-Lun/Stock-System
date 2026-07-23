@@ -148,15 +148,41 @@ class DataQualityService:
         ) if self.fubon_pool is not None else {"connected": False}
         fubon_error = fubon_error or fubon_connection.get("error")
         fubon_connected = bool(fubon_connection.get("connected"))
-        fubon_state = "error" if fubon_error else ("healthy" if fubon_connected else "warning")
+        warmup = self._safe_sync(
+            self.fubon_pool.get_warmup_status,
+            fallback={"state": "unknown", "error": "warmup_status_failed"},
+        ) if self.fubon_pool is not None and hasattr(self.fubon_pool, "get_warmup_status") else {
+            "state": "unconfigured",
+            "configured_account_count": len(fubon_statuses),
+            "connected_account_count": connected_accounts,
+        }
+        warmup_state = str(warmup.get("state") or "unknown")
+        configured_accounts = int(warmup.get("configured_account_count") or len(fubon_statuses))
+        all_configured_connected = configured_accounts > 0 and connected_accounts >= configured_accounts
+        if fubon_error:
+            fubon_state = "error"
+            fubon_label = "富邦行情狀態無法讀取"
+        elif warmup_state in {"scheduled", "running"}:
+            fubon_state = "warning"
+            fubon_label = "富邦行情帳號連線中"
+        elif configured_accounts == 0:
+            fubon_state = "idle"
+            fubon_label = "尚未設定富邦行情帳號"
+        elif all_configured_connected:
+            fubon_state = "healthy"
+            fubon_label = "富邦行情已連線"
+        else:
+            fubon_state = "warning"
+            fubon_label = "富邦行情部分帳號未連線" if fubon_connected else "富邦行情未連線"
         components["fubon"] = _component(
             fubon_state,
-            "富邦行情狀態無法讀取" if fubon_error else ("富邦行情已連線" if fubon_connected else "富邦行情未連線"),
+            fubon_label,
             connected=fubon_connected,
-            account_count=len(fubon_statuses),
+            account_count=configured_accounts,
             connected_account_count=connected_accounts,
             reconnect_attempts=reconnect_attempts,
             accounts=fubon_statuses,
+            warmup=warmup,
             error=fubon_error,
         )
 

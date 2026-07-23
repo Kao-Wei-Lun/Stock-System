@@ -22,6 +22,7 @@ _DATA_QUALITY_SERVICE = None
 _QUOTE_PERSISTENCE_BUFFER = None
 _BACKTEST_WORKLOAD_EXECUTOR = None
 _ASSET_QUOTE_STATUS_PROVIDER = None
+_PROVIDER_WARMUP_STATUS_PROVIDER = None
 
 router = APIRouter(tags=["system"])
 
@@ -36,9 +37,11 @@ def configure(
     quote_persistence_buffer=None,
     backtest_workload_executor=None,
     asset_quote_status_provider=None,
+    provider_warmup_status_provider=None,
 ):
     global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
     global _QUOTE_PERSISTENCE_BUFFER, _BACKTEST_WORKLOAD_EXECUTOR, _ASSET_QUOTE_STATUS_PROVIDER
+    global _PROVIDER_WARMUP_STATUS_PROVIDER
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
@@ -47,6 +50,7 @@ def configure(
     _QUOTE_PERSISTENCE_BUFFER = quote_persistence_buffer
     _BACKTEST_WORKLOAD_EXECUTOR = backtest_workload_executor
     _ASSET_QUOTE_STATUS_PROVIDER = asset_quote_status_provider
+    _PROVIDER_WARMUP_STATUS_PROVIDER = provider_warmup_status_provider
 
 
 def _frontend_ready() -> bool:
@@ -74,10 +78,27 @@ async def readiness():
         if _DATABASE is not None and hasattr(_DATABASE, "health_check")
         else {"connected": False, "latency_ms": None, "error": "database_unconfigured"}
     )
-    ready = bool(database_health.get("connected"))
+    frontend_health = {
+        "available": _frontend_ready(),
+        "mode": "production_spa",
+    }
+    provider_warmup = (
+        _PROVIDER_WARMUP_STATUS_PROVIDER()
+        if callable(_PROVIDER_WARMUP_STATUS_PROVIDER)
+        else {"state": "unconfigured", "complete": True}
+    )
+    ready = bool(database_health.get("connected")) and bool(frontend_health["available"])
+    provider_state = str(provider_warmup.get("state") or "unconfigured")
+    degraded = ready and provider_state in {"scheduled", "running", "failed", "cancelled"}
     payload = {
-        "status": "ready" if ready else "not_ready",
-        "components": {"database": database_health},
+        "status": "ready_degraded" if degraded else ("ready" if ready else "not_ready"),
+        "ready": ready,
+        "degraded": degraded,
+        "components": {
+            "database": database_health,
+            "frontend": frontend_health,
+            "provider_warmup": provider_warmup,
+        },
         "time": datetime.now(timezone.utc).isoformat(),
     }
     return JSONResponse(payload, status_code=200 if ready else 503)

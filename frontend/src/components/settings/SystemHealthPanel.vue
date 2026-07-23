@@ -139,6 +139,7 @@ function componentMetrics(key, item) {
     ],
     fubon: [
       { label: "已連線帳號", value: `${item.connected_account_count || 0} / ${item.account_count || 0}` },
+      { label: "暖機狀態", value: warmupLabel(item.warmup?.state) },
       { label: "重連嘗試", value: `${item.reconnect_attempts || 0}` },
     ],
     watchlist: [
@@ -152,6 +153,19 @@ function componentMetrics(key, item) {
     ],
   };
   return metrics[key] || [];
+}
+
+function warmupLabel(value) {
+  return {
+    idle: "待命",
+    scheduled: "排程中",
+    running: "連線中",
+    ready: "完成",
+    failed: "失敗",
+    cancelled: "已取消",
+    stopped: "已停止",
+    unconfigured: "未設定",
+  }[value] || "—";
 }
 
 function freshnessLabel(item) {

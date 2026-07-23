@@ -85,7 +85,7 @@ Invoke-GateStep "backtest_isolation" {
 if ($IncludeLiveChecks) {
     Invoke-GateStep "backend_ready" {
         $ready = Invoke-RestMethod -Uri "$($BaseUrl.TrimEnd('/'))/api/ready" -TimeoutSec 10
-        if ($ready.status -ne "ready") { throw "Backend is not ready." }
+        if ($ready.status -notin @("ready", "ready_degraded")) { throw "Backend is not ready." }
     }
     Invoke-GateStep "terminal_http_benchmark" {
         & (Join-Path $PSScriptRoot "benchmark-terminal.ps1") -BaseUrl $BaseUrl -ColdRuns 3 -WarmRuns 5 | Out-Null

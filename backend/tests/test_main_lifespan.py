@@ -56,3 +56,52 @@ def test_router_lifespan_preserves_startup_failures(monkeypatch):
 
     assert sent_messages[0]["type"] == "lifespan.startup.failed"
     assert "RuntimeError: boom" in sent_messages[0]["message"]
+
+
+def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeypatch):
+    calls = []
+
+    async def async_call(name):
+        calls.append(name)
+
+    async def fake_init_db():
+        calls.append("init_db")
+
+    monkeypatch.setattr(main, "validate_runtime_environment", lambda: calls.append("validate"))
+    monkeypatch.setattr(main, "init_db", fake_init_db)
+    monkeypatch.setattr(main.backtest_workload_executor, "startup", lambda: calls.append("backtest_start"))
+    monkeypatch.setattr(main.futopt_refresh_coordinator, "startup", lambda: calls.append("refresh_start"))
+    monkeypatch.setattr(main.db, "_pool", object())
+    monkeypatch.setattr(
+        main.db,
+        "ensure_default_watchlist",
+        lambda *_args, **_kwargs: async_call("default_watchlist"),
+    )
+    monkeypatch.setattr(
+        main.db,
+        "ensure_watchlist_group_items",
+        lambda *_args, **_kwargs: async_call("market_watchlist"),
+    )
+    monkeypatch.setattr(
+        main.fubon_realtime_pool,
+        "start_background_warmup",
+        lambda _db: calls.append("warmup_scheduled"),
+    )
+    monkeypatch.setattr(main.background_scheduler, "start", lambda: calls.append("scheduler_start"))
+    monkeypatch.setattr(main.background_scheduler, "shutdown", lambda: async_call("scheduler_stop"))
+    monkeypatch.setattr(main.quote_persistence_buffer, "shutdown", lambda: async_call("quote_stop"))
+    monkeypatch.setattr(main.futopt_refresh_coordinator, "shutdown", lambda: async_call("refresh_stop"))
+    monkeypatch.setattr(main.assets, "shutdown", lambda: async_call("assets_stop"))
+    monkeypatch.setattr(main.backtest_workload_executor, "shutdown", lambda: async_call("backtest_stop"))
+    monkeypatch.setattr(main.fubon_realtime_pool, "shutdown_async", lambda: async_call("warmup_stop"))
+    monkeypatch.setattr(main.fubon_manager, "shutdown", lambda: calls.append("manager_stop"))
+    monkeypatch.setattr(main.db, "close", lambda: async_call("db_stop"))
+
+    async def run():
+        async with main.lifespan(main.app):
+            calls.append("inside")
+
+    asyncio.run(run())
+
+    assert calls.index("warmup_scheduled") < calls.index("scheduler_start") < calls.index("inside")
+    assert calls[-3:] == ["warmup_stop", "manager_stop", "db_stop"]

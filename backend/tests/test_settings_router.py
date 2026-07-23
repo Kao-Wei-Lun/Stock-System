@@ -177,6 +177,16 @@ def test_get_fubon_accounts_status_merges_runtime_state(client, monkeypatch):
         "get_ws_diagnostics",
         lambda: {"TMFE6": {"last_channel": "books", "channels": {"books": {"count": 1}}}},
     )
+    monkeypatch.setattr(
+        providers.fubon_realtime_pool,
+        "get_warmup_status",
+        lambda: {
+            "state": "ready",
+            "configured_account_count": 1,
+            "connected_account_count": 1,
+            "complete": True,
+        },
+    )
 
     response = client.get("/api/settings/fubon-accounts/status")
 
@@ -186,6 +196,7 @@ def test_get_fubon_accounts_status_merges_runtime_state(client, monkeypatch):
     assert payload["accounts"][0]["realtime_assigned_count"] == 2
     assert payload["accounts"][0]["realtime_connected"] is True
     assert payload["realtime_diagnostics"]["TMFE6"]["last_channel"] == "books"
+    assert payload["warmup"]["state"] == "ready"
 
 
 def test_fubon_status_endpoint_redacts_nested_runtime_credentials(client, monkeypatch):

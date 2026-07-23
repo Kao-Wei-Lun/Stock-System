@@ -31,12 +31,21 @@ def test_readiness_endpoint_reports_database_health(client, monkeypatch):
         return {"connected": True, "latency_ms": 1.25, "error": None}
 
     monkeypatch.setattr(main.db, "health_check", healthy_database)
+    monkeypatch.setattr(main.system, "_frontend_ready", lambda: True)
+    monkeypatch.setattr(
+        main.system,
+        "_PROVIDER_WARMUP_STATUS_PROVIDER",
+        lambda: {"state": "ready", "complete": True, "connected_account_count": 1},
+    )
 
     response = client.get("/api/ready")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    assert response.json()["ready"] is True
+    assert response.json()["degraded"] is False
     assert response.json()["components"]["database"]["connected"] is True
+    assert response.json()["components"]["frontend"]["available"] is True
 
 
 def test_readiness_endpoint_returns_503_when_database_is_unavailable(client, monkeypatch):
@@ -44,12 +53,52 @@ def test_readiness_endpoint_returns_503_when_database_is_unavailable(client, mon
         return {"connected": False, "latency_ms": None, "error": "pool_not_initialized"}
 
     monkeypatch.setattr(main.db, "health_check", unhealthy_database)
+    monkeypatch.setattr(main.system, "_frontend_ready", lambda: True)
 
     response = client.get("/api/ready")
 
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
     assert response.json()["components"]["database"]["error"] == "pool_not_initialized"
+
+
+def test_readiness_is_degraded_but_available_while_provider_warms_up(client, monkeypatch):
+    async def healthy_database():
+        return {"connected": True, "latency_ms": 1.0, "error": None}
+
+    monkeypatch.setattr(main.db, "health_check", healthy_database)
+    monkeypatch.setattr(main.system, "_frontend_ready", lambda: True)
+    monkeypatch.setattr(
+        main.system,
+        "_PROVIDER_WARMUP_STATUS_PROVIDER",
+        lambda: {
+            "state": "running",
+            "complete": False,
+            "configured_account_count": 5,
+            "connected_account_count": 2,
+        },
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready_degraded"
+    assert response.json()["ready"] is True
+    assert response.json()["degraded"] is True
+
+
+def test_readiness_requires_production_frontend_artifact(client, monkeypatch):
+    async def healthy_database():
+        return {"connected": True, "latency_ms": 1.0, "error": None}
+
+    monkeypatch.setattr(main.db, "health_check", healthy_database)
+    monkeypatch.setattr(main.system, "_frontend_ready", lambda: False)
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["components"]["frontend"]["available"] is False
 
 
 def test_data_quality_endpoint_returns_unified_snapshot(client, monkeypatch):

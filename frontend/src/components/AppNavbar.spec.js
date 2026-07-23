@@ -70,6 +70,18 @@ describe("AppNavbar", () => {
     expect(wrapper.text()).toContain("富邦即時");
   });
 
+  it("shows background account warmup progress without blocking navigation", () => {
+    const wrapper = mount(AppNavbar, {
+      props: createProps({
+        fubonStatus: "connecting",
+        fubonProgress: { connected: 2, configured: 5 },
+      }),
+    });
+
+    expect(wrapper.find(".fubon-badge").classes()).toContain("connecting");
+    expect(wrapper.text()).toContain("連線中 2/5");
+  });
+
   it("shows futopt search result tags in the navbar dropdown", () => {
     const wrapper = mount(AppNavbar, {
       props: createProps({
