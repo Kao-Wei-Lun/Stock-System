@@ -1,11 +1,15 @@
 import { computed, ref } from "vue";
-import { mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChartWorkspace from "./ChartWorkspace.vue";
 
+const engineCalls = vi.hoisted(() => ({ legacy: 0, lwc: 0, legacyDispose: 0, lwcDispose: 0 }));
+
 vi.mock("../composables/useChartEngine", () => ({
-  useChartEngine: () => ({
+  useChartEngine: () => {
+    engineCalls.legacy += 1;
+    return ({
     chartMode: ref("candles"),
     priceScaleMode: ref("linear"),
     visibleData: ref([
@@ -52,11 +56,16 @@ vi.mock("../composables/useChartEngine", () => ({
     onWheel: vi.fn(),
     onChartClick: vi.fn(),
     onDoubleClick: vi.fn(),
-  }),
+    activate: vi.fn(),
+    dispose: () => { engineCalls.legacyDispose += 1; },
+    });
+  },
 }));
 
 vi.mock("../composables/useLWCChart", () => ({
-  useLWCChart: () => ({
+  useLWCChart: () => {
+    engineCalls.lwc += 1;
+    return ({
     chartMode: ref("candles"),
     priceScaleMode: ref("linear"),
     visibleData: ref([
@@ -103,7 +112,10 @@ vi.mock("../composables/useLWCChart", () => ({
     onWheel: vi.fn(),
     onChartClick: vi.fn(),
     onDoubleClick: vi.fn(),
-  }),
+    activate: vi.fn(),
+    dispose: () => { engineCalls.lwcDispose += 1; },
+    });
+  },
 }));
 
 function createProps() {
@@ -179,6 +191,45 @@ function createProps() {
 }
 
 describe("ChartWorkspace", () => {
+  beforeEach(() => {
+    engineCalls.legacy = 0;
+    engineCalls.lwc = 0;
+    engineCalls.legacyDispose = 0;
+    engineCalls.lwcDispose = 0;
+  });
+
+  it("reuses engine instances across repeated switches and disposes on unmount", async () => {
+    const wrapper = mount(ChartWorkspace, { props: createProps() });
+    await flushPromises();
+    for (let index = 0; index < 20; index += 1) {
+      await wrapper.setProps({ engineMode: index % 2 === 0 ? "lwc" : "legacy" });
+      await flushPromises();
+    }
+
+    expect(engineCalls.legacy).toBe(1);
+    expect(engineCalls.lwc).toBe(1);
+    wrapper.unmount();
+    expect(engineCalls.legacyDispose).toBeGreaterThan(0);
+    expect(engineCalls.lwcDispose).toBeGreaterThan(0);
+  });
+
+  it("loads only the selected engine during initial render", async () => {
+    const legacyWrapper = mount(ChartWorkspace, { props: createProps() });
+    await flushPromises();
+    expect(engineCalls.legacy).toBe(1);
+    expect(engineCalls.lwc).toBe(0);
+    legacyWrapper.unmount();
+
+    engineCalls.legacy = 0;
+    const lwcWrapper = mount(ChartWorkspace, {
+      props: { ...createProps(), engineMode: "lwc" },
+    });
+    await flushPromises();
+    expect(engineCalls.legacy).toBe(0);
+    expect(engineCalls.lwc).toBe(1);
+    lwcWrapper.unmount();
+  });
+
   it("renders quote metadata chips", () => {
     const wrapper = mount(ChartWorkspace, { props: createProps() });
 

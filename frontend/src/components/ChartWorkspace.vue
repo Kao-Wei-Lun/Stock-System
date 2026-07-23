@@ -198,7 +198,6 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
 import { normalizeTicker } from "../composables/useDashboard";
-import { useLWCChart } from "../composables/useLWCChart";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
@@ -327,13 +326,7 @@ const obvCanvasTarget = { target: obvCanvas };
 const adxCanvasTarget = { target: adxCanvas };
 const cmfCanvasTarget = { target: cmfCanvas };
 
-const lwcChart = useLWCChart({
-  chartContainer: chartContainerRef,
-  props,
-  emit,
-});
-
-function createIdleChartController() {
+function createIdleChartController(label = "圖表引擎載入中...") {
   const chartMode = ref("candles");
   const priceScaleMode = ref("linear");
   const noop = () => {};
@@ -350,7 +343,7 @@ function createIdleChartController() {
     zoomLabel: computed(() => "縮放 —"),
     yScaleLabel: computed(() => "Y 自動"),
     priceScaleModeLabel: computed(() => "線性"),
-    interactionHint: computed(() => "Legacy 引擎載入中..."),
+    interactionHint: computed(() => label),
     canPanLeft: computed(() => false),
     canPanRight: computed(() => false),
     canZoomIn: computed(() => false),
@@ -418,6 +411,9 @@ function createLegacyChartOptions() {
 const legacyChart = shallowRef(createIdleChartController());
 const legacyChartLoaded = ref(false);
 let legacyChartLoadPromise = null;
+const lwcChart = shallowRef(createIdleChartController("LWC 引擎載入中..."));
+const lwcChartLoaded = ref(false);
+let lwcChartLoadPromise = null;
 
 async function loadLegacyChart() {
   if (legacyChartLoaded.value) return legacyChart.value;
@@ -439,8 +435,28 @@ async function loadLegacyChart() {
   return legacyChartLoadPromise;
 }
 
+async function loadLwcChart() {
+  if (lwcChartLoaded.value) return lwcChart.value;
+  if (!lwcChartLoadPromise) {
+    const pendingChartMode = lwcChart.value.chartMode.value;
+    const pendingPriceScaleMode = lwcChart.value.priceScaleMode.value;
+    lwcChartLoadPromise = import("../composables/useLWCChart").then(({ useLWCChart }) => {
+      const createController = () => useLWCChart({ chartContainer: chartContainerRef, props, emit });
+      const controller = lifecycleTarget?.scope?.active
+        ? lifecycleTarget.scope.run(createController)
+        : createController();
+      controller.setChartMode?.(pendingChartMode);
+      controller.setPriceScaleMode?.(pendingPriceScaleMode);
+      lwcChart.value = controller;
+      lwcChartLoaded.value = true;
+      return controller;
+    });
+  }
+  return lwcChartLoadPromise;
+}
+
 const isLwcMode = computed(() => props.engineMode === "lwc");
-const activeChartController = computed(() => (isLwcMode.value ? lwcChart : legacyChart.value));
+const activeChartController = computed(() => (isLwcMode.value ? lwcChart.value : legacyChart.value));
 
 const chartMode = computed(() => activeChartController.value.chartMode.value);
 const priceScaleMode = computed(() => activeChartController.value.priceScaleMode.value);
@@ -867,7 +883,8 @@ watch(
   [() => props.loading, () => props.ohlcData.length, () => props.currentTicker],
   async ([loading, rowCount, ticker]) => {
     if (loading || rowCount < 1) return;
-    if (!isLwcMode.value) await loadLegacyChart();
+    if (isLwcMode.value) await loadLwcChart();
+    else await loadLegacyChart();
     await nextTick();
     const schedule = globalThis.requestAnimationFrame || ((callback) => globalThis.setTimeout(callback, 0));
     chartPaintFrame = schedule(() => {
@@ -887,10 +904,12 @@ watch(
 watch(
   () => props.engineMode,
   async (nextMode, previousMode) => {
-    const previousController = previousMode === "lwc" ? lwcChart : legacyChart.value;
-    const nextController = nextMode === "lwc" ? lwcChart : await loadLegacyChart();
+    const previousController = previousMode === "lwc" ? lwcChart.value : legacyChart.value;
+    const nextController = nextMode === "lwc" ? await loadLwcChart() : await loadLegacyChart();
     nextController.setChartMode(previousController.chartMode.value);
     nextController.setPriceScaleMode(previousController.priceScaleMode.value);
+    nextController.activate?.();
+    previousController.dispose?.();
     emit("hide-crosshair");
     nextTick(() => {
       nextController.refreshLayout?.();
@@ -910,6 +929,10 @@ onMounted(() => {
         window.dispatchEvent(new Event("resize"));
       });
     });
+  } else {
+    void loadLwcChart().then((controller) => {
+      nextTick(() => controller.refreshLayout?.());
+    });
   }
 });
 
@@ -921,6 +944,8 @@ onBeforeUnmount(() => {
     chartPaintFrame = null;
   }
   window.removeEventListener("keydown", handleKeydown);
+  legacyChart.value.dispose?.();
+  lwcChart.value.dispose?.();
 });
 </script>
 

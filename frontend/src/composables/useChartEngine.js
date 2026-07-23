@@ -3620,6 +3620,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     onWheel,
     onChartClick,
     onDoubleClick,
+    activate: mountEngine,
     dispose: unmountEngine,
   };
 }

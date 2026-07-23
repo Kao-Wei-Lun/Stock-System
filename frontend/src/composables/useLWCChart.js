@@ -158,7 +158,6 @@ export function useLWCChart({
   const priceScaleMode = ref("linear");
   const visibleLogicalRange = ref(null);
   let resizeFrameId = null;
-  let resizeTimeoutId = null;
 
   const chartRows = computed(() => (
     Array.isArray(props.ohlcData)
@@ -487,11 +486,7 @@ export function useLWCChart({
     if (resizeFrameId != null && typeof window !== "undefined") {
       window.cancelAnimationFrame(resizeFrameId);
     }
-    if (resizeTimeoutId != null && typeof window !== "undefined") {
-      window.clearTimeout(resizeTimeoutId);
-    }
     resizeFrameId = null;
-    resizeTimeoutId = null;
   }
 
   function scheduleResizeChart() {
@@ -505,11 +500,6 @@ export function useLWCChart({
         drawingsBridge.scheduleRender();
         resizeFrameId = null;
       });
-      resizeTimeoutId = window.setTimeout(() => {
-        resizeChart();
-        drawingsBridge.scheduleRender();
-        resizeTimeoutId = null;
-      }, 120);
     });
   }
 
@@ -827,7 +817,7 @@ export function useLWCChart({
     },
   );
 
-  onBeforeUnmount(() => {
+  function dispose() {
     clearScheduledResize();
     if (!resizeObserver.value) {
       window.removeEventListener("resize", scheduleResizeChart);
@@ -838,7 +828,9 @@ export function useLWCChart({
     }
     drawingsBridge.cleanupOverlay();
     destroyChart();
-  });
+  }
+
+  onBeforeUnmount(dispose);
 
   return {
     chartMode,
@@ -883,5 +875,7 @@ export function useLWCChart({
     onWheel,
     onChartClick,
     onDoubleClick,
+    activate: initializeChart,
+    dispose,
   };
 }
