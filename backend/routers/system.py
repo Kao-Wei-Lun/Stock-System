@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from data_fetcher import normalize_ticker
 from providers import ws_manager
@@ -32,7 +32,16 @@ def configure(*, frontend_dev_url: str, frontend_dist_dir: Path, scheduler=None,
 
 
 def _frontend_ready() -> bool:
-    return _FRONTEND_DIST_DIR is not None and _FRONTEND_DIST_DIR.exists()
+    return _FRONTEND_DIST_DIR is not None and (_FRONTEND_DIST_DIR / "index.html").is_file()
+
+
+def _frontend_missing_response():
+    return HTMLResponse(
+        "<h1>QuantVision 前端尚未建置</h1>"
+        "<p>請先執行 <code>scripts\\build-frontend.bat</code>，再重新啟動系統。</p>",
+        status_code=503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/api/health")
@@ -101,11 +110,11 @@ async def websocket_endpoint(websocket: WebSocket):
 async def root():
     if _frontend_ready():
         return RedirectResponse(url="/app/", status_code=307)
-    return RedirectResponse(url=_FRONTEND_DEV_URL, status_code=307)
+    return _frontend_missing_response()
 
 
 @router.get("/app")
 async def frontend_entry():
     if _frontend_ready():
         return RedirectResponse(url="/app/", status_code=307)
-    return RedirectResponse(url=_FRONTEND_DEV_URL, status_code=307)
+    return _frontend_missing_response()

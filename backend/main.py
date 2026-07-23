@@ -20,7 +20,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from background_tasks import BackgroundTaskService
 from data_quality_service import DataQualityService
@@ -36,6 +35,7 @@ from env_validation import (
     validate_runtime_environment,
 )
 from futopt_history_service import FutoptCandleRecorder, FutoptRefreshCoordinator
+from frontend_static import SPAStaticFiles
 from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
 from performance_timing import RequestTimingMiddleware
@@ -540,7 +540,7 @@ app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 if FRONTEND_DIST_DIR.exists():
-    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
+    app.mount("/app", SPAStaticFiles(directory=FRONTEND_DIST_DIR), name="frontend")
 
 # ─── Configure router deps & include ────────────────────────
 

@@ -7,12 +7,15 @@
 ```text
 Stock-System/
 ├── backend/                # FastAPI API + WebSocket + MySQL data layer
-├── frontend/               # Vue 3 + Vite frontend service
+├── frontend/               # Vue 3 + Vite（production 由 FastAPI 提供 dist）
 │   ├── public/
 │   │   └── legacy-dashboard.html
 │   └── src/
 ├── scripts/
-│   ├── start.bat
+│   ├── start.bat           # 日常 production 啟動（不安裝套件、不啟動 Node）
+│   ├── start-dev.bat       # 開發模式（FastAPI + Vite HMR）
+│   ├── setup.bat           # 明確安裝依賴
+│   ├── build-frontend.bat  # 建置 production 前端
 │   └── start.sh
 ├── docker-compose.yml
 ├── start.bat              # Windows wrapper; use "start.bat docker" for Docker
@@ -120,6 +123,28 @@ DISCORD_WEBHOOK_URL=
 
 Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook URL。
 
+## Windows 啟動方式
+
+首次安裝或套件更新時執行：
+
+```bat
+scripts\setup.bat
+```
+
+日常使用只需執行下列指令；它只啟動 FastAPI 並開啟 `http://localhost:8001/app/`，不會執行 npm/pip 安裝，也不會啟動 Vite：
+
+```bat
+scripts\start.bat
+```
+
+只有修改前端程式並需要 HMR 時才使用：
+
+```bat
+scripts\start-dev.bat
+```
+
+前端修改後可單獨執行 `scripts\build-frontend.bat` 重建 production 檔案。
+
 ## 前端說明
 
 - 前端已改為 Vue 3 + Vite 專案，不再使用直接雙擊 `frontend/index.html` 的啟動方式
@@ -131,8 +156,9 @@ Telegram 需要同時提供 bot token 與 chat id；Discord 使用完整 webhook
 - FastAPI 提供 `/api/*` 路由與 `/ws` WebSocket
 - `/api/health` 僅表示程序存活；`/api/ready` 會實際檢查資料庫是否可用
 - 啟動時會初始化 MySQL database / tables
-- 如果 `frontend/dist` 存在，後端可從 `/app/` 提供建置後的前端
-- 若尚未 build，後端根路徑會導向開發中的前端服務 `FRONTEND_DEV_URL`
+- 後端從 `/app/` 提供 `frontend/dist`，並支援 Vue Router deep link 重新整理
+- 若 `frontend/dist/index.html` 不存在，後端會回傳 503 與明確建置提示
+- hashed JS/CSS/font 使用一年 immutable cache；HTML 使用 `no-cache`
 
 ## 常用指令
 
