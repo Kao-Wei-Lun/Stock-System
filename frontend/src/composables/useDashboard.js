@@ -6,6 +6,7 @@ import {
   normalizeIndicatorSettings,
 } from "../utils/indicatorUtils";
 import { createDashboardApi } from "../api/dashboardApi";
+import { createTerminalCache } from "../services/terminalCache";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
 import {
   buildWorkspacePayload,
@@ -437,6 +438,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const wsUrl = `${getWsBase()}/ws`;
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
   const dashboardApi = createDashboardApi({ baseUrl: apiBase });
+  const terminalCache = createTerminalCache();
   const storedPrefs = readDashboardPrefs();
   const initialTicker = normalizeTicker(routeTicker || storedPrefs.currentTicker || "AAPL");
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
@@ -528,6 +530,8 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const futoptRefreshStatus = ref("idle");
   const futoptDataStale = ref(false);
   const rawOhlcData = ref([]);
+  const klineDataOrigin = ref("loading");
+  const klineCacheSavedAt = ref(null);
   const drawings = ref([]);
   const selectedDrawingId = ref(null);
   const workspacePresets = ref([]);
@@ -928,6 +932,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   );
   let futoptFallbackInFlight = false;
   let lastFutoptQuoteOrCandleAt = 0;
+  let terminalCacheWriteTimer = null;
   let klineRequestSequence = 0;
   let klineAbortController = null;
 
@@ -1468,6 +1473,20 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     ).slice(-DEFAULT_OHLC_BUFFER_LIMIT);
   }
 
+  function scheduleTerminalSnapshotCacheWrite() {
+    if (terminalCacheWriteTimer != null) window.clearTimeout(terminalCacheWriteTimer);
+    terminalCacheWriteTimer = window.setTimeout(() => {
+      terminalCacheWriteTimer = null;
+      const savedAt = Date.now();
+      klineCacheSavedAt.value = savedAt;
+      void terminalCache.writeOhlc({
+        ticker: currentTicker.value,
+        interval: currentInterval.value,
+        rows: rawOhlcData.value,
+      });
+    }, 1500);
+  }
+
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
@@ -1478,6 +1497,8 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     }
     const mergedQuote = applyQuote(data);
     updateCurrentCandleFromQuote(mergedQuote);
+    klineDataOrigin.value = "realtime";
+    scheduleTerminalSnapshotCacheWrite();
   }
 
   function handleRealtimeBook(message) {
@@ -1525,27 +1546,43 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       futoptDataStale.value = false;
     }
     upsertRealtimeCandleRow(data);
+    klineDataOrigin.value = "realtime";
+    scheduleTerminalSnapshotCacheWrite();
+  }
+
+  function applyWatchlistPayload(payload) {
+    watchlistGroups.value = payload?.groups || [];
+    const currentUserGroups = watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME);
+    if (
+      !activeWatchGroupId.value
+      || !currentUserGroups.some((group) => group.id === activeWatchGroupId.value)
+    ) {
+      activeWatchGroupId.value = currentUserGroups[0]?.id ?? null;
+    }
+    const current = watchlist.value.find((item) => item.ticker === currentTicker.value);
+    if (current) currentName.value = current.name || current.ticker;
   }
 
   async function loadWatchlist({ compact = activeBootstrapPage.value === "terminal" } = {}) {
     watchlistLoading.value = true;
     watchlistError.value = false;
+    let cacheApplied = false;
     try {
-      const payload = compact
-        ? await dashboardApi.listWatchlistMetadata()
-        : await dashboardApi.listWatchlist();
-      watchlistGroups.value = payload.groups || [];
-      const currentUserGroups = watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME);
-      if (
-        !activeWatchGroupId.value
-        || !currentUserGroups.some((group) => group.id === activeWatchGroupId.value)
-      ) {
-        activeWatchGroupId.value = currentUserGroups[0]?.id ?? null;
+      const remoteRequest = compact
+        ? dashboardApi.listWatchlistMetadata()
+        : dashboardApi.listWatchlist();
+      if (compact) {
+        const cached = await terminalCache.readWatchlistMetadata();
+        if (cached?.payload) {
+          applyWatchlistPayload(cached.payload);
+          cacheApplied = true;
+        }
       }
-      const current = watchlist.value.find((item) => item.ticker === currentTicker.value);
-      if (current) currentName.value = current.name || current.ticker;
+      const payload = await remoteRequest;
+      applyWatchlistPayload(payload);
+      if (compact) void terminalCache.writeWatchlistMetadata(payload);
     } catch (error) {
-      watchlistError.value = true;
+      watchlistError.value = !cacheApplied;
     } finally {
       watchlistLoading.value = false;
     }
@@ -1922,6 +1959,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
 
       if (Array.isArray(ohlcPayload?.data) && ohlcPayload.data.length) {
         rawOhlcData.value = mergeOhlcBuffer(rawOhlcData.value, ohlcPayload.data);
+        klineDataOrigin.value = "database";
         futoptRefreshStatus.value = ohlcPayload.refresh_status || "refreshed";
         futoptDataStale.value = Boolean(ohlcPayload.is_stale);
       }
@@ -1974,10 +2012,12 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       klineDisplayMode.value = "day";
     }
     chartLoading.value = true;
+    klineDataOrigin.value = "loading";
     loadingMessage.value = `載入 ${normalized} K 線...`;
+    let cacheApplied = false;
     try {
-      const data = isFutopt
-        ? await dashboardApi.getFutoptOhlc(normalized, {
+      const remoteRequest = isFutopt
+        ? dashboardApi.getFutoptOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
           refreshMode: "background",
@@ -1985,13 +2025,28 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
           warmup: 250,
           signal: requestSignal,
         })
-        : await dashboardApi.getOhlc(normalized, {
+        : dashboardApi.getOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
           limit: 400,
           warmup: 250,
           signal: requestSignal,
         });
+      const cached = await terminalCache.readOhlc({ ticker: normalized, interval: resolvedInterval });
+      if (cached?.rows?.length && requestToken === klineRequestSequence) {
+        rawOhlcData.value = mergeOhlcBuffer([], cached.rows);
+        klineDataOrigin.value = "cache";
+        klineCacheSavedAt.value = cached.savedAt;
+        cacheApplied = true;
+        chartLoading.value = false;
+        markQuantVisionPerformance(QV_PERFORMANCE_MARKS.chartDataReady, {
+          ticker: normalized,
+          interval: resolvedInterval,
+          rows: rawOhlcData.value.length,
+          origin: "cache",
+        });
+      }
+      const data = await remoteRequest;
       if (requestToken !== klineRequestSequence) return;
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
@@ -2000,6 +2055,13 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       }
       dashboardRealtime.subscribeTicker(resolvedTicker);
       rawOhlcData.value = mergeOhlcBuffer([], data.data || []);
+      klineDataOrigin.value = "database";
+      klineCacheSavedAt.value = Date.now();
+      void terminalCache.writeOhlc({
+        ticker: resolvedTicker,
+        interval: resolvedInterval,
+        rows: rawOhlcData.value,
+      });
       if (isFutopt) {
         futoptRefreshStatus.value = data.refresh_status || "idle";
         futoptDataStale.value = Boolean(data.is_stale);
@@ -2011,6 +2073,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         ticker: resolvedTicker,
         interval: resolvedInterval,
         rows: rawOhlcData.value.length,
+        origin: "database",
       });
       // The persisted snapshot is already drawable; quote and comparison hydration must not keep the chart covered.
       chartLoading.value = false;
@@ -2021,7 +2084,12 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       else resetQuote();
     } catch (error) {
       if (error?.name === "AbortError" || requestToken !== klineRequestSequence) return;
-      pushNotification({ icon: "⚠️", title: "載入失敗", msg: `無法取得 ${normalized} 資料`, type: "error" });
+      pushNotification({
+        icon: "⚠️",
+        title: cacheApplied ? "後端更新失敗，暫用快取" : "載入失敗",
+        msg: `無法取得 ${normalized} 資料`,
+        type: "error",
+      });
     } finally {
       if (requestToken === klineRequestSequence) chartLoading.value = false;
     }
@@ -3047,6 +3115,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
 
   onBeforeUnmount(() => {
     if (clockTimer) clearInterval(clockTimer);
+    if (terminalCacheWriteTimer != null) window.clearTimeout(terminalCacheWriteTimer);
     watchlistPoller.stop();
     alertPoller.stop();
     futoptFallbackPoller.stop();
@@ -3091,6 +3160,9 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     loadingMessage,
     futoptRefreshStatus,
     futoptDataStale,
+    klineDataOrigin,
+    klineCacheSavedAt,
+    clearTerminalCache: terminalCache.clear,
     ohlcData,
     drawings,
     selectedDrawingId,

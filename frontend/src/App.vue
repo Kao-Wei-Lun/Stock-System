@@ -411,6 +411,8 @@
       :quote-timestamp="quote.quote_timestamp"
       :quote-synced-at="quote.synced_at"
       :quote-delayed="quote.is_delayed"
+      :kline-data-origin="klineDataOrigin"
+      :kline-cache-saved-at="klineCacheSavedAt"
       :last-update="lastUpdate"
       :clock-time="clockTime"
     />
@@ -527,6 +529,8 @@ const {
   loadingMessage,
   futoptRefreshStatus,
   futoptDataStale,
+  klineDataOrigin,
+  klineCacheSavedAt,
   ohlcData,
   drawings,
   selectedDrawingId,

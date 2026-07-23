@@ -3,7 +3,17 @@ import { defineComponent, ref } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 
-const apiState = vi.hoisted(() => ({ calls: [], futoptOhlcHandler: null }));
+const apiState = vi.hoisted(() => ({ calls: [], futoptOhlcHandler: null, cachedOhlc: null, cacheWrites: [] }));
+
+vi.mock("../services/terminalCache", () => ({
+  createTerminalCache: () => ({
+    readOhlc: () => Promise.resolve(apiState.cachedOhlc),
+    writeOhlc: (payload) => { apiState.cacheWrites.push(payload); return Promise.resolve(true); },
+    readWatchlistMetadata: () => Promise.resolve(null),
+    writeWatchlistMetadata: () => Promise.resolve(true),
+    clear: () => Promise.resolve(),
+  }),
+}));
 
 vi.mock("../api/dashboardApi", () => ({
   createDashboardApi: () => new Proxy({
@@ -80,6 +90,8 @@ describe("useDashboard route bootstrap", () => {
   beforeEach(() => {
     apiState.calls = [];
     apiState.futoptOhlcHandler = null;
+    apiState.cachedOhlc = null;
+    apiState.cacheWrites = [];
     localStorage.clear();
   });
 
@@ -158,6 +170,29 @@ describe("useDashboard route bootstrap", () => {
 
     expect(mounted.dashboard.currentTicker.value).toBe("*TMFF");
     expect(mounted.dashboard.ohlcData.value.at(-1).close).toBe(200);
+    mounted.wrapper.unmount();
+  });
+
+  it("paints a valid cache first and replaces it with the database response", async () => {
+    let resolveBackend;
+    apiState.cachedOhlc = { savedAt: 123, rows: [candle(90)] };
+    apiState.futoptOhlcHandler = () => new Promise((resolve) => { resolveBackend = resolve; });
+    const mounted = mountDashboard({
+      initialWorkspacePage: "terminal",
+      initialTicker: "*TMFF",
+    });
+    await flushPromises();
+
+    expect(mounted.dashboard.klineDataOrigin.value).toBe("cache");
+    expect(mounted.dashboard.ohlcData.value.at(-1).close).toBe(90);
+    expect(mounted.dashboard.chartLoading.value).toBe(false);
+
+    resolveBackend({ ticker: "*TMFF", data: [candle(100)], refresh_status: "not_needed" });
+    await flushPromises();
+
+    expect(mounted.dashboard.klineDataOrigin.value).toBe("database");
+    expect(mounted.dashboard.ohlcData.value.at(-1).close).toBe(100);
+    expect(apiState.cacheWrites.at(-1).rows.at(-1).close).toBe(100);
     mounted.wrapper.unmount();
   });
 });

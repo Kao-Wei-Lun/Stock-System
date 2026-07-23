@@ -9,6 +9,10 @@
     <div class="status-block">來源：<span>{{ quoteSource }}</span></div>
     <div class="status-block">模式：<span>{{ normalizedQuoteMode }}</span></div>
     <div class="status-block">
+      K線：
+      <span class="status-badge" :class="`origin-${klineDataOrigin}`">{{ klineOriginLabel }}</span>
+    </div>
+    <div class="status-block">
       狀態：
       <span class="status-badge" :class="freshnessClass">{{ freshnessDisplayLabel }}</span>
     </div>
@@ -32,6 +36,8 @@ const props = defineProps({
   quoteTimestamp: { type: String, default: null },
   quoteSyncedAt: { type: String, default: null },
   quoteDelayed: { type: Boolean, default: true },
+  klineDataOrigin: { type: String, default: "loading" },
+  klineCacheSavedAt: { type: Number, default: null },
   lastUpdate: { type: String, required: true },
   clockTime: { type: String, required: true },
 });
@@ -41,6 +47,13 @@ const normalizedQuoteMode = computed(() => {
   if (props.quoteMode === "延遲快照") return "盤後快照";
   if (props.quoteMode === "最新快照") return "即時";
   return props.quoteMode || "快照";
+});
+
+const klineOriginLabel = computed(() => {
+  if (props.klineDataOrigin === "cache") return "快取資料";
+  if (props.klineDataOrigin === "database") return "資料庫資料";
+  if (props.klineDataOrigin === "realtime") return "即時更新";
+  return "載入中";
 });
 
 const freshnessState = computed(() => {
@@ -132,5 +145,20 @@ const freshnessClass = computed(() => freshnessState.value);
 .status-badge.missing {
   color: #ff8a9d;
   background: rgba(255, 77, 106, 0.14);
+}
+
+.status-badge.origin-cache {
+  color: #ffd166;
+  background: rgba(255, 209, 102, 0.14);
+}
+
+.status-badge.origin-database {
+  color: #7be7ff;
+  background: rgba(123, 231, 255, 0.12);
+}
+
+.status-badge.origin-realtime {
+  color: var(--green);
+  background: rgba(0, 217, 163, 0.12);
 }
 </style>

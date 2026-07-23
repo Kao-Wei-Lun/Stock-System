@@ -65,4 +65,27 @@ describe("StatusBar", () => {
     expect(wrapper.text()).toContain("即時資料");
     expect(wrapper.text()).toContain("4");
   });
+
+  it.each([
+    ["cache", "快取資料"],
+    ["database", "資料庫資料"],
+    ["realtime", "即時更新"],
+  ])("shows the %s kline source", (origin, label) => {
+    const wrapper = mount(StatusBar, {
+      props: {
+        connected: true,
+        backendUrl: "http://127.0.0.1:8001",
+        latency: "15ms",
+        quoteSource: "fubon_neo",
+        quoteMode: "最新快照",
+        quoteDelayed: false,
+        klineDataOrigin: origin,
+        lastUpdate: "-",
+        clockTime: "-",
+      },
+    });
+
+    expect(wrapper.find(`.origin-${origin}`).exists()).toBe(true);
+    expect(wrapper.text()).toContain(label);
+  });
 });

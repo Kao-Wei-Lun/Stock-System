@@ -3,6 +3,10 @@ param(
     [string]$Symbol = "*TMFF",
     [string]$Period = "1d",
     [string]$Interval = "1m",
+    [ValidateRange(1, 5000)]
+    [int]$Limit = 400,
+    [ValidateRange(0, 2000)]
+    [int]$Warmup = 250,
     [ValidateRange(1, 20)]
     [int]$ColdRuns = 3,
     [ValidateRange(1, 50)]
@@ -159,7 +163,7 @@ $base = $BaseUrl.TrimEnd("/")
 $encodedSymbol = [Uri]::EscapeDataString($Symbol)
 $encodedPeriod = [Uri]::EscapeDataString($Period)
 $encodedInterval = [Uri]::EscapeDataString($Interval)
-$url = "$base/api/futopt/ohlc/$encodedSymbol`?period=$encodedPeriod&interval=$encodedInterval&refresh=false"
+$url = "$base/api/futopt/ohlc/$encodedSymbol`?period=$encodedPeriod&interval=$encodedInterval&refresh=false&limit=$Limit&warmup=$Warmup"
 
 $cold = @()
 for ($index = 1; $index -le $ColdRuns; $index++) {
@@ -183,7 +187,7 @@ $result = [ordered]@{
     schema_version = 1
     measured_at = (Get-Date).ToString("o")
     git_commit = $commit
-    request = [ordered]@{ symbol = $Symbol; period = $Period; interval = $Interval; url = $url }
+    request = [ordered]@{ symbol = $Symbol; period = $Period; interval = $Interval; limit = $Limit; warmup = $Warmup; url = $url }
     runs = [ordered]@{ cold = $cold; warm = $warm }
     summary = [ordered]@{ cold = Get-RunSummary $cold; warm = Get-RunSummary $warm }
     frontend = Get-FrontendMetrics

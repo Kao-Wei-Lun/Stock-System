@@ -1,0 +1,162 @@
+﻿{
+    "schema_version":  1,
+    "measured_at":  "2026-07-23T11:19:25.6409978+08:00",
+    "git_commit":  "bfa66a5332c8039c17eef3a89f9c32a3b3b79779",
+    "request":  {
+                    "symbol":  "*TMFF",
+                    "period":  "1d",
+                    "interval":  "1m",
+                    "limit":  400,
+                    "warmup":  250,
+                    "url":  "http://127.0.0.1:8011/api/futopt/ohlc/*TMFF?period=1d\u0026interval=1m\u0026refresh=false\u0026limit=400\u0026warmup=250"
+                },
+    "runs":  {
+                 "cold":  [
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  1,
+                                  "status":  200,
+                                  "ttfb_ms":  49.47,
+                                  "total_ms":  54.03,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=31.94",
+                                  "request_id":  "67dd51a7-6f97-44bd-bb19-38d2603e34ee"
+                              },
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  2,
+                                  "status":  200,
+                                  "ttfb_ms":  31.17,
+                                  "total_ms":  32.2,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=29.79",
+                                  "request_id":  "ed168537-f80a-4ea0-9a36-fefc2761a0c1"
+                              },
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  3,
+                                  "status":  200,
+                                  "ttfb_ms":  30.04,
+                                  "total_ms":  30.64,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=28.54",
+                                  "request_id":  "da2a0944-e8b2-4a12-8156-66aaf7fedd70"
+                              }
+                          ],
+                 "warm":  [
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  1,
+                                  "status":  200,
+                                  "ttfb_ms":  30.58,
+                                  "total_ms":  30.87,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=29.39",
+                                  "request_id":  "a707fdaf-8b14-4ccb-bc0f-3fdd27078ee0"
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  2,
+                                  "status":  200,
+                                  "ttfb_ms":  31.63,
+                                  "total_ms":  32.42,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=30.84",
+                                  "request_id":  "db939d03-5016-4e41-9673-57bbd6c356a1"
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  3,
+                                  "status":  200,
+                                  "ttfb_ms":  30.64,
+                                  "total_ms":  30.99,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=29.67",
+                                  "request_id":  "5578187c-c282-49e7-a125-e704f73b5034"
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  4,
+                                  "status":  200,
+                                  "ttfb_ms":  30.19,
+                                  "total_ms":  30.52,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=29.33",
+                                  "request_id":  "55b15042-ddfd-4b53-a952-eab80c3d72ab"
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  5,
+                                  "status":  200,
+                                  "ttfb_ms":  35.07,
+                                  "total_ms":  35.58,
+                                  "response_bytes":  76296,
+                                  "data_count":  400,
+                                  "content_encoding":  null,
+                                  "server_timing":  "total;dur=34.27",
+                                  "request_id":  "28a0f81f-5d4d-4347-81cd-03b57c96348d"
+                              }
+                          ]
+             },
+    "summary":  {
+                    "cold":  {
+                                 "count":  3,
+                                 "ttfb_ms":  {
+                                                 "median":  31.17,
+                                                 "p95":  49.47,
+                                                 "max":  49.47
+                                             },
+                                 "total_ms":  {
+                                                  "median":  32.2,
+                                                  "p95":  54.03,
+                                                  "max":  54.03
+                                              },
+                                 "response_bytes":  {
+                                                        "median":  76296,
+                                                        "p95":  76296,
+                                                        "max":  76296
+                                                    }
+                             },
+                    "warm":  {
+                                 "count":  5,
+                                 "ttfb_ms":  {
+                                                 "median":  30.64,
+                                                 "p95":  35.07,
+                                                 "max":  35.07
+                                             },
+                                 "total_ms":  {
+                                                  "median":  30.99,
+                                                  "p95":  35.58,
+                                                  "max":  35.58
+                                              },
+                                 "response_bytes":  {
+                                                        "median":  76296,
+                                                        "p95":  76296,
+                                                        "max":  76296
+                                                    }
+                             }
+                },
+    "frontend":  {
+                     "source":  "not_collected",
+                     "marks":  {
+                                   "qv:app-mounted":  null,
+                                   "qv:terminal-visible":  null,
+                                   "qv:chart-data-ready":  null,
+                                   "qv:chart-painted":  null
+                               }
+                 }
+}
