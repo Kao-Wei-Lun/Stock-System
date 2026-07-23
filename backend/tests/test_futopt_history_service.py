@@ -31,9 +31,16 @@ class FakeDb:
             ("TMF", "1m"): [_row("2026-07-22T08:45:00+08:00", 100)],
         }
         self.resolutions = []
+        self.query_calls = []
 
-    async def get_ohlcv(self, ticker, period="1d", interval="1m"):
-        return list(self.rows.get((ticker, interval), []))
+    async def get_ohlcv(self, ticker, period="1d", interval="1m", **options):
+        self.query_calls.append((ticker, period, interval, options))
+        rows = list(self.rows.get((ticker, interval), []))
+        if options.get("since"):
+            rows = [row for row in rows if str(row["date"]) > str(options["since"])]
+        if options.get("limit") is not None:
+            rows = rows[-int(options["limit"]):]
+        return rows
 
     async def upsert_ohlcv_batch(self, ticker, rows, interval="1m"):
         current = {str(item["date"]): dict(item) for item in self.rows.get((ticker, interval), [])}
@@ -130,6 +137,51 @@ async def test_db_first_loader_persists_refresh_then_returns_merged_database_row
     assert payload["storage_tickers"] == ["TMF", "TMFH6"]
     assert [item["close"] for item in payload["data"]] == [101, 102]
     assert ("TMFH6", "1m") in db.rows
+
+
+@pytest.mark.anyio
+async def test_db_first_loader_forwards_bounded_limit_since_and_warmup_to_every_query():
+    db = FakeDb()
+    db.rows[("*TMFF", "1m")] = [
+        _row(f"2026-07-22T08:{minute:02d}:00+08:00", 100 + minute)
+        for minute in range(45)
+    ]
+    provider = FakeProvider()
+
+    payload = await load_futopt_ohlc_db_first(
+        provider,
+        db,
+        "*TMFF",
+        period="1d",
+        interval="1m",
+        refresh_mode="none",
+        limit=20,
+        warmup=30,
+        since="2026-07-22T08:10:00+08:00",
+    )
+
+    assert payload["row_count"] <= 30
+    assert db.query_calls
+    assert all(call[3] == {
+        "limit": 30,
+        "since": "2026-07-22T08:10:00+08:00",
+    } for call in db.query_calls)
+
+
+@pytest.mark.anyio
+async def test_db_first_loader_keeps_legacy_unbounded_repository_call_without_limit():
+    db = FakeDb()
+
+    await load_futopt_ohlc_db_first(
+        FakeProvider(),
+        db,
+        "TMF",
+        period="1d",
+        interval="1m",
+        refresh_mode="none",
+    )
+
+    assert db.query_calls == [("TMF", "1d", "1m", {})]
 
 
 @pytest.mark.parametrize(
@@ -287,6 +339,40 @@ async def test_refresh_coordinator_uses_separate_flights_for_symbol_and_interval
     await asyncio.gather(first, second)
 
     assert {(call["symbol"], call["interval"]) for call in provider.calls} == {("TMF", "1m"), ("TXF", "5m")}
+    await coordinator.shutdown()
+
+
+@pytest.mark.anyio
+async def test_refresh_coordinator_bounds_distinct_background_refreshes():
+    class ConcurrencyProvider(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def fetch_intraday_ohlc(self, symbol, *, period="1d", interval="1m"):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep(0.01)
+                return await super().fetch_intraday_ohlc(symbol, period=period, interval=interval)
+            finally:
+                self.active -= 1
+
+    db = FakeDb()
+    provider = ConcurrencyProvider()
+    coordinator = FutoptRefreshCoordinator(
+        provider=provider,
+        db=db,
+        max_concurrent_refreshes=2,
+    )
+
+    await asyncio.gather(*[
+        coordinator.begin(symbol, period="1d", interval="1m")
+        for symbol in ("TMF", "TXF", "TE", "TF", "XIF")
+    ])
+
+    assert provider.max_active == 2
     await coordinator.shutdown()
 
 

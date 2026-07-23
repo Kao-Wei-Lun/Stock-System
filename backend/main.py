@@ -129,6 +129,12 @@ FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
 FUTOPT_RECORDER_POLL_SECONDS = read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5)
 FUTOPT_BACKGROUND_STALE_SECONDS = read_float_env("FUTOPT_BACKGROUND_STALE_SECONDS", "90", minimum=1)
 FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS = read_float_env("FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS", "8", minimum=0.1)
+FUTOPT_BACKGROUND_MAX_CONCURRENT_REFRESHES = read_int_env(
+    "FUTOPT_BACKGROUND_MAX_CONCURRENT_REFRESHES",
+    "2",
+    minimum=1,
+    maximum=8,
+)
 ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS = read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
@@ -341,6 +347,7 @@ futopt_refresh_coordinator = FutoptRefreshCoordinator(
     db=db,
     stale_after_seconds=FUTOPT_BACKGROUND_STALE_SECONDS,
     empty_wait_seconds=FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS,
+    max_concurrent_refreshes=FUTOPT_BACKGROUND_MAX_CONCURRENT_REFRESHES,
     logger=log,
 )
 

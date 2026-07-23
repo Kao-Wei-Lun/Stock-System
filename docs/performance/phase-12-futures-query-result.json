@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:41:00+08:00",
+  "scope": "phase-12-bounded-futures-query",
+  "query_contract": {
+    "limit_forwarded_to_repository": true,
+    "since_forwarded_to_repository": true,
+    "effective_limit_uses_warmup": true,
+    "alias_and_canonical_each_bounded": true,
+    "merged_result_bounded": true,
+    "legacy_no_limit_call_compatible": true
+  },
+  "database": {
+    "index": "idx_ohlcv_ticker_interval_date",
+    "index_columns": ["ticker", "interval", "date"],
+    "query_shape": "date lower bound plus ORDER BY date DESC LIMIT",
+    "schema_migration_required": false,
+    "background_refresh_max_concurrency": 2
+  },
+  "full_gate": {
+    "backend_passed": 498,
+    "frontend_passed": 233,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true
+  },
+  "notes": [
+    "Runtime DB wait and query p95 remain available at /api/system/performance.",
+    "Live EXPLAIN and MySQL latency sampling are included in the final same-version Phase 15 operating gate."
+  ],
+  "contains_sensitive_payloads": false
+}

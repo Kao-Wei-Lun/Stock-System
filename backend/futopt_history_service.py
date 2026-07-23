@@ -38,12 +38,15 @@ class FutoptRefreshCoordinator:
         db,
         stale_after_seconds: float = 90.0,
         empty_wait_seconds: float = 8.0,
+        max_concurrent_refreshes: int = 2,
         logger: logging.Logger | None = None,
     ) -> None:
         self.provider = provider
         self.db = db
         self.stale_after_seconds = max(1.0, float(stale_after_seconds))
         self.empty_wait_seconds = max(0.1, float(empty_wait_seconds))
+        self.max_concurrent_refreshes = max(1, min(int(max_concurrent_refreshes), 8))
+        self._refresh_semaphore = asyncio.Semaphore(self.max_concurrent_refreshes)
         self.log = logger or log
         self._tasks: dict[tuple[str, str, str, str], asyncio.Task] = {}
         self._last_outcomes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -62,14 +65,18 @@ class FutoptRefreshCoordinator:
         if current is not None and not current.done():
             return current
 
+        async def bounded_refresh():
+            async with self._refresh_semaphore:
+                return await sync_futopt_intraday_ohlc(
+                    self.provider,
+                    self.db,
+                    symbol,
+                    period=period,
+                    interval=interval,
+                )
+
         task = asyncio.create_task(
-            sync_futopt_intraday_ohlc(
-                self.provider,
-                self.db,
-                symbol,
-                period=period,
-                interval=interval,
-            ),
+            bounded_refresh(),
             name=f"futopt-refresh:{key[0]}:{interval}:{session}",
         )
         self._tasks[key] = task
@@ -191,6 +198,9 @@ async def load_futopt_ohlc_db_first(
     refresh_mode: str | None = None,
     refresh_coordinator: FutoptRefreshCoordinator | None = None,
     session: str = "AUTO",
+    limit: int | None = None,
+    since: str | None = None,
+    warmup: int = 0,
 ) -> dict[str, Any]:
     """Read persisted futures candles first, then use Fubon only to fill/correct the requested range."""
     selected_refresh_mode = str(refresh_mode or ("blocking" if refresh else "none")).strip().lower()
@@ -199,9 +209,19 @@ async def load_futopt_ohlc_db_first(
     requested = str(symbol or "").strip().upper()
     canonical = normalize_futopt_symbol_query(requested)
     storage_tickers = list(dict.fromkeys(item for item in (requested, canonical) if item))
+    query_options: dict[str, Any] = {}
+    if limit is not None:
+        query_options["limit"] = max(1, min(max(int(limit), int(warmup or 0)), 5000))
+    if since is not None:
+        query_options["since"] = since
 
-    initial_groups = [await db.get_ohlcv(ticker, period=period, interval=interval) for ticker in storage_tickers]
+    initial_groups = [
+        await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
+        for ticker in storage_tickers
+    ]
     initial_rows = merge_futopt_ohlcv_rows(*initial_groups)
+    if query_options.get("limit") is not None:
+        initial_rows = initial_rows[-query_options["limit"]:]
     sync_result: dict[str, Any] | None = None
     sync_error: str | None = None
     refresh_status = "skipped"
@@ -260,8 +280,13 @@ async def load_futopt_ohlc_db_first(
             storage_tickers.append(normalized)
 
     if sync_result:
-        refreshed_groups = [await db.get_ohlcv(ticker, period=period, interval=interval) for ticker in storage_tickers]
+        refreshed_groups = [
+            await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
+            for ticker in storage_tickers
+        ]
         rows = merge_futopt_ohlcv_rows(*refreshed_groups)
+        if query_options.get("limit") is not None:
+            rows = rows[-query_options["limit"]:]
     else:
         rows = initial_rows
 

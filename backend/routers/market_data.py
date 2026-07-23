@@ -265,6 +265,9 @@ async def get_futopt_ohlc(
         refresh_mode=selected_refresh_mode,
         refresh_coordinator=_futopt_refresh_coordinator,
         session=session,
+        limit=limit,
+        since=since,
+        warmup=warmup,
     )
     if not payload.get("data") and payload.get("sync_error"):
         raise HTTPException(502, f"Unable to refresh futopt ohlc: {payload['sync_error']}")

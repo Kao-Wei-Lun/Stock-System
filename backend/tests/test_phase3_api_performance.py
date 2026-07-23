@@ -55,8 +55,10 @@ def test_ohlc_limit_and_since_are_forwarded_to_indexed_query(client, monkeypatch
 
 def test_futopt_ohlc_response_is_bounded_without_breaking_legacy_loader(client, monkeypatch):
     start = datetime(2026, 7, 23, 9, 0)
+    calls = []
 
-    async def fake_load(*_args, **_kwargs):
+    async def fake_load(*_args, **kwargs):
+        calls.append(kwargs)
         rows = [{"date": (start + timedelta(minutes=index)).isoformat(), "close": index} for index in range(600)]
         return {"ticker": "*TMFF", "data": rows, "refresh_status": "not_needed"}
 
@@ -66,6 +68,9 @@ def test_futopt_ohlc_response_is_bounded_without_breaking_legacy_loader(client, 
     assert response.status_code == 200
     assert response.json()["row_count"] == 400
     assert response.json()["data"][0]["close"] == 200
+    assert calls[0]["limit"] == 400
+    assert calls[0]["warmup"] == 250
+    assert calls[0]["since"] is None
 
 
 def test_snapshot_summary_omits_full_market_rows_and_is_cached(client, monkeypatch):
