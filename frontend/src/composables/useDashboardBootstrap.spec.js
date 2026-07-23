@@ -101,8 +101,7 @@ describe("useDashboard route bootstrap", () => {
       initialTicker: "*TMFF",
       initialRightTab: "alerts",
     });
-    await flushPromises();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await mounted.dashboard.bootstrapWorkspace("terminal", "alerts");
     await flushPromises();
 
     const methods = apiState.calls.map((call) => call.method);

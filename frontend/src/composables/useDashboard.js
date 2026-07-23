@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, watch } from "vue";
 
 import {
   DEFAULT_INDICATOR_SETTINGS,
@@ -9,13 +9,6 @@ import { createDashboardApi } from "../api/dashboardApi";
 import { createTerminalCache } from "../services/terminalCache";
 import { fetchWithPolicy } from "../utils/requestPolicy";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
-import {
-  buildWorkspacePayload,
-  clearLegacyWorkspacePresets,
-  normalizeWorkspaceRecord,
-  readLegacyWorkspacePresets,
-  toWorkspaceSaveRequest,
-} from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeBookLevels, mergeRealtimeQuote } from "../utils/realtimeQuote";
 import { DEFAULT_OHLC_BUFFER_LIMIT, mergeOhlcBuffer } from "../utils/ohlcBuffer";
@@ -38,9 +31,14 @@ import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhl
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
 import { createRealtimeUiBatcher } from "../utils/realtimeUiBatcher";
 import { createDashboardBootstrap } from "./dashboard/dashboardBootstrap";
+import { createDashboardComparison } from "./dashboard/dashboardComparison";
+import { createDashboardMarketSync } from "./dashboard/dashboardMarketSync";
+import { createDashboardNotifications } from "./dashboard/dashboardNotifications";
 import { createLazyDashboardAssetTracking } from "./dashboard/lazyDashboardAssetTracking";
 import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
 import { createDashboardRouteControllers } from "./dashboard/dashboardRouteControllers";
+import { createDashboardTerminalState } from "./dashboard/dashboardTerminalState";
+import { createLazyDashboardWorkspacePersistence } from "./dashboard/lazyDashboardWorkspacePersistence";
 import {
   createLazyDashboardAlerting,
   createLazyDashboardScreener,
@@ -56,7 +54,6 @@ const KLINE_DISPLAY_OPTIONS = [
   { key: "quarter", label: "季K" },
 ];
 
-const COMPARE_COLOR_PALETTE = ["#ffd166", "#ff8c42", "#9b6dff", "#00d4ff", "#ff4d6a"];
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const RECENT_TICKERS_KEY = "quantvision.recent.tickers.v1";
 const RECENT_TICKERS_LIMIT = 10;
@@ -473,6 +470,35 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const initialInterval = initialResolvedTimeframe.interval;
   const activeBootstrapPage = ref(String(initialWorkspacePage || "overview").toLowerCase());
   const dashboardBootstrap = createDashboardBootstrap();
+  const {
+    currentTicker,
+    currentName,
+    currentPeriod,
+    currentInterval,
+    klineDisplayMode,
+    chartEngineMode,
+    cleanChartMode,
+    chartLayout,
+    chartLoading,
+    loadingMessage,
+    futoptRefreshStatus,
+    futoptDataStale,
+    rawOhlcData,
+    klineDataOrigin,
+    klineCacheSavedAt,
+    drawings,
+    selectedDrawingId,
+    syncingCurrent,
+    syncingAll,
+  } = createDashboardTerminalState({
+    ticker: initialTicker,
+    period: initialPeriod,
+    interval: initialInterval,
+    klineDisplayMode: getEffectiveKlineDisplayMode(initialKlineDisplayMode, initialInterval),
+    chartEngineMode: initialChartEngineMode,
+    cleanChartMode: storedPrefs.cleanChartMode,
+    chartLayout: initialChartLayout,
+  });
 
   const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
   const searchQuery = ref("");
@@ -530,24 +556,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
   const rightTab = ref(normalizeDashboardRightTab(storedPrefs.rightTab));
   const workspaceTab = ref(initialWorkspaceTab);
-  const currentTicker = ref(initialTicker);
-  const currentName = ref("載入中...");
-  const currentPeriod = ref(initialPeriod);
-  const currentInterval = ref(initialInterval);
   const timeframeOptions = computed(() => getTimeframeOptionsForTicker(currentTicker.value));
-  const klineDisplayMode = ref(getEffectiveKlineDisplayMode(initialKlineDisplayMode, initialInterval));
-  const chartEngineMode = ref(initialChartEngineMode);
-  const cleanChartMode = ref(Boolean(storedPrefs.cleanChartMode));
-  const chartLayout = ref(initialChartLayout);
-  const chartLoading = ref(true);
-  const loadingMessage = ref("正在載入資料...");
-  const futoptRefreshStatus = ref("idle");
-  const futoptDataStale = ref(false);
-  const rawOhlcData = shallowRef([]);
-  const klineDataOrigin = ref("loading");
-  const klineCacheSavedAt = ref(null);
-  const drawings = ref([]);
-  const selectedDrawingId = ref(null);
   const workspacePresets = ref([]);
   const activeWorkspacePresetId = ref(storedPrefs.activeWorkspacePresetId || null);
   const localNotifications = ref([]);
@@ -559,11 +568,20 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       return rightTime - leftTime;
     }),
   );
+  const {
+    dismissNotification,
+    loadNotifications,
+    pushNotification,
+    setNotificationRead,
+  } = createDashboardNotifications({
+    dashboardApi,
+    localNotifications,
+    remoteNotifications,
+    formatTimestamp: formatQuoteTimestampLabel,
+  });
   const latency = ref("—");
   const lastUpdate = ref("—");
   const clockTime = ref("—");
-  const syncingCurrent = ref(false);
-  const syncingAll = ref(false);
   const activeTool = ref(initialTool);
   const realtimeUiBatcher = createRealtimeUiBatcher({
     enabled: REALTIME_UI_BATCHING_ENABLED,
@@ -997,6 +1015,109 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   let terminalCacheWriteTimer = null;
   let klineRequestSequence = 0;
   let klineAbortController = null;
+  const {
+    addCompareTicker,
+    clearCompareTickers,
+    loadComparisonSeries,
+    removeCompareTicker,
+    setComparisonMode,
+  } = createDashboardComparison({
+    dashboardApi,
+    compareTickers,
+    rawCompareSeries,
+    comparisonMode,
+    currentTicker,
+    currentPeriod,
+    currentInterval,
+    klineDisplayMode,
+    normalizeTicker,
+    isFutoptTicker,
+    resolveFutoptInterval,
+    resolveFutoptPeriod,
+    resolveTimeframeInterval,
+    getEffectiveKlineDisplayMode,
+    getExpandedFetchPeriod,
+    getDisplayNameForTicker,
+    getRequestSequence: () => klineRequestSequence,
+    pushNotification,
+  });
+  const {
+    deleteWorkspacePreset,
+    loadWorkspacePreset,
+    loadWorkspacePresets,
+    saveWorkspacePreset,
+  } = createLazyDashboardWorkspacePersistence({
+    dashboardApi,
+    isBrowser,
+    workspacePresets,
+    activeWorkspacePresetId,
+    currentTicker,
+    currentName,
+    currentPeriod,
+    currentInterval,
+    klineDisplayMode,
+    chartEngineMode,
+    cleanChartMode,
+    chartLayout,
+    compareTickers,
+    comparisonMode,
+    activeTool,
+    leftTab,
+    rightTab,
+    workspaceTab,
+    screenerFilters,
+    activeInd,
+    activePanels,
+    indicatorSettings,
+    drawings,
+    selectedDrawingId,
+    rawOhlcData,
+    crosshair,
+    defaultActiveInd: DEFAULT_ACTIVE_IND,
+    defaultActivePanels: DEFAULT_ACTIVE_PANELS,
+    chartLayoutOptions: CHART_LAYOUT_OPTIONS,
+    toolOptions: TOOL_OPTIONS,
+    workspaceTabOptions: WORKSPACE_TAB_OPTIONS,
+    normalizeTicker,
+    resolveDashboardTimeframeForTicker,
+    getEffectiveKlineDisplayMode,
+    normalizeChartEngineMode,
+    normalizeDashboardRightTab,
+    createDrawingEntry,
+    applyScreenerFilters,
+    clearRealtimeTicker: (ticker) => realtimeUiBatcher.clearTicker(ticker),
+    unsubscribeTicker: (ticker) => dashboardRealtime.unsubscribeTicker(ticker),
+    subscribeTicker: (ticker) => dashboardRealtime.subscribeTicker(ticker),
+    rememberRecentTicker,
+    ensureKline,
+    loadEventCalendar,
+    loadTickerIntelligence,
+    loadMacroDashboard,
+    runScreener,
+    pushNotification,
+  });
+  const {
+    syncAll,
+    syncCurrentTicker,
+  } = createDashboardMarketSync({
+    dashboardApi,
+    apiFetch,
+    currentTicker,
+    currentPeriod,
+    currentInterval,
+    syncingCurrent,
+    syncingAll,
+    normalizeTicker,
+    isFutoptTicker,
+    applyQuote,
+    ensureKline,
+    loadWatchlist,
+    loadEventCalendar,
+    loadMarketSnapshots,
+    loadMacroDashboard,
+    loadTickerIntelligence,
+    pushNotification,
+  });
 
   function ensureKline(
     ticker = currentTicker.value,
@@ -1012,46 +1133,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       () => loadKline(normalized, resolved.period, resolved.interval),
       { queryKey, force },
     );
-  }
-
-  function pushNotification({ icon, title, msg, type = "" }) {
-    const id = `${Date.now()}-${Math.random()}`;
-    const createdAt = new Date().toISOString();
-    localNotifications.value = [
-      ...localNotifications.value,
-      {
-        id,
-        icon,
-        title,
-        msg,
-        type,
-        level: type || "info",
-        category: "session",
-        read: false,
-        persisted: false,
-        ticker: null,
-        source: "session",
-        createdAt,
-        time: new Date(createdAt).toLocaleTimeString("zh-TW"),
-      },
-    ];
-    window.setTimeout(() => dismissNotification(id), 6000);
-  }
-
-  async function dismissNotification(id) {
-    const remoteTarget = remoteNotifications.value.find((item) => item.id === id);
-    if (remoteTarget?.remoteId != null) {
-      try {
-        const record = await dashboardApi.markNotificationRead(remoteTarget.remoteId);
-        remoteNotifications.value = remoteNotifications.value.map((item) =>
-          item.id === id ? mapRemoteNotification(record) : item,
-        );
-      } catch (error) {
-        console.error(error);
-      }
-      return;
-    }
-    localNotifications.value = localNotifications.value.filter((item) => item.id !== id);
   }
 
   async function apiFetch(path, options = {}) {
@@ -1091,95 +1172,8 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     throw lastError;
   }
 
-  function extractContextGroupName(payload = {}) {
-    if (payload?.context_group_name) return String(payload.context_group_name);
-    const groupTag = (Array.isArray(payload?.context_tags) ? payload.context_tags : []).find((tag) =>
-      String(tag || "").startsWith("觀察群組:"),
-    );
-    return groupTag ? String(groupTag).slice("觀察群組:".length) : "";
-  }
-
-  function mapRemoteNotification(item) {
-    const iconByCategory = {
-      alert: "⚡",
-      system: "ℹ",
-    };
-    const iconByLevel = {
-      warning: "⚠️",
-      error: "⛔",
-      success: "✅",
-      info: "ℹ",
-    };
-    const quote = item.payload?.quote || {};
-    const rawTicker = quote.ticker || item.payload?.ticker || null;
-    const isMacroNotification = String(rawTicker || "").toUpperCase() === "MARKET" || Boolean(quote.macro_summary);
-    const contextTags = Array.isArray(item.payload?.context_tags) ? item.payload.context_tags.filter(Boolean).slice(0, 4) : [];
-    const macroSummary = item.payload?.macro_summary || null;
-    const contextGroupName = extractContextGroupName(item.payload);
-    return {
-      id: `remote-${item.id}`,
-      remoteId: item.id,
-      icon: iconByCategory[item.category] || iconByLevel[item.level] || "ℹ",
-      title: item.title,
-      msg: item.message,
-      type: item.level || "",
-      level: item.level || "info",
-      category: item.category || "system",
-      read: Boolean(item.read_at),
-      persisted: true,
-      source: quote.source || item.payload?.source || "local_db",
-      ticker: isMacroNotification ? null : rawTicker,
-      workspaceTarget: isMacroNotification ? "macro" : null,
-      contextSource: item.payload?.context_source || "",
-      contextGroupName,
-      contextTags,
-      macroSummary,
-      triggerValue: item.payload?.trigger_value ?? null,
-      thresholdValue: item.payload?.threshold_value ?? null,
-      payload: item.payload || {},
-      relatedEntityType: item.related_entity_type || null,
-      relatedEntityId: item.related_entity_id || null,
-      createdAt: item.created_at || null,
-      time: formatQuoteTimestampLabel(item.created_at),
-    };
-  }
-
   function applyScreenerFilters(filters = {}) {
     applyScreenerFiltersAction(filters);
-  }
-
-  async function loadNotifications({ silent = true } = {}) {
-    try {
-      const response = await dashboardApi.listNotifications({ unreadOnly: false, limit: 50 });
-      remoteNotifications.value = Array.isArray(response?.items)
-        ? response.items.map((item) => mapRemoteNotification(item))
-        : [];
-    } catch (error) {
-      console.error(error);
-      if (!silent) {
-        pushNotification({ icon: "⚠️", title: "通知載入失敗", msg: "請稍後再試", type: "error" });
-      }
-    }
-  }
-
-  async function setNotificationRead(notificationId, read) {
-    if (!notificationId) return;
-    const target = remoteNotifications.value.find((item) => item.id === notificationId);
-    if (!target?.remoteId) return;
-    try {
-      const record = await dashboardApi.setNotificationReadState(target.remoteId, read);
-      remoteNotifications.value = remoteNotifications.value.map((item) =>
-        item.id === notificationId ? mapRemoteNotification(record) : item,
-      );
-    } catch (error) {
-      console.error(error);
-      pushNotification({
-        icon: "!",
-        title: read ? "Mark read failed" : "Mark unread failed",
-        msg: error.message || "Please try again later",
-        type: "error",
-      });
-    }
   }
 
   async function loadEventCalendar(forceRefresh = false) {
@@ -1894,102 +1888,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         type: "error",
       });
     }
-  }
-
-  async function loadComparisonSeries(targetTickers = compareTickers.value, { requestToken = null } = {}) {
-    const normalizedTickers = [...new Set(
-      (targetTickers || [])
-        .map((ticker) => normalizeTicker(ticker))
-        .filter((ticker) => ticker && ticker !== normalizeTicker(currentTicker.value)),
-    )].slice(0, 5);
-
-    compareTickers.value = normalizedTickers;
-
-    if (!normalizedTickers.length) {
-      rawCompareSeries.value = [];
-      return;
-    }
-    const mainTickerIsFutopt = isFutoptTicker(currentTicker.value);
-    const resolvedInterval = mainTickerIsFutopt
-      ? resolveFutoptInterval(currentInterval.value)
-      : resolveTimeframeInterval(currentPeriod.value, currentInterval.value);
-    const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, resolvedInterval);
-    const fetchPeriod = mainTickerIsFutopt
-      ? resolveFutoptPeriod(currentPeriod.value, resolvedInterval)
-      : getExpandedFetchPeriod(currentPeriod.value, displayMode);
-
-    const results = await Promise.allSettled(
-      normalizedTickers.map(async (ticker, index) => {
-        const payload = isFutoptTicker(ticker)
-          ? await dashboardApi.getFutoptOhlc(ticker, {
-            period: resolveFutoptPeriod(fetchPeriod, resolvedInterval),
-            interval: resolveFutoptInterval(resolvedInterval),
-            refreshMode: "background",
-            limit: 400,
-            warmup: 250,
-          })
-          : await dashboardApi.getOhlc(ticker, {
-            period: fetchPeriod,
-            interval: resolvedInterval,
-            limit: 400,
-            warmup: 250,
-          });
-        const data = payload.data || [];
-        const firstClose = data.find((row) => row.close != null)?.close ?? null;
-        const lastClose = data.length ? data[data.length - 1].close : null;
-        const changePct = firstClose && lastClose ? ((lastClose - firstClose) / firstClose) * 100 : 0;
-
-        return {
-          ticker,
-          name: getDisplayNameForTicker(ticker),
-          color: COMPARE_COLOR_PALETTE[index % COMPARE_COLOR_PALETTE.length],
-          changePct,
-          data,
-        };
-      }),
-    );
-
-    if (requestToken != null && requestToken !== klineRequestSequence) return;
-    rawCompareSeries.value = results
-      .filter((result) => result.status === "fulfilled" && result.value.data.length)
-      .map((result) => result.value);
-  }
-
-  async function addCompareTicker(ticker) {
-    const normalized = normalizeTicker(ticker);
-    if (!normalized) return;
-    if (normalized === normalizeTicker(currentTicker.value)) {
-      pushNotification({
-        icon: "ℹ",
-        title: "主圖已是這檔股票",
-        msg: normalized,
-      });
-      return;
-    }
-    if (compareTickers.value.includes(normalized)) return;
-    if (compareTickers.value.length >= 5) {
-      pushNotification({
-        icon: "⚠️",
-        title: "比較標的已達上限",
-        msg: "最多可同時比較 5 檔股票",
-        type: "error",
-      });
-      return;
-    }
-    await loadComparisonSeries([...compareTickers.value, normalized]);
-  }
-
-  async function removeCompareTicker(ticker) {
-    await loadComparisonSeries(compareTickers.value.filter((item) => item !== normalizeTicker(ticker)));
-  }
-
-  function clearCompareTickers() {
-    compareTickers.value = [];
-    rawCompareSeries.value = [];
-  }
-
-  function setComparisonMode(mode) {
-    comparisonMode.value = mode === "price" ? "price" : "percent";
   }
 
   async function refreshFutoptRealtimeFallback({ force = false } = {}) {
@@ -2782,197 +2680,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     selectedDrawingId.value = drawingId;
   }
 
-  async function migrateLegacyWorkspacePresets() {
-    if (!isBrowser()) return false;
-    const legacyPresets = readLegacyWorkspacePresets(window.localStorage);
-    if (!legacyPresets.length) return false;
-
-    let migratedCount = 0;
-    for (const preset of legacyPresets.slice(0, 24)) {
-      const trimmedName = String(preset?.name || "").trim();
-      if (!trimmedName) continue;
-      try {
-        await dashboardApi.createWorkspace(toWorkspaceSaveRequest(trimmedName, preset));
-        migratedCount += 1;
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    if (migratedCount > 0) {
-      clearLegacyWorkspacePresets(window.localStorage);
-    }
-    return migratedCount > 0;
-  }
-
-  async function loadWorkspacePresets({ allowLegacyMigration = true, silent = true } = {}) {
-    try {
-      const response = await dashboardApi.listWorkspaces();
-      const items = Array.isArray(response?.items)
-        ? response.items.map((item) => normalizeWorkspaceRecord(item))
-        : [];
-
-      if (!items.length && allowLegacyMigration) {
-        const migrated = await migrateLegacyWorkspacePresets();
-        if (migrated) {
-          return await loadWorkspacePresets({ allowLegacyMigration: false, silent });
-        }
-      }
-
-      workspacePresets.value = items;
-      if (
-        activeWorkspacePresetId.value != null
-        && !items.some((item) => sameWorkspaceId(item.id, activeWorkspacePresetId.value))
-      ) {
-        activeWorkspacePresetId.value = null;
-      }
-      return items;
-    } catch (error) {
-      console.error(error);
-      workspacePresets.value = [];
-      if (!silent) {
-        pushNotification({ icon: "⚠️", title: "工作區載入失敗", msg: "請稍後再試", type: "error" });
-      }
-      return [];
-    }
-  }
-
-  function buildWorkspaceSnapshot(name) {
-    return {
-      name,
-      savedAt: new Date().toISOString(),
-      ...buildWorkspacePayload({
-        currentTicker: currentTicker.value,
-        currentName: currentName.value,
-        currentPeriod: currentPeriod.value,
-        currentInterval: currentInterval.value,
-        klineDisplayMode: klineDisplayMode.value,
-        chartEngineMode: chartEngineMode.value,
-        cleanChartMode: cleanChartMode.value,
-        chartLayout: chartLayout.value,
-        compareTickers: compareTickers.value,
-        comparisonMode: comparisonMode.value,
-        activeTool: activeTool.value,
-        leftTab: leftTab.value,
-        rightTab: rightTab.value,
-        workspaceTab: workspaceTab.value,
-        screenerFilters,
-        activeInd,
-        activePanels,
-        indicatorSettings,
-        drawings: drawings.value,
-      }),
-    };
-  }
-
-  async function saveWorkspacePreset(name) {
-    const trimmed = (name || "").trim();
-    if (!trimmed) return;
-
-    const existing = workspacePresets.value.find((item) => item.name.toLowerCase() === trimmed.toLowerCase());
-    const snapshot = buildWorkspaceSnapshot(trimmed);
-
-    try {
-      const persisted = existing
-        ? await dashboardApi.updateWorkspace(existing.id, toWorkspaceSaveRequest(trimmed, snapshot))
-        : await dashboardApi.createWorkspace(toWorkspaceSaveRequest(trimmed, snapshot));
-      const normalized = normalizeWorkspaceRecord(persisted);
-      workspacePresets.value = existing
-        ? workspacePresets.value.map((item) => (sameWorkspaceId(item.id, existing.id) ? normalized : item))
-        : [normalized, ...workspacePresets.value].slice(0, 24);
-      activeWorkspacePresetId.value = normalized.id;
-      pushNotification({
-        icon: existing ? "↻" : "💾",
-        title: existing ? "工作區已更新" : "工作區已儲存",
-        msg: trimmed,
-        type: "success",
-      });
-    } catch (error) {
-      pushNotification({ icon: "⚠️", title: "工作區儲存失敗", msg: error.message || "請稍後再試", type: "error" });
-    }
-  }
-
-  async function loadWorkspacePreset(presetId) {
-    let preset = workspacePresets.value.find((item) => sameWorkspaceId(item.id, presetId));
-    if (!preset) {
-      try {
-        preset = normalizeWorkspaceRecord(await dashboardApi.getWorkspace(presetId));
-      } catch (error) {
-        pushNotification({ icon: "⚠️", title: "工作區載入失敗", msg: error.message || "請稍後再試", type: "error" });
-        return;
-      }
-    }
-    const normalizedTicker = normalizeTicker(preset.currentTicker || currentTicker.value);
-    realtimeUiBatcher.clearTicker(currentTicker.value);
-    dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
-    currentTicker.value = normalizedTicker;
-    currentName.value = preset.currentName || normalizedTicker;
-    const resolvedTimeframe = resolveDashboardTimeframeForTicker(
-      normalizedTicker,
-      preset.currentPeriod || currentPeriod.value,
-      preset.currentInterval || currentInterval.value,
-    );
-    currentPeriod.value = resolvedTimeframe.period;
-    currentInterval.value = resolvedTimeframe.interval;
-    klineDisplayMode.value = getEffectiveKlineDisplayMode(preset.klineDisplayMode, currentInterval.value);
-    chartEngineMode.value = normalizeChartEngineMode(preset.chartEngineMode);
-    cleanChartMode.value = Boolean(preset.cleanChartMode);
-    chartLayout.value = CHART_LAYOUT_OPTIONS.includes(preset.chartLayout) ? preset.chartLayout : "single";
-    comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
-    activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
-    leftTab.value = preset.leftTab === "market" ? "market" : "watch";
-    rightTab.value = normalizeDashboardRightTab(preset.rightTab);
-    workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(preset.workspaceTab) ? preset.workspaceTab : "chart";
-    compareTickers.value = (preset.compareTickers || [])
-      .map((ticker) => normalizeTicker(ticker))
-      .filter((ticker) => ticker && ticker !== normalizedTicker);
-    applyScreenerFilters(preset.screenerFilters || {});
-    Object.keys(DEFAULT_ACTIVE_IND).forEach((key) => {
-      activeInd[key] = preset.activeInd?.[key] ?? DEFAULT_ACTIVE_IND[key];
-    });
-    Object.keys(DEFAULT_ACTIVE_PANELS).forEach((key) => {
-      activePanels[key] = preset.activePanels?.[key] ?? DEFAULT_ACTIVE_PANELS[key];
-    });
-    Object.assign(
-      indicatorSettings,
-      normalizeIndicatorSettings(preset.indicatorSettings || indicatorSettings),
-    );
-    drawings.value = (preset.drawings || []).map((drawing) => createDrawingEntry(drawing));
-    selectedDrawingId.value = null;
-    activeWorkspacePresetId.value = preset.id;
-    rawOhlcData.value = [];
-    crosshair.visible = false;
-    rememberRecentTicker(normalizedTicker, preset.currentName || normalizedTicker);
-    dashboardRealtime.subscribeTicker(normalizedTicker);
-    await ensureKline(normalizedTicker, currentPeriod.value, currentInterval.value, { force: true });
-    if (workspaceTab.value === "events") {
-      await loadEventCalendar();
-      await loadTickerIntelligence(normalizedTicker);
-    } else if (workspaceTab.value === "macro") {
-      await loadMacroDashboard();
-    } else if (workspaceTab.value === "screener") {
-      await runScreener();
-    } else {
-      void loadTickerIntelligence(normalizedTicker);
-    }
-    pushNotification({ icon: "📂", title: "工作區已載入", msg: preset.name, type: "success" });
-  }
-
-  async function deleteWorkspacePreset(presetId) {
-    const target = workspacePresets.value.find((item) => sameWorkspaceId(item.id, presetId));
-    if (!target) return;
-    try {
-      await dashboardApi.deleteWorkspace(presetId);
-      workspacePresets.value = workspacePresets.value.filter((item) => !sameWorkspaceId(item.id, presetId));
-      if (sameWorkspaceId(activeWorkspacePresetId.value, presetId)) {
-        activeWorkspacePresetId.value = null;
-      }
-      pushNotification({ icon: "🗑", title: "工作區已刪除", msg: target.name, type: "success" });
-    } catch (error) {
-      pushNotification({ icon: "⚠️", title: "工作區刪除失敗", msg: error.message || "請稍後再試", type: "error" });
-    }
-  }
-
   function updateCrosshair(payload) {
     Object.assign(crosshair, payload);
   }
@@ -2982,83 +2689,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     crosshair.absoluteIndex = null;
     crosshair.canvasX = null;
     crosshair.canvasY = null;
-  }
-
-  async function syncCurrentTicker() {
-    syncingCurrent.value = true;
-    try {
-      const normalizedTicker = normalizeTicker(currentTicker.value);
-      let result;
-      let refreshedQuote = null;
-      if (isFutoptTicker(normalizedTicker)) {
-        result = await dashboardApi.syncFutoptOhlc(normalizedTicker, {
-          period: currentPeriod.value,
-          interval: currentInterval.value,
-        });
-      } else {
-        const [historyResult, quoteResult] = await Promise.all([
-          apiFetch(`/api/sync/${normalizedTicker}`, { method: "POST" }),
-          dashboardApi.refreshQuote(normalizedTicker),
-        ]);
-        result = historyResult;
-        refreshedQuote = quoteResult;
-        if (refreshedQuote) applyQuote(refreshedQuote);
-      }
-      const quoteStatus = refreshedQuote?.refresh_status;
-      const quoteStatusText = quoteStatus === "throttled"
-        ? "；報價已節流並保留最近快照"
-        : quoteStatus === "backoff"
-          ? "；供應商退避中，暫用最近快照"
-          : refreshedQuote
-            ? "；報價已刷新"
-            : "";
-      pushNotification({
-        icon: "✅",
-        title: "同步完成",
-        msg: `${currentTicker.value} 已同步 ${result.synced ?? result.row_count ?? 0} 筆${quoteStatusText}`,
-        type: "success",
-      });
-      await ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true });
-    } catch (error) {
-      pushNotification({ icon: "⚠️", title: "同步失敗", msg: "請檢查網路連線", type: "error" });
-    } finally {
-      syncingCurrent.value = false;
-    }
-  }
-
-  async function syncAll() {
-    syncingAll.value = true;
-    pushNotification({ icon: "📥", title: "全量同步開始", msg: "正在同步股票與大盤最新資料，這可能需要幾分鐘" });
-    try {
-      const result = await apiFetch("/api/sync/all?period=1y&interval=1d", {
-        method: "POST",
-        retries: 1,
-        retryDelayMs: 1200,
-      });
-      await Promise.all([
-        loadWatchlist(),
-        ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true }),
-        loadEventCalendar(true),
-        loadMarketSnapshots(true),
-        loadMacroDashboard(true),
-        loadTickerIntelligence(currentTicker.value, true),
-      ]);
-      pushNotification({
-        icon: result.failure_count ? "⚠️" : "✅",
-        title: result.failure_count ? "同步部分完成" : "同步完成",
-        msg: `已同步 ${result.success_count} 檔，失敗 ${result.failure_count} 檔，共更新 ${Number(result.total_rows || 0).toLocaleString()} 筆資料`,
-        type: result.failure_count ? "warning" : "success",
-      });
-    } catch (error) {
-      pushNotification({
-        icon: "⚠️",
-        title: "全量同步失敗",
-        msg: error.message || "請稍後再試",
-        type: "error",
-      });
-    } finally {
-      syncingAll.value = false;
-    }
   }
 
   async function searchSymbols(query) {
