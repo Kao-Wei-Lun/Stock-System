@@ -64,6 +64,11 @@ def test_production_launcher_does_not_install_dependencies_or_start_node():
     assert "pip install" not in script
     assert "npm run dev" not in script
     assert "node.exe" not in script
+    assert 'set "backend_url=http://127.0.0.1:%backend_port%"' in script
+    assert 'call :wait_for_http "%backend_url%/api/ready" 60' in script
+    assert 'call :wait_for_http "%app_url%" 15' in script
+    assert "start-process -filepath '%~1' -erroraction stop" in script
+    assert "open this url manually" in script
 
     dev_script = (Path(__file__).resolve().parents[2] / "scripts" / "start-dev.bat").read_text(encoding="utf-8").lower()
     assert "npm run dev" in dev_script

@@ -7,7 +7,8 @@ set "PROJECT_ROOT=%CD%"
 set "BACKEND_PORT=8001"
 if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"
 if not defined FRONTEND_BIND_HOST set "FRONTEND_BIND_HOST=127.0.0.1"
-set "BACKEND_URL=http://localhost:%BACKEND_PORT%"
+set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"
+set "APP_URL=%BACKEND_URL%/app/"
 set "VENV_PYTHON=%PROJECT_ROOT%\venv\Scripts\python.exe"
 
 if /i "%~1"=="backend" goto backend
@@ -27,12 +28,25 @@ if not exist "%VENV_PYTHON%" (
 call :stop_port %BACKEND_PORT% Backend
 echo [INFO] Starting QuantVision production service...
 start "QuantVision" "%SystemRoot%\System32\cmd.exe" /k call "%~f0" backend
-call :wait_for_http "%BACKEND_URL%/api/health" 60 || (
-    echo [ERROR] Backend did not become healthy. Check the QuantVision window.
+call :wait_for_http "%BACKEND_URL%/api/ready" 60 || (
+    echo [ERROR] Backend did not become ready. Check the QuantVision window.
     exit /b 1
 )
-start "" "%BACKEND_URL%/app/"
-echo [INFO] QuantVision is ready: %BACKEND_URL%/app/
+call :wait_for_http "%APP_URL%" 15 || (
+    echo [ERROR] Frontend did not become available: %APP_URL%
+    echo         Run scripts\build-frontend.bat and restart the system.
+    pause
+    exit /b 1
+)
+echo [INFO] Backend and frontend are ready.
+echo [INFO] Opening QuantVision: %APP_URL%
+call :open_browser "%APP_URL%" || (
+    echo [WARNING] Windows could not open the browser automatically.
+    echo [WARNING] Open this URL manually: %APP_URL%
+    pause
+    exit /b 1
+)
+echo [INFO] QuantVision is ready: %APP_URL%
 exit /b 0
 
 :backend
@@ -47,6 +61,11 @@ exit /b %errorlevel%
 :stop_port
 for /f "tokens=5" %%I in ('netstat -ano ^| findstr /R /C:":%~1 .*LISTENING" 2^>nul') do taskkill /PID %%I /T /F >nul 2>&1
 exit /b 0
+
+:open_browser
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "try { Start-Process -FilePath '%~1' -ErrorAction Stop; exit 0 } catch { Write-Error $_.Exception.Message; exit 1 }"
+exit /b %errorlevel%
 
 :wait_for_http
 setlocal

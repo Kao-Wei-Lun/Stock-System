@@ -11,6 +11,7 @@ def test_local_launchers_bind_to_loopback_by_default():
 
     assert 'if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"' in windows_launcher
     assert 'if not defined FRONTEND_BIND_HOST set "FRONTEND_BIND_HOST=127.0.0.1"' in windows_launcher
+    assert 'set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"' in windows_launcher
     assert 'APP_BIND_HOST="${APP_BIND_HOST:-127.0.0.1}"' in shell_launcher
     assert 'FRONTEND_BIND_HOST="${FRONTEND_BIND_HOST:-127.0.0.1}"' in shell_launcher
     assert 'process.env.FRONTEND_BIND_HOST || "127.0.0.1"' in vite_config

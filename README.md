@@ -85,11 +85,14 @@ chmod +x scripts/start.sh
 ./scripts/start.sh
 ```
 
-啟動後會同時跑：
+Production 啟動後由 FastAPI 直接提供已編譯的 Vue 前端：
 
-- 前端服務: `http://localhost:5173`
-- 後端 API: `http://localhost:8001`
-- Swagger 文件: `http://localhost:8001/docs`
+- 前端頁面：`http://127.0.0.1:8001/app/`
+- 後端 API：`http://127.0.0.1:8001`
+- Swagger 文件：`http://127.0.0.1:8001/docs`
+
+只有執行 `scripts\start-dev.bat` 時才會另外啟動 Vite，開發前端網址為
+`http://127.0.0.1:5173`。
 
 ### Docker
 
