@@ -426,6 +426,35 @@ describe("App", () => {
     expect(dashboardMock.bootstrapWorkspace).toHaveBeenCalledWith("terminal", "alerts");
   });
 
+  it("routes paper trading through the application router", async () => {
+    const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "overview",
+        routeRightTab: "indicators",
+      },
+      global: {
+        stubs: {
+          AppNavbar: true,
+          MarketOverviewWorkspace: true,
+          GlobalSearchCommand: true,
+          StatusBar: true,
+          ToastStack: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    wrapper.findComponent({ name: "AppNavbar" }).vm.$emit("navigate", "paper-trading");
+    await flushPromises();
+
+    expect(wrapper.emitted("route-change")).toContainEqual([{
+      workspaceTab: "paper-trading",
+      rightTab: "paper-trading",
+      currentTicker: "",
+    }]);
+  });
+
   it("creates a dedicated watch group from journal result shortcuts", async () => {
     dashboardMock.userWatchGroups = ref([{ id: 1, name: "警報通知模板 命中池" }]);
     dashboardMock.setLeftTab = vi.fn();

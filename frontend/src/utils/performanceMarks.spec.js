@@ -99,4 +99,26 @@ describe("performanceMarks", () => {
     expect(JSON.stringify(snapshot)).not.toContain("private-symbol");
     expect(JSON.stringify(snapshot)).not.toContain("account");
   });
+
+  it("reads the default performance clock without production-only call binding errors", () => {
+    let paintCallback = null;
+    vi.spyOn(performance, "now").mockReturnValue(250);
+
+    recordQuantVisionRealtimeMessage(
+      { ts: 9_990 },
+      {
+        nowEpochMs: 10_000,
+        requestFrame: (callback) => {
+          paintCallback = callback;
+          return 1;
+        },
+      },
+    );
+    paintCallback(260);
+
+    expect(readQuantVisionPerformance().runtime.realtime_paint).toMatchObject({
+      count: 1,
+      p95_ms: 10,
+    });
+  });
 });

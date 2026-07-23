@@ -1019,7 +1019,11 @@ async function toggleTerminalRight() {
 
 async function handleNavigate(page) {
   if (page === "paper-trading") {
-    window.location.href = "/paper-trading";
+    emit("route-change", {
+      workspaceTab: "paper-trading",
+      rightTab: "paper-trading",
+      currentTicker: "",
+    });
     return;
   }
   const nextPage = normalizeWorkspacePage(page);

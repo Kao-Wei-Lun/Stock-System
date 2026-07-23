@@ -56,6 +56,13 @@ describe("appRouteState", () => {
 
   it("builds route locations from the workspace shell", () => {
     expect(buildAppRouteLocation({
+      workspaceTab: "paper-trading",
+      currentTicker: "TMF",
+    })).toEqual({
+      name: "paper-trading",
+    });
+
+    expect(buildAppRouteLocation({
       workspaceTab: "review",
       rightTab: "backtest",
       currentTicker: "tsla",

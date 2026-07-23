@@ -63,6 +63,12 @@ export function buildAppRouteLocation({ workspaceTab, rightTab, currentTicker } 
   const normalizedTicker = normalizeTickerParam(currentTicker);
   const params = normalizedTicker ? { ticker: normalizedTicker } : {};
 
+  if (normalizedWorkspace === "paper-trading") {
+    return {
+      name: "paper-trading",
+    };
+  }
+
   if (normalizedWorkspace === "overview") {
     return {
       name: "overview",

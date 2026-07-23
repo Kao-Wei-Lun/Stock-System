@@ -74,7 +74,12 @@ function handleSocketMessage(event) {
     lastServerMessageAt = Date.now();
     const message = JSON.parse(event.data);
     if (message?.type === "pong") return;
-    recordQuantVisionRealtimeMessage(message);
+    // Performance telemetry must never block delivery of live market data.
+    try {
+      recordQuantVisionRealtimeMessage(message);
+    } catch (error) {
+      console.error(error);
+    }
     broadcastMessage(message);
   } catch (error) {
     console.error(error);

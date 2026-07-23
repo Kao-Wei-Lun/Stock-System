@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const recordQuantVisionRealtimeMessage = vi.hoisted(() => vi.fn());
+
+vi.mock("../../utils/performanceMarks", () => ({
+  recordQuantVisionRealtimeMessage,
+}));
+
 import {
   createDashboardRealtime,
   resetDashboardRealtimeForTests,
@@ -53,6 +59,7 @@ describe("dashboardRealtime", () => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket);
     resetDashboardRealtimeForTests();
+    recordQuantVisionRealtimeMessage.mockReset();
   });
 
   afterEach(() => {
@@ -156,6 +163,28 @@ describe("dashboardRealtime", () => {
     socket.receive({ type: "pong" });
     expect(messages).toEqual([]);
     expect(realtime.wsConnected.value).toBe(true);
+    realtime.disconnect();
+  });
+
+  it("still delivers live messages when performance telemetry fails", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    recordQuantVisionRealtimeMessage.mockImplementationOnce(() => {
+      throw new Error("telemetry failure");
+    });
+    const messages = [];
+    const realtime = createDashboardRealtime({
+      wsUrl: "ws://localhost:8001/ws",
+      onMessage: (message) => messages.push(message),
+    });
+    realtime.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+
+    socket.receive({ type: "quote", ts: Date.now(), data: { ticker: "TMF", price: 45_000 } });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].data.ticker).toBe("TMF");
+    expect(consoleError).toHaveBeenCalledOnce();
     realtime.disconnect();
   });
 

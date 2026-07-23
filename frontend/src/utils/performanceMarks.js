@@ -21,6 +21,16 @@ function getPerformanceApi() {
   return typeof globalThis.performance === "object" ? globalThis.performance : null;
 }
 
+function readPerformanceNow() {
+  const performanceApi = getPerformanceApi();
+  if (typeof performanceApi?.now !== "function") return 0;
+  try {
+    return Number(performanceApi.now()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 function appendBounded(target, value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return;
@@ -142,7 +152,9 @@ export function startQuantVisionPerformanceObserver(ObserverCtor = globalThis.Pe
 
 export function recordQuantVisionRealtimeMessage(message, {
   nowEpochMs = Date.now(),
-  nowPerformanceMs = getPerformanceApi()?.now?.() ?? 0,
+  // Keep the method lookup separate from the call. This avoids a production
+  // minification edge case that emitted an out-of-scope temporary variable.
+  nowPerformanceMs = readPerformanceNow(),
   requestFrame = globalThis.requestAnimationFrame,
 } = {}) {
   const sourceTimestamp = Number(message?.ts);
