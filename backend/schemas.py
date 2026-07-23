@@ -121,6 +121,24 @@ class QuoteResponse(BaseModel):
     bids: list[dict] | None = None
     asks: list[dict] | None = None
     ts: int | None = None
+    data_timestamp: str | None = None
+    data_age_seconds: int | None = None
+    freshness_threshold_seconds: int | None = None
+    freshness_status: str | None = None
+    is_stale: bool | None = None
+    market_timezone: str | None = None
+    market_is_open: bool | None = None
+    expected_session_date: str | None = None
+    observed_session_date: str | None = None
+    session_lag: int | None = None
+    freshness_policy: str | None = None
+    stale_reason: str | None = None
+    refresh_status: str | None = None
+    refresh_provider: str | None = None
+    next_refresh: str | None = None
+    backoff_until: str | None = None
+    last_refresh_error_category: str | None = None
+    provider_degraded: bool | None = None
 
 
 # ─── Backtest ────────────────────────────────────────────────

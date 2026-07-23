@@ -31,6 +31,12 @@ CATEGORY_OVERRIDES = {
 
 router = APIRouter(prefix="/api", tags=["watchlist"])
 _watchlist_metadata_cache = AsyncTTLCache(ttl_seconds=30, max_entries=4)
+_quote_refresh_status_provider = None
+
+
+def configure(*, quote_refresh_status_provider=None):
+    global _quote_refresh_status_provider
+    _quote_refresh_status_provider = quote_refresh_status_provider
 
 
 def categorize(ticker: str) -> str:
@@ -84,6 +90,25 @@ async def hydrate_watchlist_item(
         ticker=ticker,
         data_origin=data_origin,
     )
+    if callable(_quote_refresh_status_provider):
+        refresh_state = _quote_refresh_status_provider(ticker)
+        if freshness.get("freshness_status") == "missing":
+            freshness["stale_reason"] = "missing_quote"
+        elif freshness.get("is_stale") and refresh_state.get("in_backoff"):
+            freshness["stale_reason"] = "provider_backoff"
+        elif freshness.get("is_stale") and freshness.get("market_is_open"):
+            freshness["stale_reason"] = "market_open_quote_expired"
+        elif freshness.get("is_stale"):
+            freshness["stale_reason"] = "completed_session_missing"
+        else:
+            freshness["stale_reason"] = None
+        freshness.update({
+            "refresh_status": refresh_state.get("refresh_status"),
+            "next_refresh": refresh_state.get("next_refresh"),
+            "backoff_until": refresh_state.get("backoff_until"),
+            "last_refresh_error_category": refresh_state.get("last_error_category"),
+            "provider_degraded": refresh_state.get("provider_degraded"),
+        })
     prev = None
     if use_quote and quote.get("prev_close") not in (None, 0):
         prev = quote.get("prev_close")

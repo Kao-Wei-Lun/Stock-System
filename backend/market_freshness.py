@@ -25,6 +25,7 @@ class MarketSessionProfile:
     timezone: str
     open_time: time
     close_time: time
+    sessions: tuple[tuple[time, time], ...] = ()
 
 
 def market_session_profile(ticker: str) -> MarketSessionProfile:
@@ -34,14 +35,104 @@ def market_session_profile(ticker: str) -> MarketSessionProfile:
     if symbol.endswith((".TW", ".TWO")) or symbol in {"^TWII", "^TWOII"}:
         return MarketSessionProfile("taiwan", "Asia/Taipei", time(9, 0), time(13, 30))
     if symbol.endswith(".HK") or symbol == "^HSI":
-        return MarketSessionProfile("hong_kong", "Asia/Hong_Kong", time(9, 30), time(16, 0))
+        return MarketSessionProfile(
+            "hong_kong",
+            "Asia/Hong_Kong",
+            time(9, 30),
+            time(16, 0),
+            ((time(9, 30), time(12, 0)), (time(13, 0), time(16, 0))),
+        )
     if symbol == "^N225":
-        return MarketSessionProfile("japan", "Asia/Tokyo", time(9, 0), time(15, 30))
+        return MarketSessionProfile(
+            "japan",
+            "Asia/Tokyo",
+            time(9, 0),
+            time(15, 30),
+            ((time(9, 0), time(11, 30)), (time(12, 30), time(15, 30))),
+        )
     if symbol.endswith(".SS") or symbol.endswith(".SZ"):
-        return MarketSessionProfile("china", "Asia/Shanghai", time(9, 30), time(15, 0))
+        return MarketSessionProfile(
+            "china",
+            "Asia/Shanghai",
+            time(9, 30),
+            time(15, 0),
+            ((time(9, 30), time(11, 30)), (time(13, 0), time(15, 0))),
+        )
     if symbol.endswith("-USD"):
         return MarketSessionProfile("always_open", "UTC", time(0, 0), time(23, 59, 59))
+    if symbol == "^STOXX50E":
+        return MarketSessionProfile("europe", "Europe/Berlin", time(9, 0), time(17, 30))
     return MarketSessionProfile("us", "America/New_York", time(9, 30), time(16, 0))
+
+
+def _profile_sessions(profile: MarketSessionProfile) -> tuple[tuple[time, time], ...]:
+    return profile.sessions or ((profile.open_time, profile.close_time),)
+
+
+def market_session_state(
+    ticker: str,
+    *,
+    now: datetime | None = None,
+    holidays: set[date] | None = None,
+) -> dict[str, Any]:
+    """Return timezone-safe current/next session state.
+
+    ``ZoneInfo`` performs daylight-saving conversion for New York and Europe.
+    The optional holiday set lets deployments inject exchange calendars without
+    making quote refresh depend on an external calendar service.
+    """
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    profile = market_session_profile(ticker)
+    local_now = reference.astimezone(ZoneInfo(profile.timezone))
+    closed_dates = holidays or set()
+    if profile.name == "always_open":
+        return {
+            "market": profile.name,
+            "market_timezone": profile.timezone,
+            "market_is_open": True,
+            "session_status": "open_24_7",
+            "next_market_open": local_now.astimezone(timezone.utc).isoformat(),
+        }
+    if profile.name == "taiwan_futures":
+        _, is_open = _expected_completed_session(reference, profile)
+        return {
+            "market": profile.name,
+            "market_timezone": profile.timezone,
+            "market_is_open": is_open,
+            "session_status": "open" if is_open else "closed",
+            "next_market_open": None,
+        }
+
+    local_time = local_now.time()
+    valid_day = local_now.weekday() < 5 and local_now.date() not in closed_dates
+    sessions = _profile_sessions(profile)
+    is_open = valid_day and any(start <= local_time <= end for start, end in sessions)
+    if is_open:
+        next_open = local_now
+        status = "open"
+    else:
+        status = "break" if valid_day and profile.open_time <= local_time <= profile.close_time else "closed"
+        next_open = None
+        for offset in range(0, 10):
+            candidate_date = local_now.date() + timedelta(days=offset)
+            if candidate_date.weekday() >= 5 or candidate_date in closed_dates:
+                continue
+            for start, _ in sessions:
+                candidate = datetime.combine(candidate_date, start, tzinfo=ZoneInfo(profile.timezone))
+                if candidate > local_now:
+                    next_open = candidate
+                    break
+            if next_open:
+                break
+    return {
+        "market": profile.name,
+        "market_timezone": profile.timezone,
+        "market_is_open": is_open,
+        "session_status": status,
+        "next_market_open": next_open.astimezone(timezone.utc).isoformat() if next_open else None,
+    }
 
 
 def _previous_weekday(value: date) -> date:
@@ -65,7 +156,7 @@ def _expected_completed_session(reference: datetime, profile: MarketSessionProfi
             return local_now.date(), is_open
         return _previous_weekday(local_now.date()), is_open
     weekday = local_now.weekday() < 5
-    is_open = weekday and profile.open_time <= local_now.time() <= profile.close_time
+    is_open = weekday and any(start <= local_now.time() <= end for start, end in _profile_sessions(profile))
     if weekday and local_now.time() >= profile.close_time:
         return local_now.date(), is_open
     return _previous_weekday(local_now.date()), is_open

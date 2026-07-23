@@ -28,6 +28,7 @@ class DataQualityService:
     futopt_recorder: Any = None
     futopt_enabled: bool = True
     backup_status_provider: Any = None
+    quote_refresh_service: Any = None
 
     async def build_snapshot(self, *, now: datetime | None = None) -> dict[str, Any]:
         reference = now or datetime.now(timezone.utc)
@@ -187,6 +188,22 @@ class DataQualityService:
         )
 
         components["watchlist"] = watchlist
+        if self.quote_refresh_service is not None:
+            refresh_status = self._safe_sync(
+                self.quote_refresh_service.status,
+                fallback={"enabled": False, "degraded_count": 1, "error": "quote_refresh_status_failed"},
+            )
+            degraded_count = int(refresh_status.get("degraded_count") or 0)
+            refresh_enabled = bool(refresh_status.get("enabled"))
+            components["overseas_quotes"] = _component(
+                "healthy" if refresh_enabled and degraded_count == 0 else ("warning" if refresh_enabled else "idle"),
+                (
+                    "Yahoo／海外行情排程正常"
+                    if refresh_enabled and degraded_count == 0
+                    else ("Yahoo／海外行情供應商退避中" if refresh_enabled else "Yahoo／海外行情自動排程已停用")
+                ),
+                **refresh_status,
+            )
         components["futures_recorder"] = await self._futures_quality(reference)
 
         for key, item in components.items():
@@ -247,6 +264,8 @@ class DataQualityService:
                     data_origin=data_origin,
                     now=reference,
                 )
+                if self.quote_refresh_service is not None:
+                    freshness = self.quote_refresh_service.enrich_freshness(ticker, freshness)
                 source = str((selected or {}).get("source") or "missing")
                 source_counts[source] += 1
                 items.append({

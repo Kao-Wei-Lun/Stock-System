@@ -144,6 +144,19 @@ def test_quote_sync_builds_delayed_snapshot(monkeypatch):
     assert quote["name"] == "Apple Inc."
 
 
+@pytest.mark.anyio
+async def test_realtime_quote_preserves_provider_errors_for_backoff(monkeypatch):
+    fetcher = DataFetcher()
+
+    def fail(_ticker):
+        raise RuntimeError("HTTP 429 Too Many Requests")
+
+    monkeypatch.setattr(fetcher, "_quote_sync", fail)
+
+    with pytest.raises(RuntimeError, match="429"):
+        await fetcher.fetch_realtime_quote("BACKOFFPROBE")
+
+
 def test_row_from_twse_parses_roc_date_and_numeric_fields():
     fetcher = DataFetcher()
 

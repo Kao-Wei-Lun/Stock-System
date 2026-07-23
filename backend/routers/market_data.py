@@ -28,6 +28,7 @@ _needs_history_backfill = None
 _has_suspicious_daily_rows = None
 _futopt_candle_recorder = None
 _futopt_refresh_coordinator = None
+_quote_refresh_service = None
 FULL_HISTORY_PERIODS = {"10y", "max"}
 LATEST_DATA_SYNC_PERIOD = "1y"
 LATEST_DATA_SYNC_INTERVAL = "1d"
@@ -89,11 +90,12 @@ def configure(
     sync_taiwan_full_history=None,
     futopt_candle_recorder=None,
     futopt_refresh_coordinator=None,
+    quote_refresh_service=None,
 ):
     """Inject helpers from main.py to avoid circular imports."""
     global _fetch_and_store_quote_snapshot, _sync_tracked_market_data, _sync_taiwan_full_history
     global _needs_history_backfill, _has_suspicious_daily_rows
-    global _futopt_candle_recorder, _futopt_refresh_coordinator
+    global _futopt_candle_recorder, _futopt_refresh_coordinator, _quote_refresh_service
     global FULL_HISTORY_PERIODS, LATEST_DATA_SYNC_PERIOD, LATEST_DATA_SYNC_INTERVAL
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _sync_tracked_market_data = sync_tracked_market_data
@@ -102,6 +104,7 @@ def configure(
     _has_suspicious_daily_rows = has_suspicious_daily_rows
     _futopt_candle_recorder = futopt_candle_recorder
     _futopt_refresh_coordinator = futopt_refresh_coordinator
+    _quote_refresh_service = quote_refresh_service
     FULL_HISTORY_PERIODS = full_history_periods
     LATEST_DATA_SYNC_PERIOD = latest_data_sync_period
     LATEST_DATA_SYNC_INTERVAL = latest_data_sync_interval
@@ -220,9 +223,28 @@ async def get_ohlc_query(
 
 
 @router.get("/quote/{ticker}", response_model=QuoteResponse)
-async def get_quote(ticker: str):
+async def get_quote(ticker: str, refresh: bool = Query(False)):
     ticker = normalize_ticker(ticker)
-    quote = await _fetch_and_store_quote_snapshot(ticker)
+    quote = (
+        await _quote_refresh_service.get_for_api(ticker, force=refresh)
+        if _quote_refresh_service is not None
+        else await _fetch_and_store_quote_snapshot(ticker)
+    )
+    if not quote:
+        quote = await db.get_market_quote(ticker)
+    if not quote:
+        raise HTTPException(404, "Unable to fetch quote")
+    return quote
+
+
+@router.post("/quote/{ticker}/refresh", response_model=QuoteResponse)
+async def refresh_quote(ticker: str):
+    ticker = normalize_ticker(ticker)
+    quote = (
+        await _quote_refresh_service.get_for_api(ticker, force=True)
+        if _quote_refresh_service is not None
+        else await _fetch_and_store_quote_snapshot(ticker)
+    )
     if not quote:
         quote = await db.get_market_quote(ticker)
     if not quote:

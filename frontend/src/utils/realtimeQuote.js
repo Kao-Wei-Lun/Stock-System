@@ -57,6 +57,9 @@ export function mergeRealtimeQuote(previousQuote = {}, incomingQuote = {}, fallb
     if (incomingQuote[key] == null || incomingQuote[key] === "") return previousQuote[key] ?? fallback;
     return incomingQuote[key];
   };
+  const nextNullableValue = (key, fallback = null) => (
+    hasOwn(incomingQuote, key) ? incomingQuote[key] : (previousQuote[key] ?? fallback)
+  );
 
   const bid = nextPositiveValue("bid", null);
   const ask = nextPositiveValue("ask", null);
@@ -104,5 +107,23 @@ export function mergeRealtimeQuote(previousQuote = {}, incomingQuote = {}, fallb
       : (previousQuote.asks || []),
     quote_timestamp: nextDefinedValue("quote_timestamp", null),
     synced_at: nextDefinedValue("synced_at", null),
+    data_timestamp: nextDefinedValue("data_timestamp", null),
+    data_age_seconds: nextDefinedValue("data_age_seconds", null),
+    freshness_threshold_seconds: nextDefinedValue("freshness_threshold_seconds", null),
+    freshness_status: nextDefinedValue("freshness_status", null),
+    is_stale: hasOwn(incomingQuote, "is_stale") ? incomingQuote.is_stale : (previousQuote.is_stale ?? null),
+    market_timezone: nextDefinedValue("market_timezone", null),
+    market_is_open: hasOwn(incomingQuote, "market_is_open")
+      ? incomingQuote.market_is_open
+      : (previousQuote.market_is_open ?? null),
+    stale_reason: nextNullableValue("stale_reason", null),
+    refresh_status: nextDefinedValue("refresh_status", null),
+    refresh_provider: nextDefinedValue("refresh_provider", null),
+    next_refresh: nextDefinedValue("next_refresh", null),
+    backoff_until: nextNullableValue("backoff_until", null),
+    last_refresh_error_category: nextNullableValue("last_refresh_error_category", null),
+    provider_degraded: hasOwn(incomingQuote, "provider_degraded")
+      ? incomingQuote.provider_degraded
+      : (previousQuote.provider_degraded ?? false),
   };
 }

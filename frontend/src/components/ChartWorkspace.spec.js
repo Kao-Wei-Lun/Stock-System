@@ -244,6 +244,23 @@ describe("ChartWorkspace", () => {
     expect(wrapper.text()).toContain("資料較舊");
   });
 
+  it("uses backend market-session freshness instead of a fixed wall-clock cutoff", () => {
+    const wrapper = mount(ChartWorkspace, {
+      props: {
+        ...createProps(),
+        quote: {
+          ...createProps().quote,
+          freshness_status: "market_closed",
+          is_stale: false,
+          market_is_open: false,
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("休市快照有效");
+    expect(wrapper.text()).toContain("市場目前休市");
+  });
+
   it("surfaces macro posture inside the chart workflow", () => {
     const wrapper = mount(ChartWorkspace, {
       props: {

@@ -429,6 +429,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     getQuote(ticker) {
       return request(`/api/quote/${encodeURIComponent(ticker)}`);
     },
+    refreshQuote(ticker) {
+      return request(`/api/quote/${encodeURIComponent(ticker)}/refresh`, { method: "POST" });
+    },
     getFutoptQuote(ticker) {
       return request(`/api/futopt/quote/${encodeURIComponent(ticker)}`);
     },

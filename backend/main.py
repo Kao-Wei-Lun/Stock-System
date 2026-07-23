@@ -40,6 +40,7 @@ from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
 from performance_timing import RequestTimingMiddleware
 from realtime_quote_persistence import RealtimeQuotePersistenceBuffer
+from quote_refresh_service import QuoteRefreshService
 from macro_regime import build_macro_dashboard_payload
 from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
@@ -155,6 +156,28 @@ INSTITUTIONAL_SYNC_TIME_RAW = read_hhmm_env("INSTITUTIONAL_SYNC_TIME", "19:00")
 PAPER_MARGIN_SYNC_TIME_RAW = read_hhmm_env("PAPER_MARGIN_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
 REALTIME_POLL_INTERVAL_SECONDS = read_float_env("REALTIME_POLL_INTERVAL_SECONDS", "15", minimum=1)
 REALTIME_PER_TICKER_DELAY_SECONDS = read_float_env("REALTIME_PER_TICKER_DELAY_SECONDS", "0.2", minimum=0)
+OVERSEAS_QUOTE_REFRESH_ENABLED = read_bool_env("OVERSEAS_QUOTE_REFRESH_ENABLED", True)
+OVERSEAS_QUOTE_MAX_CONCURRENCY = read_int_env(
+    "OVERSEAS_QUOTE_MAX_CONCURRENCY", "2", minimum=1, maximum=8,
+)
+OVERSEAS_QUOTE_SCAN_INTERVAL_SECONDS = read_float_env(
+    "OVERSEAS_QUOTE_SCAN_INTERVAL_SECONDS", "15", minimum=1,
+)
+OVERSEAS_QUOTE_ACTIVE_INTERVAL_SECONDS = read_int_env(
+    "OVERSEAS_QUOTE_ACTIVE_INTERVAL_SECONDS", "60", minimum=15,
+)
+OVERSEAS_QUOTE_WATCHLIST_INTERVAL_SECONDS = read_int_env(
+    "OVERSEAS_QUOTE_WATCHLIST_INTERVAL_SECONDS", "300", minimum=30,
+)
+OVERSEAS_QUOTE_CRYPTO_INTERVAL_SECONDS = read_int_env(
+    "OVERSEAS_QUOTE_CRYPTO_INTERVAL_SECONDS", "180", minimum=30,
+)
+OVERSEAS_QUOTE_CLOSED_INTERVAL_SECONDS = read_int_env(
+    "OVERSEAS_QUOTE_CLOSED_INTERVAL_SECONDS", "1800", minimum=300,
+)
+OVERSEAS_QUOTE_MANUAL_MIN_INTERVAL_SECONDS = read_int_env(
+    "OVERSEAS_QUOTE_MANUAL_MIN_INTERVAL_SECONDS", "10", minimum=1,
+)
 REALTIME_QUOTE_PERSIST_INTERVAL_MS = read_int_env(
     "REALTIME_QUOTE_PERSIST_INTERVAL_MS",
     "500",
@@ -339,6 +362,22 @@ quote_persistence_buffer = RealtimeQuotePersistenceBuffer(
     logger=log,
 )
 sync_market_intelligence_snapshot = background_tasks.sync_market_intelligence_snapshot
+quote_refresh_service = QuoteRefreshService(
+    fetch_and_store_quote=fetch_and_store_quote_snapshot,
+    get_cached_quote=lambda ticker: db.get_market_quote(ticker),
+    get_watchlist_tickers=background_tasks.get_tracked_sync_tickers,
+    get_active_tickers=ws_manager.get_subscribed_tickers,
+    broadcast_quote=ws_manager.broadcast_to_ticker,
+    enabled=OVERSEAS_QUOTE_REFRESH_ENABLED,
+    max_concurrency=OVERSEAS_QUOTE_MAX_CONCURRENCY,
+    scan_interval_seconds=OVERSEAS_QUOTE_SCAN_INTERVAL_SECONDS,
+    active_open_interval_seconds=OVERSEAS_QUOTE_ACTIVE_INTERVAL_SECONDS,
+    watchlist_open_interval_seconds=OVERSEAS_QUOTE_WATCHLIST_INTERVAL_SECONDS,
+    crypto_interval_seconds=OVERSEAS_QUOTE_CRYPTO_INTERVAL_SECONDS,
+    closed_interval_seconds=OVERSEAS_QUOTE_CLOSED_INTERVAL_SECONDS,
+    manual_min_interval_seconds=OVERSEAS_QUOTE_MANUAL_MIN_INTERVAL_SECONDS,
+    logger=log,
+)
 fetch_startup_history_for_ticker = background_tasks.fetch_startup_history_for_ticker
 sync_taiwan_full_history = tw_history_backfill_service.sync_history
 fubon_realtime_pool.configure_store_quote(store_realtime_quote)
@@ -437,6 +476,7 @@ background_scheduler = BackgroundScheduler(
         auto_backup_interval_hours=AUTO_BACKUP_INTERVAL_HOURS,
         auto_backup_max_age_hours=AUTO_BACKUP_MAX_AGE_HOURS,
         auto_backup_initial_delay_seconds=AUTO_BACKUP_INITIAL_DELAY_SECONDS,
+        overseas_quote_refresh_enabled=OVERSEAS_QUOTE_REFRESH_ENABLED,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -463,6 +503,7 @@ background_scheduler = BackgroundScheduler(
         get_taiwan_analysis_kline_coverage=db.get_tw_analysis_kline_coverage,
         create_mysql_backup=create_scheduled_mysql_backup,
         get_mysql_backup_status=get_scheduled_mysql_backup_health,
+        quote_refresh_service=quote_refresh_service,
     ),
     logger=log,
 )
@@ -474,6 +515,7 @@ data_quality_service = DataQualityService(
     futopt_recorder=futopt_candle_recorder,
     futopt_enabled=FUTOPT_RECORDER_ENABLED,
     backup_status_provider=get_mysql_backup_health,
+    quote_refresh_service=quote_refresh_service,
 )
 backtest_workload_executor = BoundedWorkloadExecutor(
     name="backtest",
@@ -608,7 +650,9 @@ market_data.configure(
     sync_taiwan_full_history=sync_taiwan_full_history,
     futopt_candle_recorder=futopt_candle_recorder,
     futopt_refresh_coordinator=futopt_refresh_coordinator,
+    quote_refresh_service=quote_refresh_service,
 )
+watchlist.configure(quote_refresh_status_provider=quote_refresh_service.state_for)
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
     latest_public_fx_provider=latest_public_fx_provider,
@@ -634,6 +678,7 @@ system.configure(
     backtest_workload_executor=backtest_workload_executor,
     asset_quote_status_provider=assets.performance_status,
     provider_warmup_status_provider=fubon_realtime_pool.get_warmup_status,
+    quote_refresh_status_provider=quote_refresh_service.status,
 )
 
 app.include_router(watchlist.router)

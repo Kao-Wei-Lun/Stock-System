@@ -23,6 +23,7 @@ _QUOTE_PERSISTENCE_BUFFER = None
 _BACKTEST_WORKLOAD_EXECUTOR = None
 _ASSET_QUOTE_STATUS_PROVIDER = None
 _PROVIDER_WARMUP_STATUS_PROVIDER = None
+_QUOTE_REFRESH_STATUS_PROVIDER = None
 
 router = APIRouter(tags=["system"])
 
@@ -38,10 +39,11 @@ def configure(
     backtest_workload_executor=None,
     asset_quote_status_provider=None,
     provider_warmup_status_provider=None,
+    quote_refresh_status_provider=None,
 ):
     global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
     global _QUOTE_PERSISTENCE_BUFFER, _BACKTEST_WORKLOAD_EXECUTOR, _ASSET_QUOTE_STATUS_PROVIDER
-    global _PROVIDER_WARMUP_STATUS_PROVIDER
+    global _PROVIDER_WARMUP_STATUS_PROVIDER, _QUOTE_REFRESH_STATUS_PROVIDER
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
@@ -51,6 +53,7 @@ def configure(
     _BACKTEST_WORKLOAD_EXECUTOR = backtest_workload_executor
     _ASSET_QUOTE_STATUS_PROVIDER = asset_quote_status_provider
     _PROVIDER_WARMUP_STATUS_PROVIDER = provider_warmup_status_provider
+    _QUOTE_REFRESH_STATUS_PROVIDER = quote_refresh_status_provider
 
 
 def _frontend_ready() -> bool:
@@ -148,6 +151,11 @@ async def system_performance():
             _ASSET_QUOTE_STATUS_PROVIDER()
             if _ASSET_QUOTE_STATUS_PROVIDER is not None
             else {"in_flight": 0, "configured": False}
+        ),
+        "overseas_quote_refresh": (
+            _QUOTE_REFRESH_STATUS_PROVIDER()
+            if callable(_QUOTE_REFRESH_STATUS_PROVIDER)
+            else {"configured": False, "enabled": False}
         ),
         "time": datetime.now(timezone.utc).isoformat(),
     }

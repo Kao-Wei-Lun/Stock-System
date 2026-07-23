@@ -55,6 +55,7 @@ class SchedulerSettings:
     auto_backup_interval_hours: float = 24.0
     auto_backup_max_age_hours: float = 36.0
     auto_backup_initial_delay_seconds: float = 300.0
+    overseas_quote_refresh_enabled: bool = False
 
 
 @dataclass(slots=True)
@@ -79,6 +80,7 @@ class SchedulerDependencies:
     get_taiwan_analysis_kline_coverage: Any = None
     create_mysql_backup: Any = None
     get_mysql_backup_status: Any = None
+    quote_refresh_service: Any = None
 
 
 async def automatic_mysql_backup_loop(
@@ -941,6 +943,16 @@ class BackgroundScheduler:
                 logger=self._log,
             ),
         )
+        if self._settings.overseas_quote_refresh_enabled and self._deps.quote_refresh_service:
+            self._create_task(
+                "overseas-quote-refresh",
+                self._deps.quote_refresh_service.run(),
+            )
+        else:
+            self._log.info(
+                "Overseas quote scheduler skipped "
+                "(OVERSEAS_QUOTE_REFRESH_ENABLED=false or service unavailable)."
+            )
 
         if self._settings.paper_margin_auto_sync_enabled and self._deps.sync_paper_trading_margins:
             self._create_task(

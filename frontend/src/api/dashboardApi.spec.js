@@ -99,6 +99,21 @@ describe("dashboardApi", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:8001/api/quote/AAPL", {});
   });
 
+  it("uses the throttled manual quote refresh endpoint", async () => {
+    globalThis.fetch.mockImplementation(() =>
+      jsonResponse({ ticker: "AAPL", refresh_status: "refreshed" }),
+    );
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    const result = await api.refreshQuote("AAPL");
+
+    expect(result.refresh_status).toBe("refreshed");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:8001/api/quote/AAPL/refresh",
+      { method: "POST" },
+    );
+  });
+
   it("requests futopt quote and ohlc payloads from dedicated endpoints", async () => {
     globalThis.fetch
       .mockImplementationOnce(() => jsonResponse({ ticker: "TXFE6", is_delayed: false }))

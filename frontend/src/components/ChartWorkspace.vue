@@ -580,7 +580,19 @@ const quoteTimestampLabel = computed(() => {
 
 const quoteSourceLabel = computed(() => `來源：${props.quote.source || "local_cache"}`);
 const quoteDelayLabel = computed(() => (props.quote.is_delayed ? "延遲快照" : "最新快照"));
+function formatCompactDateTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value || "稍後");
+  return parsed.toLocaleString("zh-TW", { hour12: false });
+}
 const quoteFreshnessState = computed(() => {
+  if (props.quote.freshness_status === "missing") return "missing";
+  if (props.quote.provider_degraded) return "degraded";
+  if (props.quote.is_stale === true || props.quote.freshness_status === "stale") return "stale";
+  if (props.quote.freshness_status === "market_closed") return "closed";
+  if (props.quote.freshness_status === "current") {
+    return props.quote.is_delayed ? "delayed" : "live";
+  }
   const rawValue = props.quote.quote_timestamp || props.quote.synced_at;
   if (!rawValue) return "missing";
   const parsed = new Date(rawValue);
@@ -592,17 +604,24 @@ const quoteFreshnessState = computed(() => {
 const quoteFreshnessLabel = computed(() => {
   if (quoteFreshnessState.value === "missing") return "無時間戳";
   if (quoteFreshnessState.value === "stale") return "資料較舊";
+  if (quoteFreshnessState.value === "degraded") return "供應商退避";
+  if (quoteFreshnessState.value === "closed") return "休市快照有效";
   return quoteFreshnessState.value === "live" ? "資料已更新" : "盤中延遲資料";
 });
 const quoteFreshnessHint = computed(() => {
   if (quoteFreshnessState.value === "missing") return "目前報價缺少時間戳，請先確認資料來源";
-  if (quoteFreshnessState.value === "stale") return "目前顯示資料已超過 24 小時，建議先同步再下判斷";
+  if (quoteFreshnessState.value === "stale") return "目前資料落後於應有交易時段，建議手動同步後再判斷";
+  if (quoteFreshnessState.value === "degraded") {
+    const retryAt = props.quote.backoff_until || props.quote.next_refresh;
+    return retryAt ? `行情供應商暫時退避，預計 ${formatCompactDateTime(retryAt)} 後重試` : "行情供應商暫時退避，系統顯示最近可用快照";
+  }
+  if (quoteFreshnessState.value === "closed") return "市場目前休市；最近完成交易時段的快照仍有效";
   return "盤中請留意本畫面為延遲快照，不適合超短線下單判斷";
 });
 const quoteFreshnessChipClass = computed(() => ({
   up: quoteFreshnessState.value === "live",
   dn: quoteFreshnessState.value === "stale" || quoteFreshnessState.value === "missing",
-  warn: quoteFreshnessState.value === "delayed",
+  warn: ["delayed", "degraded", "closed"].includes(quoteFreshnessState.value),
 }));
 const showMacroRegimeBanner = computed(() => Boolean(
   props.macroSummary?.trade_posture

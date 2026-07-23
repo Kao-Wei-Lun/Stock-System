@@ -190,16 +190,22 @@ class DataFetcher:
         async with self._semaphore:
             loop = asyncio.get_event_loop()
             data = None
+            last_exc = None
             for candidate in candidates:
                 try:
                     data = await loop.run_in_executor(None, self._quote_sync, candidate)
                     if data:
                         break
                 except Exception as exc:
+                    last_exc = exc
                     log.debug("quote %s: %s", candidate, exc)
 
         if data:
             _quote_cache[data.get("ticker") or candidates[0]] = (now, data)
+        elif last_exc is not None:
+            # Preserve the provider failure category so the market-aware
+            # coordinator can apply 429/timeout circuit breaking.
+            raise last_exc
         return data
 
     def _quote_sync(self, ticker: str) -> Optional[Dict]:

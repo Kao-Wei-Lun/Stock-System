@@ -108,7 +108,9 @@ defineProps({
   line-height: 1.4;
 }
 
-.quote-risk-banner.delayed {
+.quote-risk-banner.delayed,
+.quote-risk-banner.degraded,
+.quote-risk-banner.closed {
   background: rgba(255, 209, 102, 0.14);
   color: #ffd166;
 }

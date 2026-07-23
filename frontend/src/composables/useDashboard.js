@@ -694,6 +694,16 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     asks: [],
     quote_timestamp: null,
     synced_at: null,
+    freshness_status: null,
+    is_stale: null,
+    market_is_open: null,
+    stale_reason: null,
+    refresh_status: null,
+    refresh_provider: null,
+    next_refresh: null,
+    backoff_until: null,
+    last_refresh_error_category: null,
+    provider_degraded: false,
   });
 
   const marketStatus = reactive({
@@ -1505,6 +1515,16 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       asks: [],
       quote_timestamp: null,
       synced_at: null,
+      freshness_status: null,
+      is_stale: null,
+      market_is_open: null,
+      stale_reason: null,
+      refresh_status: null,
+      refresh_provider: null,
+      next_refresh: null,
+      backoff_until: null,
+      last_refresh_error_category: null,
+      provider_degraded: false,
     });
   }
 
@@ -2966,16 +2986,34 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     syncingCurrent.value = true;
     try {
       const normalizedTicker = normalizeTicker(currentTicker.value);
-      const result = isFutoptTicker(normalizedTicker)
-        ? await dashboardApi.syncFutoptOhlc(normalizedTicker, {
+      let result;
+      let refreshedQuote = null;
+      if (isFutoptTicker(normalizedTicker)) {
+        result = await dashboardApi.syncFutoptOhlc(normalizedTicker, {
           period: currentPeriod.value,
           interval: currentInterval.value,
-        })
-        : await apiFetch(`/api/sync/${normalizedTicker}`, { method: "POST" });
+        });
+      } else {
+        const [historyResult, quoteResult] = await Promise.all([
+          apiFetch(`/api/sync/${normalizedTicker}`, { method: "POST" }),
+          dashboardApi.refreshQuote(normalizedTicker),
+        ]);
+        result = historyResult;
+        refreshedQuote = quoteResult;
+        if (refreshedQuote) applyQuote(refreshedQuote);
+      }
+      const quoteStatus = refreshedQuote?.refresh_status;
+      const quoteStatusText = quoteStatus === "throttled"
+        ? "；報價已節流並保留最近快照"
+        : quoteStatus === "backoff"
+          ? "；供應商退避中，暫用最近快照"
+          : refreshedQuote
+            ? "；報價已刷新"
+            : "";
       pushNotification({
         icon: "✅",
         title: "同步完成",
-        msg: `${currentTicker.value} 已同步 ${result.synced} 筆`,
+        msg: `${currentTicker.value} 已同步 ${result.synced ?? result.row_count ?? 0} 筆${quoteStatusText}`,
         type: "success",
       });
       await ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true });

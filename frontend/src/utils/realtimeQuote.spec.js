@@ -91,6 +91,30 @@ describe("mergeRealtimeQuote", () => {
       { price: 39654, size: 3 },
     ]);
   });
+
+  it("carries provider freshness metadata and clears recovered errors", () => {
+    const merged = mergeRealtimeQuote(
+      {
+        freshness_status: "stale",
+        stale_reason: "provider_backoff",
+        backoff_until: "2026-07-23T10:00:00Z",
+        provider_degraded: true,
+      },
+      {
+        freshness_status: "current",
+        is_stale: false,
+        stale_reason: null,
+        backoff_until: null,
+        provider_degraded: false,
+      },
+    );
+
+    expect(merged.freshness_status).toBe("current");
+    expect(merged.is_stale).toBe(false);
+    expect(merged.stale_reason).toBeNull();
+    expect(merged.backoff_until).toBeNull();
+    expect(merged.provider_degraded).toBe(false);
+  });
 });
 
 describe("mergeBookLevels", () => {
