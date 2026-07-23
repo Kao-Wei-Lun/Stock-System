@@ -2,8 +2,14 @@ param(
     [string]$BackupDir = "",
     [int]$RetentionDays = 30,
     [int]$KeepMinimum = 7,
-    [ValidateSet("full", "critical")]
+    [int]$KeepMinimumPerScope = 1,
+    [long]$MaxTotalBytes = 0,
+    [ValidateSet("full", "critical", "market-history")]
     [string]$Scope = "full",
+    [string]$StartDate = "",
+    [string]$EndDate = "",
+    [ValidateSet("gzip", "none")]
+    [string]$Compression = "gzip",
     [int]$TimeoutSeconds = 3600
 )
 
@@ -19,11 +25,22 @@ $arguments = @(
     "backup",
     "--retention-days", $RetentionDays,
     "--keep-minimum", $KeepMinimum,
+    "--keep-minimum-per-scope", $KeepMinimumPerScope,
     "--scope", $Scope,
+    "--compression", $Compression,
     "--timeout-seconds", $TimeoutSeconds
 )
 if ($BackupDir) {
     $arguments += @("--backup-dir", $BackupDir)
+}
+if ($MaxTotalBytes -gt 0) {
+    $arguments += @("--max-total-bytes", $MaxTotalBytes)
+}
+if ($StartDate) {
+    $arguments += @("--start-date", $StartDate)
+}
+if ($EndDate) {
+    $arguments += @("--end-date", $EndDate)
 }
 & $pythonPath @arguments
 if ($LASTEXITCODE -ne 0) {

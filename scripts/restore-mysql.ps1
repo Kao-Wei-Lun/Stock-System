@@ -7,7 +7,8 @@ param(
 
     [switch]$AllowExistingTarget,
     [switch]$AllowSourceOverwrite,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$VerifyRestore
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +26,7 @@ $arguments = @(
 if ($AllowExistingTarget) { $arguments += "--allow-existing-target" }
 if ($AllowSourceOverwrite) { $arguments += "--allow-source-overwrite" }
 if ($DryRun) { $arguments += "--dry-run" }
+if ($VerifyRestore) { $arguments += "--verify-restore" }
 & $pythonPath @arguments
 if ($LASTEXITCODE -ne 0) {
     throw "MySQL restore failed."

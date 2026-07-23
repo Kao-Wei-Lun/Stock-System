@@ -186,8 +186,8 @@ MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS = read_float_env(
 )
 AUTO_BACKUP_ENABLED = read_bool_env("AUTO_BACKUP_ENABLED", True)
 AUTO_BACKUP_SCOPE = read_text_env("AUTO_BACKUP_SCOPE", "critical").strip().lower() or "critical"
-if AUTO_BACKUP_SCOPE not in {"full", "critical"}:
-    raise RuntimeError("AUTO_BACKUP_SCOPE must be either 'full' or 'critical'")
+if AUTO_BACKUP_SCOPE not in {"full", "critical", "market-history"}:
+    raise RuntimeError("AUTO_BACKUP_SCOPE must be 'full', 'critical', or 'market-history'")
 AUTO_BACKUP_INTERVAL_HOURS = read_float_env("AUTO_BACKUP_INTERVAL_HOURS", "24", minimum=1)
 AUTO_BACKUP_MAX_AGE_HOURS = read_float_env("AUTO_BACKUP_MAX_AGE_HOURS", "36", minimum=1)
 AUTO_BACKUP_INITIAL_DELAY_SECONDS = read_float_env("AUTO_BACKUP_INITIAL_DELAY_SECONDS", "300", minimum=0)
