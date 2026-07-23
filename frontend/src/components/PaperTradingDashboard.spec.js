@@ -54,6 +54,7 @@ describe("PaperTradingDashboard resilient loading", () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="simulation-safety-notice"]').text()).toContain("不會送出任何真實委託");
+    expect(wrapper.get('[data-paper-section="accounts"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="margin-fallback"]').text()).toContain("資料庫保存值");
     expect(requests.some((url) => url.endsWith("/accounts/margin/estimate"))).toBe(false);
     expect(wrapper.text()).toContain("最後成功");

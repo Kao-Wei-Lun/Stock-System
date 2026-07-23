@@ -38,7 +38,7 @@
     </nav>
 
     <!-- ─── Account Setup Tab ─────────────────────────────── -->
-    <section v-if="activeTab === 'setup'" class="pt-section">
+    <PaperAccountSection v-if="activeTab === 'setup'">
       <div v-if="sectionLoading.accounts" class="pt-inline-state" data-testid="accounts-loading">帳戶資料載入中…</div>
       <div v-else-if="sectionErrors.accounts" class="pt-inline-state error" data-testid="accounts-error">
         <span>帳戶資料載入失敗：{{ sectionErrors.accounts }}</span>
@@ -181,10 +181,10 @@
           </table>
         </div>
       </div>
-    </section>
+    </PaperAccountSection>
 
     <!-- ─── Bot Management Tab ────────────────────────────── -->
-    <section v-if="activeTab === 'bots'" class="pt-section">
+    <PaperBotSection v-if="activeTab === 'bots'">
       <div v-if="sectionLoading.bots" class="pt-inline-state" data-testid="bots-loading">Bot 資料載入中…</div>
       <div v-else-if="sectionErrors.bots" class="pt-inline-state error" data-testid="bots-error">
         <span>Bot 資料載入失敗：{{ sectionErrors.bots }}</span>
@@ -510,10 +510,10 @@
           </div>
         </div>
       </div>
-    </section>
+    </PaperBotSection>
 
     <!-- ─── Replay Tab ────────────────────────────────────── -->
-    <section v-if="activeTab === 'replay'" class="pt-section">
+    <PaperReplaySection v-if="activeTab === 'replay'">
       <div v-if="sectionLoading.replay" class="pt-inline-state" data-testid="replay-loading">回放紀錄載入中…</div>
       <div v-else-if="sectionErrors.replay" class="pt-inline-state error" data-testid="replay-error">
         <span>回放紀錄載入失敗：{{ sectionErrors.replay }}</span>
@@ -719,7 +719,7 @@
           </table>
         </div>
       </div>
-    </section>
+    </PaperReplaySection>
 
     <!-- ─── Toast ─────────────────────────────────────────── -->
     <div v-if="toast" class="pt-toast" :class="toast.type" @click="toast = null">
@@ -731,10 +731,15 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
-import { fetchWithPolicy } from "../utils/requestPolicy";
-import { createVisibilityPoller } from "../utils/visibilityPoller";
+import PaperAccountSection from "./paper/PaperAccountSection.vue";
+import PaperBotSection from "./paper/PaperBotSection.vue";
+import PaperReplaySection from "./paper/PaperReplaySection.vue";
+import { createPaperApi } from "../composables/paper/paperApi";
+import { usePaperAccounts } from "../composables/paper/usePaperAccounts";
+import { usePaperBots } from "../composables/paper/usePaperBots";
+import { usePaperMargin } from "../composables/paper/usePaperMargin";
+import { usePaperReplays } from "../composables/paper/usePaperReplays";
 
-const API = "/api/paper-trading";
 const DEFAULT_INITIAL_MARGIN = 28900;
 
 const activeTab = ref("setup");
@@ -745,29 +750,15 @@ const tabs = [
 ];
 
 // ─── State ───────────────────────────────────────────────────
-const accounts = ref([]);
-const bots = ref([]);
-const replayRuns = ref([]);
-const replayResult = ref(null);
-const liveBotState = ref(null);
 const toast = ref(null);
-const creatingAccount = ref(false);
-const creatingBot = ref(false);
-const startingAllBots = ref(false);
-const runningReplay = ref(false);
-const deletingAccounts = reactive({});
-const deletingBots = reactive({});
-const marginPreview = ref(null);
-const marginPreviewLoading = ref(false);
-const refreshingAllMargins = ref(false);
-const refreshingAccountMargins = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
 const sectionLoading = reactive({ accounts: true, bots: true, replay: true, margin: false });
 const sectionErrors = reactive({ accounts: "", bots: "", replay: "", margin: "" });
-const activeRequestControllers = new Set();
 let _riskSizingTimer = null;
+const paperApi = createPaperApi();
+const { apiFetch } = paperApi;
 
 const v2VariantOptions = [
   { value: "baseline", label: "V2 原始動態 ATR" },
@@ -776,63 +767,70 @@ const v2VariantOptions = [
   { value: "v2_winrate_candidate", label: "勝率候選版" },
 ];
 
-const accountForm = reactive({
-  name: "TMF 模擬帳戶",
-  product_symbol: "TMF",
-  starting_equity: 100000,
-});
+const {
+  bots,
+  liveBotState,
+  creatingBot,
+  startingAllBots,
+  deletingBots,
+  botForm,
+  botStrategyForm,
+  runningBotIds,
+  startableBotCount,
+  activeBotStatusClass,
+  activeBotStatusLabel,
+  directionLabel,
+  dataSourceLabel,
+  loadBots: loadBotRecords,
+  createBot: createBotRecord,
+  removeBot,
+  startBot: startBotRecord,
+  startAllBots: startAllBotRecords,
+  stopBot: stopBotRecord,
+  refreshBotState: refreshBotStateRecord,
+  startPolling: startBotPolling,
+  stopPolling: stopBotPolling,
+} = usePaperBots({ apiFetch, notify: showToast, sectionLoading, sectionErrors });
 
-const riskForm = reactive({
-  daily_loss_limit_pct: 0.05,
-  max_drawdown_pct: 0.15,
-  max_contracts_hard: 10,
-  max_margin_usage_pct: 0.6,
-  risk_per_trade_pct: 0.02,
-  stress_points: 2000,
-  total_position_risk_pct: 0.2,
-});
+const {
+  replayRuns,
+  replayResult,
+  runningReplay,
+  replayStrategyForm,
+  replayForm,
+  loadReplayRuns: loadReplayRecords,
+  runReplay: runReplayRecord,
+} = usePaperReplays({ apiFetch, notify: showToast, sectionLoading, sectionErrors });
 
-const botForm = reactive({
-  account_id: null,
-  name: "TMF 日盤 Bot",
-  mode: "realtime",
-  holding_policy: "day_only",
-});
+const {
+  accounts,
+  accountForm,
+  riskForm,
+  creatingAccount,
+  deletingAccounts,
+  loadAccounts: loadAccountRecords,
+  createAccount: createAccountRecord,
+  removeAccount,
+} = usePaperAccounts({ apiFetch, notify: showToast, sectionLoading, sectionErrors });
 
-const botStrategyForm = reactive({
-  strategy_type: "v2",
-  v2_variant: "v2_winrate_candidate",
-  stop_loss_points: 60,
-  take_profit_points: 120,
-});
-
-const replayStrategyForm = reactive({
-  strategy_type: "v2",
-  v2_variant: "v2_winrate_candidate",
-  stop_loss_points: 60,
-  take_profit_points: 120,
-});
-
-const replayForm = reactive({
-  account_id: null,
-  start_date: "",
-  end_date: "",
+const {
+  marginPreview,
+  marginPreviewLoading,
+  refreshingAllMargins,
+  refreshingAccountMargins,
+  previewAccountMargin: previewMarginRecord,
+  refreshAccountMargin: refreshAccountMarginRecord,
+  refreshAllMargins: refreshAllMarginRecords,
+} = usePaperMargin({
+  apiFetch,
+  notify: showToast,
+  accountForm,
+  sectionLoading,
+  sectionErrors,
+  reloadAccounts: () => loadAccountRecords({ botForm, replayForm }),
 });
 
 // ─── Computed ────────────────────────────────────────────────
-const activeBotStatusClass = computed(() => {
-  const running = bots.value.some((b) => b.status === "running");
-  return running ? "running" : "idle";
-});
-
-const activeBotStatusLabel = computed(() => {
-  const running = bots.value.filter((b) => b.status === "running");
-  if (running.length) return `${running.length} Bot 運行中`;
-  return "無運行 Bot";
-});
-
-const runningBotIds = computed(() => bots.value.filter((b) => b.status === "running").map((b) => b.id));
-const startableBotCount = computed(() => bots.value.filter((b) => b.status !== "running").length);
 
 const selectedBotAccount = computed(() => (
   accounts.value.find((acct) => Number(acct.id) === Number(botForm.account_id)) || null
@@ -841,16 +839,6 @@ const selectedBotAccount = computed(() => (
 const selectedReplayAccount = computed(() => (
   accounts.value.find((acct) => Number(acct.id) === Number(replayForm.account_id)) || null
 ));
-
-const directionLabel = computed(() => {
-  const d = liveBotState.value?.direction;
-  return { long: "📈 做多", short: "📉 做空", neutral: "⏸ 觀望" }[d] || d || "--";
-});
-
-const dataSourceLabel = computed(() => {
-  const source = liveBotState.value?.data_source;
-  return { fubon_neo: "富邦 API" }[source] || source || "--";
-});
 
 const riskSizingCapital = computed(() => {
   if (activeTab.value === "replay") {
@@ -903,30 +891,6 @@ const activeRiskConfig = computed(() => {
 const activeRiskStrategyForm = computed(() => (
   activeTab.value === "replay" ? replayStrategyForm : botStrategyForm
 ));
-
-// ─── API Helpers ─────────────────────────────────────────────
-async function apiFetch(path, options = {}) {
-  const controller = new AbortController();
-  activeRequestControllers.add(controller);
-  try {
-    const requestOptions = {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-      signal: controller.signal,
-    };
-    const res = await fetchWithPolicy(`${API}${path}`, requestOptions, {
-      timeoutMs: 12_000,
-      retries: String(options.method || "GET").toUpperCase() === "GET" ? 1 : 0,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `API error: ${res.status}`);
-    }
-    return res.json();
-  } finally {
-    activeRequestControllers.delete(controller);
-  }
-}
 
 function showToast(message, type = "info") {
   toast.value = { message, type };
@@ -1044,307 +1008,87 @@ function scheduleRiskSizing() {
 
 // ─── Actions ─────────────────────────────────────────────────
 async function loadAccounts() {
-  sectionLoading.accounts = true;
-  sectionErrors.accounts = "";
-  try {
-    const data = await apiFetch("/accounts");
-    accounts.value = data.items || [];
-    if (accounts.value.length && !botForm.account_id) {
-      botForm.account_id = accounts.value[0].id;
-    }
-    if (accounts.value.length && !replayForm.account_id) {
-      replayForm.account_id = accounts.value[0].id;
-    }
-  } catch (error) {
-    sectionErrors.accounts = error.message || "未知錯誤";
-  } finally {
-    sectionLoading.accounts = false;
-  }
+  return loadAccountRecords({ botForm, replayForm });
 }
 
 async function loadBots() {
-  sectionLoading.bots = true;
-  sectionErrors.bots = "";
-  try {
-    const data = await apiFetch("/bots");
-    bots.value = data.items || [];
-  } catch (error) {
-    sectionErrors.bots = error.message || "未知錯誤";
-  } finally {
-    sectionLoading.bots = false;
-  }
+  return loadBotRecords();
 }
 
 async function loadReplayRuns() {
-  sectionLoading.replay = true;
-  sectionErrors.replay = "";
-  try {
-    const data = await apiFetch("/replay/runs");
-    replayRuns.value = data.items || [];
-  } catch (error) {
-    sectionErrors.replay = error.message || "未知錯誤";
-  } finally {
-    sectionLoading.replay = false;
-  }
+  return loadReplayRecords();
 }
 
 async function previewAccountMargin({ silent = false } = {}) {
-  marginPreviewLoading.value = true;
-  sectionLoading.margin = true;
-  sectionErrors.margin = "";
-  try {
-    const data = await apiFetch("/accounts/margin/estimate", {
-      method: "POST",
-      body: JSON.stringify({ product_symbol: accountForm.product_symbol || "TMF" }),
-    });
-    marginPreview.value = data;
-    if (!data.ok) {
-      sectionErrors.margin = data.error || data.margin_sync_error || "供應商未回傳最新值，已保留可用的持久化值";
-    }
-    if (!silent) {
-      showToast(
-        data.ok ? "\u4fdd\u8b49\u91d1\u9810\u67e5\u5b8c\u6210" : "\u5df2\u4f7f\u7528\u9810\u8a2d\u4fdd\u8b49\u91d1",
-        data.ok ? "success" : "error",
-      );
-    }
-  } catch (e) {
-    sectionErrors.margin = e.message || "未知錯誤";
-    if (!silent) showToast(e.message, "error");
-  } finally {
-    marginPreviewLoading.value = false;
-    sectionLoading.margin = false;
-  }
+  return previewMarginRecord({ silent });
 }
 
 async function refreshAccountMargin(account) {
-  refreshingAccountMargins[account.id] = true;
-  sectionErrors.margin = "";
-  try {
-    const data = await apiFetch(`/accounts/${account.id}/margin/refresh`, { method: "POST" });
-    showToast(
-      data.ok ? "\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0" : "\u4fdd\u8b49\u91d1\u66f4\u65b0\u5931\u6557\uff0c\u5df2\u4fdd\u7559\u53ef\u7528\u503c",
-      data.ok ? "success" : "error",
-    );
-    if (!data.ok) {
-      sectionErrors.margin = data.error || data.margin_sync_error || "供應商未回傳最新值，已保留既有保證金";
-    }
-    await loadAccounts();
-  } catch (e) {
-    sectionErrors.margin = e.message || "未知錯誤";
-    showToast(e.message, "error");
-  } finally {
-    delete refreshingAccountMargins[account.id];
-  }
+  return refreshAccountMarginRecord(account);
 }
 
 async function refreshAllMargins() {
-  refreshingAllMargins.value = true;
-  sectionErrors.margin = "";
-  try {
-    const data = await apiFetch("/accounts/margins/refresh", { method: "POST" });
-    showToast(
-      data.failed ? `\u5df2\u66f4\u65b0 ${data.success}/${data.total} \u500b\u5e33\u6236` : "\u5168\u90e8\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0",
-      data.failed ? "error" : "success",
-    );
-    if (data.failed) {
-      sectionErrors.margin = `${data.failed} 個帳戶更新失敗，已保留各帳戶最後可用值`;
-    }
-    await loadAccounts();
-  } catch (e) {
-    sectionErrors.margin = e.message || "未知錯誤";
-    showToast(e.message, "error");
-  } finally {
-    refreshingAllMargins.value = false;
-  }
+  return refreshAllMarginRecords();
 }
 
 async function createAccount() {
-  creatingAccount.value = true;
-  try {
-    const account = await apiFetch("/accounts", {
-      method: "POST",
-      body: JSON.stringify({
-        ...accountForm,
-        risk_config: { ...riskForm },
-        cost_model: {},
-      }),
-    });
-    showToast(
-      account.margin_sync_error ? "\u5e33\u6236\u5df2\u5efa\u7acb\uff0c\u4fdd\u8b49\u91d1\u66ab\u7528\u9810\u8a2d\u503c" : "\u5e33\u6236\u5efa\u7acb\u6210\u529f",
-      account.margin_sync_error ? "error" : "success",
-    );
-    await loadAccounts();
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    creatingAccount.value = false;
-  }
+  return createAccountRecord({
+    reload: loadAccounts,
+    marginSyncErrorMessage: "帳戶已建立，保證金暫用預設值",
+  });
 }
 
 async function createBot() {
-  creatingBot.value = true;
-  try {
-    await apiFetch("/bots", {
-      method: "POST",
-      body: JSON.stringify({
-        ...botForm,
-        strategy_config: buildStrategyConfig(botStrategyForm),
-      }),
-    });
-    showToast("Bot 建立成功", "success");
-    await loadBots();
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    creatingBot.value = false;
-  }
+  return createBotRecord(buildStrategyConfig);
 }
 
 async function deleteAccount(account) {
   if (!window.confirm(`確定要刪除帳戶「${account.name}」？相關 Bot、回放與交易紀錄也會一併刪除。`)) {
     return;
   }
-  deletingAccounts[account.id] = true;
-  try {
-    const relatedBotIds = bots.value
-      .filter((bot) => Number(bot.account_id) === Number(account.id))
-      .map((bot) => Number(bot.id));
-    await apiFetch(`/accounts/${account.id}`, { method: "DELETE" });
-    showToast("帳戶已刪除", "success");
-    if (Number(botForm.account_id) === Number(account.id)) botForm.account_id = null;
-    if (Number(replayForm.account_id) === Number(account.id)) replayForm.account_id = null;
-    if (relatedBotIds.includes(Number(liveBotState.value?.bot_id))) liveBotState.value = null;
-    await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    delete deletingAccounts[account.id];
-  }
+  const relatedBotIds = bots.value
+    .filter((bot) => Number(bot.account_id) === Number(account.id))
+    .map((bot) => Number(bot.id));
+  if (!await removeAccount(account)) return;
+  if (Number(botForm.account_id) === Number(account.id)) botForm.account_id = null;
+  if (Number(replayForm.account_id) === Number(account.id)) replayForm.account_id = null;
+  if (relatedBotIds.includes(Number(liveBotState.value?.bot_id))) liveBotState.value = null;
+  await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
 }
 
 async function deleteBot(bot) {
   if (!window.confirm(`確定要刪除 Bot「${bot.name}」？該 Bot 的模擬紀錄也會一併刪除。`)) {
     return;
   }
-  deletingBots[bot.id] = true;
-  try {
-    await apiFetch(`/bots/${bot.id}`, { method: "DELETE" });
-    showToast("Bot 已刪除", "success");
-    if (liveBotState.value?.bot_id === bot.id) liveBotState.value = null;
-    await Promise.all([loadBots(), loadReplayRuns()]);
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    delete deletingBots[bot.id];
-  }
+  if (await removeBot(bot)) await loadReplayRuns();
 }
 
 async function startBot(botId) {
-  try {
-    const data = await apiFetch(`/bots/${botId}/start`, { method: "POST" });
-    showToast(`Bot ${botId} 已啟動`, "success");
-    liveBotState.value = data.bot;
-    await loadBots();
-    startPolling();
-  } catch (e) {
-    showToast(e.message, "error");
-  }
+  return startBotRecord(botId);
 }
 
 async function startAllBots() {
-  startingAllBots.value = true;
-  try {
-    const data = await apiFetch("/bots/start-all", { method: "POST" });
-    const firstLive = (data.items || []).find((item) => item.bot)?.bot;
-    if (firstLive) liveBotState.value = firstLive;
-    await loadBots();
-    if (runningBotIds.value.length) startPolling();
-
-    if (data.failed_count) {
-      showToast(`已啟動 ${data.started_count || 0} 個 Bot，${data.failed_count} 個失敗`, "error");
-    } else if (data.started_count) {
-      showToast(`已啟動 ${data.started_count} 個 Bot`, "success");
-    } else if (data.already_running_count) {
-      showToast("所有 Bot 已在運行中", "success");
-    } else {
-      showToast("沒有可啟動的 Bot", "info");
-    }
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    startingAllBots.value = false;
-  }
+  return startAllBotRecords();
 }
 
 async function stopBot(botId) {
-  try {
-    const data = await apiFetch(`/bots/${botId}/stop`, { method: "POST" });
-    showToast(`Bot ${botId} 已停止`, "success");
-    liveBotState.value = data.bot;
-    await loadBots();
-  } catch (e) {
-    showToast(e.message, "error");
-  }
+  return stopBotRecord(botId);
 }
 
 async function refreshBotState(botId) {
-  try {
-    const data = await apiFetch(`/bots/${botId}/state`);
-    liveBotState.value = data;
-  } catch { /* ignore */ }
+  return refreshBotStateRecord(botId);
 }
 
 async function runReplay() {
-  runningReplay.value = true;
-  replayResult.value = null;
-  try {
-    const data = await apiFetch("/replay/run", {
-      method: "POST",
-      body: JSON.stringify({
-        ...replayForm,
-        strategy_config: buildStrategyConfig(replayStrategyForm),
-      }),
-    });
-    replayResult.value = data.result;
-    showToast("回放完成", "success");
-    await loadReplayRuns();
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    runningReplay.value = false;
-  }
+  return runReplayRecord(buildStrategyConfig);
 }
-
-// ─── Auto Polling ────────────────────────────────────────────
-async function pollRunningBots() {
-  const ids = runningBotIds.value;
-  if (!ids.length) { stopPolling(); return; }
-  for (const id of ids) {
-    try {
-      const state = await apiFetch(`/bots/${id}/state`);
-      // Update bar_count in bot list
-      const bot = bots.value.find((b) => b.id === id);
-      if (bot) {
-        bot.bar_count = state.bar_count;
-        bot.status = state.status;
-        bot.strategy_config = state.strategy_config || bot.strategy_config;
-      }
-      // Update live state if this bot is selected
-      if (liveBotState.value?.bot_id === id || ids.length === 1) {
-        liveBotState.value = state;
-      }
-    } catch { /* ignore */ }
-  }
-}
-
-const botPoller = createVisibilityPoller(pollRunningBots, { intervalMs: 3000 });
 
 function startPolling() {
-  botPoller.start();
+  startBotPolling();
 }
 
 function stopPolling() {
-  botPoller.stop();
+  stopBotPolling();
 }
 
 // ─── Formatters ──────────────────────────────────────────────
@@ -1458,8 +1202,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling();
   if (_riskSizingTimer) clearTimeout(_riskSizingTimer);
-  activeRequestControllers.forEach((controller) => controller.abort());
-  activeRequestControllers.clear();
+  paperApi.dispose();
 });
 </script>
 
