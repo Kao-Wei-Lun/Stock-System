@@ -76,17 +76,35 @@ class MarketDataMixin:
                     await cur.execute(sql, tuple(params))
                     return cur.rowcount
 
-    async def get_ohlcv(self, ticker: str, period: str = "1y", interval: str = "1d") -> List[Dict]:
-        since = _period_to_date(period)
-        sql = """
+    async def get_ohlcv(
+        self,
+        ticker: str,
+        period: str = "1y",
+        interval: str = "1d",
+        *,
+        since: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict]:
+        period_start = _period_to_date(period)
+        lower_bound = since or period_start
+        select_sql = """
             SELECT `date`, `open`, `high`, `low`, `close`, `volume`, `adj_close`, `source`, `updated_at`
             FROM `ohlcv`
             WHERE `ticker`=%s AND `interval`=%s AND `date`>=%s
-            ORDER BY `date` ASC
         """
+        params: tuple = (ticker, interval, lower_bound)
+        if limit is not None:
+            clean_limit = max(1, min(int(limit), 5000))
+            sql = f"""
+                SELECT * FROM ({select_sql} ORDER BY `date` DESC LIMIT %s) AS `bounded`
+                ORDER BY `date` ASC
+            """
+            params = (*params, clean_limit)
+        else:
+            sql = f"{select_sql} ORDER BY `date` ASC"
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql, (ticker, interval, since))
+                await cur.execute(sql, params)
                 rows = await cur.fetchall()
         return list(rows)
 

@@ -16,6 +16,7 @@ import {
 } from "../utils/workspacePresets";
 import { upsertRealtimeOhlcFromCandle, upsertRealtimeOhlcFromQuote } from "../utils/realtimeOhlc";
 import { mergeBookLevels, mergeRealtimeQuote } from "../utils/realtimeQuote";
+import { DEFAULT_OHLC_BUFFER_LIMIT, mergeOhlcBuffer } from "../utils/ohlcBuffer";
 import { createVisibilityPoller } from "../utils/visibilityPoller";
 import {
   FUTOPT_REST_POLL_MS,
@@ -909,7 +910,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       if (activeBootstrapPage.value === "overview") {
         return Promise.allSettled([loadWatchlist(), loadMarketSnapshots()]);
       }
-      if (activeBootstrapPage.value === "terminal") return loadWatchlist();
+      if (activeBootstrapPage.value === "terminal") return loadWatchlist({ compact: true });
       return Promise.resolve();
     },
     { intervalMs: 60_000 },
@@ -1455,7 +1456,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       rawOhlcData.value,
       data,
       currentInterval.value,
-    );
+    ).slice(-DEFAULT_OHLC_BUFFER_LIMIT);
   }
 
   function upsertRealtimeCandleRow(data) {
@@ -1464,7 +1465,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       rawOhlcData.value,
       data,
       currentInterval.value,
-    );
+    ).slice(-DEFAULT_OHLC_BUFFER_LIMIT);
   }
 
   function handleRealtimeQuote(message) {
@@ -1526,11 +1527,13 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     upsertRealtimeCandleRow(data);
   }
 
-  async function loadWatchlist() {
+  async function loadWatchlist({ compact = activeBootstrapPage.value === "terminal" } = {}) {
     watchlistLoading.value = true;
     watchlistError.value = false;
     try {
-      const payload = await dashboardApi.listWatchlist();
+      const payload = compact
+        ? await dashboardApi.listWatchlistMetadata()
+        : await dashboardApi.listWatchlist();
       watchlistGroups.value = payload.groups || [];
       const currentUserGroups = watchlistGroups.value.filter((group) => group.name !== MARKET_GROUP_NAME);
       if (
@@ -1810,10 +1813,14 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
             period: resolveFutoptPeriod(fetchPeriod, resolvedInterval),
             interval: resolveFutoptInterval(resolvedInterval),
             refreshMode: "background",
+            limit: 400,
+            warmup: 250,
           })
           : await dashboardApi.getOhlc(ticker, {
             period: fetchPeriod,
             interval: resolvedInterval,
+            limit: 400,
+            warmup: 250,
           });
         const data = payload.data || [];
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
@@ -1895,6 +1902,8 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
           period: requestedPeriod,
           interval: requestedInterval,
           refreshMode: "blocking",
+          since: rawOhlcData.value.at(-1)?.date || null,
+          limit: 100,
         }),
         dashboardApi.getFutoptQuote(requestedTicker),
       ]);
@@ -1912,7 +1921,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       }
 
       if (Array.isArray(ohlcPayload?.data) && ohlcPayload.data.length) {
-        rawOhlcData.value = ohlcPayload.data;
+        rawOhlcData.value = mergeOhlcBuffer(rawOhlcData.value, ohlcPayload.data);
         futoptRefreshStatus.value = ohlcPayload.refresh_status || "refreshed";
         futoptDataStale.value = Boolean(ohlcPayload.is_stale);
       }
@@ -1972,11 +1981,15 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
           period: fetchPeriod,
           interval: resolvedInterval,
           refreshMode: "background",
+          limit: 400,
+          warmup: 250,
           signal: requestSignal,
         })
         : await dashboardApi.getOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
+          limit: 400,
+          warmup: 250,
           signal: requestSignal,
         });
       if (requestToken !== klineRequestSequence) return;
@@ -1986,7 +1999,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         currentTicker.value = resolvedTicker;
       }
       dashboardRealtime.subscribeTicker(resolvedTicker);
-      rawOhlcData.value = data.data || [];
+      rawOhlcData.value = mergeOhlcBuffer([], data.data || []);
       if (isFutopt) {
         futoptRefreshStatus.value = data.refresh_status || "idle";
         futoptDataStale.value = Boolean(data.is_stale);
@@ -2231,14 +2244,14 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       return Promise.allSettled([
         ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value),
         dashboardBootstrap.ensure("workspaces", loadWorkspacePresets),
-        dashboardBootstrap.ensure("watchlist", loadWatchlist, { queryKey: "compact" }),
+        dashboardBootstrap.ensure("watchlist", () => loadWatchlist({ compact: true }), { queryKey: "compact" }),
       ]);
     }
 
     if (normalizedPage === "overview") {
       workspaceTab.value = "screener";
       return Promise.allSettled([
-        dashboardBootstrap.ensure("watchlist", loadWatchlist, { queryKey: "full" }),
+        dashboardBootstrap.ensure("watchlist", () => loadWatchlist({ compact: false }), { queryKey: "full" }),
         dashboardBootstrap.ensure("market-snapshots", () => loadMarketSnapshots(false)),
         dashboardBootstrap.ensure("macro", () => loadMacroDashboard(false)),
         dashboardBootstrap.ensure("events", () => loadEventCalendar(false)),

@@ -38,6 +38,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const params = new URLSearchParams();
       if (options.period) params.set("period", String(options.period));
       if (options.interval) params.set("interval", String(options.interval));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.since) params.set("since", String(options.since));
+      if (options.warmup != null) params.set("warmup", String(options.warmup));
       const query = params.toString();
       return request(`/api/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`, {
         ...(options.signal ? { signal: options.signal } : {}),
@@ -50,6 +53,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       if (options.refreshMode) params.set("refresh_mode", String(options.refreshMode));
       if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
       if (options.session) params.set("session", String(options.session));
+      if (options.limit != null) params.set("limit", String(options.limit));
+      if (options.since) params.set("since", String(options.since));
+      if (options.warmup != null) params.set("warmup", String(options.warmup));
       const query = params.toString();
       return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`, {
         ...(options.signal ? { signal: options.signal } : {}),
@@ -67,6 +73,12 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       if (options.refresh) params.set("refresh", "true");
       const query = params.toString();
       return request(`/api/fubon/snapshot/${encodeURIComponent(market)}${query ? `?${query}` : ""}`);
+    },
+    getFubonSnapshotSummary(market, options = {}) {
+      const params = new URLSearchParams();
+      if (options.refresh) params.set("refresh", "true");
+      const query = params.toString();
+      return request(`/api/fubon/snapshot/${encodeURIComponent(market)}/summary${query ? `?${query}` : ""}`);
     },
     getFubonMovers(market, options = {}) {
       const params = new URLSearchParams();
@@ -87,6 +99,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
     },
     listWatchlist() {
       return request("/api/watchlist");
+    },
+    listWatchlistMetadata() {
+      return request("/api/watchlist/metadata");
     },
     createWatchlistGroup(payload) {
       return request("/api/watchlist/groups", buildJsonRequest("POST", payload));

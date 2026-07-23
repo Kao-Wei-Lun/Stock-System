@@ -54,8 +54,8 @@ export function createDashboardMarketSnapshots({
     marketSnapshotError.value = "";
     try {
       const [tseSnapshot, otcSnapshot, tseUp, otcUp, tseDown, otcDown, tseActives, otcActives] = await Promise.all([
-        dashboardApi.getFubonSnapshot("TSE", { refresh: forceRefresh }),
-        dashboardApi.getFubonSnapshot("OTC", { refresh: forceRefresh }),
+        dashboardApi.getFubonSnapshotSummary("TSE", { refresh: forceRefresh }),
+        dashboardApi.getFubonSnapshotSummary("OTC", { refresh: forceRefresh }),
         dashboardApi.getFubonMovers("TSE", { direction: "up", change: "percent", limit: 10, refresh: forceRefresh }),
         dashboardApi.getFubonMovers("OTC", { direction: "up", change: "percent", limit: 10, refresh: forceRefresh }),
         dashboardApi.getFubonMovers("TSE", { direction: "down", change: "percent", limit: 10, refresh: forceRefresh }),

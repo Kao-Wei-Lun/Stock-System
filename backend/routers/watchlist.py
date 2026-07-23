@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from cache import AsyncTTLCache
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
@@ -29,6 +30,7 @@ CATEGORY_OVERRIDES = {
 }
 
 router = APIRouter(prefix="/api", tags=["watchlist"])
+_watchlist_metadata_cache = AsyncTTLCache(ttl_seconds=30, max_entries=4)
 
 
 def categorize(ticker: str) -> str:
@@ -163,12 +165,48 @@ async def get_watchlist():
     return {"groups": groups, "items": flat_items}
 
 
+@router.get("/watchlist/metadata")
+async def get_watchlist_metadata():
+    async def load_metadata():
+        groups = await db.get_watchlist_groups()
+        tickers = list(dict.fromkeys(
+            str(item.get("ticker") or "").strip().upper()
+            for group in groups
+            for item in group.get("items", [])
+            if item.get("ticker")
+        ))
+        stock_info = await db.get_stock_info_many(tickers)
+        flat_items = []
+        for group in groups:
+            compact_items = []
+            for item in group.get("items", []):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                compact = {
+                    "id": item.get("id"),
+                    "ticker": ticker,
+                    "name": resolve_display_name(ticker, stock_info.get(ticker)),
+                    "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
+                    "sort_order": item.get("sort_order", 0),
+                    "group_id": group.get("id"),
+                    "group_name": group.get("name"),
+                    "group_color": group.get("color"),
+                    "category": categorize(ticker),
+                }
+                compact_items.append(compact)
+                flat_items.append(compact)
+            group["items"] = compact_items
+        return {"groups": groups, "items": flat_items, "quotes_included": False}
+
+    return await _watchlist_metadata_cache.get_or_load("default", load_metadata)
+
+
 @router.post("/watchlist/groups")
 async def create_watchlist_group(payload: WatchlistGroupCreate):
     try:
         group = await db.create_watchlist_group(payload.name, color=payload.color)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    await _watchlist_metadata_cache.clear()
     return {**group, "items": []}
 
 
@@ -180,6 +218,7 @@ async def rename_watchlist_group(group_id: int, payload: WatchlistGroupUpdate):
         raise HTTPException(400, str(exc)) from exc
     if not group:
         raise HTTPException(404, "Watchlist group not found")
+    await _watchlist_metadata_cache.clear()
     return group
 
 
@@ -188,6 +227,7 @@ async def delete_watchlist_group(group_id: int):
     deleted = await db.delete_watchlist_group(group_id)
     if not deleted:
         raise HTTPException(404, "Watchlist group not found")
+    await _watchlist_metadata_cache.clear()
     await fubon_realtime_pool.sync_watchlist_from_db(db)
     return {"ok": True, "group_id": group_id}
 
@@ -215,6 +255,7 @@ async def add_watchlist_item(payload: WatchlistItemCreate):
         log.warning("watchlist info %s failed: %s", ticker, exc)
 
     await fubon_realtime_pool.sync_watchlist_from_db(db)
+    await _watchlist_metadata_cache.clear()
     hydrated = await hydrate_watchlist_item(ticker, group, item)
     hydrated["id"] = item["id"]
     hydrated["sort_order"] = item["sort_order"]
@@ -226,6 +267,7 @@ async def delete_watchlist_item(item_id: int):
     deleted = await db.delete_watchlist_item(item_id)
     if not deleted:
         raise HTTPException(404, "Watchlist item not found")
+    await _watchlist_metadata_cache.clear()
     await fubon_realtime_pool.sync_watchlist_from_db(db)
     return {"ok": True, "item_id": item_id}
 
@@ -241,4 +283,5 @@ async def reorder_watchlist_items(group_id: int, payload: WatchlistItemsOrderUpd
         raise HTTPException(400, str(exc)) from exc
     if not updated:
         raise HTTPException(404, "Watchlist items not found")
+    await _watchlist_metadata_cache.clear()
     return {"ok": True, "group_id": group_id, "item_ids": payload.item_ids}

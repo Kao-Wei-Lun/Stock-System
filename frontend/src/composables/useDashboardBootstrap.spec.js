@@ -20,8 +20,8 @@ vi.mock("../api/dashboardApi", () => ({
       apiState.calls.push({ method: "listWorkspaces" });
       return Promise.resolve({ items: [] });
     },
-    listWatchlist() {
-      apiState.calls.push({ method: "listWatchlist" });
+    listWatchlistMetadata() {
+      apiState.calls.push({ method: "listWatchlistMetadata" });
       return Promise.resolve({ groups: [] });
     },
     listNotifications() {
@@ -97,7 +97,7 @@ describe("useDashboard route bootstrap", () => {
     expect(methods).toEqual(expect.arrayContaining([
       "getFutoptOhlc",
       "listWorkspaces",
-      "listWatchlist",
+      "listWatchlistMetadata",
       "listNotifications",
     ]));
     expect(methods).not.toEqual(expect.arrayContaining([
@@ -117,11 +117,11 @@ describe("useDashboard route bootstrap", () => {
       initialTicker: "*TMFF",
     });
     await flushPromises();
-    expect(apiState.calls.some((call) => call.method === "getFubonSnapshot")).toBe(false);
+    expect(apiState.calls.some((call) => call.method === "getFubonSnapshotSummary")).toBe(false);
 
     await mounted.dashboard.bootstrapWorkspace("overview");
 
-    expect(apiState.calls.some((call) => call.method === "getFubonSnapshot")).toBe(true);
+    expect(apiState.calls.some((call) => call.method === "getFubonSnapshotSummary")).toBe(true);
     mounted.wrapper.unmount();
   });
 

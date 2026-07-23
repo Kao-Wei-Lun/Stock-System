@@ -1,9 +1,11 @@
 """Market data routes — kline, quote, info, sync, search, stats."""
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
+from cache import AsyncTTLCache
 from data_fetcher import normalize_ticker
 from database import db
 from display_name_resolver import resolve_display_name
@@ -44,6 +46,29 @@ INTRADAY_PERIODS = {"1d", "5d", "1mo", "3mo", "6mo"}
 FUTOPT_ALLOWED_INTERVALS = {"1m", "5m", "15m", "30m", "60m", "1h"}
 
 router = APIRouter(prefix="/api", tags=["market_data"])
+_snapshot_summary_cache = AsyncTTLCache(ttl_seconds=10, max_entries=8)
+
+
+def _bounded_ohlc_rows(rows: list[dict], *, since: str | None, limit: int | None, warmup: int) -> list[dict]:
+    bounded = rows
+    if since:
+        try:
+            threshold = datetime.fromisoformat(since.replace("Z", "+00:00"))
+
+            def is_after(row):
+                value = row.get("date")
+                candidate = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if candidate.tzinfo is None and threshold.tzinfo is not None:
+                    candidate = candidate.replace(tzinfo=threshold.tzinfo)
+                return candidate > threshold
+
+            bounded = [row for row in bounded if is_after(row)]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "since must be an ISO-8601 date/time")
+    if limit is not None:
+        effective_limit = max(limit, warmup)
+        bounded = bounded[-effective_limit:]
+    return bounded
 
 
 def configure(
@@ -80,17 +105,31 @@ async def _get_ohlc_payload(
     ticker: str,
     period: str | None,
     interval: str,
+    *,
+    limit: int | None = None,
+    since: str | None = None,
+    warmup: int = 0,
 ):
     ticker = normalize_ticker(ticker)
     period, interval = _normalize_ohlc_query(period, interval)
-    rows = await db.get_ohlcv(ticker, period=period, interval=interval)
+    query_options = {}
+    if limit is not None or since is not None:
+        query_options = {"limit": max(limit or 1, warmup), "since": since}
+    rows = await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
 
-    if _needs_history_backfill(rows, period) or _has_suspicious_daily_rows(ticker, rows, interval):
+    if since is None and (_needs_history_backfill(rows, period) or _has_suspicious_daily_rows(ticker, rows, interval)):
         fetch_period = "max" if period in FULL_HISTORY_PERIODS else period
         await fetcher.fetch_and_store(ticker, period=fetch_period, interval=interval, include_info=False)
-        rows = await db.get_ohlcv(ticker, period=period, interval=interval)
+        rows = await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
 
-    return {"ticker": ticker, "period": period, "interval": interval, "data": rows}
+    return {
+        "ticker": ticker,
+        "period": period,
+        "interval": interval,
+        "data": rows,
+        "row_count": len(rows),
+        "incremental": since is not None,
+    }
 
 
 def _normalize_futopt_ohlc_query(period: str | None, interval: str | None) -> tuple[str, str]:
@@ -143,8 +182,11 @@ async def get_kline(
     ticker: str,
     period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
     interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+    limit: int | None = Query(None, ge=1, le=5000),
+    since: str | None = Query(None),
+    warmup: int = Query(0, ge=0, le=2000),
 ):
-    return await _get_ohlc_payload(ticker, period, interval)
+    return await _get_ohlc_payload(ticker, period, interval, limit=limit, since=since, warmup=warmup)
 
 
 @router.get("/ohlc/{ticker}")
@@ -152,8 +194,11 @@ async def get_ohlc(
     ticker: str,
     period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
     interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+    limit: int | None = Query(None, ge=1, le=5000),
+    since: str | None = Query(None),
+    warmup: int = Query(0, ge=0, le=2000),
 ):
-    return await _get_ohlc_payload(ticker, period, interval)
+    return await _get_ohlc_payload(ticker, period, interval, limit=limit, since=since, warmup=warmup)
 
 
 @router.get("/ohlc")
@@ -161,8 +206,11 @@ async def get_ohlc_query(
     ticker: str = Query(..., min_length=1),
     period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max"),
     interval: str = Query("1d", description="1m 5m 15m 60m 1h 1d 1wk 1mo"),
+    limit: int | None = Query(None, ge=1, le=5000),
+    since: str | None = Query(None),
+    warmup: int = Query(0, ge=0, le=2000),
 ):
-    return await _get_ohlc_payload(ticker, period, interval)
+    return await _get_ohlc_payload(ticker, period, interval, limit=limit, since=since, warmup=warmup)
 
 
 @router.get("/quote/{ticker}", response_model=QuoteResponse)
@@ -199,6 +247,9 @@ async def get_futopt_ohlc(
     refresh: bool = Query(True, description="Refresh the persisted tail from Fubon before returning"),
     refresh_mode: str | None = Query(None, description="none, background, or blocking"),
     session: str = Query("AUTO", description="Refresh single-flight session key"),
+    limit: int | None = Query(None, ge=1, le=5000),
+    since: str | None = Query(None),
+    warmup: int = Query(0, ge=0, le=2000),
 ):
     period, interval = _normalize_futopt_ohlc_query(period, interval)
     selected_refresh_mode = str(refresh_mode or ("blocking" if refresh else "none")).strip().lower()
@@ -219,6 +270,9 @@ async def get_futopt_ohlc(
         raise HTTPException(502, f"Unable to refresh futopt ohlc: {payload['sync_error']}")
     if not payload.get("data"):
         raise HTTPException(404, "Unable to fetch futopt ohlc")
+    payload["data"] = _bounded_ohlc_rows(payload["data"], since=since, limit=limit, warmup=warmup)
+    payload["row_count"] = len(payload["data"])
+    payload["incremental"] = since is not None
     return payload
 
 
@@ -266,6 +320,35 @@ async def get_fubon_snapshot(
     if not payload:
         raise HTTPException(404, "Unable to fetch Fubon market snapshot")
     return payload
+
+
+@router.get("/fubon/snapshot/{market}/summary")
+async def get_fubon_snapshot_summary(market: str, refresh: bool = Query(False)):
+    normalized_market = str(market or "").strip().upper()
+
+    async def load_summary():
+        payload = await fubon_market_snapshot_provider.fetch_snapshot(normalized_market, refresh=refresh)
+        if not payload:
+            raise HTTPException(404, "Unable to fetch Fubon market snapshot")
+        return {
+            "market": payload.get("market") or normalized_market,
+            "date": payload.get("date"),
+            "time": payload.get("time"),
+            "source": payload.get("source") or "fubon_neo",
+            "freshness": payload.get("freshness"),
+            "summary": payload.get("summary") or {},
+        }
+
+    try:
+        if refresh:
+            result = await load_summary()
+            await _snapshot_summary_cache.invalidate(normalized_market)
+            return result
+        return await _snapshot_summary_cache.get_or_load(normalized_market, load_summary)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FubonMarketdataAuthenticationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/fubon/movers/{market}")

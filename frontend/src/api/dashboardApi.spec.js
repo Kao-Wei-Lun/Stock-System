@@ -139,6 +139,20 @@ describe("dashboardApi", () => {
     );
   });
 
+  it("builds bounded and incremental kline query strings", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ ticker: "AAPL", data: [] }));
+    const api = createDashboardApi();
+
+    await api.getOhlc("AAPL", {
+      period: "1d", interval: "1m", limit: 400, warmup: 250, since: "2026-07-23T09:30:00+08:00",
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/ohlc/AAPL?period=1d&interval=1m&limit=400&since=2026-07-23T09%3A30%3A00%2B08%3A00&warmup=250",
+      {},
+    );
+  });
+
   it("builds Fubon market snapshot endpoints", async () => {
     globalThis.fetch
       .mockImplementationOnce(() => jsonResponse({ market: "TSE", data: [] }))

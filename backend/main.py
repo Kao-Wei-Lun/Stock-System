@@ -19,6 +19,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from background_tasks import BackgroundTaskService
@@ -536,6 +537,7 @@ app.add_middleware(
     allowed_networks=LAN_ALLOWED_NETWORKS,
 )
 app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 if FRONTEND_DIST_DIR.exists():
     app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
