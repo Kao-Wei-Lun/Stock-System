@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:31:00+08:00",
+  "scope": "phase-10-realtime-ui-batching",
+  "implementation": {
+    "quote_batching": "animation-frame",
+    "books_batching": "latest-snapshot-per-animation-frame",
+    "candle_priority": "immediate",
+    "hidden_page_flush_ms": 250,
+    "raw_ohlc_state": "shallowRef-with-immutable-replacement",
+    "quote_state": "shallowReactive-with-changed-field-assignment",
+    "rollback_flag": "VITE_REALTIME_BATCHING_ENABLED"
+  },
+  "fixture": {
+    "quote_messages": 500,
+    "ui_quote_updates": 1,
+    "latest_price_preserved": true,
+    "maximum_high_preserved": true,
+    "minimum_low_preserved": true,
+    "total_volume_delta_preserved": true,
+    "consecutive_minute_candles_preserved": true,
+    "latest_books_snapshot_preserved": true,
+    "ticker_switch_isolated": true,
+    "hidden_to_visible_flush": true,
+    "unmount_cleanup": true
+  },
+  "browser_smoke": {
+    "route": "/terminal/*TMFF",
+    "terminal_rendered": true,
+    "websocket_connected": true,
+    "ask_levels_a1_to_a5_rendered": true,
+    "bid_levels_b1_to_b5_rendered": true,
+    "rapid_workspace_switches": 10,
+    "render_crash": false,
+    "environment_note": "The already-running development backend exposed an unrelated pre-existing market-snapshot 404; final same-version restart validation is scheduled for Phase 15."
+  },
+  "full_gate": {
+    "backend_passed": 495,
+    "frontend_passed": 228,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true,
+    "static_gzip_bytes": 141054
+  },
+  "contains_sensitive_payloads": false
+}

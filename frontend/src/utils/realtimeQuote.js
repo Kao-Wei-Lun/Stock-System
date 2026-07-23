@@ -68,6 +68,12 @@ export function mergeRealtimeQuote(previousQuote = {}, incomingQuote = {}, fallb
   const askTopLevel = hasOwn(incomingQuote, "ask") || hasOwn(incomingQuote, "ask_size")
     ? { price: ask, size: askSize }
     : null;
+  const shouldMergeBids = Array.isArray(incomingQuote.bids)
+    || hasOwn(incomingQuote, "bid")
+    || hasOwn(incomingQuote, "bid_size");
+  const shouldMergeAsks = Array.isArray(incomingQuote.asks)
+    || hasOwn(incomingQuote, "ask")
+    || hasOwn(incomingQuote, "ask_size");
 
   return {
     price: nextPositiveValue("price", null),
@@ -90,8 +96,12 @@ export function mergeRealtimeQuote(previousQuote = {}, incomingQuote = {}, fallb
     ask,
     bid_size: bidSize,
     ask_size: askSize,
-    bids: mergeBookLevels(previousQuote.bids, incomingQuote.bids, bidTopLevel),
-    asks: mergeBookLevels(previousQuote.asks, incomingQuote.asks, askTopLevel),
+    bids: shouldMergeBids
+      ? mergeBookLevels(previousQuote.bids, incomingQuote.bids, bidTopLevel)
+      : (previousQuote.bids || []),
+    asks: shouldMergeAsks
+      ? mergeBookLevels(previousQuote.asks, incomingQuote.asks, askTopLevel)
+      : (previousQuote.asks || []),
     quote_timestamp: nextDefinedValue("quote_timestamp", null),
     synced_at: nextDefinedValue("synced_at", null),
   };

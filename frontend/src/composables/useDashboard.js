@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, shallowRef, watch } from "vue";
 
 import {
   DEFAULT_INDICATOR_SETTINGS,
@@ -35,6 +35,7 @@ import {
 } from "../utils/marketSymbols";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
+import { createRealtimeUiBatcher } from "../utils/realtimeUiBatcher";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
 import { createDashboardBootstrap } from "./dashboard/dashboardBootstrap";
@@ -57,6 +58,9 @@ const RECENT_TICKERS_KEY = "quantvision.recent.tickers.v1";
 const RECENT_TICKERS_LIMIT = 10;
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const MARKET_GROUP_NAME = "全球大盤";
+const REALTIME_UI_BATCHING_ENABLED = String(
+  import.meta.env.VITE_REALTIME_BATCHING_ENABLED ?? "true",
+).toLowerCase() !== "false";
 export const WATCHLIST_COLOR_OPTIONS = [
   "#7be7ff",
   "#00d9a3",
@@ -529,7 +533,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const loadingMessage = ref("正在載入資料...");
   const futoptRefreshStatus = ref("idle");
   const futoptDataStale = ref(false);
-  const rawOhlcData = ref([]);
+  const rawOhlcData = shallowRef([]);
   const klineDataOrigin = ref("loading");
   const klineCacheSavedAt = ref(null);
   const drawings = ref([]);
@@ -554,13 +558,16 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
   const activeTool = ref(initialTool);
+  const realtimeUiBatcher = createRealtimeUiBatcher({
+    enabled: REALTIME_UI_BATCHING_ENABLED,
+    getActiveTicker: () => currentTicker.value,
+    onQuote: handleRealtimeQuote,
+    onBooks: handleRealtimeBook,
+    onCandle: handleRealtimeCandle,
+  });
   const dashboardRealtime = createDashboardRealtime({
     wsUrl,
-    onMessage: (message) => {
-      if (message.type === "quote") handleRealtimeQuote(message);
-      if (message.type === "books") handleRealtimeBook(message);
-      if (message.type === "candle") handleRealtimeCandle(message);
-    },
+    onMessage: realtimeUiBatcher.push,
   });
   const wsConnected = dashboardRealtime.wsConnected;
   const {
@@ -656,7 +663,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     pushNotification,
   });
 
-  const quote = reactive({
+  const quote = shallowReactive({
     price: null,
     open: null,
     high: null,
@@ -1417,7 +1424,9 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   function applyQuote(data) {
     const previousTotalVolume = Number.isFinite(Number(quote.volume)) ? Number(quote.volume) : null;
     const merged = mergeRealtimeQuote(quote, data, currentName.value);
-    Object.assign(quote, merged);
+    Object.entries(merged).forEach(([key, value]) => {
+      if (quote[key] !== value) quote[key] = value;
+    });
     if (merged.name) currentName.value = merged.name;
     lastUpdate.value = formatQuoteTimestampLabel(quote.quote_timestamp || quote.synced_at);
     return {
@@ -1952,6 +1961,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       if (![requestedTicker, resolvedTicker].includes(activeTicker)) return;
 
       if (resolvedTicker && resolvedTicker !== activeTicker) {
+        realtimeUiBatcher.clearTicker(activeTicker);
         dashboardRealtime.unsubscribeTicker(activeTicker);
         currentTicker.value = resolvedTicker;
         dashboardRealtime.subscribeTicker(resolvedTicker);
@@ -2050,6 +2060,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       if (requestToken !== klineRequestSequence) return;
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
+        realtimeUiBatcher.clearTicker(currentTicker.value);
         dashboardRealtime.unsubscribeTicker(currentTicker.value);
         currentTicker.value = resolvedTicker;
       }
@@ -2111,6 +2122,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
 
   async function selectTicker(ticker, name = ticker) {
     const normalized = normalizeTicker(ticker);
+    realtimeUiBatcher.clearTicker(currentTicker.value);
     dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
     currentTicker.value = normalized;
     currentName.value = name || normalized;
@@ -2848,6 +2860,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       }
     }
     const normalizedTicker = normalizeTicker(preset.currentTicker || currentTicker.value);
+    realtimeUiBatcher.clearTicker(currentTicker.value);
     dashboardRealtime.unsubscribeTicker(normalizeTicker(currentTicker.value));
     currentTicker.value = normalizedTicker;
     currentName.value = preset.currentName || normalizedTicker;
@@ -3121,6 +3134,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     futoptFallbackPoller.stop();
     dashboardBootstrap.cancelDeferred();
     if (klineAbortController) klineAbortController.abort();
+    realtimeUiBatcher.destroy();
     dashboardRealtime.disconnect();
   });
 
