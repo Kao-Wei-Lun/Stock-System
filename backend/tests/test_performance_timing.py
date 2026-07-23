@@ -5,7 +5,12 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
-from performance_timing import RequestTimingMiddleware, add_server_timing, record_server_timing
+from performance_timing import (
+    RequestTimingMiddleware,
+    add_server_timing,
+    http_performance_metrics,
+    record_server_timing,
+)
 
 
 _TOTAL_RE = re.compile(r"(?:^|, )total;dur=([0-9]+(?:\.[0-9]+)?)")
@@ -35,6 +40,7 @@ def _build_app():
 
 @pytest.mark.parametrize(("path", "status"), [("/ok", 200), ("/not-found", 404), ("/boom", 500)])
 def test_timing_headers_are_preserved_for_normal_and_error_responses(path, status):
+    http_performance_metrics.reset()
     with TestClient(_build_app(), raise_server_exceptions=False) as client:
         response = client.get(path)
 
@@ -43,6 +49,7 @@ def test_timing_headers_are_preserved_for_normal_and_error_responses(path, statu
     match = _TOTAL_RE.search(response.headers["server-timing"])
     assert match is not None
     assert float(match.group(1)) >= 0
+    assert http_performance_metrics.snapshot()["count"] == 1
 
 
 def test_timing_header_includes_safe_component_metrics():

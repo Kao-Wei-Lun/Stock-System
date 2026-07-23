@@ -88,6 +88,8 @@ def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeyp
         lambda _db: calls.append("warmup_scheduled"),
     )
     monkeypatch.setattr(main.background_scheduler, "start", lambda: calls.append("scheduler_start"))
+    monkeypatch.setattr(main.operational_metrics_service, "start", lambda: calls.append("metrics_start"))
+    monkeypatch.setattr(main.operational_metrics_service, "shutdown", lambda: async_call("metrics_stop"))
     monkeypatch.setattr(main.background_scheduler, "shutdown", lambda: async_call("scheduler_stop"))
     monkeypatch.setattr(main.quote_persistence_buffer, "shutdown", lambda: async_call("quote_stop"))
     monkeypatch.setattr(main.futopt_refresh_coordinator, "shutdown", lambda: async_call("refresh_stop"))
@@ -103,5 +105,6 @@ def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeyp
 
     asyncio.run(run())
 
-    assert calls.index("warmup_scheduled") < calls.index("scheduler_start") < calls.index("inside")
+    assert calls.index("warmup_scheduled") < calls.index("scheduler_start") < calls.index("metrics_start")
+    assert calls.index("metrics_start") < calls.index("inside")
     assert calls[-3:] == ["warmup_stop", "manager_stop", "db_stop"]

@@ -1,14 +1,16 @@
 """System routes — health checks, websocket, and frontend redirects."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from data_fetcher import normalize_ticker
+from performance_timing import http_performance_metrics
 from providers import ws_manager
 from realtime_performance import realtime_performance_metrics
 
@@ -24,6 +26,7 @@ _BACKTEST_WORKLOAD_EXECUTOR = None
 _ASSET_QUOTE_STATUS_PROVIDER = None
 _PROVIDER_WARMUP_STATUS_PROVIDER = None
 _QUOTE_REFRESH_STATUS_PROVIDER = None
+_OPERATIONAL_METRICS_SERVICE = None
 
 router = APIRouter(tags=["system"])
 
@@ -40,10 +43,12 @@ def configure(
     asset_quote_status_provider=None,
     provider_warmup_status_provider=None,
     quote_refresh_status_provider=None,
+    operational_metrics_service=None,
 ):
     global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
     global _QUOTE_PERSISTENCE_BUFFER, _BACKTEST_WORKLOAD_EXECUTOR, _ASSET_QUOTE_STATUS_PROVIDER
     global _PROVIDER_WARMUP_STATUS_PROVIDER, _QUOTE_REFRESH_STATUS_PROVIDER
+    global _OPERATIONAL_METRICS_SERVICE
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
@@ -54,6 +59,7 @@ def configure(
     _ASSET_QUOTE_STATUS_PROVIDER = asset_quote_status_provider
     _PROVIDER_WARMUP_STATUS_PROVIDER = provider_warmup_status_provider
     _QUOTE_REFRESH_STATUS_PROVIDER = quote_refresh_status_provider
+    _OPERATIONAL_METRICS_SERVICE = operational_metrics_service
 
 
 def _frontend_ready() -> bool:
@@ -135,6 +141,7 @@ async def system_performance():
         else {"configured": False, "pool": {"size": 0, "free": 0, "maxsize": 0}}
     )
     return {
+        "api": http_performance_metrics.snapshot(),
         "database": database,
         "realtime": realtime_performance_metrics.snapshot(),
         "quote_persistence": (
@@ -157,8 +164,32 @@ async def system_performance():
             if callable(_QUOTE_REFRESH_STATUS_PROVIDER)
             else {"configured": False, "enabled": False}
         ),
+        "operational_history": (
+            _OPERATIONAL_METRICS_SERVICE.status()
+            if _OPERATIONAL_METRICS_SERVICE is not None
+            else {"configured": False, "running": False}
+        ),
         "time": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/api/system/metrics/history")
+async def system_metrics_history(
+    hours: int = Query(default=24, ge=1, le=720),
+    resolution: str = Query(default="auto", pattern="^(auto|raw|downsampled)$"),
+):
+    """Return bounded aggregate history without quotes, accounts, SQL, or personal data."""
+
+    if _OPERATIONAL_METRICS_SERVICE is None:
+        return JSONResponse(
+            {"status": "error", "detail": "Operational metrics service is not configured"},
+            status_code=503,
+        )
+    return await asyncio.to_thread(
+        _OPERATIONAL_METRICS_SERVICE.history,
+        hours=hours,
+        resolution=resolution,
+    )
 
 
 @router.websocket("/ws")

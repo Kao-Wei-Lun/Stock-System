@@ -38,6 +38,35 @@
         </div>
       </div>
 
+      <section class="trend-section" aria-label="最近 24 小時營運趨勢">
+        <div class="trend-head">
+          <div>
+            <h3>最近 24 小時</h3>
+            <p>僅保存效能數值與狀態，不包含行情、帳號或個人資產資料。</p>
+          </div>
+          <span>{{ history?.point_count || 0 }} 個取樣點</span>
+        </div>
+        <div v-if="historyError" class="health-message warning" data-testid="history-error">
+          {{ historyError }}
+        </div>
+        <div v-if="trendCards.length" class="trend-grid">
+          <article v-for="card in trendCards" :key="card.key" class="trend-card">
+            <span>{{ card.label }}</span>
+            <strong>{{ formatTrendValue(card.latest, card.unit) }}</strong>
+            <svg
+              viewBox="0 0 120 34"
+              preserveAspectRatio="none"
+              role="img"
+              :aria-label="`${card.label} 24 小時趨勢`"
+            >
+              <polyline :points="sparklinePoints(card.values)" />
+            </svg>
+            <small>最大 {{ formatTrendValue(card.maximum, card.unit) }}</small>
+          </article>
+        </div>
+        <div v-else-if="!historyError" class="trend-empty">收集第一筆資料後會顯示趨勢</div>
+      </section>
+
       <div v-if="snapshot.issues?.length" class="issue-list">
         <div v-for="issue in snapshot.issues" :key="issue.component" class="health-message" :class="issue.status">
           <strong>{{ componentName(issue.component) }}</strong>
@@ -81,13 +110,35 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { dashboardApi } from "../../api/dashboardApi";
+import { getOperationalMetricsHistory } from "../../api/operationalMetricsApi";
 import { createVisibilityPoller } from "../../utils/visibilityPoller";
 
 const snapshot = ref(null);
+const history = ref(null);
 const loading = ref(false);
 const error = ref("");
+const historyError = ref("");
 
 const componentEntries = computed(() => Object.entries(snapshot.value?.components || {}));
+const trendCards = computed(() => {
+  const points = history.value?.points || [];
+  const definitions = [
+    { key: "api", label: "API P95", unit: "ms", read: (item) => item.api?.p95_ms },
+    { key: "db", label: "DB 等待 P95", unit: "ms", read: (item) => item.database?.wait_p95_ms },
+    { key: "broadcast", label: "即時廣播 P95", unit: "ms", read: (item) => item.realtime?.broadcast_p95_ms },
+    { key: "stale", label: "過期商品", unit: "count", read: (item) => item.freshness?.stale_ticker_count },
+  ];
+  return definitions.flatMap((definition) => {
+    const values = points.map(definition.read).filter((value) => Number.isFinite(Number(value))).map(Number);
+    if (!values.length) return [];
+    return [{
+      ...definition,
+      values,
+      latest: values.at(-1),
+      maximum: Math.max(...values),
+    }];
+  });
+});
 
 const COMPONENT_NAMES = {
   database: "資料庫",
@@ -203,14 +254,47 @@ function formatTime(value) {
   }).format(parsed);
 }
 
+function formatTrendValue(value, unit) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  if (unit === "count") return `${Math.round(numeric)} 檔`;
+  return `${numeric >= 100 ? numeric.toFixed(0) : numeric.toFixed(1)} ms`;
+}
+
+function sparklinePoints(values) {
+  if (!values?.length) return "";
+  const width = 120;
+  const height = 30;
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const range = maximum - minimum || 1;
+  return values.map((value, index) => {
+    const x = values.length === 1 ? width : (index / (values.length - 1)) * width;
+    const y = height - ((value - minimum) / range) * (height - 4) + 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+}
+
 async function loadSnapshot() {
   if (loading.value) return;
   loading.value = true;
   error.value = "";
+  historyError.value = "";
   try {
-    snapshot.value = await dashboardApi.getSystemDataQuality();
-  } catch (requestError) {
-    error.value = requestError?.message || "無法讀取系統狀態";
+    const [snapshotResult, historyResult] = await Promise.allSettled([
+      dashboardApi.getSystemDataQuality(),
+      getOperationalMetricsHistory({ hours: 24, resolution: "auto" }),
+    ]);
+    if (snapshotResult.status === "fulfilled") {
+      snapshot.value = snapshotResult.value;
+    } else {
+      error.value = snapshotResult.reason?.message || "無法讀取系統狀態";
+    }
+    if (historyResult.status === "fulfilled") {
+      history.value = historyResult.value;
+    } else {
+      historyError.value = historyResult.reason?.message || "暫時無法讀取 24 小時趨勢";
+    }
   } finally {
     loading.value = false;
   }
@@ -310,7 +394,8 @@ onBeforeUnmount(() => {
 }
 
 .summary-grid,
-.component-grid {
+.component-grid,
+.trend-grid {
   display: grid;
   gap: 10px;
 }
@@ -321,6 +406,82 @@ onBeforeUnmount(() => {
 
 .component-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trend-section {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(13, 20, 32, 0.92);
+}
+
+.trend-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trend-head h3 {
+  font-size: 14px;
+}
+
+.trend-head p,
+.trend-head > span,
+.trend-empty {
+  color: var(--text3);
+  font-size: 11px;
+}
+
+.trend-head p {
+  margin-top: 4px;
+}
+
+.trend-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.trend-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(8, 14, 24, 0.7);
+}
+
+.trend-card > span,
+.trend-card small {
+  color: var(--text3);
+  font-size: 10px;
+}
+
+.trend-card strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--cyan);
+  font: 600 15px "JetBrains Mono", monospace;
+}
+
+.trend-card svg {
+  display: block;
+  width: 100%;
+  height: 34px;
+  margin: 7px 0 4px;
+  overflow: visible;
+}
+
+.trend-card polyline {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-empty {
+  padding: 12px;
+  text-align: center;
 }
 
 .summary-card,
@@ -424,5 +585,6 @@ dd { color: var(--text1); font-family: "JetBrains Mono", monospace; }
   .health-head { align-items: flex-start; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .component-grid { grid-template-columns: 1fr; }
+  .trend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

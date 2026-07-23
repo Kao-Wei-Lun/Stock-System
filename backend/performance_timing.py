@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import deque
 from contextvars import ContextVar
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +21,44 @@ _CURRENT_SERVER_TIMINGS: ContextVar[dict[str, float] | None] = ContextVar(
     "quantvision_server_timings",
     default=None,
 )
+
+
+def _percentile(values: list[float], ratio: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * ratio + 0.999999)))
+    return round(ordered[index], 3)
+
+
+class HttpPerformanceMetrics:
+    """Keep bounded time-to-response-header samples without paths or payloads."""
+
+    def __init__(self, max_samples: int = 512) -> None:
+        self.max_samples = max(16, int(max_samples))
+        self._samples: deque[float] = deque(maxlen=self.max_samples)
+        self._lock = Lock()
+
+    def record(self, duration_ms: float) -> None:
+        with self._lock:
+            self._samples.append(max(0.0, float(duration_ms)))
+
+    def snapshot(self) -> dict[str, float | int | None]:
+        with self._lock:
+            values = list(self._samples)
+        return {
+            "count": len(values),
+            "p50_ms": _percentile(values, 0.50),
+            "p95_ms": _percentile(values, 0.95),
+            "max_ms": round(max(values), 3) if values else None,
+        }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._samples.clear()
+
+
+http_performance_metrics = HttpPerformanceMetrics()
 
 
 def _normalize_metric(metric: str) -> str:
@@ -80,6 +120,7 @@ class RequestTimingMiddleware:
             if message["type"] == "http.response.start":
                 response_started = True
                 elapsed_ms = (time.perf_counter() - started_at) * 1000
+                http_performance_metrics.record(elapsed_ms)
                 headers = list(message.get("headers") or [])
                 headers.append((b"x-request-id", request_id.encode("ascii")))
                 headers.append((b"server-timing", _timing_header(scope, elapsed_ms).encode("ascii")))

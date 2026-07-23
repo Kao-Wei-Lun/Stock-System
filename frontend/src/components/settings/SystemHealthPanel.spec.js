@@ -2,12 +2,16 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardApi } from "../../api/dashboardApi";
+import { getOperationalMetricsHistory } from "../../api/operationalMetricsApi";
 import SystemHealthPanel from "./SystemHealthPanel.vue";
 
 vi.mock("../../api/dashboardApi", () => ({
   dashboardApi: {
     getSystemDataQuality: vi.fn(),
   },
+}));
+vi.mock("../../api/operationalMetricsApi", () => ({
+  getOperationalMetricsHistory: vi.fn(),
 }));
 
 function snapshot() {
@@ -48,6 +52,23 @@ describe("SystemHealthPanel", () => {
 
   it("renders the unified health snapshot and stale symbols", async () => {
     dashboardApi.getSystemDataQuality.mockResolvedValue(snapshot());
+    getOperationalMetricsHistory.mockResolvedValue({
+      point_count: 2,
+      points: [
+        {
+          api: { p95_ms: 12 },
+          database: { wait_p95_ms: 2 },
+          realtime: { broadcast_p95_ms: 4 },
+          freshness: { stale_ticker_count: 3 },
+        },
+        {
+          api: { p95_ms: 8 },
+          database: { wait_p95_ms: 1 },
+          realtime: { broadcast_p95_ms: 3 },
+          freshness: { stale_ticker_count: 1 },
+        },
+      ],
+    });
 
     const wrapper = mount(SystemHealthPanel);
     await flushPromises();
@@ -58,7 +79,12 @@ describe("SystemHealthPanel", () => {
     expect(wrapper.text()).toContain("重要資料");
     expect(wrapper.text()).toContain("1.00 MB");
     expect(wrapper.text()).toContain("AAPL · 已過期");
+    expect(wrapper.text()).toContain("最近 24 小時");
+    expect(wrapper.text()).toContain("API P95");
+    expect(wrapper.text()).toContain("8.0 ms");
+    expect(wrapper.findAll(".trend-card")).toHaveLength(4);
     expect(dashboardApi.getSystemDataQuality).toHaveBeenCalledTimes(1);
+    expect(getOperationalMetricsHistory).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 
@@ -66,6 +92,7 @@ describe("SystemHealthPanel", () => {
     dashboardApi.getSystemDataQuality
       .mockResolvedValueOnce(snapshot())
       .mockRejectedValueOnce(new Error("後端暫時無法連線"));
+    getOperationalMetricsHistory.mockResolvedValue({ point_count: 0, points: [] });
 
     const wrapper = mount(SystemHealthPanel);
     await flushPromises();
@@ -74,6 +101,19 @@ describe("SystemHealthPanel", () => {
 
     expect(dashboardApi.getSystemDataQuality).toHaveBeenCalledTimes(2);
     expect(wrapper.get('[role="alert"]').text()).toBe("後端暫時無法連線");
+    wrapper.unmount();
+  });
+
+  it("keeps health visible when the optional trend history is unavailable", async () => {
+    dashboardApi.getSystemDataQuality.mockResolvedValue(snapshot());
+    getOperationalMetricsHistory.mockRejectedValue(new Error("趨勢暫時不可用"));
+
+    const wrapper = mount(SystemHealthPanel);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("MySQL 可用");
+    expect(wrapper.get('[data-testid="history-error"]').text()).toBe("趨勢暫時不可用");
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

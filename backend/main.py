@@ -38,6 +38,7 @@ from futopt_history_service import FutoptCandleRecorder, FutoptRefreshCoordinato
 from frontend_static import SPAStaticFiles
 from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
+from operational_metrics import OperationalMetricStore, OperationalMetricsService
 from performance_timing import RequestTimingMiddleware
 from realtime_quote_persistence import RealtimeQuotePersistenceBuffer
 from quote_refresh_service import QuoteRefreshService
@@ -217,7 +218,25 @@ AUTO_BACKUP_INITIAL_DELAY_SECONDS = read_float_env("AUTO_BACKUP_INITIAL_DELAY_SE
 AUTO_BACKUP_TIMEOUT_SECONDS = read_int_env("AUTO_BACKUP_TIMEOUT_SECONDS", "1800", minimum=60)
 AUTO_BACKUP_RETENTION_DAYS = read_int_env("AUTO_BACKUP_RETENTION_DAYS", "30", minimum=0)
 AUTO_BACKUP_KEEP_MINIMUM = read_int_env("AUTO_BACKUP_KEEP_MINIMUM", "7", minimum=1)
+OPERATIONAL_METRICS_INTERVAL_SECONDS = read_int_env(
+    "OPERATIONAL_METRICS_INTERVAL_SECONDS",
+    "60",
+    minimum=5,
+)
+OPERATIONAL_METRICS_QUALITY_INTERVAL_SECONDS = read_int_env(
+    "OPERATIONAL_METRICS_QUALITY_INTERVAL_SECONDS",
+    "300",
+    minimum=60,
+)
+OPERATIONAL_METRICS_STARTUP_DELAY_SECONDS = read_int_env(
+    "OPERATIONAL_METRICS_STARTUP_DELAY_SECONDS",
+    "15",
+    minimum=0,
+)
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+OPERATIONAL_METRICS_PATH = (
+    Path(__file__).resolve().parents[1] / "log" / "metrics" / "operational-metrics.json"
+)
 
 DEFAULT_WATCH_GROUP_NAME = "我的自選"
 MARKET_OVERVIEW_GROUP_NAME = "全球大盤"
@@ -517,6 +536,18 @@ data_quality_service = DataQualityService(
     backup_status_provider=get_mysql_backup_health,
     quote_refresh_service=quote_refresh_service,
 )
+operational_metrics_service = OperationalMetricsService(
+    OperationalMetricStore(OPERATIONAL_METRICS_PATH),
+    database=db,
+    scheduler=background_scheduler,
+    quote_persistence_buffer=quote_persistence_buffer,
+    provider_pool=fubon_realtime_pool,
+    data_quality_service=data_quality_service,
+    interval_seconds=OPERATIONAL_METRICS_INTERVAL_SECONDS,
+    quality_interval_seconds=OPERATIONAL_METRICS_QUALITY_INTERVAL_SECONDS,
+    startup_delay_seconds=OPERATIONAL_METRICS_STARTUP_DELAY_SECONDS,
+    logger=log,
+)
 backtest_workload_executor = BoundedWorkloadExecutor(
     name="backtest",
     max_workers=1,
@@ -546,9 +577,11 @@ async def lifespan(app: FastAPI):
         # through readiness and settings APIs while initialization continues.
         fubon_realtime_pool.start_background_warmup(db)
     background_scheduler.start()
+    operational_metrics_service.start()
     try:
         yield
     finally:
+        await operational_metrics_service.shutdown()
         await background_scheduler.shutdown()
         await quote_persistence_buffer.shutdown()
         await futopt_refresh_coordinator.shutdown()
@@ -679,6 +712,7 @@ system.configure(
     asset_quote_status_provider=assets.performance_status,
     provider_warmup_status_provider=fubon_realtime_pool.get_warmup_status,
     quote_refresh_status_provider=quote_refresh_service.status,
+    operational_metrics_service=operational_metrics_service,
 )
 
 app.include_router(watchlist.router)
