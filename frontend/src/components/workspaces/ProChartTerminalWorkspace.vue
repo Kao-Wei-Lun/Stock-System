@@ -168,13 +168,14 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted } from "vue";
 
 import ChartWorkspace from "../ChartWorkspace.vue";
 import BidAskPanel from "../terminal/BidAskPanel.vue";
 import TerminalTickerRail from "./TerminalTickerRail.vue";
-import TerminalUtilityDrawer from "./TerminalUtilityDrawer.vue";
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../../utils/performanceMarks";
+
+const TerminalUtilityDrawer = defineAsyncComponent(() => import("./TerminalUtilityDrawer.vue"));
 
 const props = defineProps({
   groups: { type: Array, default: () => [] },

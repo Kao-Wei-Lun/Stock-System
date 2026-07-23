@@ -10,6 +10,15 @@ function readArgument(name, fallback = null) {
   return match ? match.slice(prefix.length) : fallback;
 }
 
+function readPositiveInteger(name, fallback) {
+  const raw = readArgument(name, String(fallback));
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`--${name} must be a positive integer`);
+  }
+  return value;
+}
+
 function resolveManifestEntry(manifest, matcher) {
   return Object.entries(manifest).find(([key, value]) => matcher(key, value)) || null;
 }
@@ -87,6 +96,31 @@ export function analyzeBundleManifest(manifest, { distDir = null } = {}) {
   };
 }
 
+export function evaluateBundleBudgets(result, {
+  maxStaticGzipBytes = 190_000,
+  maxSelectedGzipBytes = 190_000,
+  maxStaticFiles = 9,
+} = {}) {
+  const within = (value, maximum) => Number.isFinite(value) && value >= 0 && value <= maximum;
+  const checks = {
+    terminal_workspace_found: Boolean(result.terminal_workspace_found),
+    mutually_exclusive_engines: Boolean(result.engines_are_mutually_exclusive),
+    static_gzip_bytes: within(result.static_gzip_bytes, maxStaticGzipBytes),
+    legacy_selected_gzip_bytes: within(result.legacy_selected_gzip_bytes, maxSelectedGzipBytes),
+    lwc_selected_gzip_bytes: within(result.lwc_selected_gzip_bytes, maxSelectedGzipBytes),
+    static_file_count: within(result.static_file_count, maxStaticFiles),
+  };
+  return {
+    limits: {
+      max_static_gzip_bytes: maxStaticGzipBytes,
+      max_selected_gzip_bytes: maxSelectedGzipBytes,
+      max_static_files: maxStaticFiles,
+    },
+    checks,
+    passed: Object.values(checks).every(Boolean),
+  };
+}
+
 const currentFile = fileURLToPath(import.meta.url);
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(currentFile);
 if (isDirectRun) {
@@ -103,7 +137,17 @@ if (isDirectRun) {
     const result = analyzeBundleManifest(manifest, {
       distDir: path.resolve(path.dirname(manifestPath), ".."),
     });
-    process.stdout.write(`${JSON.stringify({ manifest: manifestPath, enforce, ...result }, null, 2)}\n`);
-    if (enforce && !result.engines_are_mutually_exclusive) process.exitCode = 1;
+    const budget = evaluateBundleBudgets(result, {
+      maxStaticGzipBytes: readPositiveInteger("max-static-gzip-bytes", 190_000),
+      maxSelectedGzipBytes: readPositiveInteger("max-selected-gzip-bytes", 190_000),
+      maxStaticFiles: readPositiveInteger("max-static-files", 9),
+    });
+    process.stdout.write(`${JSON.stringify({
+      manifest: manifestPath,
+      enforce,
+      ...result,
+      budget,
+    }, null, 2)}\n`);
+    if (enforce && !budget.passed) process.exitCode = 1;
   }
 }

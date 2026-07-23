@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzeBundleManifest } from "../../../scripts/check-frontend-bundle.mjs";
+import {
+  analyzeBundleManifest,
+  evaluateBundleBudgets,
+} from "../../../scripts/check-frontend-bundle.mjs";
 
 
 describe("bundle manifest performance gate", () => {
@@ -50,5 +53,47 @@ describe("bundle manifest performance gate", () => {
     expect(result.lwc_engine_files).toEqual([]);
     expect(result.legacy_dynamic_files).toEqual(["assets/legacy-chart-engine.js"]);
     expect(result.lwc_dynamic_files).toEqual(["assets/lwc-chart-engine.js"]);
+  });
+
+  it("enforces initial payload and request-count budgets", () => {
+    const budget = evaluateBundleBudgets({
+      terminal_workspace_found: true,
+      engines_are_mutually_exclusive: true,
+      static_gzip_bytes: 120_000,
+      legacy_selected_gzip_bytes: 180_000,
+      lwc_selected_gzip_bytes: 188_300,
+      static_file_count: 4,
+    });
+
+    expect(budget.passed).toBe(true);
+    expect(budget.limits.max_selected_gzip_bytes).toBe(190_000);
+  });
+
+  it("fails when either selectable engine exceeds the delivery budget", () => {
+    const budget = evaluateBundleBudgets({
+      terminal_workspace_found: true,
+      engines_are_mutually_exclusive: true,
+      static_gzip_bytes: 120_000,
+      legacy_selected_gzip_bytes: 180_000,
+      lwc_selected_gzip_bytes: 190_001,
+      static_file_count: 4,
+    });
+
+    expect(budget.passed).toBe(false);
+    expect(budget.checks.lwc_selected_gzip_bytes).toBe(false);
+  });
+
+  it("fails closed when gzip measurements are unavailable", () => {
+    const budget = evaluateBundleBudgets({
+      terminal_workspace_found: true,
+      engines_are_mutually_exclusive: true,
+      static_gzip_bytes: null,
+      legacy_selected_gzip_bytes: null,
+      lwc_selected_gzip_bytes: null,
+      static_file_count: 4,
+    });
+
+    expect(budget.passed).toBe(false);
+    expect(budget.checks.static_gzip_bytes).toBe(false);
   });
 });

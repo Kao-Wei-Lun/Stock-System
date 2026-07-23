@@ -435,6 +435,7 @@
     />
 
     <AlertModal
+      v-if="alertModalOpen"
       :is-open="alertModalOpen"
       :form="alertForm"
       @close="closeAlertModal"
@@ -456,7 +457,6 @@ import {
 } from "vue";
 
 import AppNavbar from "./components/AppNavbar.vue";
-import AlertModal from "./components/AlertModal.vue";
 import GlobalSearchCommand from "./components/GlobalSearchCommand.vue";
 import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
@@ -466,6 +466,7 @@ import { useFubonWorkspaceStatus } from "./composables/useFubonWorkspaceStatus";
 import { useHotkeys } from "./composables/useHotkeys";
 
 const SettingsWorkspace = defineAsyncComponent(() => import("./components/settings/SettingsWorkspace.vue"));
+const AlertModal = defineAsyncComponent(() => import("./components/AlertModal.vue"));
 const InstitutionalAnalysisWorkspace = defineAsyncComponent(() => import("./components/workspaces/InstitutionalAnalysisWorkspace.vue"));
 const MarketOverviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/MarketOverviewWorkspace.vue"));
 const ProChartTerminalWorkspace = defineAsyncComponent(() => import("./components/workspaces/ProChartTerminalWorkspace.vue"));

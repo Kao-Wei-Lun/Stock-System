@@ -134,8 +134,10 @@ function Get-RunSummary {
 
 function Get-FrontendMetrics {
     $allowedMarks = @("qv:app-mounted", "qv:terminal-visible", "qv:chart-data-ready", "qv:chart-painted")
-    $metrics = [ordered]@{ source = "not_collected"; marks = [ordered]@{} }
+    $allowedRuntime = @("long_tasks", "realtime_transport", "realtime_paint")
+    $metrics = [ordered]@{ source = "not_collected"; marks = [ordered]@{}; runtime = [ordered]@{} }
     foreach ($name in $allowedMarks) { $metrics.marks[$name] = $null }
+    foreach ($name in $allowedRuntime) { $metrics.runtime[$name] = $null }
     if ([string]::IsNullOrWhiteSpace($FrontendMetricsPath)) { return $metrics }
     if (-not (Test-Path -LiteralPath $FrontendMetricsPath)) { throw "Frontend metrics file not found: $FrontendMetricsPath" }
 
@@ -144,6 +146,21 @@ function Get-FrontendMetrics {
         $entry = $source.marks.$name
         if ($null -ne $entry -and $null -ne $entry.start_time_ms) {
             $metrics.marks[$name] = [ordered]@{ start_time_ms = [Math]::Round([double]$entry.start_time_ms, 2) }
+        }
+    }
+    $runtimeProperty = $source.PSObject.Properties["runtime"]
+    if ($null -ne $runtimeProperty) {
+        foreach ($name in $allowedRuntime) {
+            $entryProperty = $runtimeProperty.Value.PSObject.Properties[$name]
+            if ($null -ne $entryProperty) {
+                $entry = $entryProperty.Value
+                $metrics.runtime[$name] = [ordered]@{
+                    count = [int]($entry.count)
+                    p50_ms = $entry.p50_ms
+                    p95_ms = $entry.p95_ms
+                    max_ms = $entry.max_ms
+                }
+            }
         }
     }
     $metrics.source = "browser_export"

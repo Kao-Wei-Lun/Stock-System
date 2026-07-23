@@ -28,6 +28,9 @@ for ($index = 0; $index -lt $Samples; $index += 1) {
         collected_at = (Get-Date).ToString("o")
         database = $response.database
         realtime = $response.realtime
+        quote_persistence = $response.quote_persistence
+        backtest_workload = $response.backtest_workload
+        asset_quote_refresh = $response.asset_quote_refresh
     }
     if ($index -lt $Samples - 1) {
         Start-Sleep -Milliseconds $IntervalMs

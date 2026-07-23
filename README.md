@@ -229,3 +229,22 @@ npm run build
 ```
 
 建置完成後，輸出會在 `frontend/dist`，後端可透過 `http://localhost:8001/app/` 提供靜態頁面。
+
+## 效能驗收
+
+每次修改終端、圖表、即時資料、資料庫查詢或回測後，執行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-final-performance-gate.ps1
+```
+
+正式環境驗收需啟動同一提交版本的後端，再執行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-final-performance-gate.ps1 -IncludeLiveChecks
+powershell -ExecutionPolicy Bypass -File scripts/soak-realtime.ps1 -DurationMinutes 60
+```
+
+第一個指令驗證測試、production build、前端載入預算、100,000 根回測隔離、
+即時 API 與資料庫索引；第二個指令連續觀察 `*TMFF`、`*TXFF` 與一檔股票。
+詳細門檻與結果位於 `docs/performance/final-acceptance-matrix.md`。

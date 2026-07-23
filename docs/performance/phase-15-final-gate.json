@@ -1,0 +1,34 @@
+﻿{
+    "schema_version":  1,
+    "measured_at":  "2026-07-23T13:29:18.6671120+08:00",
+    "git_commit":  "8d6164b8bb0fff455cff3158f8bccbf2189c9e8e",
+    "live_checks_included":  false,
+    "passed":  true,
+    "steps":  [
+                  {
+                      "name":  "backend_tests",
+                      "passed":  true,
+                      "elapsed_ms":  17892.03
+                  },
+                  {
+                      "name":  "frontend_tests",
+                      "passed":  true,
+                      "elapsed_ms":  22267.55
+                  },
+                  {
+                      "name":  "frontend_build",
+                      "passed":  true,
+                      "elapsed_ms":  6061.87
+                  },
+                  {
+                      "name":  "bundle_budget",
+                      "passed":  true,
+                      "elapsed_ms":  65.29
+                  },
+                  {
+                      "name":  "backtest_isolation",
+                      "passed":  true,
+                      "elapsed_ms":  1117.76
+                  }
+              ]
+}

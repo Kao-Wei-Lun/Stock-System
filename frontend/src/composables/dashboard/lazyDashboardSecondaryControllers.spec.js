@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -77,6 +78,24 @@ describe("lazy dashboard secondary controllers", () => {
     expect(loadModule).not.toHaveBeenCalled();
     await facade.openAlertModal();
     expect(openAlertModal).toHaveBeenCalledOnce();
+  });
+
+  it("forwards reactive alert modal state from the real lazy controller", async () => {
+    const facade = createLazyDashboardAlerting({
+      dashboardApi: {},
+      currentTicker: ref("*TMFF"),
+      institutionalFuturesCommodity: ref(""),
+      institutionalOptionsCommodity: ref(""),
+      institutionalHistoryDays: ref(30),
+      institutionalOverlay: ref(null),
+      pushNotification: vi.fn(),
+      normalizeTicker: (ticker) => String(ticker || "").toUpperCase(),
+    });
+
+    expect(facade.alertModalOpen.value).toBe(false);
+    await facade.openAlertModal();
+    expect(facade.alertModalOpen.value).toBe(true);
+    expect(facade.alertForm.ticker).toBe("*TMFF");
   });
 
   it("loads market snapshots only for overview consumers", async () => {

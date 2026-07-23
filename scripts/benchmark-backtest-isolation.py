@@ -79,8 +79,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bars", type=int, default=100_000)
     parser.add_argument("--executor-kind", choices=("thread", "process"), default="process")
+    parser.add_argument("--max-heartbeat-p95-ms", type=float, default=30.0)
+    parser.add_argument("--max-heartbeat-max-ms", type=float, default=100.0)
     args = parser.parse_args()
-    print(json.dumps(asyncio.run(measure(max(60, args.bars), args.executor_kind)), ensure_ascii=False))
+    result = asyncio.run(measure(max(60, args.bars), args.executor_kind))
+    result["limits"] = {
+        "heartbeat_p95_ms": args.max_heartbeat_p95_ms,
+        "heartbeat_max_ms": args.max_heartbeat_max_ms,
+    }
+    result["passed"] = (
+        result["heartbeat_p95_ms"] <= args.max_heartbeat_p95_ms
+        and result["heartbeat_max_ms"] <= args.max_heartbeat_max_ms
+        and result["peak_workers"] <= 1
+    )
+    print(json.dumps(result, ensure_ascii=False))
+    if not result["passed"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

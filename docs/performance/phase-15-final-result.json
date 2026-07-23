@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "phase": 15,
+  "measured_at": "2026-07-23T13:22:00+08:00",
+  "branch": "codex/realtime-reliability-phases",
+  "tests": {
+    "backend": {
+      "passed": 508,
+      "failed": 0
+    },
+    "frontend": {
+      "passed": 246,
+      "failed": 0,
+      "skipped": 1
+    },
+    "production_build": "passed"
+  },
+  "bundle": {
+    "static_file_count": 4,
+    "static_gzip_bytes": 119688,
+    "legacy_selected_gzip_bytes": 137761,
+    "lwc_selected_gzip_bytes": 188300,
+    "max_selected_gzip_bytes": 190000,
+    "engines_are_mutually_exclusive": true,
+    "passed": true
+  },
+  "backtest_isolation": {
+    "bars": 100000,
+    "executor_kind": "process",
+    "elapsed_ms": 951.69,
+    "heartbeat_p95_ms": 13.98,
+    "heartbeat_max_ms": 29.56,
+    "peak_workers": 1,
+    "passed": true
+  },
+  "browser": {
+    "terminal_reload_count": 20,
+    "terminal_reload_failures": 0,
+    "terminal_instances_after_reload": 1,
+    "order_book_instances_after_reload": 1,
+    "lazy_utility_drawer_loaded_on_open": true
+  },
+  "live_environment": {
+    "same_version_backend_available": false,
+    "database_explain_executed": true,
+    "database_explain_passed": true,
+    "database_access_type": "range",
+    "database_compatible_composite_index_present": true,
+    "database_optimizer_selected_compatible_index": false,
+    "sixty_minute_market_soak_executed": false,
+    "reason": "The running development backend predates this phase. Live checks must use the same commit with MySQL and Fubon connected."
+  },
+  "result": "automated_gate_passed_live_gate_pending"
+}
