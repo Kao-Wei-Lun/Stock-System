@@ -1,4 +1,4 @@
-const DB_NAME = "quantvision-terminal-cache";
+export const TERMINAL_CACHE_DB_NAME = "quantvision-terminal-cache";
 const DB_VERSION = 1;
 const SNAPSHOT_STORE = "snapshots";
 const METADATA_STORE = "metadata";
@@ -13,14 +13,33 @@ function requestResult(request) {
   });
 }
 
+function isRecoverableIndexedDbError(error) {
+  return new Set([
+    "AbortError",
+    "InvalidStateError",
+    "NotFoundError",
+    "UnknownError",
+    "VersionError",
+  ]).has(String(error?.name || ""));
+}
+
+export function resetIndexedDbTerminalCache(indexedDb = globalThis.indexedDB) {
+  if (!indexedDb?.deleteDatabase) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const request = indexedDb.deleteDatabase(TERMINAL_CACHE_DB_NAME);
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => resolve(false);
+    request.onblocked = () => resolve(false);
+  });
+}
+
 export function createIndexedDbTerminalCacheDriver(indexedDb = globalThis.indexedDB) {
   let openPromise = null;
+  let databaseHandle = null;
 
-  function open() {
-    if (!indexedDb) return Promise.resolve(null);
-    if (!openPromise) {
-      openPromise = new Promise((resolve, reject) => {
-        const request = indexedDb.open(DB_NAME, DB_VERSION);
+  function openOnce() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDb.open(TERMINAL_CACHE_DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
           const database = request.result;
           if (!database.objectStoreNames.contains(SNAPSHOT_STORE)) {
@@ -30,18 +49,58 @@ export function createIndexedDbTerminalCacheDriver(indexedDb = globalThis.indexe
             database.createObjectStore(METADATA_STORE, { keyPath: "key" });
           }
         };
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+          databaseHandle = request.result;
+          databaseHandle.onversionchange = () => {
+            databaseHandle?.close();
+            databaseHandle = null;
+            openPromise = null;
+          };
+          resolve(databaseHandle);
+        };
         request.onerror = () => reject(request.error || new Error("Unable to open terminal cache"));
-      }).catch(() => null);
+      });
+  }
+
+  async function recover() {
+    databaseHandle?.close();
+    databaseHandle = null;
+    openPromise = null;
+    await resetIndexedDbTerminalCache(indexedDb);
+    return openOnce();
+  }
+
+  function open() {
+    if (!indexedDb) return Promise.resolve(null);
+    if (!openPromise) {
+      openPromise = openOnce()
+        .catch(async (error) => {
+          if (!isRecoverableIndexedDbError(error)) return null;
+          try {
+            return await recover();
+          } catch {
+            return null;
+          }
+        });
     }
     return openPromise;
   }
 
   async function run(storeName, mode, operation) {
+    async function execute(database) {
+      const transaction = database.transaction(storeName, mode);
+      return operation(transaction.objectStore(storeName));
+    }
+
     const database = await open();
     if (!database) return null;
-    const transaction = database.transaction(storeName, mode);
-    return operation(transaction.objectStore(storeName));
+    try {
+      return await execute(database);
+    } catch (error) {
+      if (!isRecoverableIndexedDbError(error)) throw error;
+      const recovered = await recover().catch(() => null);
+      return recovered ? execute(recovered) : null;
+    }
   }
 
   return {
@@ -54,6 +113,12 @@ export function createIndexedDbTerminalCacheDriver(indexedDb = globalThis.indexe
         run(SNAPSHOT_STORE, "readwrite", (objectStore) => requestResult(objectStore.clear())),
         run(METADATA_STORE, "readwrite", (objectStore) => requestResult(objectStore.clear())),
       ]);
+    },
+    reset: async () => {
+      databaseHandle?.close();
+      databaseHandle = null;
+      openPromise = null;
+      return resetIndexedDbTerminalCache(indexedDb);
     },
   };
 }

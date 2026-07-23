@@ -392,6 +392,7 @@
     </div>
 
     <GlobalSearchCommand
+      v-if="commandPaletteOpen"
       :open="commandPaletteOpen"
       :query="searchQuery"
       :search-results="searchResults"
@@ -419,6 +420,7 @@
     />
 
     <ToastStack
+      v-if="notifications.length"
       :notifications="notifications"
       @dismiss="dismissNotification"
       @select="handleToastSelect"
@@ -458,16 +460,16 @@ import {
 } from "vue";
 
 import AppNavbar from "./components/AppNavbar.vue";
-import GlobalSearchCommand from "./components/GlobalSearchCommand.vue";
-import NotificationPanel from "./components/NotificationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
-import ToastStack from "./components/ToastStack.vue";
 import { useDashboard } from "./composables/useDashboard";
 import { useFubonWorkspaceStatus } from "./composables/useFubonWorkspaceStatus";
 import { useHotkeys } from "./composables/useHotkeys";
 
 const SettingsWorkspace = defineAsyncComponent(() => import("./components/settings/SettingsWorkspace.vue"));
 const AlertModal = defineAsyncComponent(() => import("./components/AlertModal.vue"));
+const GlobalSearchCommand = defineAsyncComponent(() => import("./components/GlobalSearchCommand.vue"));
+const NotificationPanel = defineAsyncComponent(() => import("./components/NotificationPanel.vue"));
+const ToastStack = defineAsyncComponent(() => import("./components/ToastStack.vue"));
 const InstitutionalAnalysisWorkspace = defineAsyncComponent(() => import("./components/workspaces/InstitutionalAnalysisWorkspace.vue"));
 const MarketOverviewWorkspace = defineAsyncComponent(() => import("./components/workspaces/MarketOverviewWorkspace.vue"));
 const ProChartTerminalWorkspace = defineAsyncComponent(() => import("./components/workspaces/ProChartTerminalWorkspace.vue"));

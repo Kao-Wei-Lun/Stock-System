@@ -7,6 +7,7 @@ import {
 } from "../utils/indicatorUtils";
 import { createDashboardApi } from "../api/dashboardApi";
 import { createTerminalCache } from "../services/terminalCache";
+import { fetchWithPolicy } from "../utils/requestPolicy";
 import { fmtMktCap, fmtPrice, fmtVol } from "../utils/formatters";
 import {
   buildWorkspacePayload,
@@ -1057,6 +1058,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     const {
       retries = 0,
       retryDelayMs = 1200,
+      timeoutMs = 15_000,
       ...fetchOptions
     } = options;
 
@@ -1065,7 +1067,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     while (attempt <= retries) {
       const start = Date.now();
       try {
-        const response = await fetch(`${apiBase}${path}`, fetchOptions);
+        const response = await fetchWithPolicy(`${apiBase}${path}`, fetchOptions, { timeoutMs });
         const contentType = response.headers.get("content-type") || "";
         const payload = contentType.includes("application/json") ? await response.json() : null;
         latency.value = `${Date.now() - start}ms`;
@@ -1077,7 +1079,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         return payload;
       } catch (error) {
         lastError = error;
-        const isNetworkError = error instanceof TypeError;
+        const isNetworkError = error instanceof TypeError || error?.code === "QV_API_TIMEOUT";
         const isRetryableHttp = [502, 503, 504].includes(error?.status);
         if (attempt >= retries || (!isNetworkError && !isRetryableHttp)) {
           throw error;

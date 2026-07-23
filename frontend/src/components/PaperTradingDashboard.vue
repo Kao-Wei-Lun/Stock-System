@@ -18,6 +18,11 @@
       </div>
     </header>
 
+    <div class="pt-simulation-notice" role="note" data-testid="simulation-safety-notice">
+      <strong>僅供模擬與策略驗證</strong>
+      <span>本頁不會送出任何真實委託；帳戶、Bot 與回放結果皆為模擬資料。</span>
+    </div>
+
     <!-- ─── Tab Bar ───────────────────────────────────────── -->
     <nav class="pt-tabs">
       <button
@@ -25,6 +30,7 @@
         :key="tab.key"
         class="pt-tab"
         :class="{ active: activeTab === tab.key }"
+        :aria-current="activeTab === tab.key ? 'page' : undefined"
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
@@ -40,6 +46,21 @@
       </div>
       <div v-else-if="!accounts.length" class="pt-inline-state" data-testid="accounts-empty">
         尚未建立模擬帳戶，可先使用下方表單建立。
+      </div>
+      <div v-if="sectionLoading.margin" class="pt-inline-state" data-testid="margin-loading">
+        保證金資料更新中…
+      </div>
+      <div
+        v-else-if="sectionErrors.margin"
+        class="pt-inline-state warning"
+        role="status"
+        data-testid="margin-error"
+      >
+        <span>保證金供應商暫時無法使用：{{ sectionErrors.margin }}。既有帳戶與歷史回放仍可使用。</span>
+        <button class="pt-btn pt-btn-sm" @click="previewAccountMargin">重試</button>
+      </div>
+      <div v-else-if="!marginPreview" class="pt-inline-state" data-testid="margin-fallback">
+        尚未向供應商更新；目前使用資料庫保存值或商品預設保證金。
       </div>
       <div class="pt-card">
         <h2 class="pt-card-title">帳戶設定</h2>
@@ -710,6 +731,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import FuturesRiskSizerPanel from "./paper/FuturesRiskSizerPanel.vue";
+import { fetchWithPolicy } from "../utils/requestPolicy";
 import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 const API = "/api/paper-trading";
@@ -742,8 +764,9 @@ const refreshingAccountMargins = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
-const sectionLoading = reactive({ accounts: true, bots: true, replay: true });
-const sectionErrors = reactive({ accounts: "", bots: "", replay: "" });
+const sectionLoading = reactive({ accounts: true, bots: true, replay: true, margin: false });
+const sectionErrors = reactive({ accounts: "", bots: "", replay: "", margin: "" });
+const activeRequestControllers = new Set();
 let _riskSizingTimer = null;
 
 const v2VariantOptions = [
@@ -883,15 +906,26 @@ const activeRiskStrategyForm = computed(() => (
 
 // ─── API Helpers ─────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `API error: ${res.status}`);
+  const controller = new AbortController();
+  activeRequestControllers.add(controller);
+  try {
+    const requestOptions = {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+      signal: controller.signal,
+    };
+    const res = await fetchWithPolicy(`${API}${path}`, requestOptions, {
+      timeoutMs: 12_000,
+      retries: String(options.method || "GET").toUpperCase() === "GET" ? 1 : 0,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `API error: ${res.status}`);
+    }
+    return res.json();
+  } finally {
+    activeRequestControllers.delete(controller);
   }
-  return res.json();
 }
 
 function showToast(message, type = "info") {
@@ -1056,12 +1090,17 @@ async function loadReplayRuns() {
 
 async function previewAccountMargin({ silent = false } = {}) {
   marginPreviewLoading.value = true;
+  sectionLoading.margin = true;
+  sectionErrors.margin = "";
   try {
     const data = await apiFetch("/accounts/margin/estimate", {
       method: "POST",
       body: JSON.stringify({ product_symbol: accountForm.product_symbol || "TMF" }),
     });
     marginPreview.value = data;
+    if (!data.ok) {
+      sectionErrors.margin = data.error || data.margin_sync_error || "供應商未回傳最新值，已保留可用的持久化值";
+    }
     if (!silent) {
       showToast(
         data.ok ? "\u4fdd\u8b49\u91d1\u9810\u67e5\u5b8c\u6210" : "\u5df2\u4f7f\u7528\u9810\u8a2d\u4fdd\u8b49\u91d1",
@@ -1069,22 +1108,29 @@ async function previewAccountMargin({ silent = false } = {}) {
       );
     }
   } catch (e) {
+    sectionErrors.margin = e.message || "未知錯誤";
     if (!silent) showToast(e.message, "error");
   } finally {
     marginPreviewLoading.value = false;
+    sectionLoading.margin = false;
   }
 }
 
 async function refreshAccountMargin(account) {
   refreshingAccountMargins[account.id] = true;
+  sectionErrors.margin = "";
   try {
     const data = await apiFetch(`/accounts/${account.id}/margin/refresh`, { method: "POST" });
     showToast(
       data.ok ? "\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0" : "\u4fdd\u8b49\u91d1\u66f4\u65b0\u5931\u6557\uff0c\u5df2\u4fdd\u7559\u53ef\u7528\u503c",
       data.ok ? "success" : "error",
     );
+    if (!data.ok) {
+      sectionErrors.margin = data.error || data.margin_sync_error || "供應商未回傳最新值，已保留既有保證金";
+    }
     await loadAccounts();
   } catch (e) {
+    sectionErrors.margin = e.message || "未知錯誤";
     showToast(e.message, "error");
   } finally {
     delete refreshingAccountMargins[account.id];
@@ -1093,14 +1139,19 @@ async function refreshAccountMargin(account) {
 
 async function refreshAllMargins() {
   refreshingAllMargins.value = true;
+  sectionErrors.margin = "";
   try {
     const data = await apiFetch("/accounts/margins/refresh", { method: "POST" });
     showToast(
       data.failed ? `\u5df2\u66f4\u65b0 ${data.success}/${data.total} \u500b\u5e33\u6236` : "\u5168\u90e8\u4fdd\u8b49\u91d1\u5df2\u66f4\u65b0",
       data.failed ? "error" : "success",
     );
+    if (data.failed) {
+      sectionErrors.margin = `${data.failed} 個帳戶更新失敗，已保留各帳戶最後可用值`;
+    }
     await loadAccounts();
   } catch (e) {
+    sectionErrors.margin = e.message || "未知錯誤";
     showToast(e.message, "error");
   } finally {
     refreshingAllMargins.value = false;
@@ -1407,6 +1458,8 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling();
   if (_riskSizingTimer) clearTimeout(_riskSizingTimer);
+  activeRequestControllers.forEach((controller) => controller.abort());
+  activeRequestControllers.clear();
 });
 </script>
 
@@ -1416,6 +1469,22 @@ onUnmounted(() => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+}
+
+.pt-simulation-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 193, 92, 0.35);
+  border-radius: 10px;
+  color: rgba(255, 236, 202, 0.88);
+  background: rgba(114, 70, 12, 0.18);
+}
+
+.pt-simulation-notice strong {
+  color: #ffc15c;
 }
 
 .pt-inline-state {
@@ -1429,6 +1498,12 @@ onUnmounted(() => {
   border-radius: 8px;
   color: rgba(214, 230, 245, 0.78);
   background: rgba(17, 33, 48, 0.65);
+}
+
+.pt-inline-state.warning {
+  border-color: rgba(255, 193, 92, 0.35);
+  color: #ffd99b;
+  background: rgba(114, 70, 12, 0.16);
 }
 
 .pt-inline-state.error {

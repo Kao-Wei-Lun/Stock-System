@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { TERMINAL_CACHE_SCHEMA_VERSION, createTerminalCache } from "./terminalCache";
+import {
+  TERMINAL_CACHE_DB_NAME,
+  TERMINAL_CACHE_SCHEMA_VERSION,
+  createTerminalCache,
+  resetIndexedDbTerminalCache,
+} from "./terminalCache";
 
 function createMemoryDriver() {
   const stores = { snapshots: new Map(), metadata: new Map() };
@@ -61,5 +66,20 @@ describe("terminalCache", () => {
     await cache.clear();
     expect(driver.stores.snapshots.size).toBe(0);
     expect(driver.stores.metadata.size).toBe(0);
+  });
+
+  it("deletes only the QuantVision terminal cache database during recovery", async () => {
+    let deletedName = null;
+    const indexedDb = {
+      deleteDatabase(name) {
+        deletedName = name;
+        const request = {};
+        queueMicrotask(() => request.onsuccess());
+        return request;
+      },
+    };
+
+    await expect(resetIndexedDbTerminalCache(indexedDb)).resolves.toBe(true);
+    expect(deletedName).toBe(TERMINAL_CACHE_DB_NAME);
   });
 });

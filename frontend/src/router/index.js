@@ -1,13 +1,32 @@
+import { defineAsyncComponent } from "vue";
 import { createRouter, createWebHistory } from "vue-router";
 
-const OverviewView = () => import("../views/OverviewView.vue");
-const TerminalView = () => import("../views/TerminalView.vue");
-const InstitutionalView = () => import("../views/InstitutionalView.vue");
-const JournalView = () => import("../views/JournalView.vue");
-const BacktestView = () => import("../views/BacktestView.vue");
-const AssetsView = () => import("../views/AssetsView.vue");
-const SettingsView = () => import("../views/SettingsView.vue");
-const PaperTradingView = () => import("../views/PaperTradingView.vue");
+import { reportFrontendError } from "../utils/frontendRecovery";
+
+function recoverableRoute(loader) {
+  return defineAsyncComponent({
+    loader,
+    delay: 0,
+    timeout: 20_000,
+    suspensible: true,
+    onError(error, retry, fail, attempts) {
+      if (attempts < 2) retry();
+      else {
+        reportFrontendError(error, "route-module");
+        fail();
+      }
+    },
+  });
+}
+
+const OverviewView = recoverableRoute(() => import("../views/OverviewView.vue"));
+const TerminalView = recoverableRoute(() => import("../views/TerminalView.vue"));
+const InstitutionalView = recoverableRoute(() => import("../views/InstitutionalView.vue"));
+const JournalView = recoverableRoute(() => import("../views/JournalView.vue"));
+const BacktestView = recoverableRoute(() => import("../views/BacktestView.vue"));
+const AssetsView = recoverableRoute(() => import("../views/AssetsView.vue"));
+const SettingsView = recoverableRoute(() => import("../views/SettingsView.vue"));
+const PaperTradingView = recoverableRoute(() => import("../views/PaperTradingView.vue"));
 
 const redirectWithTicker = (name) => (to) => ({
   name,

@@ -1,3 +1,5 @@
+import { fetchWithPolicy } from "../utils/requestPolicy";
+
 function normalizeBaseUrl(baseUrl = "") {
   return String(baseUrl || "").replace(/\/$/, "");
 }
@@ -12,11 +14,23 @@ function buildJsonRequest(method, body) {
   };
 }
 
-export function createDashboardApi({ baseUrl = "" } = {}) {
+export function createDashboardApi({
+  baseUrl = "",
+  requestTimeoutMs = import.meta.env.MODE === "test" ? 0 : 15_000,
+  requestRetries = import.meta.env.MODE === "test" ? 0 : 1,
+} = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
   async function request(path, options = {}) {
-    const response = await fetch(`${normalizedBaseUrl}${path}`, options);
+    const {
+      timeoutMs = requestTimeoutMs,
+      retries = requestRetries,
+      ...fetchOptions
+    } = options;
+    const response = await fetchWithPolicy(`${normalizedBaseUrl}${path}`, fetchOptions, {
+      timeoutMs,
+      retries,
+    });
     const contentType = response.headers?.get?.("content-type") || "";
     const payload = contentType.includes("application/json") ? await response.json() : null;
     if (!response.ok) {
