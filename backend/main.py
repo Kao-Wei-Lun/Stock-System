@@ -36,7 +36,7 @@ from env_validation import (
 )
 from futopt_history_service import FutoptCandleRecorder, FutoptRefreshCoordinator
 from frontend_static import SPAStaticFiles
-from logging_config import configure_logging
+from logging_config import configure_channel_logging, configure_logging
 from local_access import LocalAccessMiddleware, split_csv
 from operational_metrics import OperationalMetricStore, OperationalMetricsService
 from performance_timing import RequestTimingMiddleware
@@ -77,6 +77,7 @@ if hasattr(sys.stderr, "reconfigure"):
 load_dotenv()
 configure_logging()
 log = logging.getLogger(__name__)
+scheduler_log = configure_channel_logging("scheduler", profile="scheduler")
 
 # ─── Configuration ───────────────────────────────────────────
 
@@ -354,7 +355,7 @@ background_tasks = BackgroundTaskService(
     startup_download_delay_seconds=STARTUP_DOWNLOAD_DELAY_SECONDS,
     latest_data_sync_period=LATEST_DATA_SYNC_PERIOD,
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
-    logger=log,
+    logger=scheduler_log,
 )
 tw_history_backfill_service = TaiwanHistoryBackfillService(
     db=db,
@@ -524,7 +525,7 @@ background_scheduler = BackgroundScheduler(
         get_mysql_backup_status=get_scheduled_mysql_backup_health,
         quote_refresh_service=quote_refresh_service,
     ),
-    logger=log,
+    logger=scheduler_log,
 )
 data_quality_service = DataQualityService(
     db=db,

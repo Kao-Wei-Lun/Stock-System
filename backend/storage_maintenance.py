@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from logging_config import configure_logging
 
 from chip_archive_codec import (
     ChipArchiveError,
@@ -659,12 +661,21 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     load_dotenv(PROJECT_ROOT / ".env")
+    configure_logging(profile="backup", console_enabled=False)
+    activity_log = logging.getLogger("backup.maintenance")
     args = build_parser().parse_args(argv)
+    activity_log.info("Storage maintenance started action=%s execute=%s", args.action, args.execute)
     try:
         result = asyncio.run(_run_cli(args))
     except Exception as exc:
+        activity_log.error(
+            "Storage maintenance failed action=%s category=maintenance_error message=%s",
+            args.action,
+            exc,
+        )
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
+    activity_log.info("Storage maintenance completed action=%s", args.action)
     print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2, default=str))
     return 0
 

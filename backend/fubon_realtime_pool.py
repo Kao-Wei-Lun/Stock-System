@@ -204,7 +204,11 @@ class FubonRealtimeSubscriptionPool:
             self._warmup_state = "failed"
             self._warmup_error = str(exc)[:300]
             self._warmup_completed_at = self._utcnow().isoformat()
-            log.exception("Fubon provider background warmup failed: %s", exc)
+            log.exception(
+                "Fubon provider warmup failed category=%s message=%s",
+                classify_fubon_error(exc),
+                exc,
+            )
             return False
         self._warmup_state = "ready"
         self._warmup_completed_at = self._utcnow().isoformat()
@@ -266,8 +270,13 @@ class FubonRealtimeSubscriptionPool:
                         getattr(self._primary_manager, "last_init_error", None),
                     )
             except Exception as exc:
-                self._record_recovery_failure(primary_id, classify_fubon_error(exc), exc)
-                log.warning("Fubon primary account %s warmup failed: %s", primary_id, exc)
+                category = classify_fubon_error(exc)
+                self._record_recovery_failure(primary_id, category, exc)
+                log.warning(
+                    "Fubon primary connection warmup failed category=%s message=%s",
+                    category,
+                    exc,
+                )
 
         removed_ids = [account_id for account_id in list(self._managers.keys()) if account_id not in desired_ids]
         for account_id in removed_ids:
@@ -300,8 +309,13 @@ class FubonRealtimeSubscriptionPool:
                         getattr(manager, "last_init_error", None),
                     )
             except Exception as exc:
-                self._record_recovery_failure(account_id, classify_fubon_error(exc), exc)
-                log.warning("Fubon account %s warmup failed: %s", account_id, exc)
+                category = classify_fubon_error(exc)
+                self._record_recovery_failure(account_id, category, exc)
+                log.warning(
+                    "Fubon secondary connection warmup failed category=%s message=%s",
+                    category,
+                    exc,
+                )
 
         await self._rebalance_assignments()
         return self.connected
@@ -711,7 +725,11 @@ class FubonRealtimeSubscriptionPool:
                 "message": "account reconnected" if success else "account reconnect failed",
             }
         except Exception as exc:
-            log.warning("Fubon account %s reconnect failed: %s", account_id, exc)
+            log.warning(
+                "Fubon isolated reconnect failed category=%s message=%s",
+                classify_fubon_error(exc),
+                exc,
+            )
             return {
                 "success": False,
                 "account_id": int(account_id),
@@ -726,11 +744,15 @@ class FubonRealtimeSubscriptionPool:
             account_id for account_id, manager in list(self._managers.items()) if not manager.connected
         ]
         for account_id in disconnected_ids:
-            log.warning("Fubon account %s is disconnected; attempting isolated recovery", account_id)
+            log.warning("Fubon connection is disconnected; attempting isolated recovery")
             try:
                 await self.reconnect_account(account_id, manual=False)
             except Exception as exc:
-                log.warning("Fubon account %s recovery failed: %s", account_id, exc)
+                log.warning(
+                    "Fubon isolated recovery failed category=%s message=%s",
+                    classify_fubon_error(exc),
+                    exc,
+                )
 
         desired_after_hours = is_futopt_after_hours()
         stale_tickers = [
@@ -755,7 +777,10 @@ class FubonRealtimeSubscriptionPool:
                 try:
                     handler(payload)
                 except Exception as exc:
-                    log.warning("Fubon realtime pool handler failed: %s", exc)
+                    log.warning(
+                        "Fubon realtime handler failed category=handler message=%s",
+                        exc,
+                    )
 
         self._manager_bridge_handlers[account_id] = _bridge
         manager.register_message_handler(_bridge)
@@ -835,8 +860,12 @@ class FubonRealtimeSubscriptionPool:
                 try:
                     channels = await self._subscribe_target_on_manager(account_id, manager, target)
                 except Exception as exc:
-                    log.warning("Fubon realtime subscribe failed for %s via account %s: %s", normalized, account_id, exc)
-                    errors.append(f"{account_id}:{exc}")
+                    log.warning(
+                        "Fubon realtime subscribe failed category=%s message=%s",
+                        classify_fubon_error(exc),
+                        exc,
+                    )
+                    errors.append(classify_fubon_error(exc))
                     continue
 
                 assignment = RealtimeAssignment(

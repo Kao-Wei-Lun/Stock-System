@@ -1,0 +1,406 @@
+"""Safe local uvicorn supervisor used by the Windows production launcher."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+from collections import deque
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RUNTIME_DIR = PROJECT_ROOT / ".runtime"
+PREFLIGHT_FREE = "free"
+PREFLIGHT_EXPECTED = "expected"
+PREFLIGHT_COLLISION = "collision"
+
+
+class SupervisorError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorSettings:
+    python_path: Path
+    working_directory: Path
+    host: str = "127.0.0.1"
+    port: int = 8001
+    max_crashes: int = 5
+    crash_window_seconds: float = 300
+    stable_runtime_seconds: float = 300
+    initial_backoff_seconds: float = 1
+    max_backoff_seconds: float = 30
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def find_listening_pid(port: int) -> int | None:
+    """Return the Windows listening PID without changing process state."""
+
+    if sys.platform != "win32":
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.1)
+            return -1 if probe.connect_ex(("127.0.0.1", int(port))) == 0 else None
+    result = subprocess.run(
+        ["netstat", "-ano", "-p", "TCP"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=10,
+    )
+    port_pattern = re.compile(rf":{int(port)}$")
+    for line in result.stdout.splitlines():
+        columns = line.split()
+        if len(columns) < 5 or columns[0].upper() != "TCP":
+            continue
+        if columns[-2].upper() != "LISTENING" or not port_pattern.search(columns[1]):
+            continue
+        try:
+            return int(columns[-1])
+        except ValueError:
+            continue
+    return None
+
+
+def read_process_command_line(pid: int) -> str:
+    if sys.platform != "win32" or pid <= 0:
+        return ""
+    command = (
+        f"$p=Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\" "
+        "-ErrorAction SilentlyContinue; if($p){$p.CommandLine}"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=10,
+    )
+    return result.stdout.strip()
+
+
+class LocalServiceSupervisor:
+    def __init__(
+        self,
+        settings: SupervisorSettings,
+        *,
+        runtime_dir: Path = DEFAULT_RUNTIME_DIR,
+        port_probe: Callable[[int], int | None] = find_listening_pid,
+        command_line_probe: Callable[[int], str] = read_process_command_line,
+        popen_factory: Callable[..., Any] = subprocess.Popen,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.settings = settings
+        self.runtime_dir = Path(runtime_dir)
+        self.state_path = self.runtime_dir / "backend-service.json"
+        self.stop_marker = self.runtime_dir / "backend-service.stop"
+        self.breaker_path = self.runtime_dir / "backend-service-breaker.json"
+        self._port_probe = port_probe
+        self._command_line_probe = command_line_probe
+        self._popen_factory = popen_factory
+        self._clock = clock
+        self._sleep = sleep
+
+    def _command_matches_expected_process(self, pid: int) -> bool:
+        command_line = self._command_line_probe(pid).lower()
+        expected_python = str(self.settings.python_path.resolve()).lower()
+        return (
+            expected_python in command_line
+            and "uvicorn" in command_line
+            and "main:app" in command_line
+            and f"--port {self.settings.port}" in command_line
+        )
+
+    def _is_managed_process(self, pid: int) -> bool:
+        state = _read_json(self.state_path)
+        if int(state.get("process_pid") or 0) != int(pid):
+            return False
+        if int(state.get("port") or 0) != self.settings.port:
+            return False
+        return self._command_matches_expected_process(pid)
+
+    def _is_expected_process(self, pid: int) -> bool:
+        # The command signature allows a one-time handover from the pre-supervisor
+        # launcher, but still binds confirmation to this project's exact venv.
+        return self._is_managed_process(pid) or self._command_matches_expected_process(pid)
+
+    def preflight(self) -> dict[str, Any]:
+        pid = self._port_probe(self.settings.port)
+        if pid is None:
+            return {"status": PREFLIGHT_FREE, "port": self.settings.port}
+        if pid > 0 and self._is_expected_process(pid):
+            return {
+                "status": PREFLIGHT_EXPECTED,
+                "port": self.settings.port,
+                "process_pid": pid,
+                "managed": self._is_managed_process(pid),
+            }
+        return {
+            "status": PREFLIGHT_COLLISION,
+            "port": self.settings.port,
+            "process_pid": pid if pid and pid > 0 else None,
+        }
+
+    def _command(self) -> list[str]:
+        return [
+            str(self.settings.python_path),
+            "-X",
+            "utf8",
+            "-m",
+            "uvicorn",
+            "main:app",
+            "--host",
+            self.settings.host,
+            "--port",
+            str(self.settings.port),
+            "--no-use-colors",
+        ]
+
+    def _write_running_state(self, process_pid: int, restart_count: int) -> None:
+        _atomic_json_write(
+            self.state_path,
+            {
+                "schema_version": 1,
+                "status": "running",
+                "service": "quantvision-backend",
+                "signature": "uvicorn main:app",
+                "port": self.settings.port,
+                "supervisor_pid": os.getpid(),
+                "process_pid": int(process_pid),
+                "restart_count": int(restart_count),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _clear_state_for(self, process_pid: int) -> None:
+        state = _read_json(self.state_path)
+        if int(state.get("process_pid") or 0) != int(process_pid):
+            return
+        try:
+            self.state_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _planned_stop_requested(self) -> bool:
+        return self.stop_marker.is_file()
+
+    def _wait_backoff(self, delay_seconds: float) -> bool:
+        deadline = self._clock() + max(0.0, delay_seconds)
+        while self._clock() < deadline:
+            if self._planned_stop_requested():
+                return False
+            self._sleep(min(0.1, max(0.0, deadline - self._clock())))
+        return not self._planned_stop_requested()
+
+    def run(self) -> int:
+        preflight = self.preflight()
+        if preflight["status"] == PREFLIGHT_EXPECTED:
+            print(f"[INFO] QuantVision backend is already running on port {self.settings.port}.")
+            return 0
+        if preflight["status"] == PREFLIGHT_COLLISION:
+            raise SupervisorError(
+                f"Port {self.settings.port} is occupied by an unconfirmed process; no process was stopped."
+            )
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        for marker in (self.stop_marker, self.breaker_path):
+            try:
+                marker.unlink()
+            except FileNotFoundError:
+                pass
+
+        crash_times: deque[float] = deque()
+        restart_count = 0
+        while True:
+            if self._planned_stop_requested():
+                return 0
+            process = self._popen_factory(
+                self._command(),
+                cwd=str(self.settings.working_directory),
+                shell=False,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    if sys.platform == "win32"
+                    else 0
+                ),
+            )
+            self._write_running_state(process.pid, restart_count)
+            started_at = self._clock()
+            try:
+                exit_code = int(process.wait())
+            except KeyboardInterrupt:
+                self.stop_marker.write_text("planned\n", encoding="utf-8")
+                self._terminate_started_process(process)
+                exit_code = 0
+            finally:
+                self._clear_state_for(process.pid)
+
+            runtime = max(0.0, self._clock() - started_at)
+            if self._planned_stop_requested() or exit_code == 0:
+                try:
+                    self.stop_marker.unlink()
+                except FileNotFoundError:
+                    pass
+                return 0
+            if runtime >= self.settings.stable_runtime_seconds:
+                crash_times.clear()
+
+            now = self._clock()
+            crash_times.append(now)
+            while crash_times and now - crash_times[0] > self.settings.crash_window_seconds:
+                crash_times.popleft()
+            if len(crash_times) >= self.settings.max_crashes:
+                _atomic_json_write(
+                    self.breaker_path,
+                    {
+                        "schema_version": 1,
+                        "status": "restart_breaker_open",
+                        "service": "quantvision-backend",
+                        "port": self.settings.port,
+                        "crash_count": len(crash_times),
+                        "opened_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                print(
+                    f"[ERROR] Backend crashed {len(crash_times)} times; restart breaker is open."
+                )
+                return 70
+
+            delay = min(
+                self.settings.max_backoff_seconds,
+                self.settings.initial_backoff_seconds * (2 ** restart_count),
+            )
+            restart_count += 1
+            print(
+                f"[WARNING] Backend exited with code {exit_code}; "
+                f"retrying in {delay:g} seconds ({restart_count}/{self.settings.max_crashes})."
+            )
+            if not self._wait_backoff(delay):
+                return 0
+
+    @staticmethod
+    def _terminate_started_process(process: Any) -> None:
+        try:
+            if sys.platform == "win32":
+                os.kill(int(process.pid), signal.CTRL_BREAK_EVENT)
+            else:
+                process.terminate()
+            process.wait(timeout=10)
+            return
+        except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+
+    def request_stop(self) -> dict[str, Any]:
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.stop_marker.write_text("planned\n", encoding="utf-8")
+        pid = self._port_probe(self.settings.port)
+        if pid is None:
+            return {"status": "already_stopped", "port": self.settings.port}
+        if pid <= 0 or not self._is_expected_process(pid):
+            raise SupervisorError(
+                f"Port {self.settings.port} is occupied by an unconfirmed process; no process was stopped."
+            )
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T"],
+                capture_output=True,
+                check=False,
+                timeout=15,
+            )
+            if result.returncode != 0:
+                raise SupervisorError("Confirmed backend did not accept the planned stop request.")
+        else:
+            os.kill(pid, signal.SIGTERM)
+        return {"status": "stop_requested", "port": self.settings.port, "process_pid": pid}
+
+    def status(self) -> dict[str, Any]:
+        preflight = self.preflight()
+        return {
+            **preflight,
+            "state": _read_json(self.state_path),
+            "restart_breaker": _read_json(self.breaker_path),
+            "planned_stop_pending": self._planned_stop_requested(),
+        }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("check", "run", "stop", "status"))
+    parser.add_argument("--python", type=Path, default=Path(sys.executable))
+    parser.add_argument("--working-directory", type=Path, default=PROJECT_ROOT / "backend")
+    parser.add_argument("--runtime-dir", type=Path, default=DEFAULT_RUNTIME_DIR)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--max-crashes", type=int, default=5)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    args = build_parser().parse_args(argv)
+    supervisor = LocalServiceSupervisor(
+        SupervisorSettings(
+            python_path=args.python.resolve(),
+            working_directory=args.working_directory.resolve(),
+            host=args.host,
+            port=max(1, min(65535, args.port)),
+            max_crashes=max(1, args.max_crashes),
+        ),
+        runtime_dir=args.runtime_dir.resolve(),
+    )
+    try:
+        if args.action == "check":
+            result = supervisor.preflight()
+            print(json.dumps(result, ensure_ascii=False))
+            return {
+                PREFLIGHT_FREE: 0,
+                PREFLIGHT_EXPECTED: 10,
+                PREFLIGHT_COLLISION: 20,
+            }[result["status"]]
+        if args.action == "run":
+            return supervisor.run()
+        if args.action == "stop":
+            print(json.dumps(supervisor.request_stop(), ensure_ascii=False))
+            return 0
+        print(json.dumps(supervisor.status(), ensure_ascii=False, indent=2))
+        return 0
+    except SupervisorError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 20
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from dotenv import load_dotenv
+from logging_config import configure_logging
 
 from mysql_backup import (
     DEFAULT_BACKUP_DIR,
@@ -431,7 +433,10 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     load_dotenv(PROJECT_ROOT / ".env")
+    configure_logging(profile="backup", console_enabled=False)
+    activity_log = logging.getLogger("backup.lifecycle")
     args = build_parser().parse_args(argv)
+    activity_log.info("Storage lifecycle started command=%s", args.command)
     try:
         reference_date = date.fromisoformat(args.today) if args.today else None
         settings = MysqlSettings.from_env()
@@ -451,8 +456,14 @@ def main(argv: list[str] | None = None) -> int:
             else auditor.dry_run(today=reference_date, backup_dir=args.backup_dir)
         )
     except (BackupError, StorageLifecycleError, ValueError) as exc:
+        activity_log.error(
+            "Storage lifecycle failed command=%s category=lifecycle_error message=%s",
+            args.command,
+            exc,
+        )
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
+    activity_log.info("Storage lifecycle completed command=%s", args.command)
     print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
     return 0
 

@@ -78,6 +78,16 @@ scripts\start.bat
 start.bat
 ```
 
+Windows production 啟動器會監督後端程序；若非預期崩潰，會採指數退避重啟，
+短時間連續失敗則開啟 restart breaker。它只會沿用或停止由 QuantVision
+supervisor 狀態或同專案 venv 完整命令簽章確認的 uvicorn 程序，不會強制終止
+占用 8001 埠的不明程序。
+
+```bat
+start.bat status
+start.bat stop
+```
+
 ### Mac / Linux
 
 ```bash

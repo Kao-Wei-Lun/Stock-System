@@ -7,6 +7,7 @@ import gzip
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from dotenv import load_dotenv
+from logging_config import configure_logging
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1295,7 +1297,10 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     load_dotenv(PROJECT_ROOT / ".env")
+    configure_logging(profile="backup", console_enabled=False)
+    activity_log = logging.getLogger("backup")
     args = build_parser().parse_args(argv)
+    activity_log.info("Backup utility started command=%s", args.command)
     try:
         if args.command == "backup":
             result = create_backup(
@@ -1336,8 +1341,14 @@ def main(argv: list[str] | None = None) -> int:
                 mysql_path=args.mysql_path,
             )
     except BackupError as exc:
+        activity_log.error(
+            "Backup utility failed command=%s category=backup_error message=%s",
+            args.command,
+            exc,
+        )
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
+    activity_log.info("Backup utility completed command=%s", args.command)
     print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
     return 0
 

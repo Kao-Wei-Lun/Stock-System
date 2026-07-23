@@ -1093,7 +1093,12 @@ class FubonSDKManager:
         except Exception as exc:
             safe_error = redact_sensitive_text(exc)
             self._ws_reconnect_last_error[normalized] = safe_error
-            log.warning("Fubon %s manual websocket reconnect failed: %s", normalized, safe_error)
+            log.warning(
+                "Fubon %s manual websocket reconnect failed category=%s message=%s",
+                normalized,
+                classify_fubon_error(exc),
+                safe_error,
+            )
             self._schedule_reconnect_ws_target(normalized)
             return False
 
@@ -1160,7 +1165,12 @@ class FubonSDKManager:
         except Exception as exc:
             safe_error = redact_sensitive_text(exc)
             self._ws_reconnect_last_error[market_type] = safe_error
-            log.warning("Fubon %s websocket reconnect failed: %s", market_type, safe_error)
+            log.warning(
+                "Fubon %s websocket reconnect failed category=%s message=%s",
+                market_type,
+                classify_fubon_error(exc),
+                safe_error,
+            )
             self._schedule_reconnect_ws_target(market_type)
 
     def _cancel_reconnect_timer(self, market_type: str, *, cancel_active: bool = True) -> None:
