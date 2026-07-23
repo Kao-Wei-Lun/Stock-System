@@ -176,6 +176,7 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     ("MARKET_INTELLIGENCE_STARTUP_SYNC", True),
     ("FUTOPT_RECORDER_ENABLED", True),
     ("PAPER_MARGIN_AUTO_SYNC_ENABLED", True),
+    ("BACKTEST_EXECUTOR_ENABLED", True),
   ):
     capture(key, lambda key=key, default=default: read_bool_env(key, default, env=source))
 
@@ -232,6 +233,18 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture(
     "ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS",
     lambda: read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1, env=source),
+  )
+  capture(
+    "ASSET_QUOTE_REFRESH_MAX_CONCURRENCY",
+    lambda: read_int_env("ASSET_QUOTE_REFRESH_MAX_CONCURRENCY", "6", minimum=1, maximum=32, env=source),
+  )
+  capture(
+    "ASSET_QUOTE_CACHE_TTL_SECONDS",
+    lambda: read_float_env("ASSET_QUOTE_CACHE_TTL_SECONDS", "15", minimum=0, env=source),
+  )
+  capture(
+    "BACKTEST_TIMEOUT_SECONDS",
+    lambda: read_float_env("BACKTEST_TIMEOUT_SECONDS", "30", minimum=0.1, env=source),
   )
   capture(
     "TW_FULL_HISTORY_DELAY_SECONDS",

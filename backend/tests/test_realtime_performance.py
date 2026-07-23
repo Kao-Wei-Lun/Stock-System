@@ -44,4 +44,6 @@ async def test_system_performance_returns_database_and_realtime_status(monkeypat
     assert payload["database"]["pool"]["maxsize"] == 10
     assert payload["realtime"]["broadcast_latency"]["p95_ms"] == 4.25
     assert payload["quote_persistence"]["pending"] == 0
+    assert "backtest_workload" in payload
+    assert "asset_quote_refresh" in payload
     assert payload["time"]

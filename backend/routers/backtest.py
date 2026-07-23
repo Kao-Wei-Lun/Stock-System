@@ -9,10 +9,17 @@ from data_fetcher import normalize_ticker
 from database import DEFAULT_OWNER_ID, db
 from providers import fetcher
 from schemas import BacktestRunCreatePayload
+from workload_executor import BoundedWorkloadExecutor, WorkloadTimeoutError
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/backtests", tags=["backtest"])
+workload_executor = BoundedWorkloadExecutor(name="backtest", max_workers=1, timeout_seconds=30)
+
+
+def configure(*, executor: BoundedWorkloadExecutor) -> None:
+    global workload_executor
+    workload_executor = executor
 
 
 @router.get("/strategies")
@@ -67,7 +74,8 @@ async def create_backtest_run(payload: BacktestRunCreatePayload):
         )
 
     try:
-        result = run_backtest(
+        result = await workload_executor.run(
+            run_backtest,
             rows,
             {
                 "ticker": ticker,
@@ -85,6 +93,9 @@ async def create_backtest_run(payload: BacktestRunCreatePayload):
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except WorkloadTimeoutError as exc:
+        log.warning("Backtest timed out for %s: %s", ticker, exc)
+        raise HTTPException(504, "Backtest execution timed out") from exc
 
     persisted = await db.create_backtest_run(
         {

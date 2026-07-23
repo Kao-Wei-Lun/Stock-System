@@ -6,6 +6,7 @@ import pytest
 
 import main
 from backtest_engine import list_backtest_strategies, run_backtest
+from workload_executor import WorkloadTimeoutError
 
 
 def build_rows(closes, opens=None):
@@ -287,3 +288,33 @@ def test_backtest_api_persists_runs(client, monkeypatch):
     get_response = client.get("/api/backtests/runs/21")
     assert get_response.status_code == 200
     assert get_response.json()["ticker"] == "AAPL"
+
+
+def test_backtest_api_returns_gateway_timeout_when_executor_exceeds_budget(client, monkeypatch):
+    async def get_ohlcv_range(*_args, **_kwargs):
+        return build_rows(MA_CLOSES)
+
+    class TimeoutExecutor:
+        async def run(self, *_args, **_kwargs):
+            raise WorkloadTimeoutError("budget exceeded")
+
+    monkeypatch.setattr(main.db, "get_ohlcv_range", get_ohlcv_range)
+    monkeypatch.setattr(main.backtest, "workload_executor", TimeoutExecutor())
+
+    response = client.post(
+        "/api/backtests/runs",
+        json={
+            "ticker": "AAPL",
+            "strategy": "ma_cross",
+            "start": "2024-01-01",
+            "end": "2024-12-31",
+            "capital": 100000,
+            "fee": 0.1,
+            "slippage": 0,
+            "position_sizing": "full_equity",
+            "interval": "1d",
+        },
+    )
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Backtest execution timed out"

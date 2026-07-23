@@ -1030,7 +1030,15 @@ async def build_asset_portfolio_snapshot(
     now_dt = datetime.now(timezone.utc)
 
     if fetch_quote and positions:
-        quotes = await asyncio.gather(*(fetch_quote(position["ticker"]) for position in positions), return_exceptions=True)
+        # Multiple accounts may hold the same security. Fetch each symbol once,
+        # then fan the result back out to its positions.
+        unique_tickers = list(dict.fromkeys(position["ticker"] for position in positions))
+        unique_quotes = await asyncio.gather(
+            *(fetch_quote(ticker) for ticker in unique_tickers),
+            return_exceptions=True,
+        )
+        quotes_by_ticker = dict(zip(unique_tickers, unique_quotes))
+        quotes = [quotes_by_ticker.get(position["ticker"]) for position in positions]
     else:
         quotes = [None] * len(positions)
 

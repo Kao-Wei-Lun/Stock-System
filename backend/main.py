@@ -65,6 +65,7 @@ from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSetti
 from mysql_backup import DEFAULT_BACKUP_DIR, MysqlSettings, create_backup, latest_backup_status, verify_backup
 from taifex_fetcher import taifex_fetcher
 from taiwan_history_backfill_service import TaiwanHistoryBackfillService, _normalize_intervals
+from workload_executor import BoundedWorkloadExecutor
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -136,6 +137,12 @@ FUTOPT_BACKGROUND_MAX_CONCURRENT_REFRESHES = read_int_env(
     maximum=8,
 )
 ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS = read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1)
+ASSET_QUOTE_REFRESH_MAX_CONCURRENCY = read_int_env(
+    "ASSET_QUOTE_REFRESH_MAX_CONCURRENCY", "6", minimum=1, maximum=32,
+)
+ASSET_QUOTE_CACHE_TTL_SECONDS = read_float_env("ASSET_QUOTE_CACHE_TTL_SECONDS", "15", minimum=0)
+BACKTEST_EXECUTOR_ENABLED = read_bool_env("BACKTEST_EXECUTOR_ENABLED", True)
+BACKTEST_TIMEOUT_SECONDS = read_float_env("BACKTEST_TIMEOUT_SECONDS", "30", minimum=0.1)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
 TRACKED_MARKET_SYNC_TIME_RAW = read_hhmm_env("TRACKED_MARKET_SYNC_TIME", DAILY_LATEST_SYNC_TIME_RAW)
@@ -468,6 +475,13 @@ data_quality_service = DataQualityService(
     futopt_enabled=FUTOPT_RECORDER_ENABLED,
     backup_status_provider=get_mysql_backup_health,
 )
+backtest_workload_executor = BoundedWorkloadExecutor(
+    name="backtest",
+    max_workers=1,
+    timeout_seconds=BACKTEST_TIMEOUT_SECONDS,
+    enabled=BACKTEST_EXECUTOR_ENABLED,
+    executor_kind="process",
+)
 
 
 # ─── App lifecycle ───────────────────────────────────────────
@@ -476,6 +490,7 @@ data_quality_service = DataQualityService(
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
 
+    backtest_workload_executor.startup()
     futopt_refresh_coordinator.startup()
     validate_runtime_environment()
     await init_db()
@@ -491,6 +506,8 @@ async def lifespan(app: FastAPI):
     await background_scheduler.shutdown()
     await quote_persistence_buffer.shutdown()
     await futopt_refresh_coordinator.shutdown()
+    await assets.shutdown()
+    await backtest_workload_executor.shutdown()
     fubon_realtime_pool.shutdown()
     fubon_manager.shutdown()
     await db.close()
@@ -592,7 +609,10 @@ assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
     latest_public_fx_provider=latest_public_fx_provider,
     quote_refresh_timeout_seconds=ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS,
+    quote_refresh_max_concurrency=ASSET_QUOTE_REFRESH_MAX_CONCURRENCY,
+    quote_cache_ttl_seconds=ASSET_QUOTE_CACHE_TTL_SECONDS,
 )
+backtest.configure(executor=backtest_workload_executor)
 
 intelligence.configure(
     sync_market_intelligence_snapshot=sync_market_intelligence_snapshot,
@@ -607,6 +627,8 @@ system.configure(
     database=db,
     data_quality_service=data_quality_service,
     quote_persistence_buffer=quote_persistence_buffer,
+    backtest_workload_executor=backtest_workload_executor,
+    asset_quote_status_provider=assets.performance_status,
 )
 
 app.include_router(watchlist.router)

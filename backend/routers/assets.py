@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -52,17 +53,70 @@ _fetch_and_store_quote_snapshot = None
 _latest_public_fx_provider = None
 _quote_refresh_timeout_seconds = 8.0
 _quote_refresh_tasks: Dict[str, asyncio.Task] = {}
+_quote_refresh_max_concurrency = 6
+_quote_refresh_semaphore = asyncio.Semaphore(_quote_refresh_max_concurrency)
+_quote_cache_ttl_seconds = 15.0
+_quote_cache: Dict[str, tuple[float, int, Dict[str, Any]]] = {}
 _fx_refresh_task: asyncio.Task | None = None
 _SNAPSHOT_LIMIT = 5000
 _LEDGER_PAGE_SIZE = 1000
 _AUTO_TRADE_SETTLEMENT_SOURCE = "trade_settlement_auto"
 
 
-def configure(*, fetch_and_store_quote_snapshot, latest_public_fx_provider=None, quote_refresh_timeout_seconds=8.0) -> None:
+def configure(
+    *,
+    fetch_and_store_quote_snapshot,
+    latest_public_fx_provider=None,
+    quote_refresh_timeout_seconds=8.0,
+    quote_refresh_max_concurrency=6,
+    quote_cache_ttl_seconds=15.0,
+) -> None:
     global _fetch_and_store_quote_snapshot, _latest_public_fx_provider, _quote_refresh_timeout_seconds
+    global _quote_refresh_max_concurrency, _quote_refresh_semaphore, _quote_cache_ttl_seconds
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _latest_public_fx_provider = latest_public_fx_provider
     _quote_refresh_timeout_seconds = max(0.1, float(quote_refresh_timeout_seconds))
+    _quote_refresh_max_concurrency = max(1, int(quote_refresh_max_concurrency))
+    _quote_refresh_semaphore = asyncio.Semaphore(_quote_refresh_max_concurrency)
+    _quote_cache_ttl_seconds = max(0.0, float(quote_cache_ttl_seconds))
+    _quote_cache.clear()
+
+
+async def shutdown() -> None:
+    """Cancel outstanding provider refreshes during application shutdown."""
+    global _fx_refresh_task
+    pending = [task for task in _quote_refresh_tasks.values() if not task.done()]
+    if _fx_refresh_task is not None and not _fx_refresh_task.done():
+        pending.append(_fx_refresh_task)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    _quote_refresh_tasks.clear()
+    _fx_refresh_task = None
+    _quote_cache.clear()
+
+
+def performance_status() -> Dict[str, Any]:
+    return {
+        "max_concurrency": _quote_refresh_max_concurrency,
+        "in_flight": sum(1 for task in _quote_refresh_tasks.values() if not task.done()),
+        "cache_entries": len(_quote_cache),
+        "cache_ttl_seconds": _quote_cache_ttl_seconds,
+        "provider_timeout_seconds": _quote_refresh_timeout_seconds,
+    }
+
+
+async def _run_quote_refresh(normalized: str) -> Dict[str, Any] | None:
+    async with _quote_refresh_semaphore:
+        quote = await _fetch_and_store_quote_snapshot(normalized)
+    if quote:
+        _quote_cache[normalized] = (
+            time.monotonic() + _quote_cache_ttl_seconds,
+            id(_fetch_and_store_quote_snapshot),
+            quote,
+        )
+    return quote
 
 
 async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | None:
@@ -371,6 +425,16 @@ async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
 
 async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str, Any] | None:
     normalized = normalize_ticker(ticker)
+    cached = _quote_cache.get(normalized)
+    if (
+        refresh
+        and cached
+        and cached[0] > time.monotonic()
+        and cached[1] == id(_fetch_and_store_quote_snapshot)
+    ):
+        return cached[2]
+    if cached:
+        _quote_cache.pop(normalized, None)
     stored_quote = await db.get_market_quote(normalized)
     if not refresh or not _fetch_and_store_quote_snapshot:
         return stored_quote
@@ -378,7 +442,7 @@ async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str,
     task = _quote_refresh_tasks.get(normalized)
     if task is None or task.done():
         task = asyncio.create_task(
-            _fetch_and_store_quote_snapshot(normalized),
+            _run_quote_refresh(normalized),
             name=f"asset-quote-refresh:{normalized}",
         )
         _quote_refresh_tasks[normalized] = task

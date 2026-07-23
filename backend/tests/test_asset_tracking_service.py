@@ -311,6 +311,47 @@ def test_build_asset_portfolio_snapshot_marks_quote_gap_quality_flags():
     assert snapshot["data_quality_summary"]["user_visible_messages"]
 
 
+def test_portfolio_snapshot_fetches_duplicate_ticker_once_across_accounts():
+    calls = []
+    accounts = [
+        {"id": 1, "name": "Broker A", "base_currency": "TWD", "include_in_total": True},
+        {"id": 2, "name": "Broker B", "base_currency": "TWD", "include_in_total": True},
+    ]
+    trades = [
+        {
+            "id": 1,
+            "account_id": 1,
+            "ticker": "2330.TW",
+            "side": "buy",
+            "quantity": 1,
+            "price": 100,
+            "trade_date": "2026-01-01T00:00:00+00:00",
+            "currency": "TWD",
+        },
+        {
+            "id": 2,
+            "account_id": 2,
+            "ticker": "2330.TW",
+            "side": "buy",
+            "quantity": 2,
+            "price": 100,
+            "trade_date": "2026-01-01T00:00:00+00:00",
+            "currency": "TWD",
+        },
+    ]
+
+    async def fetch_quote(ticker):
+        calls.append(ticker)
+        return {"ticker": ticker, "price": 120, "currency": "TWD"}
+
+    snapshot = asyncio.run(
+        build_asset_portfolio_snapshot(accounts, [], trades, fetch_quote=fetch_quote)
+    )
+
+    assert calls == ["2330.TW"]
+    assert len(snapshot["holdings"]) == 2
+
+
 def test_build_asset_portfolio_snapshot_applies_manual_override_fx_rates_and_splits():
     accounts = [
         {

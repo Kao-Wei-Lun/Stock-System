@@ -20,6 +20,8 @@ _SCHEDULER = None
 _DATABASE = None
 _DATA_QUALITY_SERVICE = None
 _QUOTE_PERSISTENCE_BUFFER = None
+_BACKTEST_WORKLOAD_EXECUTOR = None
+_ASSET_QUOTE_STATUS_PROVIDER = None
 
 router = APIRouter(tags=["system"])
 
@@ -32,15 +34,19 @@ def configure(
     database=None,
     data_quality_service=None,
     quote_persistence_buffer=None,
+    backtest_workload_executor=None,
+    asset_quote_status_provider=None,
 ):
     global _FRONTEND_DEV_URL, _FRONTEND_DIST_DIR, _SCHEDULER, _DATABASE, _DATA_QUALITY_SERVICE
-    global _QUOTE_PERSISTENCE_BUFFER
+    global _QUOTE_PERSISTENCE_BUFFER, _BACKTEST_WORKLOAD_EXECUTOR, _ASSET_QUOTE_STATUS_PROVIDER
     _FRONTEND_DEV_URL = frontend_dev_url.rstrip("/")
     _FRONTEND_DIST_DIR = frontend_dist_dir
     _SCHEDULER = scheduler
     _DATABASE = database
     _DATA_QUALITY_SERVICE = data_quality_service
     _QUOTE_PERSISTENCE_BUFFER = quote_persistence_buffer
+    _BACKTEST_WORKLOAD_EXECUTOR = backtest_workload_executor
+    _ASSET_QUOTE_STATUS_PROVIDER = asset_quote_status_provider
 
 
 def _frontend_ready() -> bool:
@@ -111,6 +117,16 @@ async def system_performance():
             _QUOTE_PERSISTENCE_BUFFER.status()
             if _QUOTE_PERSISTENCE_BUFFER is not None
             else {"running": False, "pending": 0, "configured": False}
+        ),
+        "backtest_workload": (
+            _BACKTEST_WORKLOAD_EXECUTOR.metrics()
+            if _BACKTEST_WORKLOAD_EXECUTOR is not None
+            else {"started": False, "active": 0, "configured": False}
+        ),
+        "asset_quote_refresh": (
+            _ASSET_QUOTE_STATUS_PROVIDER()
+            if _ASSET_QUOTE_STATUS_PROVIDER is not None
+            else {"in_flight": 0, "configured": False}
         ),
         "time": datetime.now(timezone.utc).isoformat(),
     }

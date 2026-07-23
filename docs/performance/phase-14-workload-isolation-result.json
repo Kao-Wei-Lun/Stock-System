@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T13:03:00+08:00",
+  "scope": "phase-14-cpu-and-provider-workload-isolation",
+  "backtest": {
+    "executor_kind": "process",
+    "max_workers": 1,
+    "timeout_seconds": 30,
+    "api_contract": "synchronous-response",
+    "timeout_http_status": 504,
+    "bars": 100000,
+    "equity_points": 99999,
+    "elapsed_ms": 817.21,
+    "event_loop_heartbeat_p95_ms": 7.26,
+    "event_loop_heartbeat_max_ms": 27.8,
+    "result_parity": true,
+    "shutdown_verified": true,
+    "rollback_flag": "BACKTEST_EXECUTOR_ENABLED"
+  },
+  "asset_quotes": {
+    "ticker_deduplication_before_fetch": true,
+    "single_flight_per_ticker": true,
+    "max_provider_concurrency": 6,
+    "short_cache_ttl_seconds": 15,
+    "stored_quote_timeout_fallback": true,
+    "provider_tasks_cancelled_on_shutdown": true,
+    "runtime_metrics_exposed": true
+  },
+  "observability": {
+    "endpoint": "/api/system/performance",
+    "sections": ["backtest_workload", "asset_quote_refresh"]
+  },
+  "full_gate": {
+    "backend_passed": 508,
+    "frontend_passed": 242,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true,
+    "terminal_static_gzip_bytes": 126788
+  },
+  "contains_sensitive_payloads": false
+}

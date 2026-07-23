@@ -1086,6 +1086,74 @@ async def test_concurrent_asset_reads_share_one_quote_refresh(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_asset_quote_refresh_has_bounded_provider_concurrency(monkeypatch):
+    active = 0
+    peak_active = 0
+
+    async def refresh(ticker):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return {"ticker": ticker, "price": 100}
+
+    async def no_stored_quote(_ticker):
+        return None
+
+    monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", refresh)
+    monkeypatch.setattr(main.assets, "_quote_refresh_semaphore", asyncio.Semaphore(4))
+    monkeypatch.setattr(main.assets, "_quote_cache", {})
+    monkeypatch.setattr(main.db, "get_market_quote", no_stored_quote)
+
+    results = await asyncio.gather(*(
+        main.assets._fetch_latest_quote(f"TEST{index}", refresh=True) for index in range(50)
+    ))
+
+    assert len(results) == 50
+    assert peak_active <= 4
+
+
+@pytest.mark.anyio
+async def test_asset_quote_short_ttl_cache_avoids_repeated_provider_call(monkeypatch):
+    calls = 0
+
+    async def refresh(ticker):
+        nonlocal calls
+        calls += 1
+        return {"ticker": ticker, "price": 101, "quote_timestamp": "2026-07-23T04:00:00+00:00"}
+
+    async def no_stored_quote(_ticker):
+        return None
+
+    monkeypatch.setattr(main.assets, "_fetch_and_store_quote_snapshot", refresh)
+    monkeypatch.setattr(main.assets, "_quote_cache_ttl_seconds", 15.0)
+    monkeypatch.setattr(main.assets, "_quote_cache", {})
+    monkeypatch.setattr(main.db, "get_market_quote", no_stored_quote)
+
+    first = await main.assets._fetch_latest_quote("AAPL", refresh=True)
+    second = await main.assets._fetch_latest_quote("AAPL", refresh=True)
+
+    assert first == second
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_asset_shutdown_cancels_provider_tasks(monkeypatch):
+    quote_task = asyncio.create_task(asyncio.sleep(10))
+    fx_task = asyncio.create_task(asyncio.sleep(10))
+    monkeypatch.setattr(main.assets, "_quote_refresh_tasks", {"AAPL": quote_task})
+    monkeypatch.setattr(main.assets, "_fx_refresh_task", fx_task)
+
+    await main.assets.shutdown()
+
+    assert quote_task.cancelled()
+    assert fx_task.cancelled()
+    assert main.assets._quote_refresh_tasks == {}
+    assert main.assets._fx_refresh_task is None
+
+
+@pytest.mark.anyio
 async def test_public_fx_refresh_timeout_falls_back_to_stored_rates(monkeypatch):
     stored_rates = [{"from_currency": "USD", "to_currency": "TWD", "rate": 32.1}]
 
