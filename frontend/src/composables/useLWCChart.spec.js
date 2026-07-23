@@ -242,4 +242,49 @@ describe("useLWCChart", () => {
     expect(lwcMocks.chartApi.addSeries).toHaveBeenCalledTimes(createdSeriesCount);
     wrapper.unmount();
   });
+
+  it("keeps auto scale until explicit Y controls lock it and exposes clipping recovery", async () => {
+    const first = { date: "2026-04-01", open: 10, high: 12, low: 9, close: 11, volume: 1000 };
+    const second = { date: "2026-04-02", open: 11, high: 13, low: 10, close: 12, volume: 1200 };
+    const props = reactive({
+      ohlcData: [first, second],
+      activeInd: {},
+      activePanels: {},
+      indicatorSettings: {},
+      cleanChartMode: false,
+      currentInterval: "1d",
+      currentTicker: "AAPL",
+      isFullscreen: false,
+    });
+    let controller;
+    const wrapper = mount(defineComponent({
+      setup() {
+        const container = ref(null);
+        controller = useLWCChart({ chartContainer: container, props, emit: vi.fn() });
+        return { container };
+      },
+      template: "<div ref='container' style='width: 640px; height: 420px;'></div>",
+    }));
+    await nextTick();
+    await nextTick();
+
+    expect(lwcMocks.createChart.mock.calls[0][1].handleScale.axisPressedMouseMove.price).toBe(false);
+    expect(controller.yScaleLabel.value).toContain("Y 軸 自動");
+    expect(controller.canResetYScale.value).toBe(false);
+
+    controller.zoomYIn();
+    expect(controller.yScaleLabel.value).toContain("手動鎖定");
+    expect(controller.canResetYScale.value).toBe(true);
+    expect(lwcMocks.seriesInstances[0].priceScaleApi.setAutoScale).toHaveBeenLastCalledWith(false);
+
+    props.ohlcData = [first, { ...second, high: 30, close: 29 }];
+    await nextTick();
+    expect(controller.yScaleClipped.value).toBe(true);
+
+    controller.resetYScale();
+    expect(controller.yScaleLabel.value).toContain("Y 軸 自動");
+    expect(controller.yScaleClipped.value).toBe(false);
+    expect(lwcMocks.seriesInstances[0].priceScaleApi.setAutoScale).toHaveBeenLastCalledWith(true);
+    wrapper.unmount();
+  });
 });

@@ -192,6 +192,8 @@ export function useLWCChart({
   let dynamicSeriesBindings = [];
   const chartMode = ref("candles");
   const priceScaleMode = ref("linear");
+  const yAxisMode = ref("auto");
+  const manualPriceRange = ref(null);
   const visibleLogicalRange = ref(null);
   let resizeFrameId = null;
   let previousRawRows = Array.isArray(props.ohlcData) ? props.ohlcData : [];
@@ -264,10 +266,15 @@ export function useLWCChart({
     return "";
   });
   const zoomLabel = computed(() => `縮放：${visibleData.value.length || 0} 根`);
-  const yScaleLabel = computed(() => "Y 軸：LWC Multi-pane");
+  const yScaleLabel = computed(() => {
+    if (yAxisMode.value !== "manual_locked" || !manualPriceRange.value) return "Y 軸 自動";
+    return `Y 軸 手動鎖定 ${fmtPrice(manualPriceRange.value.from)} - ${fmtPrice(manualPriceRange.value.to)}`;
+  });
   const priceScaleModeLabel = computed(() => (priceScaleMode.value === "log" ? "對數" : "線性"));
   const interactionHint = computed(() => (
-    "LWC 已接上主圖、Multi-pane 指標、法人成本帶與繪圖 bridge；Legacy 僅保留為 fallback。"
+    yAxisMode.value === "manual_locked"
+      ? "Y 軸已手動鎖定；點擊 Y 軸 chip 或雙擊可恢復自動"
+      : "Y 軸自動包含可視 K 線與價格指標；使用 Y+/Y− 可明確鎖定"
   ));
   const canvasClass = computed(() => "chart-canvas-lwc");
   const canUseLogScale = computed(() => chartRows.value.every((entry) => entry.candle.low > 0));
@@ -283,7 +290,14 @@ export function useLWCChart({
     if (!visibleLogicalRange.value) return false;
     return visibleLogicalRange.value.to - visibleLogicalRange.value.from < chartRows.value.length + 8;
   });
-  const canResetYScale = computed(() => Boolean(mainSeries.value));
+  const canResetYScale = computed(() => yAxisMode.value === "manual_locked");
+  const yScaleClipped = computed(() => {
+    if (yAxisMode.value !== "manual_locked" || !manualPriceRange.value) return false;
+    return visibleData.value.some((row) => (
+      Number(row?.low) < manualPriceRange.value.from
+      || Number(row?.high) > manualPriceRange.value.to
+    ));
+  });
   const isIntradayView = computed(() => isIntradayInterval(props.currentInterval));
 
   function getCurrentLogicalRange() {
@@ -301,7 +315,7 @@ export function useLWCChart({
       ? PriceScaleMode.Logarithmic
       : PriceScaleMode.Normal;
     mainSeries.value.priceScale().applyOptions({
-      autoScale: true,
+      autoScale: yAxisMode.value === "auto",
       mode,
       scaleMargins: MAIN_PRICE_SCALE_MARGINS,
     });
@@ -436,12 +450,7 @@ export function useLWCChart({
 
     indicatorModel.value.overlays.forEach((descriptor) => {
       const series = chartApi.value.addSeries(resolveSeriesDefinition(descriptor.type), descriptor.options, 0);
-      // 排除 overlay 指標對 Y 軸 autoScale 的影響，
-      // 讓 Y 軸只根據主 series（K 線）的價格範圍自動縮放。
-      // 使用 applyOptions 確保 LWC v5 正確套用 autoscaleInfoProvider。
-      series.applyOptions({
-        autoscaleInfoProvider: (/* original */) => null,
-      });
+      // Price-scale overlays participate in LWC auto scale with the candles.
       series.setData(descriptor.data);
       dynamicSeries.value.push(series);
       dynamicSeriesBindings.push({ series, descriptor });
@@ -516,6 +525,8 @@ export function useLWCChart({
     setLogicalRange({ from, to });
     // 強制重新啟用 autoScale，以防用戶之前手動拖動 Y 軸導致 autoScale 被關閉
     if (mainSeries.value) {
+      yAxisMode.value = "auto";
+      manualPriceRange.value = null;
       mainSeries.value.priceScale().setAutoScale(true);
     }
   }
@@ -595,7 +606,9 @@ export function useLWCChart({
       },
       handleScale: {
         axisPressedMouseMove: {
-          price: true,
+          // Price-axis gestures stay disabled in auto mode. Explicit Y+/Y-
+          // controls below are the only transition to manual_locked.
+          price: false,
           time: true,
         },
         mouseWheel: true,
@@ -664,18 +677,24 @@ export function useLWCChart({
   function zoomPriceRange(factor) {
     if (!mainSeries.value) return;
     const scale = mainSeries.value.priceScale();
-    const range = scale.getVisibleRange();
-    if (!range) {
-      scale.setAutoScale(true);
-      return;
-    }
+    const visiblePrices = visibleData.value
+      .flatMap((row) => [Number(row?.low), Number(row?.high)])
+      .filter(Number.isFinite);
+    const range = scale.getVisibleRange() || (
+      visiblePrices.length
+        ? { from: Math.min(...visiblePrices), to: Math.max(...visiblePrices) }
+        : null
+    );
+    if (!range) return;
     const center = (range.from + range.to) / 2;
     const halfRange = ((range.to - range.from) / 2) * factor;
-    scale.setAutoScale(false);
-    scale.setVisibleRange({
+    yAxisMode.value = "manual_locked";
+    manualPriceRange.value = {
       from: center - halfRange,
       to: center + halfRange,
-    });
+    };
+    scale.setAutoScale(false);
+    scale.setVisibleRange(manualPriceRange.value);
   }
 
   function setChartMode(mode) {
@@ -702,6 +721,8 @@ export function useLWCChart({
   function resetView() { applyDefaultVisibleRange(); }
   function resetYScale() {
     if (!mainSeries.value) return;
+    yAxisMode.value = "auto";
+    manualPriceRange.value = null;
     mainSeries.value.priceScale().setAutoScale(true);
     applyPriceScaleOptions();
   }
@@ -786,6 +807,7 @@ export function useLWCChart({
             } catch { /* ignore */ }
           }
           updateIndicatorPanesLast();
+          if (yAxisMode.value === "auto") mainSeries.value.priceScale().setAutoScale(true);
           drawingsBridge.scheduleRender();
           return;
         }
@@ -818,6 +840,7 @@ export function useLWCChart({
             } catch { /* ignore */ }
           }
           updateIndicatorPanesLast();
+          if (yAxisMode.value === "auto") mainSeries.value.priceScale().setAutoScale(true);
           drawingsBridge.scheduleRender();
           return;
         }
@@ -834,6 +857,7 @@ export function useLWCChart({
       syncVolumeSeries();
       syncIndicatorPanes();
       if (isDataStructureChange || props.currentTicker !== previousTicker.value) {
+        resetYScale();
         applyDefaultVisibleRange();
       }
       if (!rows.length) {
@@ -846,6 +870,7 @@ export function useLWCChart({
   watch(
     () => props.currentInterval,
     () => {
+      resetYScale();
       applyTimeScaleOptions();
       drawingsBridge.scheduleRender();
     },
@@ -856,6 +881,7 @@ export function useLWCChart({
     () => {
       previousTicker.value = props.currentTicker;
       if (chartApi.value) {
+        resetYScale();
         applyDefaultVisibleRange();
       }
       emit("hide-crosshair");
@@ -907,6 +933,7 @@ export function useLWCChart({
     canGoBackHistory,
     canGoForwardHistory,
     canResetYScale,
+    yScaleClipped,
     setChartMode,
     setPriceScaleMode,
     zoomIn,

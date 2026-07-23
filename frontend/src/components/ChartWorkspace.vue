@@ -87,6 +87,7 @@
       :visible-change-class="visibleChangeClass"
       :zoom-label="zoomLabel"
       :y-scale-label="yScaleLabel"
+      :y-scale-clipped="yScaleClipped"
       :price-scale-mode-label="priceScaleModeLabel"
       :quote-timestamp-label="quoteTimestampLabel"
       :quote-source-label="quoteSourceLabel"
@@ -96,6 +97,7 @@
       :institutional-overlay="institutionalOverlay"
       :interaction-hint="interactionHint"
       :quote="quote"
+      @reset-y-scale="resetYScale"
     />
 
     <ChartWorkspaceControls
@@ -469,6 +471,7 @@ const visibleChangeLabel = computed(() => activeChartController.value.visibleCha
 const visibleChangeClass = computed(() => activeChartController.value.visibleChangeClass.value);
 const zoomLabel = computed(() => activeChartController.value.zoomLabel.value);
 const yScaleLabel = computed(() => activeChartController.value.yScaleLabel.value);
+const yScaleClipped = computed(() => activeChartController.value.yScaleClipped?.value ?? false);
 const priceScaleModeLabel = computed(() => activeChartController.value.priceScaleModeLabel.value);
 const interactionHint = computed(() => activeChartController.value.interactionHint.value);
 const canPanLeft = computed(() => activeChartController.value.canPanLeft.value);

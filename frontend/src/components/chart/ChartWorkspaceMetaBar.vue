@@ -4,7 +4,16 @@
     <div class="meta-chip">{{ visibleBarsLabel }}</div>
     <div class="meta-chip" :class="visibleChangeClass">{{ visibleChangeLabel }}</div>
     <div class="meta-chip">{{ zoomLabel }}</div>
-    <div class="meta-chip">{{ yScaleLabel }}</div>
+    <button
+      class="meta-chip y-scale-chip"
+      :class="{ warn: yScaleClipped, interactive: yScaleLabel.includes('手動') || yScaleClipped }"
+      type="button"
+      :disabled="!yScaleLabel.includes('手動') && !yScaleClipped"
+      :aria-label="yScaleClipped ? 'K 線超出手動 Y 軸範圍，恢復自動縮放' : '恢復 Y 軸自動縮放'"
+      @click="$emit('reset-y-scale')"
+    >
+      {{ yScaleClipped ? `⚠ 資料超出範圍 · ${yScaleLabel}` : yScaleLabel }}
+    </button>
     <div class="meta-chip">{{ priceScaleModeLabel }}</div>
     <div class="meta-chip">{{ quoteTimestampLabel }}</div>
     <div class="meta-chip">{{ quoteSourceLabel }}</div>
@@ -28,6 +37,7 @@ defineProps({
   visibleChangeClass: { type: [String, Object, Array], default: "" },
   zoomLabel: { type: String, required: true },
   yScaleLabel: { type: String, required: true },
+  yScaleClipped: { type: Boolean, default: false },
   priceScaleModeLabel: { type: String, required: true },
   quoteTimestampLabel: { type: String, required: true },
   quoteSourceLabel: { type: String, required: true },
@@ -38,11 +48,26 @@ defineProps({
   interactionHint: { type: String, required: true },
   quote: { type: Object, required: true },
 });
+
+defineEmits(["reset-y-scale"]);
 </script>
 
 <style scoped>
 .meta-chip.warn {
   color: #ffd166;
   border-color: rgba(255, 209, 102, 0.24);
+}
+
+.y-scale-chip {
+  font: inherit;
+}
+
+.y-scale-chip:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.y-scale-chip.interactive {
+  cursor: pointer;
 }
 </style>

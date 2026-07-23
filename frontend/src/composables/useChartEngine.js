@@ -85,7 +85,11 @@ export function formatLegacyAxisDateLabel(value, { rangeDays = 0, interval = "1d
   return formatLegacyDateLabel(date);
 }
 
-export function resolveLegacyMainChartAutoScaleRange(data, _overlayValues = [], scaleMode = "linear") {
+export function shouldHandlePriceAxisInteraction(mode) {
+  return mode === "manual_locked";
+}
+
+export function resolveLegacyMainChartAutoScaleRange(data, overlayValues = [], scaleMode = "linear") {
   const pricePoints = (Array.isArray(data) ? data : [])
     .flatMap((row) => [row?.high, row?.low])
     .filter(isFiniteNumber);
@@ -96,24 +100,39 @@ export function resolveLegacyMainChartAutoScaleRange(data, _overlayValues = [], 
 
   const rawMin = Math.min(...pricePoints);
   const rawMax = Math.max(...pricePoints);
+  const candleRange = Math.max(rawMax - rawMin, Math.abs(rawMax) * 0.01, 1);
+  const reasonableMin = rawMin - candleRange * 2;
+  const reasonableMax = rawMax + candleRange * 2;
+  (Array.isArray(overlayValues) ? overlayValues : []).forEach((series) => {
+    const values = Array.isArray(series) ? series : [series];
+    values.forEach((value) => {
+      if (isFiniteNumber(value) && value >= reasonableMin && value <= reasonableMax) {
+        pricePoints.push(value);
+      }
+    });
+  });
 
   let min = rawMin;
   let max = rawMax;
+  const resolvedRawMin = Math.min(...pricePoints);
+  const resolvedRawMax = Math.max(...pricePoints);
+  min = resolvedRawMin;
+  max = resolvedRawMax;
 
-  if (rawMin === rawMax) {
-    const singlePad = Math.max(Math.abs(rawMin) * 0.08, 1);
-    min = rawMin - singlePad;
-    max = rawMax + singlePad;
+  if (resolvedRawMin === resolvedRawMax) {
+    const singlePad = Math.max(Math.abs(resolvedRawMin) * 0.08, 1);
+    min = resolvedRawMin - singlePad;
+    max = resolvedRawMax + singlePad;
   } else {
-    const range = rawMax - rawMin;
+    const range = resolvedRawMax - resolvedRawMin;
     const padding = resolveAutoYPadding(range);
-    min = rawMin - padding;
-    max = rawMax + padding;
+    min = resolvedRawMin - padding;
+    max = resolvedRawMax + padding;
   }
 
-  if (scaleMode === "log" && rawMin > 0) {
-    min = Math.max(min, rawMin * 0.42);
-    max = Math.max(max, clampPositive(rawMax) * 1.08);
+  if (scaleMode === "log" && resolvedRawMin > 0) {
+    min = Math.max(min, resolvedRawMin * 0.42);
+    max = Math.max(max, clampPositive(resolvedRawMax) * 1.08);
   }
 
   return { min, max };
@@ -367,21 +386,30 @@ export function useChartEngine({
   );
   const yScaleLabel = computed(() => {
     if (!visibleData.value.length) return "Y 軸 自動";
-    const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
-    const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
-    const modeLabel = yAxis.mode === "manual" ? "Y 軸 手動" : "Y 軸 自動";
+    const min = yAxis.mode === "manual_locked" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
+    const max = yAxis.mode === "manual_locked" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
+    const modeLabel = yAxis.mode === "manual_locked" ? "Y 軸 手動鎖定" : "Y 軸 自動";
     return `${modeLabel} ${fmtPrice(min)} - ${fmtPrice(max)}`;
   });
   const priceScaleModeLabel = computed(
     () => `價格尺度 ${priceScaleMode.value === "log" ? "對數" : "線性"}`,
   );
-  const canResetYScale = computed(() => yAxis.mode === "manual");
+  const canResetYScale = computed(() => yAxis.mode === "manual_locked");
+  const yScaleClipped = computed(() => {
+    if (yAxis.mode !== "manual_locked" || yAxis.min == null || yAxis.max == null) return false;
+    return visibleData.value.some((row) => (
+      (isFiniteNumber(row?.low) && row.low < yAxis.min)
+      || (isFiniteNumber(row?.high) && row.high > yAxis.max)
+    ));
+  });
   const interactionHintText = computed(() => {
     if (selectionBox.active) return "框選中：放開滑鼠後縮放到所選區間";
     if (dragMode.value === "pan-x") return "拖曳中：左右平移時間視窗";
     if (dragMode.value === "pan-y") return "拖曳中：調整價格軸顯示範圍";
     if (props.activeTool === "cursor") {
-      return "滾輪縮放時間、價格軸滾輪縮放 Y 軸、拖曳平移、雙擊重置";
+      return yAxis.mode === "manual_locked"
+        ? "Y 軸已手動鎖定；Y+/Y− 可縮放，點擊 Y 軸 chip 或雙擊恢復自動"
+        : "滾輪縮放時間、拖曳平移；Y+/Y− 或框選可明確鎖定 Y 軸";
     }
     if (props.activeTool === "boxzoom") {
       return "按住拖曳框出區間，放開後放大所選時間與價格範圍";
@@ -503,8 +531,8 @@ export function useChartEngine({
   };
 
   const getCurrentYRange = () => {
-    const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
-    const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
+    const min = yAxis.mode === "manual_locked" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
+    const max = yAxis.mode === "manual_locked" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
     return { min, max };
   };
 
@@ -521,7 +549,7 @@ export function useChartEngine({
       max += pad;
     }
 
-    yAxis.mode = "manual";
+    yAxis.mode = "manual_locked";
     yAxis.min = min;
     yAxis.max = max;
 
@@ -637,7 +665,7 @@ export function useChartEngine({
     applyingHistory.value = true;
     viewport.startIndex = snapshot.startIndex;
     viewport.visibleCount = snapshot.visibleCount;
-    yAxis.mode = snapshot.yMode;
+    yAxis.mode = ["manual", "manual_locked"].includes(snapshot.yMode) ? "manual_locked" : "auto";
     yAxis.min = snapshot.yMin;
     yAxis.max = snapshot.yMax;
     priceScaleMode.value = snapshot.priceScaleMode === "log" ? "log" : "linear";
@@ -1727,16 +1755,16 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     });
     if (draftDrawing.value) overlayValues.push(getDrawingPriceValues(draftDrawing.value));
 
-    // Y-axis 縮放計算改為僅參考 K 線本身，
-    // 這樣在指標或繪圖數值偏離較遠時，K 線仍能保持動態放大（Enlarged）並填滿畫面。
+    // Auto scale always contains visible candles and reasonable price-scale
+    // indicators, while rejecting corrupt/far-away overlay outliers.
     const { min: autoMin, max: autoMax } = resolveMainChartAutoScale(
       data,
       overlayValues,
       priceScaleMode.value,
     );
 
-    const min = yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : autoMin;
-    const max = yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : autoMax;
+    const min = yAxis.mode === "manual_locked" && yAxis.min != null ? yAxis.min : autoMin;
+    const max = yAxis.mode === "manual_locked" && yAxis.max != null ? yAxis.max : autoMax;
     const scale = (value) => scaleY(value, min, max, PAD.top, chartHeight, priceScaleMode.value);
 
     mainMetrics.autoMin = autoMin;
@@ -3169,12 +3197,18 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     interactionStartView.value = createViewSnapshot();
     isDragging.value = true;
     if (info.isOnPriceAxis) {
+      if (!shouldHandlePriceAxisInteraction(yAxis.mode)) {
+        isDragging.value = false;
+        interactionStartView.value = null;
+        emit("hide-crosshair");
+        return;
+      }
       dragMode.value = "pan-y";
       dragState.startY = event.clientY;
       dragState.startMin =
-        yAxis.mode === "manual" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
+        yAxis.mode === "manual_locked" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
       dragState.startMax =
-        yAxis.mode === "manual" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
+        yAxis.mode === "manual_locked" && yAxis.max != null ? yAxis.max : mainMetrics.autoMax;
     } else {
       dragMode.value = "pan-x";
       dragState.startX = event.clientX;
@@ -3274,6 +3308,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     const info = getPointerData(event);
     if (!info) return;
     if (info.isOnPriceAxis) {
+      if (!shouldHandlePriceAxisInteraction(yAxis.mode)) return;
       zoomY(event.deltaY < 0 ? 0.88 : 1.14, info.price, { commit: false });
       queueViewStateCommit();
       return;
@@ -3599,6 +3634,7 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
     canGoBackHistory,
     canGoForwardHistory,
     canResetYScale,
+    yScaleClipped,
     setChartMode,
     setPriceScaleMode,
     zoomIn,
