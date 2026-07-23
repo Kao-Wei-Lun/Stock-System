@@ -33,6 +33,14 @@
 
     <!-- ─── Account Setup Tab ─────────────────────────────── -->
     <section v-if="activeTab === 'setup'" class="pt-section">
+      <div v-if="sectionLoading.accounts" class="pt-inline-state" data-testid="accounts-loading">帳戶資料載入中…</div>
+      <div v-else-if="sectionErrors.accounts" class="pt-inline-state error" data-testid="accounts-error">
+        <span>帳戶資料載入失敗：{{ sectionErrors.accounts }}</span>
+        <button class="pt-btn pt-btn-sm" @click="loadAccounts">重試</button>
+      </div>
+      <div v-else-if="!accounts.length" class="pt-inline-state" data-testid="accounts-empty">
+        尚未建立模擬帳戶，可先使用下方表單建立。
+      </div>
       <div class="pt-card">
         <h2 class="pt-card-title">帳戶設定</h2>
         <div class="pt-form-grid">
@@ -120,7 +128,15 @@
                 <td>
                   <div>{{ formatCurrency(acct.initial_margin_per_contract) }}</div>
                   <div class="pt-muted-line">{{ marginMetaLabel(acct) }}</div>
-                  <div v-if="acct.margin_sync_error" class="pt-error-line">{{ acct.margin_sync_error }}</div>
+                  <div v-if="acct.margin_last_success_at" class="pt-muted-line">
+                    最後成功：{{ formatTime(acct.margin_last_success_at) }}
+                  </div>
+                  <div v-if="acct.margin_last_error || acct.margin_sync_error" class="pt-error-line">
+                    {{ marginErrorLabel(acct) }}
+                  </div>
+                  <div v-if="acct.margin_next_retry_at" class="pt-muted-line">
+                    下次自動嘗試：{{ formatTime(acct.margin_next_retry_at) }}
+                  </div>
                 </td>
                 <td>{{ formatTime(acct.created_at) }}</td>
                 <td>
@@ -148,6 +164,14 @@
 
     <!-- ─── Bot Management Tab ────────────────────────────── -->
     <section v-if="activeTab === 'bots'" class="pt-section">
+      <div v-if="sectionLoading.bots" class="pt-inline-state" data-testid="bots-loading">Bot 資料載入中…</div>
+      <div v-else-if="sectionErrors.bots" class="pt-inline-state error" data-testid="bots-error">
+        <span>Bot 資料載入失敗：{{ sectionErrors.bots }}</span>
+        <button class="pt-btn pt-btn-sm" @click="loadBots">重試</button>
+      </div>
+      <div v-else-if="!bots.length" class="pt-inline-state" data-testid="bots-empty">
+        尚未建立 Bot；建立後才會顯示於清單。
+      </div>
       <div class="pt-card">
         <h2 class="pt-card-title">建立 Bot</h2>
         <div class="pt-form-grid">
@@ -469,6 +493,14 @@
 
     <!-- ─── Replay Tab ────────────────────────────────────── -->
     <section v-if="activeTab === 'replay'" class="pt-section">
+      <div v-if="sectionLoading.replay" class="pt-inline-state" data-testid="replay-loading">回放紀錄載入中…</div>
+      <div v-else-if="sectionErrors.replay" class="pt-inline-state error" data-testid="replay-error">
+        <span>回放紀錄載入失敗：{{ sectionErrors.replay }}</span>
+        <button class="pt-btn pt-btn-sm" @click="loadReplayRuns">重試</button>
+      </div>
+      <div v-else-if="!replayRuns.length" class="pt-inline-state" data-testid="replay-empty">
+        尚無歷史回放紀錄。
+      </div>
       <div class="pt-card">
         <h2 class="pt-card-title">歷史回放</h2>
         <div class="pt-form-grid">
@@ -710,6 +742,8 @@ const refreshingAccountMargins = reactive({});
 const riskSizingPreview = ref(null);
 const riskSizingLoading = ref(false);
 const riskSizingError = ref("");
+const sectionLoading = reactive({ accounts: true, bots: true, replay: true });
+const sectionErrors = reactive({ accounts: "", bots: "", replay: "" });
 let _riskSizingTimer = null;
 
 const v2VariantOptions = [
@@ -824,8 +858,8 @@ const activeInitialMargin = computed(() => {
 const marginPreviewLabel = computed(() => {
   if (marginPreviewLoading.value) return "\u5bcc\u90a6 API \u67e5\u8a62\u4e2d";
   const preview = marginPreview.value;
-  if (!preview) return "\u5efa\u7acb\u6642\u81ea\u52d5\u7531\u5bcc\u90a6 API \u67e5\u8a62\uff0c\u67e5\u8a62\u5931\u6557\u6703\u4fdd\u7559\u9810\u8a2d\u503c";
-  return `${marginSourceLabel(preview.margin_source || preview.source)} · ${preview.margin_reference_symbol || "TMF"} · ${formatTime(preview.margin_synced_at)}`;
+  if (!preview) return "目前使用持久化／商品預設值；按「預查保證金」才會連線更新";
+  return `${marginSourceLabel(preview.margin_source || preview.source)} · ${preview.margin_reference_symbol || "TMF"} · ${formatTime(preview.margin_last_success_at || preview.margin_synced_at)}`;
 });
 const refreshAllMarginsLabel = computed(() => (
   refreshingAllMargins.value ? "\u66f4\u65b0\u4e2d" : "\u66f4\u65b0\u5168\u90e8\u4fdd\u8b49\u91d1"
@@ -976,6 +1010,8 @@ function scheduleRiskSizing() {
 
 // ─── Actions ─────────────────────────────────────────────────
 async function loadAccounts() {
+  sectionLoading.accounts = true;
+  sectionErrors.accounts = "";
   try {
     const data = await apiFetch("/accounts");
     accounts.value = data.items || [];
@@ -985,21 +1021,37 @@ async function loadAccounts() {
     if (accounts.value.length && !replayForm.account_id) {
       replayForm.account_id = accounts.value[0].id;
     }
-  } catch { /* ignore */ }
+  } catch (error) {
+    sectionErrors.accounts = error.message || "未知錯誤";
+  } finally {
+    sectionLoading.accounts = false;
+  }
 }
 
 async function loadBots() {
+  sectionLoading.bots = true;
+  sectionErrors.bots = "";
   try {
     const data = await apiFetch("/bots");
     bots.value = data.items || [];
-  } catch { /* ignore */ }
+  } catch (error) {
+    sectionErrors.bots = error.message || "未知錯誤";
+  } finally {
+    sectionLoading.bots = false;
+  }
 }
 
 async function loadReplayRuns() {
+  sectionLoading.replay = true;
+  sectionErrors.replay = "";
   try {
     const data = await apiFetch("/replay/runs");
     replayRuns.value = data.items || [];
-  } catch { /* ignore */ }
+  } catch (error) {
+    sectionErrors.replay = error.message || "未知錯誤";
+  } finally {
+    sectionLoading.replay = false;
+  }
 }
 
 async function previewAccountMargin({ silent = false } = {}) {
@@ -1277,8 +1329,19 @@ function marginSourceLabel(source) {
 function marginMetaLabel(account) {
   const source = marginSourceLabel(account?.margin_source);
   const symbol = account?.margin_reference_symbol || account?.product_symbol || "TMF";
-  const syncedAt = formatTime(account?.margin_synced_at);
+  const syncedAt = formatTime(account?.margin_last_success_at || account?.margin_synced_at);
   return `${source} · ${symbol} · ${syncedAt}`;
+}
+
+function marginErrorLabel(account) {
+  const category = {
+    configuration_error: "設定錯誤（不會自動重試）",
+    transient: "暫時連線錯誤",
+    heartbeat_timeout: "連線逾時",
+    session_invalid: "登入狀態失效",
+    unknown: "更新錯誤",
+  }[account?.margin_error_category] || "更新錯誤";
+  return `${category}：${account?.margin_last_error || account?.margin_sync_error}`;
 }
 
 function formatDetails(value) {
@@ -1333,7 +1396,6 @@ watch(
 
 onMounted(async () => {
   await Promise.all([loadAccounts(), loadBots(), loadReplayRuns()]);
-  await previewAccountMargin({ silent: true });
   // Auto-start polling if any bot is running
   if (runningBotIds.value.length) {
     // Also fetch initial state for the first running bot
@@ -1354,6 +1416,25 @@ onUnmounted(() => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+}
+
+.pt-inline-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(92, 139, 179, 0.28);
+  border-radius: 8px;
+  color: rgba(214, 230, 245, 0.78);
+  background: rgba(17, 33, 48, 0.65);
+}
+
+.pt-inline-state.error {
+  border-color: rgba(255, 92, 119, 0.4);
+  color: #ff9aae;
+  background: rgba(85, 22, 36, 0.35);
 }
 
 .pt-header {

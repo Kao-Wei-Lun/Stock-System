@@ -51,10 +51,24 @@
             <span>最後連線</span>
             <strong>{{ formatTime(account.last_connected_at) }}</strong>
           </div>
+          <div>
+            <span>帳號能力</span>
+            <strong>{{ capabilityLabel(account.account_capabilities) }}</strong>
+          </div>
+          <div>
+            <span>自動恢復</span>
+            <strong>{{ recoveryLabel(account) }}</strong>
+          </div>
         </div>
 
         <div v-if="account.connection_error" class="account-error">
           {{ account.connection_error }}
+        </div>
+        <div v-if="account.recovery_last_error" class="account-error">
+          {{ account.recovery_last_error }}
+          <span v-if="account.recovery_next_retry_at">
+            （下次嘗試：{{ formatTime(account.recovery_next_retry_at) }}）
+          </span>
         </div>
 
         <div v-if="account.realtime_assigned_tickers?.length" class="account-symbols">
@@ -72,8 +86,14 @@
 
         <div class="account-actions">
           <button type="button" :disabled="isBusy(account.id)" @click="testAccount(account)">測試連線</button>
+          <button type="button" :disabled="isBusy(account.id) || !account.is_enabled" @click="reconnect(account, 'stock')">
+            重連股票
+          </button>
+          <button type="button" :disabled="isBusy(account.id) || !account.is_enabled" @click="reconnect(account, 'futopt')">
+            重連期權
+          </button>
           <button type="button" :disabled="isBusy(account.id) || !account.is_enabled" @click="reconnect(account)">
-            重新連線
+            重新登入
           </button>
           <button type="button" :disabled="isBusy(account.id)" @click="openEditModal(account)">編輯</button>
           <button type="button" :disabled="account.is_active || isBusy(account.id)" @click="activate(account)">
@@ -193,11 +213,11 @@ async function testAccount(account) {
   }
 }
 
-async function reconnect(account) {
+async function reconnect(account, marketType = null) {
   setBusy(account.id, true);
   setMessage("success", "");
   try {
-    const result = await reconnectAccount(account.id);
+    const result = await reconnectAccount(account.id, marketType);
     setMessage(result.success ? "success" : "error", result.message || "富邦重新連線已啟動");
   } catch (err) {
     setMessage("error", err?.message || "富邦重新連線失敗");
@@ -262,6 +282,27 @@ function modeHint(mode) {
   return mode === "Normal"
     ? "目前畫面正在看的 ticker 會優先分配到這組帳號。"
     : "watchlist 與背景即時訂閱會優先分配到這組帳號。";
+}
+
+function capabilityLabel(capabilities) {
+  if (!Array.isArray(capabilities) || !capabilities.length) return "尚未辨識";
+  return capabilities.map((capability) => ({
+    stock: "證券",
+    futures: "期貨",
+    options: "選擇權",
+    unknown: "待確認",
+  }[capability] || capability)).join("、");
+}
+
+function recoveryLabel(account) {
+  const state = {
+    ready: "正常",
+    disconnected: "未連線",
+    connecting: "重連中",
+    backoff: "等待重試",
+    configuration_error: "需修正設定",
+  }[account?.recovery_state] || account?.recovery_state || "待命";
+  return account?.recovery_attempt ? `${state}（第 ${account.recovery_attempt} 次）` : state;
 }
 
 onMounted(() => {

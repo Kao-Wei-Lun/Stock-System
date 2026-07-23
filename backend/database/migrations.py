@@ -19,6 +19,7 @@ MIGRATION_TABLE = "schema_migrations"
 BASELINE_SCHEMA_CHECKSUM = "f935b31f6cc21b27ba44c87c6cf95b1c135b428cfa3cd687fe59b2fcf7fa447b"
 ASSET_IMPORT_DEDUPE_CHECKSUM = "9790c8b4e2025cfa99df6426c8988c92010b60e47bcf453351e8caa3b7bd08ab"
 ASSET_IMPORT_BATCH_CHECKSUM = "645c3c38c721ffdfa82378bc21adea4fe480de2b3a197b53ef1dac8d85e9e002"
+PAPER_MARGIN_RESILIENCE_CHECKSUM = "9f366ed311d7f59bbc699c266214e86018bb6ed9bbcbe6eba237654177decae5"
 CREATE_MIGRATION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS `schema_migrations` (
     `version` VARCHAR(64) NOT NULL,
@@ -156,6 +157,51 @@ def _asset_import_batch_planner(state: SchemaState) -> List[str]:
     return statements
 
 
+PAPER_MARGIN_RESILIENCE_SQL = {
+    "margin_last_attempt_at": """
+        ALTER TABLE `paper_trading_accounts`
+        ADD COLUMN `margin_last_attempt_at` DATETIME NULL AFTER `margin_sync_error`
+    """.strip(),
+    "margin_last_success_at": """
+        ALTER TABLE `paper_trading_accounts`
+        ADD COLUMN `margin_last_success_at` DATETIME NULL AFTER `margin_last_attempt_at`
+    """.strip(),
+    "margin_last_error": """
+        ALTER TABLE `paper_trading_accounts`
+        ADD COLUMN `margin_last_error` TEXT NULL AFTER `margin_last_success_at`
+    """.strip(),
+    "margin_error_category": """
+        ALTER TABLE `paper_trading_accounts`
+        ADD COLUMN `margin_error_category` VARCHAR(64) NULL AFTER `margin_last_error`
+    """.strip(),
+    "margin_next_retry_at": """
+        ALTER TABLE `paper_trading_accounts`
+        ADD COLUMN `margin_next_retry_at` DATETIME NULL AFTER `margin_error_category`
+    """.strip(),
+}
+
+
+def _paper_margin_resilience_checksum() -> str:
+    encoded = json.dumps(
+        PAPER_MARGIN_RESILIENCE_SQL,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _paper_margin_resilience_planner(state: SchemaState) -> List[str]:
+    table_name = "paper_trading_accounts"
+    present = state.columns.get(table_name, set())
+    if table_name not in state.tables:
+        return list(PAPER_MARGIN_RESILIENCE_SQL.values())
+    return [
+        statement
+        for column, statement in PAPER_MARGIN_RESILIENCE_SQL.items()
+        if column not in present
+    ]
+
+
 # When desired schema definitions change, add a new MigrationSpec instead of
 # editing the baseline version or its frozen checksum. The helper above can be
 # used to calculate the checksum for a newly introduced schema snapshot.
@@ -177,6 +223,12 @@ MIGRATIONS: tuple[MigrationSpec, ...] = (
         description="Add atomic asset import batches and rollback audit",
         checksum=ASSET_IMPORT_BATCH_CHECKSUM,
         planner=_asset_import_batch_planner,
+    ),
+    MigrationSpec(
+        version="20260723_0001",
+        description="Add resilient paper trading margin refresh metadata",
+        checksum=PAPER_MARGIN_RESILIENCE_CHECKSUM,
+        planner=_paper_margin_resilience_planner,
     ),
 )
 

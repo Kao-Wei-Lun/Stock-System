@@ -46,6 +46,7 @@ fubon_realtime_pool = FubonRealtimeSubscriptionPool(
     fubon_manager,
     resolve_futopt_contract=_resolve_realtime_futopt_contract,
 )
+fubon_futopt_provider.configure_margin_manager_provider(fubon_realtime_pool.get_futures_manager)
 quote_provider = HybridQuoteProvider(fubon_quote_provider, yahoo_quote_provider)
 external_notifier = ExternalNotificationDispatcher.from_env()
 alert_engine = AlertEngine(db, quote_provider, external_notifier=external_notifier)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from fubon_symbols import (
     supports_fubon_stock_realtime_ticker,
     tw_ticker_to_fubon,
 )
-from fubon_provider import FubonSDKManager
+from fubon_provider import FubonSDKManager, classify_fubon_error
 
 
 log = logging.getLogger(__name__)
@@ -69,7 +70,9 @@ class FubonRealtimeSubscriptionPool:
         self._pending_tasks: dict[str, asyncio.Task] = {}
         self._last_shortage_notifications: dict[str, float] = {}
         self._ws_diagnostics: dict[str, dict[str, Any]] = {}
-        self._recovery_lock = asyncio.Lock()
+        self._reconnect_tasks: dict[tuple[int, str], asyncio.Task] = {}
+        self._account_reconnect_locks: dict[int, asyncio.Lock] = {}
+        self._account_recovery: dict[int, dict[str, Any]] = {}
         self._reload_lock = asyncio.Lock()
         self._warmup_task: asyncio.Task | None = None
         self._warmup_state = "idle"
@@ -95,6 +98,67 @@ class FubonRealtimeSubscriptionPool:
 
     def configure_store_quote(self, handler: Optional[Callable[[dict], Awaitable[Any]]]) -> None:
         self._store_quote = handler
+
+    def get_futures_manager(self) -> FubonSDKManager | None:
+        """Return a connected manager whose login includes a futures-capable account."""
+        candidates = [
+            manager
+            for manager in self._managers.values()
+            if manager.connected
+            and (
+                not hasattr(manager, "supports_account_capability")
+                or manager.supports_account_capability("futures")
+            )
+        ]
+        if self._primary_manager in candidates:
+            return self._primary_manager
+        return candidates[0] if candidates else None
+
+    def _record_recovery_success(self, account_id: int) -> None:
+        self._account_recovery[int(account_id)] = {
+            "state": "ready",
+            "attempt": 0,
+            "next_retry_at": None,
+            "next_retry_monotonic": 0.0,
+            "error_category": None,
+            "last_error": None,
+            "last_success_at": self._utcnow().isoformat(),
+        }
+
+    def _record_recovery_failure(
+        self,
+        account_id: int,
+        category: str | None,
+        message: Any,
+    ) -> dict[str, Any]:
+        normalized_category = str(category or "unknown")
+        recovery = self._account_recovery.setdefault(int(account_id), {})
+        attempt = int(recovery.get("attempt") or 0) + 1
+        recovery.update(
+            {
+                "state": (
+                    "configuration_error"
+                    if normalized_category == "configuration_error"
+                    else "backoff"
+                ),
+                "attempt": attempt,
+                "error_category": normalized_category,
+                "last_error": str(message or "reconnect failed")[:300],
+            }
+        )
+        if normalized_category == "configuration_error":
+            recovery["next_retry_monotonic"] = 0.0
+            recovery["next_retry_at"] = None
+            return recovery
+
+        delay = min(60.0, 2.0 ** min(attempt, 6))
+        delay += random.uniform(0.0, min(1.0, delay * 0.2))
+        recovery["next_retry_monotonic"] = time.monotonic() + delay
+        recovery["next_retry_at"] = datetime.fromtimestamp(
+            self._utcnow().timestamp() + delay,
+            tz=timezone.utc,
+        ).isoformat()
+        return recovery
 
     def get_warmup_status(self) -> dict[str, Any]:
         configured_count = len(self._managers)
@@ -194,7 +258,15 @@ class FubonRealtimeSubscriptionPool:
                 if initialized:
                     self._primary_manager.start_ws_stock()
                     self._primary_manager.start_ws_futopt()
+                    self._record_recovery_success(primary_id)
+                else:
+                    self._record_recovery_failure(
+                        primary_id,
+                        getattr(self._primary_manager, "last_init_error_category", None),
+                        getattr(self._primary_manager, "last_init_error", None),
+                    )
             except Exception as exc:
+                self._record_recovery_failure(primary_id, classify_fubon_error(exc), exc)
                 log.warning("Fubon primary account %s warmup failed: %s", primary_id, exc)
 
         removed_ids = [account_id for account_id in list(self._managers.keys()) if account_id not in desired_ids]
@@ -220,13 +292,27 @@ class FubonRealtimeSubscriptionPool:
                 if initialized:
                     manager.start_ws_stock()
                     manager.start_ws_futopt()
+                    self._record_recovery_success(account_id)
+                else:
+                    self._record_recovery_failure(
+                        account_id,
+                        getattr(manager, "last_init_error_category", None),
+                        getattr(manager, "last_init_error", None),
+                    )
             except Exception as exc:
+                self._record_recovery_failure(account_id, classify_fubon_error(exc), exc)
                 log.warning("Fubon account %s warmup failed: %s", account_id, exc)
 
         await self._rebalance_assignments()
         return self.connected
 
     async def shutdown_async(self, *, shutdown_primary: bool = False) -> None:
+        reconnect_tasks = [task for task in self._reconnect_tasks.values() if not task.done()]
+        for reconnect_task in reconnect_tasks:
+            reconnect_task.cancel()
+        if reconnect_tasks:
+            await asyncio.gather(*reconnect_tasks, return_exceptions=True)
+        self._reconnect_tasks.clear()
         task = self._warmup_task
         if task is not None and not task.done():
             task.cancel()
@@ -442,7 +528,18 @@ class FubonRealtimeSubscriptionPool:
                 assigned_by_account.get(account_id, []),
                 key=lambda item: (item.requested_ticker, item.resolved_ticker),
             )
+            recovery = self._account_recovery.get(account_id, {})
+            capabilities = (
+                list(manager.account_capabilities)
+                if hasattr(manager, "account_capabilities")
+                else ["unknown"]
+            )
             result[account_id] = {
+                "connection_status": (
+                    "connected"
+                    if manager.connected
+                    else ("error" if recovery.get("error_category") else "disconnected")
+                ),
                 "realtime_assigned_count": len(assignments),
                 "realtime_physical_subscription_count": sum(
                     1
@@ -458,30 +555,124 @@ class FubonRealtimeSubscriptionPool:
                 ],
                 "realtime_ws_mode": manager.ws_mode,
                 "realtime_connected": bool(manager.connected),
+                "account_capabilities": capabilities,
+                "recovery_state": recovery.get("state", "ready" if manager.connected else "disconnected"),
+                "recovery_attempt": int(recovery.get("attempt", 0)),
+                "recovery_next_retry_at": recovery.get("next_retry_at"),
+                "recovery_error_category": recovery.get("error_category"),
+                "recovery_last_error": recovery.get("last_error"),
                 "realtime_reconnect": manager.get_reconnect_status()
                 if hasattr(manager, "get_reconnect_status")
                 else {},
             }
         return result
 
-    async def reconnect_account(self, account_id: int, market_type: str | None = None) -> dict[str, Any]:
-        """Recover one configured account without restarting the FastAPI process."""
-        from repositories.fubon_accounts import FubonAccountRepository
-
+    async def reconnect_account(
+        self,
+        account_id: int,
+        market_type: str | None = None,
+        *,
+        manual: bool = True,
+    ) -> dict[str, Any]:
+        """Recover one configured account with per-account single-flight semantics."""
         normalized_market = str(market_type or "").strip().lower() or None
         if normalized_market not in {None, "stock", "futopt"}:
             raise ValueError("market_type must be stock or futopt")
+
+        account_id = int(account_id)
+        recovery = self._account_recovery.setdefault(account_id, {})
+        if manual:
+            recovery.update(
+                {
+                    "state": "connecting",
+                    "attempt": 0,
+                    "next_retry_at": None,
+                    "next_retry_monotonic": 0.0,
+                    "error_category": None,
+                    "last_error": None,
+                }
+            )
+        else:
+            if recovery.get("error_category") == "configuration_error":
+                return {
+                    "success": False,
+                    "account_id": account_id,
+                    "deferred": True,
+                    "error_category": "configuration_error",
+                    "message": "automatic reconnect stopped until account settings are corrected",
+                }
+            if time.monotonic() < float(recovery.get("next_retry_monotonic") or 0.0):
+                return {
+                    "success": False,
+                    "account_id": account_id,
+                    "deferred": True,
+                    "error_category": recovery.get("error_category"),
+                    "next_retry_at": recovery.get("next_retry_at"),
+                    "message": "automatic reconnect is in backoff",
+                }
+
+        key = (account_id, normalized_market or "all")
+        existing = self._reconnect_tasks.get(key)
+        if existing is not None and not existing.done():
+            return await asyncio.shield(existing)
+
+        task = asyncio.create_task(
+            self._run_account_reconnect_serialized(account_id, normalized_market),
+            name=f"fubon-reconnect:{account_id}:{normalized_market or 'all'}",
+        )
+        self._reconnect_tasks[key] = task
+        try:
+            result = await asyncio.shield(task)
+        finally:
+            if self._reconnect_tasks.get(key) is task:
+                self._reconnect_tasks.pop(key, None)
+
+        if result.get("success"):
+            self._record_recovery_success(account_id)
+            return result
+
+        category = str(result.get("error_category") or "unknown")
+        recovery = self._record_recovery_failure(
+            account_id,
+            category,
+            result.get("message"),
+        )
+        return {**result, "error_category": category, "next_retry_at": recovery.get("next_retry_at")}
+
+    async def _run_account_reconnect_serialized(
+        self,
+        account_id: int,
+        normalized_market: str | None,
+    ) -> dict[str, Any]:
+        lock = self._account_reconnect_locks.setdefault(account_id, asyncio.Lock())
+        async with lock:
+            return await self._reconnect_account_once(account_id, normalized_market)
+
+    async def _reconnect_account_once(
+        self,
+        account_id: int,
+        normalized_market: str | None,
+    ) -> dict[str, Any]:
+        """Execute one account recovery attempt; caller owns retry policy."""
+        from repositories.fubon_accounts import FubonAccountRepository
+
         if self._db is None:
             return {"success": False, "account_id": account_id, "message": "database is not configured"}
 
-        async with self._recovery_lock:
+        try:
             manager = self._managers.get(int(account_id))
             if normalized_market and manager and manager.connected:
                 success = bool(manager.force_reconnect_ws(normalized_market))
+                status = (
+                    manager.get_reconnect_status().get(normalized_market, {})
+                    if hasattr(manager, "get_reconnect_status")
+                    else {}
+                )
                 return {
                     "success": success,
                     "account_id": int(account_id),
                     "market_type": normalized_market,
+                    "error_category": status.get("last_error_category") if not success else None,
                     "message": "websocket reconnect started" if success else "websocket reconnect failed",
                 }
 
@@ -512,7 +703,21 @@ class FubonRealtimeSubscriptionPool:
                 "success": bool(success),
                 "account_id": int(account_id),
                 "market_type": "all",
+                "error_category": (
+                    getattr(manager, "last_init_error_category", None)
+                    if not success
+                    else None
+                ),
                 "message": "account reconnected" if success else "account reconnect failed",
+            }
+        except Exception as exc:
+            log.warning("Fubon account %s reconnect failed: %s", account_id, exc)
+            return {
+                "success": False,
+                "account_id": int(account_id),
+                "market_type": normalized_market or "all",
+                "error_category": classify_fubon_error(exc),
+                "message": str(exc)[:300],
             }
 
     async def refresh_session_assignments(self) -> None:
@@ -523,7 +728,7 @@ class FubonRealtimeSubscriptionPool:
         for account_id in disconnected_ids:
             log.warning("Fubon account %s is disconnected; attempting isolated recovery", account_id)
             try:
-                await self.reconnect_account(account_id)
+                await self.reconnect_account(account_id, manual=False)
             except Exception as exc:
                 log.warning("Fubon account %s recovery failed: %s", account_id, exc)
 

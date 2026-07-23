@@ -63,6 +63,15 @@ export function useFubonAccounts() {
         : [];
       account.realtime_ws_mode = status.realtime_ws_mode || account.ws_mode;
       account.realtime_connected = Boolean(status.realtime_connected);
+      account.account_capabilities = Array.isArray(status.account_capabilities)
+        ? status.account_capabilities
+        : [];
+      account.recovery_state = status.recovery_state;
+      account.recovery_attempt = status.recovery_attempt || 0;
+      account.recovery_next_retry_at = status.recovery_next_retry_at;
+      account.recovery_error_category = status.recovery_error_category;
+      account.recovery_last_error = status.recovery_last_error;
+      account.realtime_reconnect = status.realtime_reconnect || {};
     });
   }
 

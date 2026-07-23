@@ -101,6 +101,19 @@ class FakeConnectWebSocket:
             raise RuntimeError("socket is already opened")
 
 
+class FakeReconnectWebSocket(FakeWebSocket):
+    def __init__(self):
+        super().__init__()
+        self.connect_calls = 0
+        self.disconnect_calls = 0
+
+    def connect(self):
+        self.connect_calls += 1
+
+    def disconnect(self):
+        self.disconnect_calls += 1
+
+
 def test_subscription_id_updates_from_subscribed_event():
     manager = FubonSDKManager()
     manager._ws_stock = FakeWebSocket()
@@ -214,6 +227,26 @@ def test_start_ws_stock_is_idempotent_for_already_started_socket():
     assert manager._ws_stock.connect_calls == 1
 
 
+def test_manual_reconnect_reopens_socket_and_restores_desired_subscriptions_without_duplicates():
+    manager = FubonSDKManager()
+    websocket = FakeReconnectWebSocket()
+    manager._ws_stock = websocket
+    manager.connected = True
+    manager.start_ws_stock()
+    manager.subscribe_stock("2330", "books")
+
+    for _minute in range(30):
+        assert manager.force_reconnect_ws("stock") is True
+        manager._handle_ws_connect("stock")
+
+    status = manager.get_reconnect_status()["stock"]
+    assert websocket.disconnect_calls == 30
+    assert websocket.connect_calls == 31
+    assert status["subscription_count"] == 1
+    assert status["desired_subscription_count"] == 1
+    assert list(manager._subscriptions) == ["stock:2330:books"]
+
+
 def test_unregister_message_handler_and_shutdown_suppress_dispatch():
     manager = FubonSDKManager()
     received = []
@@ -322,6 +355,7 @@ def test_failed_reconnect_is_rescheduled_with_exponential_backoff(monkeypatch):
             self.alive = False
 
     monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(fubon_provider.random, "uniform", lambda _start, _end: 0.0)
     manager._reconnect_ws_target = lambda _market_type: False
 
     manager._schedule_reconnect_ws_target("stock")
@@ -346,6 +380,50 @@ def test_ws_connect_resets_reconnect_state():
     assert status["attempts"] == 0
     assert status["last_error"] is None
     assert status["last_success_at"] is not None
+    assert status["state"] == "connected"
+    assert status["next_retry_at"] is None
+
+
+def test_ws_disconnect_records_transient_state_and_retry_deadline(monkeypatch):
+    manager = FubonSDKManager()
+    manager.connected = True
+
+    class FakeTimer:
+        def __init__(self, interval, callback):
+            self.interval = interval
+            self.callback = callback
+            self.daemon = False
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            return True
+
+        def cancel(self):
+            pass
+
+    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(fubon_provider.random, "uniform", lambda _start, _end: 0.0)
+
+    manager._handle_ws_disconnect("stock", RuntimeError("connection closed"))
+
+    status = manager.get_reconnect_status()["stock"]
+    assert status["state"] == "backoff"
+    assert status["last_error_category"] == "transient"
+    assert status["last_disconnect_at"] is not None
+    assert status["next_retry_at"] is not None
+
+
+def test_manager_detects_futures_capability_without_selecting_known_stock_account():
+    manager = FubonSDKManager()
+    stock = {"account_type": "stock"}
+    futures = {"account_type": "futures"}
+    manager._login_accounts = [stock, futures]
+
+    assert manager.account_capabilities == ("futures", "stock")
+    assert manager._select_futopt_account([stock, futures]) is futures
+    assert manager._select_futopt_account([stock]) is None
 
 
 class FakeSnapshotApi:
@@ -619,3 +697,36 @@ def test_query_futopt_estimate_margin_calls_sdk_trade_api(monkeypatch):
     assert futopt_api.calls == [
         (account, {"symbol": "TMFE6", "price": 40500, "lot": 1, "session": "REGULAR"})
     ]
+
+
+def test_query_margin_skips_incompatible_login_account_and_uses_futures_account(monkeypatch):
+    manager = FubonSDKManager()
+    stock_account = {"account_type": "stock", "account": "S001"}
+    futures_account = {"account_type": "futures", "account": "F001"}
+
+    class SelectiveFutoptApi(FakeFutoptTradeApi):
+        def query_estimate_margin(self, account, order):
+            self.calls.append((account, order))
+            if account is stock_account:
+                return {"is_success": False, "message": "帳號類別錯誤"}
+            return {"is_success": True, "data": {"estimate_margin": 27_100}}
+
+    futopt_api = SelectiveFutoptApi()
+    manager.connected = True
+    manager._sdk = FakeTradeSDK(futopt_api)
+    manager._login_accounts = [stock_account, futures_account]
+    manager._active_futopt_account = stock_account
+    manager.ensure_trading_ready = lambda: asyncio.sleep(0, result=True)
+    monkeypatch.setattr(
+        fubon_provider,
+        "_build_futopt_estimate_margin_order",
+        lambda symbol, **kwargs: {"symbol": symbol, **kwargs},
+    )
+
+    payload = asyncio.run(
+        manager.query_futopt_estimate_margin("TMFE6", price=40500, lot=1)
+    )
+
+    assert payload["data"]["estimate_margin"] == 27_100
+    assert [account for account, _order in futopt_api.calls] == [futures_account]
+    assert manager.get_futopt_account() is futures_account

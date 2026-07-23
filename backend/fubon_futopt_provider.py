@@ -155,9 +155,25 @@ def _instrument_type_from_symbol(symbol: str) -> str:
 
 
 class FubonFutoptProvider:
-    def __init__(self, manager):
+    def __init__(self, manager, *, margin_manager_provider=None):
         self._manager = manager
+        self._margin_manager_provider = margin_manager_provider
         self._contract_cache: dict[tuple[str, str, str, str | None], tuple[float, list[dict]]] = {}
+
+    def configure_margin_manager_provider(self, provider) -> None:
+        self._margin_manager_provider = provider
+
+    def _margin_manager(self):
+        if callable(self._margin_manager_provider):
+            manager = self._margin_manager_provider()
+            if manager is not None:
+                return manager
+        if (
+            not hasattr(self._manager, "supports_account_capability")
+            or self._manager.supports_account_capability("futures")
+        ):
+            return self._manager
+        return None
 
     async def resolve_contract(self, symbol: str, *, session: str = "REGULAR") -> Optional[dict]:
         normalized_symbol = normalize_ticker(symbol)
@@ -232,7 +248,11 @@ class FubonFutoptProvider:
         if str(resolved.get("instrument_type") or "future").lower() != "future":
             raise ValueError(f"Margin estimate only supports futures contracts: {symbol}")
 
-        quote = await self._manager.fetch_futopt_quote(
+        margin_manager = self._margin_manager()
+        if margin_manager is None:
+            raise RuntimeError("No futures-compatible Fubon account is connected")
+
+        quote = await margin_manager.fetch_futopt_quote(
             resolved["resolved_symbol"],
             session=resolved_session,
         ) or {}
@@ -253,7 +273,7 @@ class FubonFutoptProvider:
         if price is None:
             raise RuntimeError(f"Unable to determine quote price for margin estimate: {resolved['resolved_symbol']}")
 
-        response = await self._manager.query_futopt_estimate_margin(
+        response = await margin_manager.query_futopt_estimate_margin(
             resolved["resolved_symbol"],
             price=price,
             lot=max(1, int(lot or 1)),
@@ -282,6 +302,7 @@ class FubonFutoptProvider:
             "price": price,
             "lot": max(1, int(lot or 1)),
             "source": "fubon_query_estimate_margin",
+            "provider_account_id": getattr(margin_manager, "active_account_id", None),
         }
 
     async def fetch_intraday_ohlc(

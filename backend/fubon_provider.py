@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 from security_sanitizer import redact_sensitive_text, secret_values_from_account
@@ -15,6 +16,57 @@ log = logging.getLogger(__name__)
 
 class FubonMarketdataAuthenticationError(RuntimeError):
     """Raised when Fubon/Fugle marketdata credentials remain invalid after retry."""
+
+
+def classify_fubon_error(error: Any) -> str:
+    """Classify provider failures so permanent errors do not enter retry loops."""
+    text = str(error or "").strip().lower()
+    if not text:
+        return "unknown"
+    if _is_marketdata_auth_error(error if isinstance(error, Exception) else RuntimeError(text)):
+        return "session_invalid"
+    if any(
+        token in text
+        for token in (
+            "帳號類別錯誤",
+            "account type",
+            "account category",
+            "invalid api key",
+            "certificate",
+            "憑證",
+            "密碼錯誤",
+            "login failed",
+        )
+    ):
+        return "configuration_error"
+    if "heartbeat" in text or "ping timeout" in text or "pong timeout" in text:
+        return "heartbeat_timeout"
+    if any(
+        token in text
+        for token in (
+            "timeout",
+            "timed out",
+            "disconnect",
+            "connection reset",
+            "connection closed",
+            "temporarily unavailable",
+            "rate limit",
+            "429",
+            "502",
+            "503",
+            "504",
+        )
+    ):
+        return "transient"
+    return "unknown"
+
+
+def _error_code(error: Any) -> str | None:
+    for name in ("status", "status_code", "code", "error_code"):
+        value = getattr(error, name, None)
+        if value not in (None, ""):
+            return str(value)[:64]
+    return None
 
 
 def _is_marketdata_auth_error(exc: Exception) -> bool:
@@ -128,7 +180,25 @@ class FubonSDKManager:
         self._ws_reconnect_attempts: Dict[str, int] = {"stock": 0, "futopt": 0}
         self._ws_reconnect_last_error: Dict[str, str | None] = {"stock": None, "futopt": None}
         self._ws_reconnect_last_success_at: Dict[str, str | None] = {"stock": None, "futopt": None}
+        self._last_init_error: str | None = None
+        self._last_init_error_category: str | None = None
+        self._ws_state: Dict[str, Dict[str, Any]] = {
+            market_type: self._new_ws_state()
+            for market_type in ("stock", "futopt")
+        }
         self.connected = False
+
+    @staticmethod
+    def _new_ws_state() -> Dict[str, Any]:
+        return {
+            "state": "disconnected",
+            "last_connected_at": None,
+            "last_message_at": None,
+            "last_disconnect_at": None,
+            "last_error_code": None,
+            "last_error_category": None,
+            "next_retry_at": None,
+        }
 
     @property
     def enabled(self) -> bool:
@@ -145,6 +215,36 @@ class FubonSDKManager:
     @property
     def supports_full_ws_quotes(self) -> bool:
         return self._ws_mode == "Normal"
+
+    @property
+    def last_init_error(self) -> str | None:
+        return self._last_init_error
+
+    @property
+    def last_init_error_category(self) -> str | None:
+        return self._last_init_error_category
+
+    @staticmethod
+    def _account_capability(account: Any) -> str:
+        raw = " ".join(
+            str(_object_field(account, name) or "")
+            for name in ("account_type", "accountType", "type", "market", "category")
+        ).lower()
+        if any(token in raw for token in ("futopt", "future", "futures", "option", "期貨")):
+            return "futures"
+        if any(token in raw for token in ("stock", "security", "securities", "equity", "證券")):
+            return "stock"
+        return "unknown"
+
+    @property
+    def account_capabilities(self) -> tuple[str, ...]:
+        capabilities = {self._account_capability(account) for account in self._login_accounts}
+        return tuple(sorted(capabilities or {"unknown"}))
+
+    def supports_account_capability(self, capability: str) -> bool:
+        normalized = str(capability or "").strip().lower()
+        capabilities = set(self.account_capabilities)
+        return normalized in capabilities or "unknown" in capabilities
 
     async def init_from_db(self, db) -> bool:
         from repositories.fubon_accounts import FubonAccountRepository
@@ -172,6 +272,8 @@ class FubonSDKManager:
             for target in old_targets:
                 self._best_effort_shutdown(target)
             self.connected = False
+            self._last_init_error = safe_error
+            self._last_init_error_category = classify_fubon_error(exc)
             if repo and account_id:
                 await repo.update_connection_status(account_id, "error", safe_error)
             log.error("Fubon SDK initialization failed: %s", safe_error)
@@ -186,6 +288,8 @@ class FubonSDKManager:
         self._ws_futopt = ws_futopt
         self._login_accounts = login_accounts
         self._active_futopt_account = self._select_futopt_account(login_accounts)
+        self._last_init_error = None
+        self._last_init_error_category = None
         self.connected = True
         self._attach_message_handlers()
 
@@ -270,12 +374,16 @@ class FubonSDKManager:
 
     @staticmethod
     def _select_futopt_account(login_accounts: list[Any]):
-        fallback = login_accounts[0] if login_accounts else None
+        unknown_accounts = []
         for account in login_accounts:
-            account_type = str(_object_field(account, "account_type", "accountType", "type") or "").lower()
-            if any(token in account_type for token in ("futopt", "future", "futures", "option", "期貨")):
+            capability = FubonSDKManager._account_capability(account)
+            if capability == "futures":
                 return account
-        return fallback
+            if capability == "unknown":
+                unknown_accounts.append(account)
+        # Older SDK responses do not always expose account_type. Preserve
+        # compatibility, but never knowingly select a stock-only account.
+        return unknown_accounts[0] if unknown_accounts else None
 
     async def hot_switch(self, account: dict) -> bool:
         old_subscriptions = dict(self._subscription_payloads)
@@ -530,8 +638,24 @@ class FubonSDKManager:
     ):
         if not await self.ensure_trading_ready():
             raise RuntimeError("Fubon trading client is not ready")
+        candidates = [
+            account
+            for account in self._login_accounts
+            if self._account_capability(account) == "futures"
+        ]
+        candidates.extend(
+            account
+            for account in self._login_accounts
+            if self._account_capability(account) == "unknown"
+        )
         account = self.get_futopt_account()
-        if account is None:
+        if (
+            account is not None
+            and self._account_capability(account) != "stock"
+            and account not in candidates
+        ):
+            candidates.insert(0, account)
+        if not candidates:
             raise RuntimeError("No Fubon futures/options account returned by login")
         futopt_api = getattr(self._sdk, "futopt", None)
         query_estimate_margin = getattr(futopt_api, "query_estimate_margin", None)
@@ -545,7 +669,26 @@ class FubonSDKManager:
         )
 
         def _query_sync():
-            return query_estimate_margin(account, order)
+            last_response = None
+            last_error: Exception | None = None
+            for candidate in candidates:
+                try:
+                    response = query_estimate_margin(candidate, order)
+                except Exception as exc:
+                    last_error = exc
+                    if classify_fubon_error(exc) == "configuration_error":
+                        continue
+                    raise
+                last_response = response
+                is_success = _object_field(response, "is_success", "isSuccess")
+                message = _object_field(response, "message", "error")
+                if is_success is False and classify_fubon_error(message) == "configuration_error":
+                    continue
+                self._active_futopt_account = candidate
+                return response
+            if last_error is not None:
+                raise last_error
+            return last_response
 
         return await asyncio.to_thread(_query_sync)
 
@@ -845,6 +988,9 @@ class FubonSDKManager:
         payload = self._normalize_ws_message(market_type, message)
         if not payload:
             return
+        state = self._ws_state[market_type]
+        state["last_message_at"] = datetime.now(timezone.utc).isoformat()
+        state["state"] = "connected"
         self._update_subscription_state(payload)
         self._update_pending_subscription_acks(payload)
         for handler in list(self._message_handlers):
@@ -859,7 +1005,17 @@ class FubonSDKManager:
         self._cancel_reconnect_timer(market_type)
         self._ws_reconnect_attempts[market_type] = 0
         self._ws_reconnect_last_error[market_type] = None
-        self._ws_reconnect_last_success_at[market_type] = datetime.now(timezone.utc).isoformat()
+        connected_at = datetime.now(timezone.utc).isoformat()
+        self._ws_reconnect_last_success_at[market_type] = connected_at
+        self._ws_state[market_type].update(
+            {
+                "state": "connected",
+                "last_connected_at": connected_at,
+                "last_error_code": None,
+                "last_error_category": None,
+                "next_retry_at": None,
+            }
+        )
         self._ws_started_targets.add(market_type)
         log.info("Fubon %s websocket connected", market_type)
 
@@ -869,14 +1025,33 @@ class FubonSDKManager:
             log.info("Fubon %s websocket closed during shutdown", market_type)
             return
         log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
-        self._ws_reconnect_last_error[market_type] = redact_sensitive_text(args or "disconnected")
+        error = next((arg for arg in args if arg is not None), "disconnected")
+        safe_error = redact_sensitive_text(error)
+        self._ws_reconnect_last_error[market_type] = safe_error
+        self._ws_state[market_type].update(
+            {
+                "state": "degraded",
+                "last_disconnect_at": datetime.now(timezone.utc).isoformat(),
+                "last_error_code": _error_code(error),
+                "last_error_category": classify_fubon_error(safe_error),
+            }
+        )
         self._schedule_reconnect_ws_target(market_type)
 
     def _handle_ws_error(self, market_type: str, *args) -> None:
         if self._shutting_down:
             return
         log.warning("Fubon %s websocket error: %s", market_type, args or "unknown")
-        if any(_is_marketdata_auth_error(arg) for arg in args if isinstance(arg, Exception) or arg is not None):
+        error = next((arg for arg in args if arg is not None), "websocket error")
+        category = classify_fubon_error(error)
+        self._ws_state[market_type].update(
+            {
+                "state": "degraded",
+                "last_error_code": _error_code(error),
+                "last_error_category": category,
+            }
+        )
+        if category == "session_invalid":
             self._invalidate_marketdata_session(
                 f"Fubon {market_type} websocket authentication failed: {args or 'unknown'}"
             )
@@ -888,6 +1063,10 @@ class FubonSDKManager:
         if not self.connected:
             return False
         target = self._ws_stock if market_type == "stock" else self._ws_futopt
+        # A manual reconnect can be requested while the SDK still considers the
+        # target started. Clear the idempotency marker before closing it so the
+        # following start call opens a new socket instead of returning early.
+        self._ws_started_targets.discard(market_type)
         self._best_effort_shutdown(target)
         started = self.start_ws_stock() if market_type == "stock" else self.start_ws_futopt()
         if not started:
@@ -906,6 +1085,9 @@ class FubonSDKManager:
         if normalized not in {"stock", "futopt"}:
             raise ValueError("market_type must be stock or futopt")
         self._cancel_reconnect_timer(normalized)
+        self._ws_reconnect_attempts[normalized] = 0
+        self._ws_state[normalized]["state"] = "connecting"
+        self._ws_state[normalized]["next_retry_at"] = None
         try:
             return self._reconnect_ws_target(normalized)
         except Exception as exc:
@@ -923,10 +1105,17 @@ class FubonSDKManager:
             }
         return {
             market_type: {
+                **self._ws_state.get(market_type, {}),
                 "attempts": int(self._ws_reconnect_attempts.get(market_type, 0)),
                 "pending": bool(pending.get(market_type)),
                 "last_error": self._ws_reconnect_last_error.get(market_type),
                 "last_success_at": self._ws_reconnect_last_success_at.get(market_type),
+                "subscription_count": sum(
+                    1 for key in self._subscriptions if key.startswith(f"{market_type}:")
+                ),
+                "desired_subscription_count": sum(
+                    1 for key in self._subscription_payloads if key.startswith(f"{market_type}:")
+                ),
             }
             for market_type in ("stock", "futopt")
         }
@@ -945,6 +1134,10 @@ class FubonSDKManager:
                 self._RECONNECT_MAX_DELAY_SECONDS,
                 self._RECONNECT_DELAY_SECONDS * (2 ** min(attempts, 8)),
             )
+            delay_seconds += random.uniform(0.0, min(1.0, delay_seconds * 0.2))
+            next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+            self._ws_state[market_type]["state"] = "backoff"
+            self._ws_state[market_type]["next_retry_at"] = next_retry_at.isoformat()
             timer = threading.Timer(
                 delay_seconds,
                 lambda mt=market_type: self._run_scheduled_reconnect(mt),
@@ -958,6 +1151,8 @@ class FubonSDKManager:
         if self._shutting_down or not self.connected:
             return
         self._ws_reconnect_attempts[market_type] = self._ws_reconnect_attempts.get(market_type, 0) + 1
+        self._ws_state[market_type]["state"] = "connecting"
+        self._ws_state[market_type]["next_retry_at"] = None
         try:
             started = self._reconnect_ws_target(market_type)
             if started is False:
@@ -995,6 +1190,16 @@ class FubonSDKManager:
         self._ws_started_targets.clear()
         self._attached_targets.clear()
         self._cancel_all_reconnect_timers()
+        now = datetime.now(timezone.utc).isoformat()
+        for state in self._ws_state.values():
+            state.update(
+                {
+                    "state": "degraded",
+                    "last_disconnect_at": now,
+                    "last_error_category": "session_invalid",
+                    "next_retry_at": None,
+                }
+            )
         self._best_effort_shutdown(self._ws_stock)
         self._best_effort_shutdown(self._ws_futopt)
 

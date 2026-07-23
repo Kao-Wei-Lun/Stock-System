@@ -21,8 +21,11 @@ class PaperTradingMixin:
             (`owner_id`, `name`, `product_symbol`, `starting_equity`,
              `initial_margin_per_contract`, `margin_source`, `margin_reference_symbol`,
              `margin_currency`, `margin_synced_at`, `margin_sync_error`,
+             `margin_last_attempt_at`, `margin_last_success_at`, `margin_last_error`,
+             `margin_error_category`, `margin_next_retry_at`,
              `risk_config_json`, `cost_model_json`, `strategy_config_json`, `is_active`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         row_id = await self._execute_insert(sql, (
             owner_id,
@@ -35,6 +38,11 @@ class PaperTradingMixin:
             data.get("margin_currency"),
             data.get("margin_synced_at"),
             data.get("margin_sync_error"),
+            data.get("margin_last_attempt_at"),
+            data.get("margin_last_success_at"),
+            data.get("margin_last_error"),
+            data.get("margin_error_category"),
+            data.get("margin_next_retry_at"),
             json.dumps(data.get("risk_config", {}), ensure_ascii=False),
             json.dumps(data.get("cost_model", {}), ensure_ascii=False),
             json.dumps(data.get("strategy_config", {}), ensure_ascii=False) if data.get("strategy_config") else None,
@@ -55,6 +63,11 @@ class PaperTradingMixin:
             "margin_currency",
             "margin_synced_at",
             "margin_sync_error",
+            "margin_last_attempt_at",
+            "margin_last_success_at",
+            "margin_last_error",
+            "margin_error_category",
+            "margin_next_retry_at",
             "is_active",
         ):
             if col in data:

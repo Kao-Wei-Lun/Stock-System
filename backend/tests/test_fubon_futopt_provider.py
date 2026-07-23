@@ -193,6 +193,25 @@ async def test_futopt_provider_estimates_margin_with_resolved_contract():
 
 
 @pytest.mark.anyio
+async def test_margin_estimate_uses_pool_selected_futures_manager():
+    marketdata_manager = StubFutoptManager()
+    futures_manager = StubFutoptManager()
+    futures_manager.active_account_id = 5
+    provider = FubonFutoptProvider(
+        marketdata_manager,
+        margin_manager_provider=lambda: futures_manager,
+    )
+
+    payload = await provider.estimate_margin("TXF", session="REGULAR")
+
+    assert marketdata_manager.ticker_calls
+    assert marketdata_manager.quote_calls == []
+    assert futures_manager.quote_calls == [{"symbol": "TXFE6", "session": "REGULAR"}]
+    assert futures_manager.estimate_margin_calls[0]["symbol"] == "TXFE6"
+    assert payload["provider_account_id"] == 5
+
+
+@pytest.mark.anyio
 async def test_futopt_provider_fetches_quote_from_auto_afterhours_session(monkeypatch):
     monkeypatch.setattr(futopt_module, "resolve_futopt_session", lambda _session=None: "AFTERHOURS")
     manager = StubFutoptManager()

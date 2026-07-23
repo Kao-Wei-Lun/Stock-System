@@ -151,6 +151,21 @@ async def test_account_warmup_failure_does_not_cancel_remaining_accounts(monkeyp
 
 
 @pytest.mark.anyio
+async def test_warmup_configuration_failure_disables_automatic_retry(monkeypatch):
+    primary = WarmupManager(1, fail=True)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    WarmupRepo.accounts = [{"id": 1, "is_active": True, "is_enabled": True}]
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", WarmupRepo)
+
+    assert await pool.init_from_db(WarmupDb()) is False
+    result = await pool.reconnect_account(1, manual=False)
+
+    assert result["deferred"] is True
+    assert result["error_category"] == "configuration_error"
+    assert primary.init_calls == [1]
+
+
+@pytest.mark.anyio
 async def test_async_shutdown_cancels_incomplete_provider_warmup(monkeypatch):
     release = asyncio.Event()
     primary = WarmupManager(1, release=release)
@@ -352,7 +367,76 @@ async def test_session_refresh_recovers_each_disconnected_account_without_full_r
 
     await pool.refresh_session_assignments()
 
-    pool.reconnect_account.assert_awaited_once_with(2)
+    pool.reconnect_account.assert_awaited_once_with(2, manual=False)
+
+
+@pytest.mark.anyio
+async def test_account_reconnect_is_single_flight_per_account_and_market():
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    release = asyncio.Event()
+    calls = 0
+
+    async def reconnect_once(account_id, market_type):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return {"success": True, "account_id": account_id, "market_type": market_type or "all"}
+
+    pool._reconnect_account_once = reconnect_once
+    first = asyncio.create_task(pool.reconnect_account(1, market_type="futopt"))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(pool.reconnect_account(1, market_type="futopt"))
+    await asyncio.sleep(0)
+
+    assert calls == 1
+    release.set()
+    first_result, second_result = await asyncio.gather(first, second)
+    assert first_result["success"] is True
+    assert second_result == first_result
+
+
+@pytest.mark.anyio
+async def test_configuration_error_stops_automatic_account_reconnect():
+    primary = FakeManager(1)
+    primary.connected = False
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._account_recovery[1] = {
+        "state": "configuration_error",
+        "error_category": "configuration_error",
+        "attempt": 1,
+    }
+    pool._reconnect_account_once = AsyncMock()
+
+    result = await pool.reconnect_account(1, manual=False)
+
+    assert result["deferred"] is True
+    assert result["error_category"] == "configuration_error"
+    pool._reconnect_account_once.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_transient_account_reconnect_uses_negative_backoff(monkeypatch):
+    primary = FakeManager(1)
+    primary.connected = False
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._reconnect_account_once = AsyncMock(
+        return_value={
+            "success": False,
+            "account_id": 1,
+            "error_category": "transient",
+            "message": "connection reset",
+        }
+    )
+    monkeypatch.setattr(realtime_pool_module.random, "uniform", lambda _start, _end: 0.0)
+
+    first = await pool.reconnect_account(1, manual=False)
+    second = await pool.reconnect_account(1, manual=False)
+
+    assert first["success"] is False
+    assert first["next_retry_at"] is not None
+    assert second["deferred"] is True
+    assert pool._reconnect_account_once.await_count == 1
 
 
 @pytest.mark.anyio

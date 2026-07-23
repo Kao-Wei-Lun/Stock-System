@@ -4,12 +4,14 @@ from database.migrations import (
     ASSET_IMPORT_BATCH_CHECKSUM,
     ASSET_IMPORT_DEDUPE_CHECKSUM,
     BASELINE_SCHEMA_CHECKSUM,
+    PAPER_MARGIN_RESILIENCE_CHECKSUM,
     MIGRATIONS,
     MigrationError,
     SchemaState,
     _schema_definition_checksum,
     _asset_import_dedupe_checksum,
     _asset_import_batch_checksum,
+    _paper_margin_resilience_checksum,
     build_versioned_migration_plan,
 )
 from database.core import DatabaseCore
@@ -48,6 +50,7 @@ def applied_all():
         {"version": MIGRATIONS[0].version, "checksum": BASELINE_SCHEMA_CHECKSUM},
         {"version": MIGRATIONS[1].version, "checksum": ASSET_IMPORT_DEDUPE_CHECKSUM},
         {"version": MIGRATIONS[2].version, "checksum": ASSET_IMPORT_BATCH_CHECKSUM},
+        {"version": MIGRATIONS[3].version, "checksum": PAPER_MARGIN_RESILIENCE_CHECKSUM},
     ]
 
 
@@ -70,6 +73,20 @@ def batch_complete_state() -> SchemaState:
     return state
 
 
+def margin_complete_state() -> SchemaState:
+    state = batch_complete_state()
+    state.columns.setdefault("paper_trading_accounts", set()).update(
+        {
+            "margin_last_attempt_at",
+            "margin_last_success_at",
+            "margin_last_error",
+            "margin_error_category",
+            "margin_next_retry_at",
+        }
+    )
+    return state
+
+
 def test_migration_registry_is_ordered_and_baseline_checksum_is_frozen():
     versions = [migration.version for migration in MIGRATIONS]
 
@@ -78,6 +95,7 @@ def test_migration_registry_is_ordered_and_baseline_checksum_is_frozen():
     assert BASELINE_SCHEMA_CHECKSUM == _schema_definition_checksum()
     assert ASSET_IMPORT_DEDUPE_CHECKSUM == _asset_import_dedupe_checksum()
     assert ASSET_IMPORT_BATCH_CHECKSUM == _asset_import_batch_checksum()
+    assert PAPER_MARGIN_RESILIENCE_CHECKSUM == _paper_margin_resilience_checksum()
 
 
 def test_composed_database_uses_versioned_core_migration_method():
@@ -87,7 +105,7 @@ def test_composed_database_uses_versioned_core_migration_method():
 def test_empty_database_has_versioned_baseline_with_schema_statements():
     plan = build_versioned_migration_plan(empty_state())
 
-    assert plan["pending_count"] == 3
+    assert plan["pending_count"] == 4
     assert plan["pending"][0]["version"] == "20260722_0001"
     assert plan["pending"][0]["statement_count"] > 0
     assert any("CREATE TABLE `asset_accounts`" in sql for sql in plan["pending"][0]["statements"])
@@ -95,32 +113,40 @@ def test_empty_database_has_versioned_baseline_with_schema_statements():
     assert plan["pending"][1]["statement_count"] == 4
     assert plan["pending"][2]["version"] == "20260722_0003"
     assert plan["pending"][2]["statement_count"] == 5
+    assert plan["pending"][3]["version"] == "20260723_0001"
+    assert plan["pending"][3]["statement_count"] == 5
 
 
 def test_existing_complete_database_gets_zero_statement_baseline_record():
     plan = build_versioned_migration_plan(complete_state())
 
-    assert plan["pending_count"] == 3
+    assert plan["pending_count"] == 4
     assert plan["pending"][0]["statement_count"] == 0
     assert plan["pending"][1]["statement_count"] == 4
     assert plan["pending"][2]["statement_count"] == 5
+    assert plan["pending"][3]["statement_count"] == 5
     assert plan["up_to_date"] is False
 
 
 def test_applied_baseline_requires_asset_import_dedupe_migration():
     plan = build_versioned_migration_plan(complete_state(), applied_baseline())
 
-    assert plan["pending_count"] == 2
+    assert plan["pending_count"] == 3
     assert plan["applied_versions"] == ["20260722_0001"]
     assert plan["pending"][0]["version"] == "20260722_0002"
     assert plan["up_to_date"] is False
 
 
 def test_all_applied_migrations_are_up_to_date():
-    plan = build_versioned_migration_plan(batch_complete_state(), applied_all())
+    plan = build_versioned_migration_plan(margin_complete_state(), applied_all())
 
     assert plan["pending_count"] == 0
-    assert plan["applied_versions"] == ["20260722_0001", "20260722_0002", "20260722_0003"]
+    assert plan["applied_versions"] == [
+        "20260722_0001",
+        "20260722_0002",
+        "20260722_0003",
+        "20260723_0001",
+    ]
     assert plan["up_to_date"] is True
 
 
@@ -212,7 +238,7 @@ async def test_database_core_records_zero_statement_baseline(monkeypatch):
 
     plan = await database.create_tables(auto_apply=True)
 
-    assert plan["pending_count"] == 3
+    assert plan["pending_count"] == 4
     assert any("CREATE TABLE IF NOT EXISTS `schema_migrations`" in sql for sql, _ in database._pool.executed)
     insert = next((sql, params) for sql, params in database._pool.executed if "INSERT INTO `schema_migrations`" in sql)
     assert insert[1][0] == "20260722_0001"
