@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-23T12:53:00+08:00",
+  "scope": "phase-13-route-controller-and-lazy-dashboard-dependencies",
+  "implementation": {
+    "route_controller_registry": true,
+    "stale_activation_tokens": true,
+    "route_deactivation_cleanup": true,
+    "lazy_controllers": [
+      "asset-tracking",
+      "trade-workbench",
+      "screener",
+      "market-intelligence",
+      "alerting",
+      "market-snapshots"
+    ],
+    "concurrent_chunk_load_deduplication": true,
+    "chunk_load_retry": true,
+    "public_dashboard_contract_preserved": true
+  },
+  "bundle": {
+    "phase_12_app_gzip_kb": 69.81,
+    "phase_13_app_gzip_kb": 55.53,
+    "app_gzip_reduction_pct": 20.46,
+    "terminal_static_gzip_bytes": 126788,
+    "legacy_selected_gzip_bytes": 144862,
+    "lwc_selected_gzip_bytes": 195400,
+    "chart_engines_mutually_exclusive": true,
+    "app_reduction_target_met": true
+  },
+  "browser_smoke": {
+    "terminal_route": "/terminal/*TMFF",
+    "terminal_rendered": true,
+    "five_level_order_book_rendered": true,
+    "asset_route": "/assets",
+    "asset_workspace_rendered": true,
+    "journal_route": "/review/journal/*TMFF",
+    "journal_workspace_rendered": true,
+    "journal_runtime_errors": 0,
+    "environment_note": "The already-running development backend still reports the previously documented market snapshot and one asset endpoint 404; route controller rendering and dynamic imports completed without runtime exceptions."
+  },
+  "full_gate": {
+    "backend_passed": 498,
+    "frontend_passed": 242,
+    "frontend_skipped": 1,
+    "production_build_passed": true,
+    "bundle_gate_passed": true
+  },
+  "contains_sensitive_payloads": false
+}

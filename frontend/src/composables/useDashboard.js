@@ -36,14 +36,17 @@ import {
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
 import { createRealtimeUiBatcher } from "../utils/realtimeUiBatcher";
-import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
-import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
 import { createDashboardBootstrap } from "./dashboard/dashboardBootstrap";
-import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
-import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
+import { createLazyDashboardAssetTracking } from "./dashboard/lazyDashboardAssetTracking";
 import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
-import { createDashboardScreener } from "./dashboard/dashboardScreener";
-import { createDashboardTradeWorkbench } from "./dashboard/dashboardTradeWorkbench";
+import { createDashboardRouteControllers } from "./dashboard/dashboardRouteControllers";
+import {
+  createLazyDashboardAlerting,
+  createLazyDashboardScreener,
+  createLazyDashboardMarketIntel,
+  createLazyDashboardMarketSnapshots,
+  createLazyDashboardTradeWorkbench,
+} from "./dashboard/lazyDashboardSecondaryControllers";
 
 const KLINE_DISPLAY_OPTIONS = [
   { key: "day", label: "日K" },
@@ -623,7 +626,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     shiftInstitutionalDate: shiftInstitutionalDateAction,
     updateTaifexStructuredQuery: updateTaifexStructuredQueryAction,
     resetTaifexStructuredQuery: resetTaifexStructuredQueryAction,
-  } = createDashboardMarketIntel({
+  } = createLazyDashboardMarketIntel({
     storedPrefs,
     currentTicker,
     dashboardApi,
@@ -641,7 +644,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     marketSnapshotError,
     marketBreadthCards,
     loadMarketSnapshots,
-  } = createDashboardMarketSnapshots({
+  } = createLazyDashboardMarketSnapshots({
     dashboardApi,
     pushNotification,
   });
@@ -657,7 +660,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     saveScreenerPreset: saveScreenerPresetAction,
     loadScreenerPreset: loadScreenerPresetAction,
     deleteScreenerPreset: deleteScreenerPresetAction,
-  } = createDashboardScreener({
+  } = createLazyDashboardScreener({
     storedPrefs,
     dashboardApi,
     pushNotification,
@@ -741,7 +744,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     toggleAlertLog,
     toggleAlertActive,
     deleteAlert,
-  } = createDashboardAlerting({
+  } = createLazyDashboardAlerting({
     dashboardApi,
     currentTicker,
     institutionalFuturesCommodity,
@@ -786,7 +789,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     deleteJournalEntry: deleteJournalEntryAction,
     updateBacktestField: updateBacktestFieldAction,
     runBacktest: runBacktestAction,
-  } = createDashboardTradeWorkbench({
+  } = createLazyDashboardTradeWorkbench({
     dashboardApi,
     currentTicker,
     currentInterval,
@@ -800,6 +803,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   });
   const {
     assetLoading,
+    assetError,
     assetPerformanceRange,
     assetAccounts,
     assetCashEntries,
@@ -893,7 +897,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     previewAssetJournalImport,
     importAssetJournalEntries,
     recomputeAssetTracking,
-  } = createDashboardAssetTracking({
+  } = createLazyDashboardAssetTracking({
     dashboardApi,
     currentTicker,
     currentName,
@@ -937,6 +941,43 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     () => activeBootstrapPage.value === "terminal" ? refreshFutoptRealtimeFallback() : Promise.resolve(),
     { intervalMs: FUTOPT_REST_POLL_MS },
   );
+  const activateRealtime = () => {
+    dashboardRealtime.connect();
+    dashboardRealtime.subscribeTicker(normalizeTicker(currentTicker.value));
+  };
+  const deactivateRealtime = () => dashboardRealtime.disconnect();
+  const routeControllers = createDashboardRouteControllers({
+    terminal: {
+      activate: () => {
+        activateRealtime();
+        watchlistPoller.start();
+        futoptFallbackPoller.start();
+      },
+      deactivate: () => {
+        watchlistPoller.stop();
+        futoptFallbackPoller.stop();
+      },
+    },
+    overview: {
+      activate: () => {
+        activateRealtime();
+        watchlistPoller.start();
+      },
+      deactivate: () => watchlistPoller.stop(),
+    },
+    institutional: {
+      activate: activateRealtime,
+    },
+    review: {
+      activate: deactivateRealtime,
+    },
+    assets: {
+      activate: deactivateRealtime,
+    },
+    settings: {
+      activate: deactivateRealtime,
+    },
+  });
   let futoptFallbackInFlight = false;
   let lastFutoptQuoteOrCandleAt = 0;
   let terminalCacheWriteTimer = null;
@@ -2304,19 +2345,10 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       : "overview";
     activeBootstrapPage.value = normalizedPage;
 
-    const needsRealtime = ["terminal", "overview", "institutional"].includes(normalizedPage);
-    if (needsRealtime) {
-      dashboardRealtime.connect();
-      dashboardRealtime.subscribeTicker(normalizeTicker(currentTicker.value));
-    } else {
-      dashboardRealtime.disconnect();
-    }
-
-    if (["terminal", "overview"].includes(normalizedPage)) watchlistPoller.start();
-    else watchlistPoller.stop();
+    await routeControllers.activate(
+      ["journal", "backtest", "review"].includes(normalizedPage) ? "review" : normalizedPage,
+    );
     alertPoller.start();
-    if (normalizedPage === "terminal") futoptFallbackPoller.start();
-    else futoptFallbackPoller.stop();
     dashboardBootstrap.defer("notifications", () => loadNotifications({ silent: true }));
 
     if (normalizedPage === "terminal") {
@@ -3122,7 +3154,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   onMounted(() => {
     updateClock();
     clockTimer = window.setInterval(updateClock, 1000);
-    resetJournalFormAction();
     void bootstrapWorkspace(activeBootstrapPage.value, initialRightTab);
   });
 
@@ -3135,6 +3166,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     dashboardBootstrap.cancelDeferred();
     if (klineAbortController) klineAbortController.abort();
     realtimeUiBatcher.destroy();
+    void routeControllers.dispose();
     dashboardRealtime.disconnect();
   });
 
@@ -3263,6 +3295,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     journalFilterScope,
     journalFilters,
     assetLoading,
+    assetError,
     assetPerformanceRange,
     assetAccounts,
     assetCashEntries,
