@@ -126,6 +126,19 @@ describe("dashboardApi", () => {
     );
   });
 
+  it("forwards abort signals for superseded kline requests", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ ticker: "AAPL", data: [] }));
+    const api = createDashboardApi();
+    const controller = new AbortController();
+
+    await api.getOhlc("AAPL", { period: "1y", interval: "1d", signal: controller.signal });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/ohlc/AAPL?period=1y&interval=1d",
+      { signal: controller.signal },
+    );
+  });
+
   it("builds Fubon market snapshot endpoints", async () => {
     globalThis.fetch
       .mockImplementationOnce(() => jsonResponse({ market: "TSE", data: [] }))

@@ -39,7 +39,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       if (options.period) params.set("period", String(options.period));
       if (options.interval) params.set("interval", String(options.interval));
       const query = params.toString();
-      return request(`/api/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+      return request(`/api/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`, {
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     },
     getFutoptOhlc(ticker, options = {}) {
       const params = new URLSearchParams();
@@ -49,7 +51,9 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
       if (options.session) params.set("session", String(options.session));
       const query = params.toString();
-      return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+      return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`, {
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     },
     syncFutoptOhlc(ticker, options = {}) {
       const params = new URLSearchParams();

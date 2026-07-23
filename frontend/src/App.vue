@@ -486,7 +486,8 @@ const pseudoFullscreen = ref(false);
 const commandPaletteOpen = ref(false);
 const routeStateReady = ref(false);
 const applyingRouteState = ref(false);
-const activeWorkspacePage = ref("overview");
+const initialWorkspacePage = normalizeWorkspacePage(props.routeWorkspaceTab);
+const activeWorkspacePage = ref(initialWorkspacePage);
 const terminalLeftCollapsed = ref(true);
 const terminalRightCollapsed = ref(true);
 const {
@@ -652,6 +653,7 @@ const {
   assetJournalImportForm,
   institutionalOverlay,
   backendUrl,
+  bootstrapWorkspace,
   searchSymbols,
   closeSearch,
   submitSearch,
@@ -793,7 +795,11 @@ const {
   saveScreenerPreset,
   loadScreenerPreset,
   deleteScreenerPreset,
-} = useDashboard();
+} = useDashboard({
+  initialWorkspacePage,
+  initialTicker: props.routeTicker,
+  initialRightTab: props.routeRightTab,
+});
 
 const reviewTab = ref("journal");
 
@@ -843,11 +849,13 @@ async function closeTerminalFullscreenIfNeeded() {
 
 async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
   if (page === "terminal") {
-    await setWorkspaceTab("chart");
     const nextDrawerTab = normalizeDrawerTab(secondaryTab);
     drawerTab.value = nextDrawerTab;
+    const bootstrapPromise = bootstrapWorkspace("terminal", nextDrawerTab);
     if (!terminalRightCollapsed.value) {
-      await setRightTab(nextDrawerTab);
+      await Promise.allSettled([bootstrapPromise, setRightTab(nextDrawerTab)]);
+    } else {
+      await bootstrapPromise;
     }
     return;
   }
@@ -856,13 +864,7 @@ async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
     if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
       await closeTerminalFullscreenIfNeeded();
     }
-    await setWorkspaceTab("screener");
-    await Promise.all([
-      loadMacroDashboard(true),
-      loadEventCalendar(true),
-      loadTickerIntelligence(readStateValue(currentTicker), true),
-      readStateValue(screenerResults)?.items?.length ? Promise.resolve() : runScreener(),
-    ]);
+    await bootstrapWorkspace("overview", secondaryTab);
     return;
   }
 
@@ -870,7 +872,8 @@ async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
     if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
       await closeTerminalFullscreenIfNeeded();
     }
-    await setWorkspaceTab("institutional");
+    await bootstrapWorkspace("institutional", secondaryTab);
+    await bootstrapWorkspace("settings", secondaryTab);
     return;
   }
 
@@ -885,17 +888,15 @@ async function ensureWorkspaceResources(page, secondaryTab = "indicators") {
     if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
       await closeTerminalFullscreenIfNeeded();
     }
-    await setWorkspaceTab("chart");
-    await setRightTab("assets");
+    await bootstrapWorkspace("assets", "assets");
     return;
   }
 
   if (chartFullscreen.value || pseudoFullscreen.value || document.fullscreenElement) {
     await closeTerminalFullscreenIfNeeded();
   }
-  await setWorkspaceTab("chart");
   reviewTab.value = normalizeReviewTab(secondaryTab);
-  await setRightTab(reviewTab.value);
+  await bootstrapWorkspace("review", reviewTab.value);
 }
 
 async function applyWorkspacePage(nextPage, secondaryTab = "indicators") {
@@ -915,10 +916,17 @@ async function applyIncomingRouteState() {
 
   applyingRouteState.value = true;
   try {
-    if (nextTicker && nextTicker !== readStateValue(currentTicker)) {
-      await selectTicker(nextTicker, nextTicker);
+    const previousPage = activeWorkspacePage.value;
+    activeWorkspacePage.value = nextPage;
+    if (nextPage === "terminal" && previousPage !== "terminal") {
+      terminalLeftCollapsed.value = true;
+      terminalRightCollapsed.value = true;
     }
-    await applyWorkspacePage(nextPage, nextRightTab);
+    const tickerPromise = nextTicker && nextTicker !== readStateValue(currentTicker)
+      ? selectTicker(nextTicker, nextTicker)
+      : Promise.resolve();
+    const resourcePromise = ensureWorkspaceResources(nextPage, nextRightTab);
+    await Promise.allSettled([tickerPromise, resourcePromise]);
   } finally {
     applyingRouteState.value = false;
     routeStateReady.value = true;

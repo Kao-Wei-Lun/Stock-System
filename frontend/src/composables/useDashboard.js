@@ -35,6 +35,7 @@ import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhl
 import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
+import { createDashboardBootstrap } from "./dashboard/dashboardBootstrap";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
 import { createDashboardMarketSnapshots } from "./dashboard/dashboardMarketSnapshots";
 import { createDashboardRealtime } from "./dashboard/dashboardRealtime";
@@ -430,13 +431,13 @@ function isExchangeOpen(date, schedule) {
   return schedule.sessions.some(([start, end]) => minutesOfDay >= start && minutesOfDay < end);
 }
 
-export function useDashboard() {
+export function useDashboard({ initialWorkspacePage = "overview", initialTicker: routeTicker = "", initialRightTab = "indicators" } = {}) {
   const apiBase = getApiBase();
   const wsUrl = `${getWsBase()}/ws`;
   const backendUrl = import.meta.env.DEV ? getBackendTarget() : window.location.origin;
   const dashboardApi = createDashboardApi({ baseUrl: apiBase });
   const storedPrefs = readDashboardPrefs();
-  const initialTicker = normalizeTicker(storedPrefs.currentTicker || "AAPL");
+  const initialTicker = normalizeTicker(routeTicker || storedPrefs.currentTicker || "AAPL");
   const storedTimeframe = TIMEFRAME_OPTIONS.find(
     (option) => option.tf === storedPrefs.currentPeriod && option.iv === storedPrefs.currentInterval,
   );
@@ -453,6 +454,8 @@ export function useDashboard() {
   );
   const initialPeriod = initialResolvedTimeframe.period;
   const initialInterval = initialResolvedTimeframe.interval;
+  const activeBootstrapPage = ref(String(initialWorkspacePage || "overview").toLowerCase());
+  const dashboardBootstrap = createDashboardBootstrap();
 
   const klineDisplayOptions = KLINE_DISPLAY_OPTIONS;
   const searchQuery = ref("");
@@ -902,18 +905,46 @@ export function useDashboard() {
 
   let clockTimer = null;
   const watchlistPoller = createVisibilityPoller(
-    () => Promise.all([loadWatchlist(), loadMarketSnapshots()]),
+    () => {
+      if (activeBootstrapPage.value === "overview") {
+        return Promise.allSettled([loadWatchlist(), loadMarketSnapshots()]);
+      }
+      if (activeBootstrapPage.value === "terminal") return loadWatchlist();
+      return Promise.resolve();
+    },
     { intervalMs: 60_000 },
   );
   const alertPoller = createVisibilityPoller(
-    () => Promise.all([loadAlerts(), loadNotifications()]),
+    () => Promise.allSettled([
+      dashboardBootstrap.getResourceState("alerts").status === "ready" ? loadAlerts() : Promise.resolve(),
+      loadNotifications(),
+    ]),
     { intervalMs: 30_000 },
   );
-  const futoptFallbackPoller = createVisibilityPoller(refreshFutoptRealtimeFallback, {
-    intervalMs: FUTOPT_REST_POLL_MS,
-  });
+  const futoptFallbackPoller = createVisibilityPoller(
+    () => activeBootstrapPage.value === "terminal" ? refreshFutoptRealtimeFallback() : Promise.resolve(),
+    { intervalMs: FUTOPT_REST_POLL_MS },
+  );
   let futoptFallbackInFlight = false;
   let lastFutoptQuoteOrCandleAt = 0;
+  let klineRequestSequence = 0;
+  let klineAbortController = null;
+
+  function ensureKline(
+    ticker = currentTicker.value,
+    period = currentPeriod.value,
+    interval = currentInterval.value,
+    { force = false } = {},
+  ) {
+    const normalized = normalizeTicker(ticker);
+    const resolved = resolveDashboardTimeframeForTicker(normalized, period, interval);
+    const queryKey = `${normalized}:${resolved.period}:${resolved.interval}`;
+    return dashboardBootstrap.ensure(
+      "kline",
+      () => loadKline(normalized, resolved.period, resolved.interval),
+      { queryKey, force },
+    );
+  }
 
   function pushNotification({ icon, title, msg, type = "" }) {
     const id = `${Date.now()}-${Math.random()}`;
@@ -1750,7 +1781,7 @@ export function useDashboard() {
     }
   }
 
-  async function loadComparisonSeries(targetTickers = compareTickers.value) {
+  async function loadComparisonSeries(targetTickers = compareTickers.value, { requestToken = null } = {}) {
     const normalizedTickers = [...new Set(
       (targetTickers || [])
         .map((ticker) => normalizeTicker(ticker))
@@ -1799,6 +1830,7 @@ export function useDashboard() {
       }),
     );
 
+    if (requestToken != null && requestToken !== klineRequestSequence) return;
     rawCompareSeries.value = results
       .filter((result) => result.status === "fulfilled" && result.value.data.length)
       .map((result) => result.value);
@@ -1898,12 +1930,15 @@ export function useDashboard() {
     }
   }
 
-  async function loadQuote(ticker = currentTicker.value) {
+  async function loadQuote(ticker = currentTicker.value, { requestToken = null } = {}) {
     try {
       const normalized = normalizeTicker(ticker);
       const data = isFutoptTicker(normalized)
         ? await dashboardApi.getFutoptQuote(normalized)
         : await apiFetch(`/api/quote/${normalized}`, { retries: 6, retryDelayMs: 1200 });
+      if (requestToken != null && requestToken !== klineRequestSequence) return;
+      const resolved = normalizeTicker(data?.ticker || data?.resolved_symbol || normalized);
+      if (![normalized, resolved].includes(normalizeTicker(currentTicker.value))) return;
       if (data) applyQuote(data);
     } catch (error) {
       console.error(error);
@@ -1911,6 +1946,10 @@ export function useDashboard() {
   }
 
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
+    const requestToken = ++klineRequestSequence;
+    if (klineAbortController) klineAbortController.abort();
+    klineAbortController = typeof AbortController === "function" ? new AbortController() : null;
+    const requestSignal = klineAbortController?.signal;
     const normalized = normalizeTicker(ticker);
     const isFutopt = isFutoptTicker(normalized);
     const { period: resolvedPeriod, interval: resolvedInterval } = resolveDashboardTimeframeForTicker(
@@ -1933,11 +1972,14 @@ export function useDashboard() {
           period: fetchPeriod,
           interval: resolvedInterval,
           refreshMode: "background",
+          signal: requestSignal,
         })
         : await dashboardApi.getOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
+          signal: requestSignal,
         });
+      if (requestToken !== klineRequestSequence) return;
       const resolvedTicker = normalizeTicker(data?.ticker || normalized);
       if (resolvedTicker !== currentTicker.value) {
         dashboardRealtime.unsubscribeTicker(currentTicker.value);
@@ -1960,13 +2002,15 @@ export function useDashboard() {
       // The persisted snapshot is already drawable; quote and comparison hydration must not keep the chart covered.
       chartLoading.value = false;
       crosshair.visible = false;
-      await loadComparisonSeries(compareTickers.value);
-      if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker);
+      await loadComparisonSeries(compareTickers.value, { requestToken });
+      if (requestToken !== klineRequestSequence) return;
+      if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker, { requestToken });
       else resetQuote();
     } catch (error) {
+      if (error?.name === "AbortError" || requestToken !== klineRequestSequence) return;
       pushNotification({ icon: "⚠️", title: "載入失敗", msg: `無法取得 ${normalized} 資料`, type: "error" });
     } finally {
-      chartLoading.value = false;
+      if (requestToken === klineRequestSequence) chartLoading.value = false;
     }
   }
 
@@ -1995,11 +2039,15 @@ export function useDashboard() {
     rawOhlcData.value = [];
     crosshair.visible = false;
     rememberRecentTicker(normalized, name || normalized);
-    await loadKline(normalized, currentPeriod.value, currentInterval.value);
-    void loadBacktestHistory({ ticker: normalized });
-    void loadJournalData();
-    void loadTickerIntelligence(normalized);
-    void ensureInstitutionalOverlayForTicker(normalized);
+    await ensureKline(normalized, currentPeriod.value, currentInterval.value, { force: true });
+    if (activeBootstrapPage.value === "overview") {
+      void loadTickerIntelligence(normalized);
+    } else if (activeBootstrapPage.value === "institutional") {
+      void ensureInstitutionalOverlayForTicker(normalized);
+    } else if (activeBootstrapPage.value === "review") {
+      if (rightTab.value === "backtest") void loadBacktestHistory({ ticker: normalized });
+      if (rightTab.value === "journal") void loadJournalData();
+    }
   }
 
   function setTimeframe(timeframe) {
@@ -2014,7 +2062,7 @@ export function useDashboard() {
     }
     currentPeriod.value = resolvedPeriod;
     currentInterval.value = resolvedInterval;
-    loadKline(currentTicker.value, resolvedPeriod, resolvedInterval);
+    void ensureKline(currentTicker.value, resolvedPeriod, resolvedInterval);
   }
 
   async function loadInstitutionalData(dateValue = institutionalDate.value, forceRefresh = false) {
@@ -2082,7 +2130,7 @@ export function useDashboard() {
     if (nextMode === klineDisplayMode.value) return;
     klineDisplayMode.value = nextMode;
     crosshair.visible = false;
-    await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
+    await ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value);
   }
 
   function setLeftTab(tab) {
@@ -2095,41 +2143,135 @@ export function useDashboard() {
 
   async function setRightTab(tab) {
     rightTab.value = tab;
-    if (tab === "db") await loadDbStats();
-    if (tab === "assets") await loadAssetTrackingData({ refresh: true, silent: false });
-    if (tab === "backtest") await loadBacktestHistory({ ticker: currentTicker.value });
-    if (tab === "journal") await loadJournalData({ silent: false });
+    if (tab === "alerts") {
+      await dashboardBootstrap.ensure("alerts", () => loadAlerts({ silent: false }));
+    }
+    if (tab === "db") await dashboardBootstrap.ensure("db-stats", loadDbStats);
+    if (tab === "assets") {
+      await dashboardBootstrap.ensure("assets", () => loadAssetTrackingData({ refresh: true, silent: false }));
+    }
+    if (tab === "backtest") {
+      await dashboardBootstrap.ensure(
+        "backtest",
+        () => loadBacktestHistory({ ticker: currentTicker.value }),
+        { queryKey: normalizeTicker(currentTicker.value) },
+      );
+    }
+    if (tab === "journal") {
+      await Promise.allSettled([
+        dashboardBootstrap.ensure("journal-presets", loadJournalFilterPresets),
+        dashboardBootstrap.ensure(
+          "journal",
+          () => loadJournalData({ silent: false }),
+          { queryKey: normalizeTicker(currentTicker.value) },
+        ),
+      ]);
+    }
   }
 
   async function setWorkspaceTab(tab) {
     workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(tab) ? tab : "chart";
     if (workspaceTab.value === "institutional") {
       if (!institutionalData.value && !institutionalLoading.value) {
-        await loadInstitutionalData();
+        await dashboardBootstrap.ensure("institutional", loadInstitutionalData);
       } else if (!institutionalInsights.value && !institutionalInsightsLoading.value) {
-        await loadInstitutionalInsights();
+        await dashboardBootstrap.ensure("institutional-insights", loadInstitutionalInsights);
       }
       return;
     }
     if (workspaceTab.value === "events") {
-      await Promise.all([
-        loadEventCalendar(),
-        loadTickerIntelligence(currentTicker.value),
+      await Promise.allSettled([
+        dashboardBootstrap.ensure("events", () => loadEventCalendar()),
+        dashboardBootstrap.ensure(
+          "ticker-intelligence",
+          () => loadTickerIntelligence(currentTicker.value),
+          { queryKey: normalizeTicker(currentTicker.value) },
+        ),
       ]);
       return;
     }
     if (workspaceTab.value === "macro") {
-      await loadMacroDashboard();
+      await dashboardBootstrap.ensure("macro", () => loadMacroDashboard());
       return;
     }
     if (workspaceTab.value === "screener") {
       if (!screenerPresets.value.length) {
-        await loadScreenerPresets();
+        await dashboardBootstrap.ensure("screener-presets", loadScreenerPresets);
       }
       if (!screenerResults.value.items?.length) {
-        await runScreener();
+        await dashboardBootstrap.ensure("screener", runScreener);
       }
     }
+  }
+
+  async function bootstrapWorkspace(page = activeBootstrapPage.value, secondaryTab = initialRightTab) {
+    const rawPage = String(page || "").toLowerCase();
+    const normalizedPage = ["terminal", "overview", "institutional", "review", "assets", "settings"].includes(rawPage)
+      ? rawPage
+      : "overview";
+    activeBootstrapPage.value = normalizedPage;
+
+    const needsRealtime = ["terminal", "overview", "institutional"].includes(normalizedPage);
+    if (needsRealtime) {
+      dashboardRealtime.connect();
+      dashboardRealtime.subscribeTicker(normalizeTicker(currentTicker.value));
+    } else {
+      dashboardRealtime.disconnect();
+    }
+
+    if (["terminal", "overview"].includes(normalizedPage)) watchlistPoller.start();
+    else watchlistPoller.stop();
+    alertPoller.start();
+    if (normalizedPage === "terminal") futoptFallbackPoller.start();
+    else futoptFallbackPoller.stop();
+    dashboardBootstrap.defer("notifications", () => loadNotifications({ silent: true }));
+
+    if (normalizedPage === "terminal") {
+      workspaceTab.value = "chart";
+      return Promise.allSettled([
+        ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value),
+        dashboardBootstrap.ensure("workspaces", loadWorkspacePresets),
+        dashboardBootstrap.ensure("watchlist", loadWatchlist, { queryKey: "compact" }),
+      ]);
+    }
+
+    if (normalizedPage === "overview") {
+      workspaceTab.value = "screener";
+      return Promise.allSettled([
+        dashboardBootstrap.ensure("watchlist", loadWatchlist, { queryKey: "full" }),
+        dashboardBootstrap.ensure("market-snapshots", () => loadMarketSnapshots(false)),
+        dashboardBootstrap.ensure("macro", () => loadMacroDashboard(false)),
+        dashboardBootstrap.ensure("events", () => loadEventCalendar(false)),
+        dashboardBootstrap.ensure("screener-presets", loadScreenerPresets),
+        dashboardBootstrap.ensure("screener", runScreener),
+        dashboardBootstrap.ensure(
+          "ticker-intelligence",
+          () => loadTickerIntelligence(currentTicker.value, false),
+          { queryKey: normalizeTicker(currentTicker.value) },
+        ),
+      ]);
+    }
+
+    if (normalizedPage === "institutional") {
+      workspaceTab.value = "institutional";
+      return Promise.allSettled([
+        dashboardBootstrap.ensure("institutional", loadInstitutionalData),
+        dashboardBootstrap.ensure("institutional-insights", loadInstitutionalInsights),
+      ]);
+    }
+
+    if (normalizedPage === "assets") {
+      rightTab.value = "assets";
+      return Promise.allSettled([
+        dashboardBootstrap.ensure("assets", () => loadAssetTrackingData({ refresh: true, silent: false })),
+      ]);
+    }
+
+    if (normalizedPage === "review") {
+      return Promise.allSettled([setRightTab(secondaryTab === "backtest" ? "backtest" : "journal")]);
+    }
+
+    return [];
   }
 
   function setChartLayout(layout) {
@@ -2668,7 +2810,7 @@ export function useDashboard() {
       await loadDbStats();
     }
     dashboardRealtime.subscribeTicker(normalizedTicker);
-    await loadKline(normalizedTicker, currentPeriod.value, currentInterval.value);
+    await ensureKline(normalizedTicker, currentPeriod.value, currentInterval.value, { force: true });
     if (workspaceTab.value === "events") {
       await loadEventCalendar();
       await loadTickerIntelligence(normalizedTicker);
@@ -2724,7 +2866,7 @@ export function useDashboard() {
         msg: `${currentTicker.value} 已同步 ${result.synced} 筆`,
         type: "success",
       });
-      await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
+      await ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true });
     } catch (error) {
       pushNotification({ icon: "⚠️", title: "同步失敗", msg: "請檢查網路連線", type: "error" });
     } finally {
@@ -2744,7 +2886,7 @@ export function useDashboard() {
       await Promise.all([
         loadWatchlist(),
         loadDbStats(),
-        loadKline(currentTicker.value, currentPeriod.value, currentInterval.value),
+        ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true }),
         loadEventCalendar(true),
         loadMarketSnapshots(true),
         loadMacroDashboard(true),
@@ -2883,45 +3025,11 @@ export function useDashboard() {
     { deep: true },
   );
 
-  onMounted(async () => {
+  onMounted(() => {
     updateClock();
     clockTimer = window.setInterval(updateClock, 1000);
-    dashboardRealtime.connect();
-    dashboardRealtime.subscribeTicker(normalizeTicker(currentTicker.value));
-    await loadWorkspacePresets();
-    await loadAlerts();
-    await loadNotifications();
-    await loadBacktestHistory({ ticker: currentTicker.value });
     resetJournalFormAction();
-    await loadJournalFilterPresets();
-    await loadJournalData();
-    await loadScreenerPresets();
-    await loadWatchlist();
-    await loadMarketSnapshots();
-    if (rightTab.value === "db") {
-      await loadDbStats();
-    }
-    if (rightTab.value === "assets") {
-      await loadAssetTrackingData({ refresh: true, silent: false });
-    }
-    if (workspaceTab.value === "institutional") {
-      await loadInstitutionalData();
-    }
-    if (workspaceTab.value === "events") {
-      await loadEventCalendar();
-    }
-    if (workspaceTab.value === "macro") {
-      await loadMacroDashboard();
-    }
-    if (workspaceTab.value === "screener") {
-      await runScreener();
-    }
-    await loadKline(currentTicker.value, currentPeriod.value, currentInterval.value);
-    void loadTickerIntelligence(currentTicker.value);
-    void ensureInstitutionalOverlayForTicker(currentTicker.value);
-    watchlistPoller.start();
-    alertPoller.start();
-    futoptFallbackPoller.start();
+    void bootstrapWorkspace(activeBootstrapPage.value, initialRightTab);
   });
 
   onBeforeUnmount(() => {
@@ -2929,6 +3037,8 @@ export function useDashboard() {
     watchlistPoller.stop();
     alertPoller.stop();
     futoptFallbackPoller.stop();
+    dashboardBootstrap.cancelDeferred();
+    if (klineAbortController) klineAbortController.abort();
     dashboardRealtime.disconnect();
   });
 
@@ -3102,6 +3212,8 @@ export function useDashboard() {
     indicatorSnapshot,
     institutionalOverlay,
     backendUrl,
+    bootstrapResources: dashboardBootstrap.resources,
+    bootstrapWorkspace,
     searchSymbols,
     closeSearch,
     submitSearch,

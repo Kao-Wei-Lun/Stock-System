@@ -259,6 +259,8 @@ const dashboardMock = {
   },
   institutionalOverlay: null,
   backendUrl: "http://127.0.0.1:8001",
+  bootstrapResources: {},
+  bootstrapWorkspace: noop,
   searchSymbols: noop,
   closeSearch: noop,
   submitSearch: noop,
@@ -394,6 +396,34 @@ describe("App", () => {
     fubonWorkspaceStatusMock.fubonStatus.value = "unconfigured";
     fubonWorkspaceStatusMock.showFubonOnboardingBanner.value = false;
     fubonWorkspaceStatusMock.dismissFubonOnboardingBanner = vi.fn();
+    dashboardMock.bootstrapWorkspace = vi.fn().mockResolvedValue([]);
+  });
+
+  it("renders the terminal as the first workspace without mounting overview", async () => {
+    const wrapper = shallowMount(App, {
+      props: {
+        routeWorkspaceTab: "terminal",
+        routeRightTab: "alerts",
+        routeTicker: "*TMFF",
+      },
+      global: {
+        stubs: {
+          AppNavbar: true,
+          MarketOverviewWorkspace: { name: "MarketOverviewWorkspace", template: "<div data-testid='overview' />" },
+          ProChartTerminalWorkspace: { name: "ProChartTerminalWorkspace", template: "<div data-testid='terminal' />" },
+          GlobalSearchCommand: true,
+          StatusBar: true,
+          ToastStack: true,
+          NotificationPanel: true,
+          AlertModal: true,
+        },
+      },
+    });
+
+    expect(wrapper.find('[data-testid="terminal"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="overview"]').exists()).toBe(false);
+    await flushPromises();
+    expect(dashboardMock.bootstrapWorkspace).toHaveBeenCalledWith("terminal", "alerts");
   });
 
   it("creates a dedicated watch group from journal result shortcuts", async () => {
