@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   getTimeframeOptionsForTicker,
+  normalizeDashboardRightTab,
   normalizeTicker,
   resolveDashboardTimeframeForTicker,
   shouldPollFutoptRestFallback,
 } from "./useDashboard";
 
 describe("dashboard timeframe helpers", () => {
+  it("maps retired database drawer state to the supported indicator drawer", () => {
+    expect(normalizeDashboardRightTab("db")).toBe("indicators");
+    expect(normalizeDashboardRightTab("alerts")).toBe("alerts");
+    expect(normalizeDashboardRightTab(" JOURNAL ")).toBe("journal");
+  });
+
   it("uses a futopt-only intraday timeframe menu for futures contracts and base symbols", () => {
     expect(normalizeTicker("TMF")).toBe("TMF");
     expect(normalizeTicker("*txff")).toBe("*TXFF");

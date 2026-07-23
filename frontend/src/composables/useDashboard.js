@@ -60,6 +60,7 @@ const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const RECENT_TICKERS_KEY = "quantvision.recent.tickers.v1";
 const RECENT_TICKERS_LIMIT = 10;
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
+const DASHBOARD_RIGHT_TAB_OPTIONS = ["indicators", "alerts", "assets", "backtest", "journal"];
 const MARKET_GROUP_NAME = "全球大盤";
 const REALTIME_UI_BATCHING_ENABLED = String(
   import.meta.env.VITE_REALTIME_BATCHING_ENABLED ?? "true",
@@ -112,6 +113,11 @@ const EXCHANGE_SCHEDULES = {
   hkex: { timeZone: "Asia/Hong_Kong", sessions: [[9 * 60 + 30, 12 * 60], [13 * 60, 16 * 60]] },
 };
 let drawingIdSeed = 1;
+
+export function normalizeDashboardRightTab(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return DASHBOARD_RIGHT_TAB_OPTIONS.includes(normalized) ? normalized : "indicators";
+}
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -521,7 +527,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       .filter((series) => (series.data || []).length),
   );
   const leftTab = ref(storedPrefs.leftTab === "market" ? "market" : "watch");
-  const rightTab = ref(["indicators", "alerts", "assets", "backtest", "journal", "db"].includes(storedPrefs.rightTab) ? storedPrefs.rightTab : "indicators");
+  const rightTab = ref(normalizeDashboardRightTab(storedPrefs.rightTab));
   const workspaceTab = ref(initialWorkspaceTab);
   const currentTicker = ref(initialTicker);
   const currentName = ref("載入中...");
@@ -555,9 +561,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   const latency = ref("—");
   const lastUpdate = ref("—");
   const clockTime = ref("—");
-  const dbStats = ref(null);
-  const dbStatsLoading = ref(false);
-  const dbStatsError = ref("");
   const syncingCurrent = ref(false);
   const syncingAll = ref(false);
   const activeTool = ref(initialTool);
@@ -2147,20 +2150,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     }
   }
 
-  async function loadDbStats() {
-    if (dbStatsLoading.value) return;
-    dbStatsLoading.value = true;
-    dbStatsError.value = "";
-    try {
-      dbStats.value = await apiFetch("/api/db/stats");
-    } catch (error) {
-      dbStats.value = null;
-      dbStatsError.value = "無法取得 DB 統計";
-    } finally {
-      dbStatsLoading.value = false;
-    }
-  }
-
   async function selectTicker(ticker, name = ticker) {
     const normalized = normalizeTicker(ticker);
     realtimeUiBatcher.clearTicker(currentTicker.value);
@@ -2276,22 +2265,22 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
   }
 
   async function setRightTab(tab) {
-    rightTab.value = tab;
-    if (tab === "alerts") {
+    const normalizedTab = normalizeDashboardRightTab(tab);
+    rightTab.value = normalizedTab;
+    if (normalizedTab === "alerts") {
       await dashboardBootstrap.ensure("alerts", () => loadAlerts({ silent: false }));
     }
-    if (tab === "db") await dashboardBootstrap.ensure("db-stats", loadDbStats);
-    if (tab === "assets") {
+    if (normalizedTab === "assets") {
       await dashboardBootstrap.ensure("assets", () => loadAssetTrackingData({ refresh: true, silent: false }));
     }
-    if (tab === "backtest") {
+    if (normalizedTab === "backtest") {
       await dashboardBootstrap.ensure(
         "backtest",
         () => loadBacktestHistory({ ticker: currentTicker.value }),
         { queryKey: normalizeTicker(currentTicker.value) },
       );
     }
-    if (tab === "journal") {
+    if (normalizedTab === "journal") {
       await Promise.allSettled([
         dashboardBootstrap.ensure("journal-presets", loadJournalFilterPresets),
         dashboardBootstrap.ensure(
@@ -2910,7 +2899,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     comparisonMode.value = preset.comparisonMode === "price" ? "price" : "percent";
     activeTool.value = TOOL_OPTIONS.includes(preset.activeTool) ? preset.activeTool : "cursor";
     leftTab.value = preset.leftTab === "market" ? "market" : "watch";
-    rightTab.value = ["indicators", "alerts", "assets", "backtest", "journal", "db"].includes(preset.rightTab) ? preset.rightTab : "indicators";
+    rightTab.value = normalizeDashboardRightTab(preset.rightTab);
     workspaceTab.value = WORKSPACE_TAB_OPTIONS.includes(preset.workspaceTab) ? preset.workspaceTab : "chart";
     compareTickers.value = (preset.compareTickers || [])
       .map((ticker) => normalizeTicker(ticker))
@@ -2932,9 +2921,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     rawOhlcData.value = [];
     crosshair.visible = false;
     rememberRecentTicker(normalizedTicker, preset.currentName || normalizedTicker);
-    if (rightTab.value === "db") {
-      await loadDbStats();
-    }
     dashboardRealtime.subscribeTicker(normalizedTicker);
     await ensureKline(normalizedTicker, currentPeriod.value, currentInterval.value, { force: true });
     if (workspaceTab.value === "events") {
@@ -3011,7 +2997,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       });
       await Promise.all([
         loadWatchlist(),
-        loadDbStats(),
         ensureKline(currentTicker.value, currentPeriod.value, currentInterval.value, { force: true }),
         loadEventCalendar(true),
         loadMarketSnapshots(true),
@@ -3221,9 +3206,6 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     latency,
     lastUpdate,
     clockTime,
-    dbStats,
-    dbStatsLoading,
-    dbStatsError,
     institutionalDate,
     institutionalData,
     institutionalLoading,

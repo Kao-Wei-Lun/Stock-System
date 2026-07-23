@@ -1,7 +1,9 @@
 """Market data routes — kline, quote, info, sync, search, stats."""
 
+import asyncio
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -47,6 +49,10 @@ FUTOPT_ALLOWED_INTERVALS = {"1m", "5m", "15m", "30m", "60m", "1h"}
 
 router = APIRouter(prefix="/api", tags=["market_data"])
 _snapshot_summary_cache = AsyncTTLCache(ttl_seconds=10, max_entries=8)
+_db_stats_cache = AsyncTTLCache(ttl_seconds=300, max_entries=1)
+_db_stats_last_success: dict | None = None
+_db_stats_last_success_monotonic: float | None = None
+DB_STATS_TIMEOUT_SECONDS = 2.0
 
 
 def _bounded_ohlc_rows(rows: list[dict], *, since: str | None, limit: int | None, warmup: int) -> list[dict]:
@@ -619,4 +625,35 @@ async def search(q: str = Query(..., min_length=1)):
 
 @router.get("/db/stats")
 async def db_stats():
-    return await db.get_stats()
+    global _db_stats_last_success, _db_stats_last_success_monotonic
+
+    async def load():
+        global _db_stats_last_success, _db_stats_last_success_monotonic
+        payload = await asyncio.wait_for(db.get_stats(), timeout=DB_STATS_TIMEOUT_SECONDS)
+        snapshot = {
+            **payload,
+            "estimated": bool(payload.get("estimated", True)),
+            "as_of": payload.get("as_of") or datetime.now(timezone.utc).isoformat(),
+            "stale": False,
+        }
+        _db_stats_last_success = snapshot
+        _db_stats_last_success_monotonic = time.monotonic()
+        return snapshot
+
+    try:
+        payload = await _db_stats_cache.get_or_load("summary", load)
+    except Exception as exc:
+        if _db_stats_last_success is None:
+            log.warning("Database statistics unavailable: %s", type(exc).__name__)
+            raise HTTPException(503, "Database statistics are temporarily unavailable") from exc
+        payload = {**_db_stats_last_success, "stale": True}
+
+    cache_age_seconds = (
+        max(0.0, time.monotonic() - _db_stats_last_success_monotonic)
+        if _db_stats_last_success_monotonic is not None
+        else None
+    )
+    return {
+        **payload,
+        "cache_age_seconds": round(cache_age_seconds, 3) if cache_age_seconds is not None else None,
+    }
