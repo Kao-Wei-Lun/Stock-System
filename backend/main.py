@@ -37,6 +37,7 @@ from env_validation import (
 from futopt_history_service import FutoptCandleRecorder
 from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
+from performance_timing import RequestTimingMiddleware
 from macro_regime import build_macro_dashboard_payload
 from paper_trading.margin_sync import sync_all_paper_trading_account_margins
 from providers import (
@@ -516,12 +517,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    expose_headers=["Server-Timing", "X-Request-ID"],
 )
 app.add_middleware(
     LocalAccessMiddleware,
     allow_lan=ALLOW_LAN_ACCESS,
     allowed_networks=LAN_ALLOWED_NETWORKS,
 )
+app.add_middleware(RequestTimingMiddleware)
 
 if FRONTEND_DIST_DIR.exists():
     app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")

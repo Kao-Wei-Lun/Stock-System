@@ -154,12 +154,13 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, nextTick, onMounted } from "vue";
 
 import ChartWorkspace from "../ChartWorkspace.vue";
 import BidAskPanel from "../terminal/BidAskPanel.vue";
 import TerminalTickerRail from "./TerminalTickerRail.vue";
 import TerminalUtilityDrawer from "./TerminalUtilityDrawer.vue";
+import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../../utils/performanceMarks";
 
 const props = defineProps({
   groups: { type: Array, default: () => [] },
@@ -256,6 +257,13 @@ const emit = defineEmits([
 ]);
 
 const normalizedDrawerTab = computed(() => (props.rightTab === "journal" ? "journal" : "alerts"));
+
+onMounted(async () => {
+  await nextTick();
+  markQuantVisionPerformance(QV_PERFORMANCE_MARKS.terminalVisible, {
+    ticker: props.currentTicker,
+  });
+});
 
 function openDrawer(tab) {
   emit("set-right-tab", tab);

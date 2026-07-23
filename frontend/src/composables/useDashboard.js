@@ -32,6 +32,7 @@ import {
   shouldPollFutoptRestFallback,
 } from "../utils/marketSymbols";
 import { filterRenderableOhlcRows, isRenderableOhlcRow } from "../utils/chartOhlc";
+import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
 import { createDashboardAlerting } from "./dashboard/dashboardAlerting";
 import { createDashboardAssetTracking } from "./dashboard/dashboardAssetTracking";
 import { createDashboardMarketIntel } from "./dashboard/dashboardMarketIntel";
@@ -1929,6 +1930,11 @@ export function useDashboard() {
       }
       dashboardRealtime.subscribeTicker(resolvedTicker);
       rawOhlcData.value = data.data || [];
+      markQuantVisionPerformance(QV_PERFORMANCE_MARKS.chartDataReady, {
+        ticker: resolvedTicker,
+        interval: resolvedInterval,
+        rows: rawOhlcData.value.length,
+      });
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
       if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker);

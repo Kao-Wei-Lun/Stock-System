@@ -201,6 +201,7 @@ import { normalizeTicker } from "../composables/useDashboard";
 import { useLWCChart } from "../composables/useLWCChart";
 import { useChartSyncPanes } from "../composables/useChartSyncPanes";
 import { fmtPrice } from "../utils/formatters";
+import { markQuantVisionPerformance, QV_PERFORMANCE_MARKS } from "../utils/performanceMarks";
 import ChartCanvasArea from "./chart/ChartCanvasArea.vue";
 import ChartIndicatorDeck from "./chart/ChartIndicatorDeck.vue";
 import DrawingManager from "./chart/DrawingManager.vue";
@@ -280,6 +281,7 @@ const emit = defineEmits([
 
 const lifecycleTarget = getCurrentInstance();
 let workspaceMounted = false;
+let chartPaintFrame = null;
 const chartAreaRef = ref(null);
 const chartContainerRef = ref(null);
 const mainCanvas = ref(null);
@@ -862,6 +864,27 @@ watch(
 );
 
 watch(
+  [() => props.loading, () => props.ohlcData.length, () => props.currentTicker],
+  async ([loading, rowCount, ticker]) => {
+    if (loading || rowCount < 1) return;
+    if (!isLwcMode.value) await loadLegacyChart();
+    await nextTick();
+    const schedule = globalThis.requestAnimationFrame || ((callback) => globalThis.setTimeout(callback, 0));
+    chartPaintFrame = schedule(() => {
+      chartPaintFrame = schedule(() => {
+        chartPaintFrame = null;
+        markQuantVisionPerformance(QV_PERFORMANCE_MARKS.chartPainted, {
+          ticker,
+          rows: rowCount,
+          engine: props.engineMode,
+        });
+      });
+    });
+  },
+  { immediate: true },
+);
+
+watch(
   () => props.engineMode,
   async (nextMode, previousMode) => {
     const previousController = previousMode === "lwc" ? lwcChart : legacyChart.value;
@@ -892,6 +915,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   workspaceMounted = false;
+  if (chartPaintFrame != null) {
+    const cancel = globalThis.cancelAnimationFrame || globalThis.clearTimeout;
+    cancel(chartPaintFrame);
+    chartPaintFrame = null;
+  }
   window.removeEventListener("keydown", handleKeydown);
 });
 </script>

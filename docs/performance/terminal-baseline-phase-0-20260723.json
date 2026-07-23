@@ -1,0 +1,160 @@
+﻿{
+    "schema_version":  1,
+    "measured_at":  "2026-07-23T10:32:14.7372436+08:00",
+    "git_commit":  "edcb7f0d7ebe31f635fe793d3687a2443201ed55",
+    "request":  {
+                    "symbol":  "*TMFF",
+                    "period":  "1d",
+                    "interval":  "1m",
+                    "url":  "http://127.0.0.1:8001/api/futopt/ohlc/*TMFF?period=1d\u0026interval=1m\u0026refresh=false"
+                },
+    "runs":  {
+                 "cold":  [
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  1,
+                                  "status":  200,
+                                  "ttfb_ms":  130.38,
+                                  "total_ms":  149.6,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  2,
+                                  "status":  200,
+                                  "ttfb_ms":  120.49,
+                                  "total_ms":  122.91,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "cold",
+                                  "run_number":  3,
+                                  "status":  200,
+                                  "ttfb_ms":  122.9,
+                                  "total_ms":  126.21,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              }
+                          ],
+                 "warm":  [
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  1,
+                                  "status":  200,
+                                  "ttfb_ms":  113.51,
+                                  "total_ms":  114.09,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  2,
+                                  "status":  200,
+                                  "ttfb_ms":  117.17,
+                                  "total_ms":  118.62,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  3,
+                                  "status":  200,
+                                  "ttfb_ms":  121.66,
+                                  "total_ms":  142.59,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  4,
+                                  "status":  200,
+                                  "ttfb_ms":  119.58,
+                                  "total_ms":  120.92,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              },
+                              {
+                                  "run_type":  "warm",
+                                  "run_number":  5,
+                                  "status":  200,
+                                  "ttfb_ms":  120.69,
+                                  "total_ms":  121.32,
+                                  "response_bytes":  294055,
+                                  "data_count":  1548,
+                                  "content_encoding":  null,
+                                  "server_timing":  null,
+                                  "request_id":  null
+                              }
+                          ]
+             },
+    "summary":  {
+                    "cold":  {
+                                 "count":  3,
+                                 "ttfb_ms":  {
+                                                 "median":  122.9,
+                                                 "p95":  130.38,
+                                                 "max":  130.38
+                                             },
+                                 "total_ms":  {
+                                                  "median":  126.21,
+                                                  "p95":  149.6,
+                                                  "max":  149.6
+                                              },
+                                 "response_bytes":  {
+                                                        "median":  294055,
+                                                        "p95":  294055,
+                                                        "max":  294055
+                                                    }
+                             },
+                    "warm":  {
+                                 "count":  5,
+                                 "ttfb_ms":  {
+                                                 "median":  119.58,
+                                                 "p95":  121.66,
+                                                 "max":  121.66
+                                             },
+                                 "total_ms":  {
+                                                  "median":  120.92,
+                                                  "p95":  142.59,
+                                                  "max":  142.59
+                                              },
+                                 "response_bytes":  {
+                                                        "median":  294055,
+                                                        "p95":  294055,
+                                                        "max":  294055
+                                                    }
+                             }
+                },
+    "frontend":  {
+                     "source":  "not_collected",
+                     "marks":  {
+                                   "qv:app-mounted":  null,
+                                   "qv:terminal-visible":  null,
+                                   "qv:chart-data-ready":  null,
+                                   "qv:chart-painted":  null
+                               }
+                 }
+}
