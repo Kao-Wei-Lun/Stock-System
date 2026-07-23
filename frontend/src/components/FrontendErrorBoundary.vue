@@ -57,6 +57,12 @@ function handleReportedError(event) {
 }
 
 function retryModule() {
+  if (failure.value?.category === "module_load") {
+    // Browsers cache failed ESM imports for the lifetime of the document.
+    // A document reload is required to create a fresh module graph.
+    window.location.reload();
+    return;
+  }
   failure.value = null;
   renderKey.value += 1;
 }

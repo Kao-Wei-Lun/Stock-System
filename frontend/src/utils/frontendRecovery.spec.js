@@ -34,4 +34,19 @@ describe("frontendRecovery", () => {
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain("customer-private-payload");
     uninstall();
   });
+
+  it("ignores expected request aborts during fast route changes", () => {
+    const target = new EventTarget();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const uninstall = installUnhandledRejectionReporter(target);
+    const event = new Event("unhandledrejection");
+    Object.defineProperty(event, "reason", {
+      value: new DOMException("superseded", "AbortError"),
+    });
+
+    target.dispatchEvent(event);
+
+    expect(errorLog).not.toHaveBeenCalled();
+    uninstall();
+  });
 });

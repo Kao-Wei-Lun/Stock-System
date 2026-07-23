@@ -72,6 +72,11 @@ Invoke-GateStep "bundle_budget" {
         "--max-static-files=9"
     )
 }
+Invoke-GateStep "production_spa_e2e" {
+    Invoke-Checked -WorkingDirectory $frontendDir -FilePath "npm.cmd" -Arguments @(
+        "run", "test:e2e", "--", "--reporter=line"
+    )
+}
 Invoke-GateStep "backtest_isolation" {
     Invoke-Checked -WorkingDirectory $repoRoot -FilePath $python -Arguments @(
         "scripts/benchmark-backtest-isolation.py",

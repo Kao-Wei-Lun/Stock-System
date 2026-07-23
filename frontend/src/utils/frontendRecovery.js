@@ -35,6 +35,9 @@ export function reportFrontendError(error, source = "runtime") {
 export function installUnhandledRejectionReporter(target = globalThis.window) {
   if (!target?.addEventListener) return () => {};
   const handler = (event) => {
+    const category = categorizeFrontendError(event?.reason);
+    // Superseded ticker/route requests are intentionally aborted and are not UI failures.
+    if (category === "request_aborted") return;
     const detail = reportFrontendError(event?.reason, "unhandledrejection");
     // Do not log the original exception or rejected payload: it can contain API data.
     console.error("[QuantVision frontend]", detail);

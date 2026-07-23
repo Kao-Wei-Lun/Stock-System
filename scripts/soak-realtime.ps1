@@ -8,7 +8,14 @@ param(
     [int]$SampleIntervalSeconds = 10,
     [string[]]$FuturesSymbols = @("*TMFF", "*TXFF"),
     [string]$StockSymbol = "2330.TW",
-    [string]$OutputPath = ""
+    [string]$OutputPath = "",
+    [ValidateRange(1, 10000)]
+    [double]$MaxBroadcastP95Ms = 75,
+    [ValidateRange(1, 10000)]
+    [double]$MaxDbWaitP95Ms = 10,
+    [ValidateRange(1, 60000)]
+    [double]$MaxQueueAgeMs = 750,
+    [switch]$RequireMarketActivity
 )
 
 Set-StrictMode -Version Latest
@@ -105,6 +112,37 @@ while ((Get-Date) -lt $deadline) {
 $diagnostics = @($samples | ForEach-Object { $_.diagnostics } | Where-Object { $null -ne $_ })
 $commit = (& git -C $repoRoot rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0) { $commit = $null }
+$summary = [ordered]@{
+    quote_pending_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("quote_persistence", "pending") })
+    realtime_queue_depth_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "queue_depth", "max_ms") })
+    quote_queue_age_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "persistence_queue_age", "max_ms") })
+    broadcast_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "broadcast_latency", "p95_ms") })
+    broadcast_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "broadcast_latency", "max_ms") })
+    db_wait_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("database", "wait", "p95_ms") })
+    db_query_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("database", "query", "p95_ms") })
+    backtest_active_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("backtest_workload", "active") })
+    asset_refresh_in_flight_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("asset_quote_refresh", "in_flight") })
+    ingress_delta = Get-CounterDelta $diagnostics "ingress"
+    broadcast_delta = Get-CounterDelta $diagnostics "broadcast"
+    persistence_flush_delta = Get-CounterDelta $diagnostics "persistence_flush"
+    coalesced_delta = Get-CounterDelta $diagnostics "coalesced"
+    dropped_delta = Get-CounterDelta $diagnostics "dropped"
+}
+$checks = [ordered]@{
+    samples_complete = $samples.Count -gt 0 -and $failures.Count -eq 0
+    live_duration = (-not $RequireMarketActivity) -or $requestedSeconds -ge 3600
+    dropped_quote_zero = $null -ne $summary.dropped_delta -and [long]$summary.dropped_delta -eq 0
+    broadcast_p95 = $null -ne $summary.broadcast_p95_max_ms -and [double]$summary.broadcast_p95_max_ms -le $MaxBroadcastP95Ms
+    db_wait_p95 = $null -ne $summary.db_wait_p95_max_ms -and [double]$summary.db_wait_p95_max_ms -le $MaxDbWaitP95Ms
+    queue_age = $null -ne $summary.quote_queue_age_max_ms -and [double]$summary.quote_queue_age_max_ms -le $MaxQueueAgeMs
+    market_activity = (-not $RequireMarketActivity) -or (
+        $null -ne $summary.ingress_delta -and
+        $null -ne $summary.broadcast_delta -and
+        [long]$summary.ingress_delta -gt 0 -and
+        [long]$summary.broadcast_delta -gt 0
+    )
+}
+$passed = @($checks.Values | Where-Object { -not $_ }).Count -eq 0
 $result = [ordered]@{
     schema_version = 1
     measured_at = (Get-Date).ToString("o")
@@ -113,28 +151,21 @@ $result = [ordered]@{
     sample_interval_seconds = $SampleIntervalSeconds
     sample_count = $samples.Count
     failure_count = $failures.Count
-    passed = $samples.Count -gt 0 -and $failures.Count -eq 0
-    summary = [ordered]@{
-        quote_pending_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("quote_persistence", "pending") })
-        realtime_queue_depth_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "queue_depth", "max_ms") })
-        quote_queue_age_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "persistence_queue_age", "max_ms") })
-        broadcast_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "broadcast_latency", "p95_ms") })
-        broadcast_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("realtime", "broadcast_latency", "max_ms") })
-        db_wait_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("database", "wait", "p95_ms") })
-        db_query_p95_max_ms = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("database", "query", "p95_ms") })
-        backtest_active_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("backtest_workload", "active") })
-        asset_refresh_in_flight_max = Get-Maximum @($diagnostics | ForEach-Object { Get-NestedValue $_ @("asset_quote_refresh", "in_flight") })
-        ingress_delta = Get-CounterDelta $diagnostics "ingress"
-        broadcast_delta = Get-CounterDelta $diagnostics "broadcast"
-        persistence_flush_delta = Get-CounterDelta $diagnostics "persistence_flush"
-        coalesced_delta = Get-CounterDelta $diagnostics "coalesced"
-        dropped_delta = Get-CounterDelta $diagnostics "dropped"
+    passed = $passed
+    thresholds = [ordered]@{
+        max_broadcast_p95_ms = $MaxBroadcastP95Ms
+        max_db_wait_p95_ms = $MaxDbWaitP95Ms
+        max_queue_age_ms = $MaxQueueAgeMs
+        require_market_activity = [bool]$RequireMarketActivity
     }
+    checks = $checks
+    summary = $summary
     failures = $failures
     samples = $samples
 }
 $result | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $resolvedOutput -Encoding UTF8
 Write-Host "Soak test complete: $resolvedOutput" -ForegroundColor Green
 if (-not $result.passed) {
-    throw "Soak test did not complete every sample successfully. Review the sanitized result file."
+    $failedChecks = @($checks.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object { $_.Key })
+    throw "Soak Gate failed ($($failedChecks -join ', ')). Review the sanitized result file."
 }

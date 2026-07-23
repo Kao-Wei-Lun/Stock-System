@@ -1,6 +1,8 @@
 venv/
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 backend/__pycache__/
 backend/*.pyc
 __pycache__/

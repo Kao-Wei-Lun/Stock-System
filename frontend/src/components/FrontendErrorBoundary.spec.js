@@ -9,20 +9,20 @@ afterEach(() => {
 });
 
 describe("FrontendErrorBoundary", () => {
-  it("shows accessible recovery actions for a dynamic import failure", async () => {
+  it("shows accessible recovery actions and can remount a failed component tree", async () => {
     const wrapper = mount(FrontendErrorBoundary, {
       slots: { default: "<div data-testid='workspace'>workspace</div>" },
     });
 
     reportFrontendError(
-      new TypeError("Failed to fetch dynamically imported module: /app/chunk.js"),
-      "route-module",
+      new Error("component render failure"),
+      "component",
     );
     await wrapper.vm.$nextTick();
 
     const recovery = wrapper.get('[data-testid="frontend-recovery"]');
     expect(recovery.attributes("role")).toBe("alert");
-    expect(recovery.text()).toContain("錯誤分類：module_load");
+    expect(recovery.text()).toContain("錯誤分類：render");
     expect(recovery.text()).toContain("清除前端快取並重載");
 
     await recovery.get("button").trigger("click");

@@ -30,6 +30,7 @@ def test_spa_entry_and_deep_links_return_uncached_index(tmp_path):
         "/app/review/journal/2330.TW",
         "/app/assets/2330.TW",
         "/app/settings/2330.TW",
+        "/app/paper-trading",
     ]
 
     for path in paths:
