@@ -106,12 +106,24 @@ describe("dashboardApi", () => {
     const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
 
     const quote = await api.getFutoptQuote("TXF");
-    const ohlc = await api.getFutoptOhlc("TXF", { period: "5d", interval: "5m" });
+    const ohlc = await api.getFutoptOhlc("TXF", { period: "5d", interval: "5m", refreshMode: "background" });
 
     expect(quote.ticker).toBe("TXFE6");
     expect(ohlc.ticker).toBe("TXFE6");
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, "http://localhost:8001/api/futopt/quote/TXF", {});
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "http://localhost:8001/api/futopt/ohlc/TXF?period=5d&interval=5m", {});
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, "http://localhost:8001/api/futopt/ohlc/TXF?period=5d&interval=5m&refresh_mode=background", {});
+  });
+
+  it("uses the dedicated blocking futopt sync endpoint for manual refresh", async () => {
+    globalThis.fetch.mockImplementation(() => jsonResponse({ requested_symbol: "*TMFF", row_count: 120 }));
+    const api = createDashboardApi({ baseUrl: "http://localhost:8001" });
+
+    await api.syncFutoptOhlc("*TMFF", { period: "1d", interval: "1m" });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:8001/api/futopt/sync/*TMFF?period=1d&interval=1m",
+      { method: "POST" },
+    );
   });
 
   it("builds Fubon market snapshot endpoints", async () => {

@@ -29,6 +29,8 @@ function createProps() {
     chartLayout: "single",
     chartLoading: false,
     loadingMessage: "",
+    futoptRefreshStatus: "idle",
+    futoptDataStale: false,
     crosshair: { visible: false, absoluteIndex: null },
     ohlcData: [],
     activeInd: {},
@@ -121,6 +123,21 @@ describe("ProChartTerminalWorkspace", () => {
     expect(wrapper.find(".utility-drawer-stub").exists()).toBe(false);
     expect(wrapper.find(".bid-ask-panel-stub").exists()).toBe(false);
     expect(wrapper.find(".terminal-page").classes()).toContain("is-chart-fullscreen");
+    expect(wrapper.find(".chart-workspace-stub").exists()).toBe(true);
+  });
+
+  it("shows non-blocking futures refresh state without replacing the chart", () => {
+    const wrapper = mount(ProChartTerminalWorkspace, {
+      props: {
+        ...createProps(),
+        currentTicker: "*TMFF",
+        futoptRefreshStatus: "running",
+        futoptDataStale: true,
+      },
+      global: createGlobal(),
+    });
+
+    expect(wrapper.find(".terminal-background-status").text()).toContain("背景更新");
     expect(wrapper.find(".chart-workspace-stub").exists()).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ _sync_taiwan_full_history = None
 _needs_history_backfill = None
 _has_suspicious_daily_rows = None
 _futopt_candle_recorder = None
+_futopt_refresh_coordinator = None
 FULL_HISTORY_PERIODS = {"10y", "max"}
 LATEST_DATA_SYNC_PERIOD = "1y"
 LATEST_DATA_SYNC_INTERVAL = "1d"
@@ -56,11 +57,12 @@ def configure(
     latest_data_sync_interval,
     sync_taiwan_full_history=None,
     futopt_candle_recorder=None,
+    futopt_refresh_coordinator=None,
 ):
     """Inject helpers from main.py to avoid circular imports."""
     global _fetch_and_store_quote_snapshot, _sync_tracked_market_data, _sync_taiwan_full_history
     global _needs_history_backfill, _has_suspicious_daily_rows
-    global _futopt_candle_recorder
+    global _futopt_candle_recorder, _futopt_refresh_coordinator
     global FULL_HISTORY_PERIODS, LATEST_DATA_SYNC_PERIOD, LATEST_DATA_SYNC_INTERVAL
     _fetch_and_store_quote_snapshot = fetch_and_store_quote_snapshot
     _sync_tracked_market_data = sync_tracked_market_data
@@ -68,6 +70,7 @@ def configure(
     _needs_history_backfill = needs_history_backfill
     _has_suspicious_daily_rows = has_suspicious_daily_rows
     _futopt_candle_recorder = futopt_candle_recorder
+    _futopt_refresh_coordinator = futopt_refresh_coordinator
     FULL_HISTORY_PERIODS = full_history_periods
     LATEST_DATA_SYNC_PERIOD = latest_data_sync_period
     LATEST_DATA_SYNC_INTERVAL = latest_data_sync_interval
@@ -194,8 +197,13 @@ async def get_futopt_ohlc(
     period: str | None = Query(None, description="1d 5d 1mo 3mo 6mo"),
     interval: str = Query("1m", description="1m 5m 15m 30m 60m 1h"),
     refresh: bool = Query(True, description="Refresh the persisted tail from Fubon before returning"),
+    refresh_mode: str | None = Query(None, description="none, background, or blocking"),
+    session: str = Query("AUTO", description="Refresh single-flight session key"),
 ):
     period, interval = _normalize_futopt_ohlc_query(period, interval)
+    selected_refresh_mode = str(refresh_mode or ("blocking" if refresh else "none")).strip().lower()
+    if selected_refresh_mode not in {"none", "background", "blocking"}:
+        raise HTTPException(400, "refresh_mode must be one of: none, background, blocking")
     payload = await load_futopt_ohlc_db_first(
         fubon_futopt_provider,
         db,
@@ -203,6 +211,9 @@ async def get_futopt_ohlc(
         period=period,
         interval=interval,
         refresh=refresh,
+        refresh_mode=selected_refresh_mode,
+        refresh_coordinator=_futopt_refresh_coordinator,
+        session=session,
     )
     if not payload.get("data") and payload.get("sync_error"):
         raise HTTPException(502, f"Unable to refresh futopt ohlc: {payload['sync_error']}")

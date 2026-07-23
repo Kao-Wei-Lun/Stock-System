@@ -45,8 +45,18 @@ export function createDashboardApi({ baseUrl = "" } = {}) {
       const params = new URLSearchParams();
       if (options.period) params.set("period", String(options.period));
       if (options.interval) params.set("interval", String(options.interval));
+      if (options.refreshMode) params.set("refresh_mode", String(options.refreshMode));
+      if (options.refresh != null) params.set("refresh", String(Boolean(options.refresh)));
+      if (options.session) params.set("session", String(options.session));
       const query = params.toString();
       return request(`/api/futopt/ohlc/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`);
+    },
+    syncFutoptOhlc(ticker, options = {}) {
+      const params = new URLSearchParams();
+      if (options.period) params.set("period", String(options.period));
+      if (options.interval) params.set("interval", String(options.interval));
+      const query = params.toString();
+      return request(`/api/futopt/sync/${encodeURIComponent(ticker)}${query ? `?${query}` : ""}`, { method: "POST" });
     },
     getFubonSnapshot(market, options = {}) {
       const params = new URLSearchParams();

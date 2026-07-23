@@ -1,4 +1,7 @@
+import time
+
 import main
+from futopt_history_service import FutoptRefreshCoordinator
 
 
 def test_search_dynamic_futures_alias_returns_resolved_near_month(client, monkeypatch):
@@ -81,6 +84,65 @@ def test_futopt_ohlc_route_returns_502_when_provider_and_database_have_no_data(c
 
     assert response.status_code == 502
     assert "upstream futopt failure" in response.json()["detail"]
+
+
+def test_futopt_ohlc_refresh_false_keeps_legacy_database_only_behavior(client, monkeypatch):
+    async def unexpected_provider(*_args, **_kwargs):
+        raise AssertionError("refresh=false must not call the provider")
+
+    async def fake_get_ohlcv(ticker, period="1d", interval="1m"):
+        return [{"date": "2026-07-23T09:00:00+08:00", "close": 100, "source": "database"}]
+
+    monkeypatch.setattr(main.market_data.fubon_futopt_provider, "fetch_intraday_ohlc", unexpected_provider)
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
+
+    response = client.get("/api/futopt/ohlc/TMF?period=1d&interval=1m&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["refresh_mode"] == "none"
+    assert response.json()["refresh_status"] == "skipped"
+
+
+def test_futopt_ohlc_rejects_unknown_refresh_mode(client):
+    response = client.get("/api/futopt/ohlc/TMF?refresh_mode=surprise")
+
+    assert response.status_code == 400
+    assert "refresh_mode" in response.json()["detail"]
+
+
+def test_background_futopt_ohlc_api_stays_below_latency_gate_with_slow_provider(client, monkeypatch):
+    calls = []
+
+    async def slow_fetch(symbol, *, period="1d", interval="1m"):
+        import asyncio
+
+        calls.append((symbol, period, interval))
+        await asyncio.sleep(0.2)
+        return None
+
+    async def fake_get_ohlcv(_ticker, period="1d", interval="1m"):
+        return [{"date": "2026-07-22T09:00:00+08:00", "close": 100, "source": "database"}]
+
+    monkeypatch.setattr(main.market_data.fubon_futopt_provider, "fetch_intraday_ohlc", slow_fetch)
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
+    coordinator = FutoptRefreshCoordinator(
+        provider=main.market_data.fubon_futopt_provider,
+        db=main.market_data.db,
+        stale_after_seconds=1,
+    )
+    monkeypatch.setattr(main.market_data, "_futopt_refresh_coordinator", coordinator)
+
+    durations = []
+    for _ in range(5):
+        started = time.perf_counter()
+        response = client.get("/api/futopt/ohlc/TMF?period=1d&interval=1m&refresh_mode=background")
+        durations.append((time.perf_counter() - started) * 1000)
+        assert response.status_code == 200
+        assert response.json()["refresh_status"] == "running"
+
+    assert max(durations) < 300
+    assert len(calls) == 1
+    time.sleep(0.25)
 
 
 def test_futopt_sync_route_persists_alias_and_resolved_contract(client, monkeypatch):

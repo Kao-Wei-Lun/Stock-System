@@ -12,6 +12,108 @@ from fubon_symbols import is_exact_futopt_contract, normalize_futopt_symbol_quer
 
 log = logging.getLogger(__name__)
 
+FUTOPT_REFRESH_MODES = {"none", "background", "blocking"}
+
+
+def _futopt_data_age_seconds(row: dict[str, Any] | None, *, now: datetime | None = None) -> float | None:
+    if not row or not row.get("date"):
+        return None
+    current = now or datetime.now().astimezone()
+    try:
+        parsed = datetime.fromisoformat(str(row["date"]).strip().replace(" ", "T").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=current.tzinfo)
+    return max(0.0, (current - parsed.astimezone(current.tzinfo)).total_seconds())
+
+
+class FutoptRefreshCoordinator:
+    """Deduplicate REST refreshes without creating another Fubon provider session."""
+
+    def __init__(
+        self,
+        *,
+        provider,
+        db,
+        stale_after_seconds: float = 90.0,
+        empty_wait_seconds: float = 8.0,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self.provider = provider
+        self.db = db
+        self.stale_after_seconds = max(1.0, float(stale_after_seconds))
+        self.empty_wait_seconds = max(0.1, float(empty_wait_seconds))
+        self.log = logger or log
+        self._tasks: dict[tuple[str, str, str, str], asyncio.Task] = {}
+        self._last_outcomes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        self._closed = False
+
+    @staticmethod
+    def build_key(symbol: str, period: str, interval: str, session: str = "AUTO") -> tuple[str, str, str, str]:
+        canonical = normalize_futopt_symbol_query(str(symbol or "").strip().upper())
+        return canonical, str(period).lower(), str(interval).lower(), str(session or "AUTO").strip().upper()
+
+    def begin(self, symbol: str, *, period: str, interval: str, session: str = "AUTO") -> asyncio.Task:
+        if self._closed:
+            raise RuntimeError("Futopt refresh coordinator is shutting down")
+        key = self.build_key(symbol, period, interval, session)
+        current = self._tasks.get(key)
+        if current is not None and not current.done():
+            return current
+
+        task = asyncio.create_task(
+            sync_futopt_intraday_ohlc(
+                self.provider,
+                self.db,
+                symbol,
+                period=period,
+                interval=interval,
+            ),
+            name=f"futopt-refresh:{key[0]}:{interval}:{session}",
+        )
+        self._tasks[key] = task
+        self._last_outcomes[key] = {"status": "running", "error": None}
+        task.add_done_callback(lambda completed, task_key=key: self._finish(task_key, completed))
+        return task
+
+    def _finish(self, key: tuple[str, str, str, str], task: asyncio.Task) -> None:
+        if self._tasks.get(key) is task:
+            self._tasks.pop(key, None)
+        try:
+            result = task.result()
+        except asyncio.CancelledError:
+            self._last_outcomes[key] = {"status": "cancelled", "error": None}
+        except Exception as exc:
+            self._last_outcomes[key] = {"status": "failed", "error": str(exc)}
+            self.log.warning("Futopt background refresh failed for %s: %s", key, exc)
+        else:
+            self._last_outcomes[key] = {
+                "status": "refreshed" if result else "empty",
+                "error": None,
+                "result": result,
+            }
+
+    def get_status(self, symbol: str, *, period: str, interval: str, session: str = "AUTO") -> dict[str, Any]:
+        key = self.build_key(symbol, period, interval, session)
+        task = self._tasks.get(key)
+        if task is not None and not task.done():
+            return {"status": "running", "error": None}
+        return dict(self._last_outcomes.get(key) or {"status": "idle", "error": None})
+
+    def startup(self) -> None:
+        self._closed = False
+
+    async def shutdown(self) -> None:
+        self._closed = True
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+
 
 def date_range_to_futopt_period(start_date: str, end_date: str) -> str:
     """Map a replay date range to the nearest Fubon intraday period bucket."""
@@ -86,8 +188,14 @@ async def load_futopt_ohlc_db_first(
     period: str,
     interval: str,
     refresh: bool = True,
+    refresh_mode: str | None = None,
+    refresh_coordinator: FutoptRefreshCoordinator | None = None,
+    session: str = "AUTO",
 ) -> dict[str, Any]:
     """Read persisted futures candles first, then use Fubon only to fill/correct the requested range."""
+    selected_refresh_mode = str(refresh_mode or ("blocking" if refresh else "none")).strip().lower()
+    if selected_refresh_mode not in FUTOPT_REFRESH_MODES:
+        raise ValueError(f"Unsupported futopt refresh mode: {selected_refresh_mode}")
     requested = str(symbol or "").strip().upper()
     canonical = normalize_futopt_symbol_query(requested)
     storage_tickers = list(dict.fromkeys(item for item in (requested, canonical) if item))
@@ -96,8 +204,12 @@ async def load_futopt_ohlc_db_first(
     initial_rows = merge_futopt_ohlcv_rows(*initial_groups)
     sync_result: dict[str, Any] | None = None
     sync_error: str | None = None
+    refresh_status = "skipped"
+    initial_age_seconds = _futopt_data_age_seconds(initial_rows[-1] if initial_rows else None)
+    stale_after_seconds = refresh_coordinator.stale_after_seconds if refresh_coordinator else 90.0
+    is_stale = initial_age_seconds is None or initial_age_seconds > stale_after_seconds
 
-    if refresh:
+    if selected_refresh_mode == "blocking":
         try:
             sync_result = await sync_futopt_intraday_ohlc(
                 provider,
@@ -106,9 +218,40 @@ async def load_futopt_ohlc_db_first(
                 period=period,
                 interval=interval,
             )
+            refresh_status = "refreshed" if sync_result else "empty"
         except Exception as exc:
             sync_error = str(exc)
+            refresh_status = "failed"
             log.warning("Futopt DB-first refresh failed for %s (%s/%s): %s", requested, period, interval, exc)
+    elif selected_refresh_mode == "background" and is_stale:
+        if refresh_coordinator is None:
+            raise ValueError("background refresh mode requires a refresh coordinator")
+        task = refresh_coordinator.begin(requested, period=period, interval=interval, session=session)
+        await asyncio.sleep(0)
+        if not initial_rows:
+            try:
+                sync_result = await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=refresh_coordinator.empty_wait_seconds,
+                )
+                refresh_status = "refreshed" if sync_result else "empty"
+            except asyncio.TimeoutError:
+                refresh_status = "timeout"
+                sync_error = "Futopt background refresh timed out before initial data became available"
+            except Exception as exc:
+                refresh_status = "failed"
+                sync_error = str(exc)
+        elif task.done():
+            try:
+                sync_result = task.result()
+                refresh_status = "refreshed" if sync_result else "empty"
+            except Exception as exc:
+                refresh_status = "failed"
+                sync_error = str(exc)
+        else:
+            refresh_status = "running"
+    elif selected_refresh_mode == "background":
+        refresh_status = "not_needed"
 
     resolved = str((sync_result or {}).get("resolved_symbol") or "").strip().upper()
     for ticker in (resolved, *((sync_result or {}).get("stored_tickers") or [])):
@@ -122,6 +265,9 @@ async def load_futopt_ohlc_db_first(
     else:
         rows = initial_rows
 
+    data_age_seconds = _futopt_data_age_seconds(rows[-1] if rows else None)
+    is_stale = data_age_seconds is None or data_age_seconds > stale_after_seconds
+
     return {
         "ticker": requested or canonical,
         "requested_symbol": requested,
@@ -131,7 +277,11 @@ async def load_futopt_ohlc_db_first(
         "data": rows,
         "row_count": len(rows),
         "latest_date": rows[-1].get("date") if rows else None,
+        "data_age_seconds": round(data_age_seconds, 3) if data_age_seconds is not None else None,
+        "is_stale": is_stale,
         "data_source": "database",
+        "refresh_mode": selected_refresh_mode,
+        "refresh_status": refresh_status,
         "refreshed_from": "fubon_neo" if sync_result else None,
         "sync_status": "refreshed" if sync_result else "failed" if sync_error else "skipped",
         "sync_error": sync_error,

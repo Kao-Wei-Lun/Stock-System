@@ -48,6 +48,20 @@
       />
 
       <div class="terminal-chart-shell">
+        <div
+          v-if="futoptRefreshStatus === 'running'"
+          class="terminal-background-status"
+          role="status"
+        >
+          背景更新期貨 K 線中
+        </div>
+        <div
+          v-else-if="futoptDataStale && ['failed', 'timeout'].includes(futoptRefreshStatus)"
+          class="terminal-background-status is-warning"
+          role="status"
+        >
+          即時來源暫時無法更新，顯示資料庫 K 線
+        </div>
         <ChartWorkspace
           :current-ticker="currentTicker"
           :current-name="currentName"
@@ -180,6 +194,8 @@ const props = defineProps({
   chartLayout: { type: String, required: true },
   chartLoading: { type: Boolean, required: true },
   loadingMessage: { type: String, required: true },
+  futoptRefreshStatus: { type: String, default: "idle" },
+  futoptDataStale: { type: Boolean, default: false },
   crosshair: { type: Object, required: true },
   ohlcData: { type: Array, default: () => [] },
   activeInd: { type: Object, required: true },
@@ -387,6 +403,30 @@ function openDrawer(tab) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.terminal-background-status {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 8;
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(123, 231, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(7, 24, 32, 0.9);
+  color: #b9f5ff;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.terminal-background-status.is-warning {
+  border-color: rgba(255, 174, 77, 0.3);
+  background: rgba(42, 27, 10, 0.92);
+  color: #ffd39a;
 }
 
 .terminal-chart-shell > * {

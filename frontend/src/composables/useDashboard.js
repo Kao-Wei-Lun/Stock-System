@@ -521,6 +521,8 @@ export function useDashboard() {
   const chartLayout = ref(initialChartLayout);
   const chartLoading = ref(true);
   const loadingMessage = ref("正在載入資料...");
+  const futoptRefreshStatus = ref("idle");
+  const futoptDataStale = ref(false);
   const rawOhlcData = ref([]);
   const drawings = ref([]);
   const selectedDrawingId = ref(null);
@@ -1437,7 +1439,11 @@ export function useDashboard() {
   function handleRealtimeQuote(message) {
     const data = message.data;
     if (data.ticker !== currentTicker.value && data.ticker !== normalizeTicker(currentTicker.value)) return;
-    if (isFutoptTicker(data.ticker)) lastFutoptQuoteOrCandleAt = Date.now();
+    if (isFutoptTicker(data.ticker)) {
+      lastFutoptQuoteOrCandleAt = Date.now();
+      futoptRefreshStatus.value = "realtime";
+      futoptDataStale.value = false;
+    }
     const mergedQuote = applyQuote(data);
     updateCurrentCandleFromQuote(mergedQuote);
   }
@@ -1481,7 +1487,11 @@ export function useDashboard() {
   function handleRealtimeCandle(message) {
     const data = message.data;
     if (message.ticker !== currentTicker.value && message.ticker !== normalizeTicker(currentTicker.value)) return;
-    if (isFutoptTicker(message.ticker || data?.ticker)) lastFutoptQuoteOrCandleAt = Date.now();
+    if (isFutoptTicker(message.ticker || data?.ticker)) {
+      lastFutoptQuoteOrCandleAt = Date.now();
+      futoptRefreshStatus.value = "realtime";
+      futoptDataStale.value = false;
+    }
     upsertRealtimeCandleRow(data);
   }
 
@@ -1768,6 +1778,7 @@ export function useDashboard() {
           ? await dashboardApi.getFutoptOhlc(ticker, {
             period: resolveFutoptPeriod(fetchPeriod, resolvedInterval),
             interval: resolveFutoptInterval(resolvedInterval),
+            refreshMode: "background",
           })
           : await dashboardApi.getOhlc(ticker, {
             period: fetchPeriod,
@@ -1851,6 +1862,7 @@ export function useDashboard() {
         dashboardApi.getFutoptOhlc(requestedTicker, {
           period: requestedPeriod,
           interval: requestedInterval,
+          refreshMode: "blocking",
         }),
         dashboardApi.getFutoptQuote(requestedTicker),
       ]);
@@ -1869,6 +1881,8 @@ export function useDashboard() {
 
       if (Array.isArray(ohlcPayload?.data) && ohlcPayload.data.length) {
         rawOhlcData.value = ohlcPayload.data;
+        futoptRefreshStatus.value = ohlcPayload.refresh_status || "refreshed";
+        futoptDataStale.value = Boolean(ohlcPayload.is_stale);
       }
       if (quotePayload) {
         const mergedQuote = applyQuote(quotePayload);
@@ -1918,6 +1932,7 @@ export function useDashboard() {
         ? await dashboardApi.getFutoptOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
+          refreshMode: "background",
         })
         : await dashboardApi.getOhlc(normalized, {
           period: fetchPeriod,
@@ -1930,11 +1945,20 @@ export function useDashboard() {
       }
       dashboardRealtime.subscribeTicker(resolvedTicker);
       rawOhlcData.value = data.data || [];
+      if (isFutopt) {
+        futoptRefreshStatus.value = data.refresh_status || "idle";
+        futoptDataStale.value = Boolean(data.is_stale);
+      } else {
+        futoptRefreshStatus.value = "idle";
+        futoptDataStale.value = false;
+      }
       markQuantVisionPerformance(QV_PERFORMANCE_MARKS.chartDataReady, {
         ticker: resolvedTicker,
         interval: resolvedInterval,
         rows: rawOhlcData.value.length,
       });
+      // The persisted snapshot is already drawable; quote and comparison hydration must not keep the chart covered.
+      chartLoading.value = false;
       crosshair.visible = false;
       await loadComparisonSeries(compareTickers.value);
       if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker);
@@ -2687,7 +2711,13 @@ export function useDashboard() {
   async function syncCurrentTicker() {
     syncingCurrent.value = true;
     try {
-      const result = await apiFetch(`/api/sync/${normalizeTicker(currentTicker.value)}`, { method: "POST" });
+      const normalizedTicker = normalizeTicker(currentTicker.value);
+      const result = isFutoptTicker(normalizedTicker)
+        ? await dashboardApi.syncFutoptOhlc(normalizedTicker, {
+          period: currentPeriod.value,
+          interval: currentInterval.value,
+        })
+        : await apiFetch(`/api/sync/${normalizedTicker}`, { method: "POST" });
       pushNotification({
         icon: "✅",
         title: "同步完成",
@@ -2936,6 +2966,8 @@ export function useDashboard() {
     chartLayout,
     chartLoading,
     loadingMessage,
+    futoptRefreshStatus,
+    futoptDataStale,
     ohlcData,
     drawings,
     selectedDrawingId,

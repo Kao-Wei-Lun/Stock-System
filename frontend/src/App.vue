@@ -69,6 +69,8 @@
         :chart-layout="chartLayout"
         :chart-loading="chartLoading"
         :loading-message="loadingMessage"
+        :futopt-refresh-status="futoptRefreshStatus"
+        :futopt-data-stale="futoptDataStale"
         :crosshair="crosshair"
         :ohlc-data="ohlcData"
         :active-ind="activeInd"
@@ -522,6 +524,8 @@ const {
   chartLayout,
   chartLoading,
   loadingMessage,
+  futoptRefreshStatus,
+  futoptDataStale,
   ohlcData,
   drawings,
   selectedDrawingId,

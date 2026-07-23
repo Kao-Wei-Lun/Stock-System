@@ -34,7 +34,7 @@ from env_validation import (
     read_url_env,
     validate_runtime_environment,
 )
-from futopt_history_service import FutoptCandleRecorder
+from futopt_history_service import FutoptCandleRecorder, FutoptRefreshCoordinator
 from logging_config import configure_logging
 from local_access import LocalAccessMiddleware, split_csv
 from performance_timing import RequestTimingMiddleware
@@ -125,6 +125,8 @@ FUTOPT_RECORDER_BACKFILL_INTERVAL_SECONDS = read_int_env(
     minimum=60,
 )
 FUTOPT_RECORDER_POLL_SECONDS = read_int_env("FUTOPT_RECORDER_POLL_SECONDS", "30", minimum=5)
+FUTOPT_BACKGROUND_STALE_SECONDS = read_float_env("FUTOPT_BACKGROUND_STALE_SECONDS", "90", minimum=1)
+FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS = read_float_env("FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS", "8", minimum=0.1)
 ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS = read_float_env("ASSET_QUOTE_REFRESH_TIMEOUT_SECONDS", "8", minimum=0.1)
 APP_TIMEZONE = read_timezone_env("APP_TIMEZONE", "Asia/Taipei")
 DAILY_LATEST_SYNC_TIME_RAW = read_hhmm_env("DAILY_LATEST_SYNC_TIME", "18:10")
@@ -313,6 +315,13 @@ futopt_candle_recorder = FutoptCandleRecorder(
     symbols=FUTOPT_RECORDER_SYMBOLS,
     logger=log,
 )
+futopt_refresh_coordinator = FutoptRefreshCoordinator(
+    provider=fubon_futopt_provider,
+    db=db,
+    stale_after_seconds=FUTOPT_BACKGROUND_STALE_SECONDS,
+    empty_wait_seconds=FUTOPT_BACKGROUND_EMPTY_WAIT_SECONDS,
+    logger=log,
+)
 
 
 async def sync_paper_trading_margins(reason: str = "scheduled") -> dict:
@@ -435,6 +444,7 @@ data_quality_service = DataQualityService(
 async def lifespan(app: FastAPI):
     log.info("QuantVision Pro backend starting...")
 
+    futopt_refresh_coordinator.startup()
     validate_runtime_environment()
     await init_db()
     await db.ensure_default_watchlist(DEFAULT_WATCHLIST, DEFAULT_WATCH_GROUP_NAME)
@@ -447,6 +457,7 @@ async def lifespan(app: FastAPI):
     background_scheduler.start()
     yield
     await background_scheduler.shutdown()
+    await futopt_refresh_coordinator.shutdown()
     fubon_realtime_pool.shutdown()
     fubon_manager.shutdown()
     await db.close()
@@ -541,6 +552,7 @@ market_data.configure(
     latest_data_sync_interval=LATEST_DATA_SYNC_INTERVAL,
     sync_taiwan_full_history=sync_taiwan_full_history,
     futopt_candle_recorder=futopt_candle_recorder,
+    futopt_refresh_coordinator=futopt_refresh_coordinator,
 )
 assets.configure(
     fetch_and_store_quote_snapshot=fetch_and_store_quote_snapshot,
