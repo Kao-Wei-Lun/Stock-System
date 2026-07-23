@@ -9,6 +9,7 @@ from repositories.journal import JournalMixin
 from repositories.market_data import MarketDataMixin
 from repositories.notification import NotificationMixin
 from repositories.sync import SyncMixin
+from repositories.storage_lifecycle import StorageLifecycleMixin
 from repositories.taiwan_chip import TaiwanChipMixin
 from repositories.watchlist import WatchlistMixin
 from repositories.workspace import WorkspaceMixin
@@ -25,6 +26,7 @@ class Database(
     MarketDataMixin,
     NotificationMixin,
     SyncMixin,
+    StorageLifecycleMixin,
     TaiwanChipMixin,
     WatchlistMixin,
     WorkspaceMixin,

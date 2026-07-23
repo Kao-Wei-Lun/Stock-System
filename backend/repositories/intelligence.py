@@ -100,14 +100,18 @@ class IntelligenceMixin:
                     await cur.executemany(
                         """
                         INSERT INTO `news_articles`
-                            (`ticker`, `market`, `title`, `summary`, `published_at`, `source`, `url`, `sentiment`, `payload_json`)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            (`ticker`, `market`, `title`, `summary`, `published_at`,
+                             `source`, `provider_id`, `url`, `canonical_url_hash`,
+                             `sentiment`, `payload_json`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         AS `incoming`
                         ON DUPLICATE KEY UPDATE
                             `market`=`incoming`.`market`,
                             `summary`=`incoming`.`summary`,
                             `source`=`incoming`.`source`,
+                            `provider_id`=`incoming`.`provider_id`,
                             `url`=`incoming`.`url`,
+                            `canonical_url_hash`=`incoming`.`canonical_url_hash`,
                             `sentiment`=`incoming`.`sentiment`,
                             `payload_json`=`incoming`.`payload_json`
                         """,
@@ -119,7 +123,9 @@ class IntelligenceMixin:
                                 item["summary"],
                                 _parse_datetime_value(item["published_at"]),
                                 item["source"],
+                                item["provider_id"],
                                 item["url"],
+                                item["canonical_url_hash"],
                                 item["sentiment"],
                                 _json_dumps(item.get("payload") or {}),
                             )

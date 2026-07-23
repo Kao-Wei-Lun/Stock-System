@@ -276,10 +276,17 @@ class TaiwanChipProvider:
         normalized = normalize_ticker(ticker)
         market = infer_market(normalized)
         if market != "TW":
-            return await db.get_taiwan_chip_snapshot(normalized)
+            return await db.get_taiwan_chip_snapshot(
+                normalized,
+                include_branch_payload=True,
+            )
 
         query_date = self._coerce_target_date(target_date)
-        existing = await db.get_taiwan_chip_snapshot(normalized, query_date.isoformat())
+        existing = await db.get_taiwan_chip_snapshot(
+            normalized,
+            query_date.isoformat(),
+            include_branch_payload=True,
+        )
         if existing and not force_refresh:
             return existing
 
@@ -290,14 +297,21 @@ class TaiwanChipProvider:
             sources=self._sources_for_ticker(normalized),
         )
         resolved_date = sync_result.get("resolved_date") or query_date.isoformat()
-        snapshot = await db.get_taiwan_chip_snapshot(normalized, resolved_date)
+        snapshot = await db.get_taiwan_chip_snapshot(
+            normalized,
+            resolved_date,
+            include_branch_payload=True,
+        )
         if snapshot:
             return snapshot
 
         if query_date < TWSE_T86_EARLIEST_DATE:
             return existing
 
-        return await db.get_taiwan_chip_snapshot(normalized)
+        return await db.get_taiwan_chip_snapshot(
+            normalized,
+            include_branch_payload=True,
+        )
 
     async def ensure_daily_snapshot(
         self,

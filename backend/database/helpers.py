@@ -17,6 +17,7 @@ MYSQL_DATABASE = read_text_env("MYSQL_DATABASE", "quantvision")
 
 from journal_service import build_journal_stats, compute_trade_result
 from display_name_resolver import resolve_display_name
+from news_identity import news_url_hash, resolve_news_provider_id
 
 def _serialize_user_profile(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
@@ -267,6 +268,7 @@ def _deserialize_market_event(row: Optional[Dict[str, Any]]) -> Optional[Dict[st
         "event_time": _datetime_to_iso(row.get("event_time")),
         "importance": row.get("importance"),
         "source": row.get("source"),
+        "provider_id": row.get("provider_id"),
         "url": row.get("url"),
         "payload": _json_loads(row.get("payload_json"), {}),
         "created_at": _datetime_to_iso(row.get("created_at")),
@@ -808,6 +810,7 @@ def _normalize_market_event_payload(payload: Optional[Dict[str, Any]]) -> Dict[s
 
 def _normalize_news_article_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     source = dict(payload or {})
+    url = _optional_string(source.get("url"), max_length=512)
     return {
         "ticker": _optional_string(source.get("ticker"), max_length=32),
         "market": _optional_string(source.get("market"), max_length=32),
@@ -815,7 +818,9 @@ def _normalize_news_article_payload(payload: Optional[Dict[str, Any]]) -> Dict[s
         "summary": _optional_string(source.get("summary"), max_length=4000),
         "published_at": _required_string(source.get("published_at"), "News article published_at is required", max_length=64),
         "source": _optional_string(source.get("source"), max_length=128),
-        "url": _optional_string(source.get("url"), max_length=512),
+        "provider_id": resolve_news_provider_id(source),
+        "url": url,
+        "canonical_url_hash": news_url_hash(url),
         "sentiment": _optional_string(source.get("sentiment"), max_length=32),
         "payload": source.get("payload") if isinstance(source.get("payload"), dict) else {},
     }

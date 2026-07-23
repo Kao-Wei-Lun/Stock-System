@@ -287,7 +287,7 @@ def intelligence_store(monkeypatch):
     async def get_stock_info(ticker):
         return store["fundamentals"] if ticker == "AAPL" else None
 
-    async def get_taiwan_chip_snapshot(ticker, snapshot_date=None):
+    async def get_taiwan_chip_snapshot(ticker, snapshot_date=None, **_kwargs):
         return store["chips"] if ticker == "2330.TW" else None
 
     async def list_screener_presets(owner_id=1):
@@ -395,7 +395,7 @@ def test_market_intelligence_routes(client, intelligence_store):
 
 
 def test_taiwan_chip_route_returns_404_when_official_data_is_unavailable(client, intelligence_store, monkeypatch):
-    async def get_taiwan_chip_snapshot(_ticker, snapshot_date=None):
+    async def get_taiwan_chip_snapshot(_ticker, snapshot_date=None, **_kwargs):
         return None
 
     async def sync_ticker_snapshot(_ticker, target_date=None, force_refresh=False):

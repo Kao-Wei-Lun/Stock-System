@@ -415,7 +415,11 @@ async def get_taiwan_chip_detail(
         except ValueError as exc:
             raise HTTPException(400, "date must use YYYY-MM-DD") from exc
 
-    snapshot = await db.get_taiwan_chip_snapshot(normalized, target_date.isoformat() if target_date else None)
+    snapshot = await db.get_taiwan_chip_snapshot(
+        normalized,
+        target_date.isoformat() if target_date else None,
+        include_branch_payload=True,
+    )
     if refresh or not snapshot:
         try:
             snapshot = await taiwan_chip_provider.sync_ticker_snapshot(
@@ -427,7 +431,11 @@ async def get_taiwan_chip_detail(
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             log.warning("taiwan chip sync failed for %s: %s", normalized, exc)
-            snapshot = await db.get_taiwan_chip_snapshot(normalized, target_date.isoformat() if target_date else None)
+            snapshot = await db.get_taiwan_chip_snapshot(
+                normalized,
+                target_date.isoformat() if target_date else None,
+                include_branch_payload=True,
+            )
     if not snapshot:
         raise HTTPException(404, f"No official Taiwan chip data available for {normalized}")
     return {

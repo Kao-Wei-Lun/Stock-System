@@ -1,10 +1,18 @@
 from typing import Any, Dict, List, Optional
 from database.helpers import *
 from database.core import DEFAULT_OWNER_ID
+from chip_archive_codec import ChipArchiveError, find_archived_branch_payload
 # Import common serialization helpers here if needed
 
 OFFICIAL_TAIWAN_CHIP_SOURCES = ("twse_t86", "tpex_3itrade_hedge")
 OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS = ", ".join(["%s"] * len(OFFICIAL_TAIWAN_CHIP_SOURCES))
+TAIWAN_CHIP_LIGHT_COLUMNS = """
+    `id`, `ticker`, `market`, `snapshot_date`, `margin_balance`, `short_balance`,
+    `securities_lending_balance`, `foreign_net_buy_sell`,
+    `investment_trust_net_buy_sell`, `dealer_net_buy_sell`,
+    `institutional_net_buy_sell`, `source`, `summary_json`,
+    `created_at`, `updated_at`
+""".strip()
 TAIFEX_OVERVIEW_FIELDS = (
     "trade_long_futures_volume",
     "trade_long_options_volume",
@@ -354,11 +362,18 @@ class TaiwanChipMixin:
         self,
         ticker: str,
         snapshot_date: Optional[str] = None,
+        *,
+        include_branch_payload: bool = False,
     ) -> Optional[Dict[str, Any]]:
+        branch_selection = (
+            "`branch_payload_json`"
+            if include_branch_payload
+            else "NULL AS `branch_payload_json`"
+        )
         if snapshot_date:
             row = await self._fetchone(
                 f"""
-                SELECT *
+                SELECT {TAIWAN_CHIP_LIGHT_COLUMNS}, {branch_selection}
                 FROM `taiwan_chip_snapshots`
                 WHERE `ticker`=%s AND `snapshot_date`=%s
                   AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
@@ -369,7 +384,7 @@ class TaiwanChipMixin:
         else:
             row = await self._fetchone(
                 f"""
-                SELECT *
+                SELECT {TAIWAN_CHIP_LIGHT_COLUMNS}, {branch_selection}
                 FROM `taiwan_chip_snapshots`
                 WHERE `ticker`=%s
                   AND `source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})
@@ -378,7 +393,27 @@ class TaiwanChipMixin:
                 """,
                 (ticker, *OFFICIAL_TAIWAN_CHIP_SOURCES),
             )
-        return _deserialize_taiwan_chip_snapshot(row)
+        snapshot = _deserialize_taiwan_chip_snapshot(row)
+        if (
+            snapshot
+            and include_branch_payload
+            and not row.get("branch_payload_json")
+            and hasattr(self, "get_chip_branch_archive")
+        ):
+            archive = await self.get_chip_branch_archive(
+                snapshot_date=snapshot["snapshot_date"],
+                source=str(snapshot.get("source") or ""),
+            )
+            try:
+                archived_payload = find_archived_branch_payload(archive, ticker)
+            except ChipArchiveError:
+                archived_payload = None
+            if archived_payload is not None:
+                snapshot["branch_payload"] = archived_payload
+                snapshot["branch_payload_source"] = "archive"
+        elif snapshot and include_branch_payload:
+            snapshot["branch_payload_source"] = "online"
+        return snapshot
 
     async def get_taiwan_chip_snapshot_count(self, snapshot_date: str) -> int:
         row = await self._fetchone(
@@ -500,7 +535,7 @@ class TaiwanChipMixin:
         filters.append(f"`source` IN ({OFFICIAL_TAIWAN_CHIP_SOURCE_PLACEHOLDERS})")
         rows = await self._fetchall(
             f"""
-            SELECT *
+            SELECT {TAIWAN_CHIP_LIGHT_COLUMNS}, NULL AS `branch_payload_json`
             FROM `taiwan_chip_snapshots`
             WHERE {' AND '.join(filters)}
             ORDER BY `snapshot_date` DESC, `id` DESC

@@ -306,7 +306,7 @@ def test_build_taiwan_chip_summary_uses_official_signals_when_available():
 
 @pytest.mark.anyio
 async def test_taiwan_chip_provider_raises_when_official_sources_are_unavailable(monkeypatch):
-    async def get_taiwan_chip_snapshot(_ticker, _snapshot_date=None):
+    async def get_taiwan_chip_snapshot(_ticker, _snapshot_date=None, **_kwargs):
         return None
 
     async def get_taiwan_chip_snapshot_source_counts(_snapshot_date):

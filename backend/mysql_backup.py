@@ -48,6 +48,8 @@ CRITICAL_SCOPE_INCLUDED_DATA_TABLES = (
     "sync_jobs",
     "sync_job_logs",
     "sync_log",
+    "sync_log_daily_summary",
+    "storage_maintenance_runs",
     "watchlist_groups",
     "watchlist_items",
     "backtest_runs",
@@ -94,6 +96,8 @@ MARKET_HISTORY_DATE_COLUMNS = {
     "taifex_cash_summary_daily": "resolved_date",
     "taiwan_chip_snapshots": "snapshot_date",
     "fubon_market_snapshots": "snapshot_date",
+    "taiwan_chip_branch_archives": "snapshot_date",
+    "market_payload_archives": "business_date",
 }
 MARKET_HISTORY_TABLES = tuple(MARKET_HISTORY_DATE_COLUMNS)
 REBUILDABLE_OR_HISTORY_DATA_TABLES = (

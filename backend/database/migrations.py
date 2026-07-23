@@ -20,6 +20,7 @@ BASELINE_SCHEMA_CHECKSUM = "f935b31f6cc21b27ba44c87c6cf95b1c135b428cfa3cd687fe59
 ASSET_IMPORT_DEDUPE_CHECKSUM = "9790c8b4e2025cfa99df6426c8988c92010b60e47bcf453351e8caa3b7bd08ab"
 ASSET_IMPORT_BATCH_CHECKSUM = "645c3c38c721ffdfa82378bc21adea4fe480de2b3a197b53ef1dac8d85e9e002"
 PAPER_MARGIN_RESILIENCE_CHECKSUM = "9f366ed311d7f59bbc699c266214e86018bb6ed9bbcbe6eba237654177decae5"
+STORAGE_LIFECYCLE_CHECKSUM = "d9b063a6d7ed3066a72f5aacbce062455ec0107cfccd433f6ef785c316c2869d"
 CREATE_MIGRATION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS `schema_migrations` (
     `version` VARCHAR(64) NOT NULL,
@@ -202,6 +203,150 @@ def _paper_margin_resilience_planner(state: SchemaState) -> List[str]:
     ]
 
 
+STORAGE_LIFECYCLE_SQL = {
+    "taiwan_chip_branch_archives": """
+        CREATE TABLE IF NOT EXISTS `taiwan_chip_branch_archives` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `snapshot_date` DATE NOT NULL,
+            `source` VARCHAR(128) NOT NULL,
+            `archive_format` VARCHAR(32) NOT NULL DEFAULT 'gzip_jsonl_v1',
+            `payload_blob` LONGBLOB NOT NULL,
+            `payload_sha256` CHAR(64) NOT NULL,
+            `source_row_count` BIGINT NOT NULL,
+            `original_size_bytes` BIGINT NOT NULL,
+            `compressed_size_bytes` BIGINT NOT NULL,
+            `min_source_id` BIGINT NULL,
+            `max_source_id` BIGINT NULL,
+            `backup_id` VARCHAR(128) NOT NULL,
+            `status` VARCHAR(32) NOT NULL DEFAULT 'archived',
+            `archived_at` DATETIME NOT NULL,
+            `cleanup_eligible_at` DATETIME NOT NULL,
+            `cleaned_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_chip_branch_archive_date_source` (`snapshot_date`, `source`),
+            KEY `idx_chip_branch_archive_cleanup` (`status`, `cleanup_eligible_at`, `snapshot_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """.strip(),
+    "sync_log_daily_summary": """
+        CREATE TABLE IF NOT EXISTS `sync_log_daily_summary` (
+            `summary_date` DATE NOT NULL,
+            `ticker` VARCHAR(32) NOT NULL,
+            `status` VARCHAR(32) NOT NULL,
+            `entry_count` BIGINT NOT NULL,
+            `rows_added` BIGINT NOT NULL,
+            `first_synced_at` DATETIME NULL,
+            `last_synced_at` DATETIME NULL,
+            `last_error_message` VARCHAR(500) NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`summary_date`, `ticker`, `status`),
+            KEY `idx_sync_log_daily_summary_status` (`status`, `summary_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """.strip(),
+    "market_payload_archives": """
+        CREATE TABLE IF NOT EXISTS `market_payload_archives` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `source_table` VARCHAR(64) NOT NULL,
+            `archive_key` VARCHAR(128) NOT NULL,
+            `business_date` DATE NOT NULL,
+            `archive_format` VARCHAR(32) NOT NULL DEFAULT 'gzip_jsonl_v1',
+            `payload_blob` LONGBLOB NOT NULL,
+            `payload_sha256` CHAR(64) NOT NULL,
+            `source_row_count` BIGINT NOT NULL,
+            `original_size_bytes` BIGINT NOT NULL,
+            `compressed_size_bytes` BIGINT NOT NULL,
+            `backup_id` VARCHAR(128) NOT NULL,
+            `status` VARCHAR(32) NOT NULL DEFAULT 'archived',
+            `archived_at` DATETIME NOT NULL,
+            `cleanup_eligible_at` DATETIME NOT NULL,
+            `cleaned_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_market_payload_archive_identity`
+                (`source_table`, `archive_key`, `business_date`),
+            KEY `idx_market_payload_archive_cleanup`
+                (`source_table`, `status`, `cleanup_eligible_at`, `business_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """.strip(),
+    "storage_maintenance_runs": """
+        CREATE TABLE IF NOT EXISTS `storage_maintenance_runs` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `action` VARCHAR(64) NOT NULL,
+            `source_table` VARCHAR(64) NULL,
+            `cutoff_date` DATE NULL,
+            `status` VARCHAR(32) NOT NULL,
+            `is_dry_run` TINYINT NOT NULL DEFAULT 1,
+            `backup_id` VARCHAR(128) NULL,
+            `batch_size` INT NOT NULL DEFAULT 0,
+            `processed_rows` BIGINT NOT NULL DEFAULT 0,
+            `archived_rows` BIGINT NOT NULL DEFAULT 0,
+            `cleaned_rows` BIGINT NOT NULL DEFAULT 0,
+            `cursor_json` LONGTEXT NULL,
+            `result_json` LONGTEXT NULL,
+            `last_error` TEXT NULL,
+            `started_at` DATETIME NOT NULL,
+            `completed_at` DATETIME NULL,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_storage_maintenance_runs_status` (`status`, `updated_at`),
+            KEY `idx_storage_maintenance_runs_table` (`source_table`, `action`, `started_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """.strip(),
+}
+STORAGE_LIFECYCLE_NEWS_SQL = {
+    "canonical_url_hash": """
+        ALTER TABLE `news_articles`
+        ADD COLUMN `canonical_url_hash` CHAR(64) NULL AFTER `url`
+    """.strip(),
+    "provider_id": """
+        ALTER TABLE `news_articles`
+        ADD COLUMN `provider_id` VARCHAR(128) NULL AFTER `source`
+    """.strip(),
+    "canonical_index": """
+        ALTER TABLE `news_articles`
+        ADD UNIQUE INDEX `uq_news_articles_ticker_canonical`
+            (`ticker`, `canonical_url_hash`)
+    """.strip(),
+    "provider_index": """
+        ALTER TABLE `news_articles`
+        ADD INDEX `idx_news_articles_source_provider`
+            (`source`, `provider_id`)
+    """.strip(),
+}
+
+
+def _storage_lifecycle_checksum() -> str:
+    encoded = json.dumps(
+        {
+            "tables": STORAGE_LIFECYCLE_SQL,
+            "news": STORAGE_LIFECYCLE_NEWS_SQL,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _storage_lifecycle_planner(state: SchemaState) -> List[str]:
+    statements = [
+        statement
+        for table_name, statement in STORAGE_LIFECYCLE_SQL.items()
+        if table_name not in state.tables
+    ]
+    if "news_articles" not in state.tables:
+        statements.extend(STORAGE_LIFECYCLE_NEWS_SQL.values())
+        return statements
+    news_columns = state.columns.get("news_articles", set())
+    news_indexes = state.indexes.get("news_articles", set())
+    if "canonical_url_hash" not in news_columns:
+        statements.append(STORAGE_LIFECYCLE_NEWS_SQL["canonical_url_hash"])
+    if "provider_id" not in news_columns:
+        statements.append(STORAGE_LIFECYCLE_NEWS_SQL["provider_id"])
+    if "uq_news_articles_ticker_canonical" not in news_indexes:
+        statements.append(STORAGE_LIFECYCLE_NEWS_SQL["canonical_index"])
+    if "idx_news_articles_source_provider" not in news_indexes:
+        statements.append(STORAGE_LIFECYCLE_NEWS_SQL["provider_index"])
+    return statements
+
+
 # When desired schema definitions change, add a new MigrationSpec instead of
 # editing the baseline version or its frozen checksum. The helper above can be
 # used to calculate the checksum for a newly introduced schema snapshot.
@@ -229,6 +374,12 @@ MIGRATIONS: tuple[MigrationSpec, ...] = (
         description="Add resilient paper trading margin refresh metadata",
         checksum=PAPER_MARGIN_RESILIENCE_CHECKSUM,
         planner=_paper_margin_resilience_planner,
+    ),
+    MigrationSpec(
+        version="20260723_0002",
+        description="Add bounded storage lifecycle archive metadata",
+        checksum=STORAGE_LIFECYCLE_CHECKSUM,
+        planner=_storage_lifecycle_planner,
     ),
 )
 
