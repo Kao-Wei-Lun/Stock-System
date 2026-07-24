@@ -7,9 +7,10 @@
   --purple: #9b6dff; --cyan: #00d4ff; --gold: #ffd166;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body,#app{height:100%;overflow:hidden;}
-body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;display:flex;flex-direction:column;}
-.app-shell{height:100%;display:flex;flex-direction:column;}
+html,body,#app{height:100%;min-height:0;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;}
+#app{width:100%;}
+.app-shell{height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;min-height:0;overflow:hidden;display:flex;flex-direction:column;}
 
 /* ─ TOPBAR ─ */
 .topbar{height:48px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;z-index:100;}

@@ -9,6 +9,23 @@ const primaryRoutes = [
   { label: "設定", path: "/app/settings/2330.TW", marker: "系統設定" },
 ];
 
+const routeScrollContracts = [
+  { label: "總覽", path: "/app/overview/2330.TW", selector: ".workspace-page.overview-page", scrollable: true },
+  { label: "終端", path: "/app/terminal/%2ATMFF", selector: ".terminal-page", scrollable: false },
+  { label: "籌碼", path: "/app/institutional/2330.TW", selector: ".workspace-page.institutional-page", scrollable: true },
+  { label: "復盤日誌", path: "/app/review/journal/2330.TW", selector: ".workspace-page.review-page", scrollable: true },
+  { label: "復盤回測", path: "/app/review/backtest/2330.TW", selector: ".workspace-page.review-page", scrollable: true },
+  { label: "資產", path: "/app/assets/2330.TW", selector: ".workspace-page.asset-page", scrollable: true },
+  {
+    label: "設定",
+    path: "/app/settings/2330.TW",
+    selector: ".settings-workspace",
+    scrollable: true,
+    overflowExpected: false,
+  },
+  { label: "模擬", path: "/app/paper-trading", selector: ".paper-trading-page", scrollable: true, standalone: true },
+];
+
 async function resetFixture(request, patch = {}) {
   await request.post("/api/e2e/control", {
     data: {
@@ -63,6 +80,53 @@ test("all primary navigation and direct reload routes remain usable", async ({ p
   await page.getByRole("button", { name: /^模擬/ }).click();
   await expect(page).toHaveURL(/\/app\/paper-trading$/);
   await expect(page.getByText("本頁不會送出任何真實委託")).toBeVisible();
+});
+
+test("all routes keep the viewport bounded and preserve their intended scroll container", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  for (const route of routeScrollContracts) {
+    await page.goto(route.path);
+    const scrollContainer = page.locator(route.selector);
+    await expect(scrollContainer, route.label).toBeVisible();
+
+    if (!route.standalone) {
+      await expect.poll(
+        () => page.evaluate(() => {
+          const app = document.querySelector("#app");
+          const shell = document.querySelector(".app-shell");
+          return {
+            appHeight: app?.clientHeight ?? 0,
+            appScrollHeight: app?.scrollHeight ?? 0,
+            shellHeight: shell?.clientHeight ?? 0,
+            viewportHeight: window.innerHeight,
+          };
+        }),
+        { message: `${route.label} 根層高度必須受視窗限制` },
+      ).toEqual({
+        appHeight: 720,
+        appScrollHeight: 720,
+        shellHeight: 720,
+        viewportHeight: 720,
+      });
+    }
+
+    const overflowY = await scrollContainer.evaluate((element) => getComputedStyle(element).overflowY);
+    if (route.scrollable) {
+      expect(["auto", "scroll"], route.label).toContain(overflowY);
+      if (route.overflowExpected !== false) {
+        await expect.poll(
+          () => scrollContainer.evaluate((element) => element.scrollHeight > element.clientHeight + 1),
+          { message: `${route.label} 應由頁面容器處理垂直捲動` },
+        ).toBe(true);
+      }
+    } else {
+      await expect.poll(
+        () => scrollContainer.evaluate((element) => element.scrollHeight > element.clientHeight + 1),
+        { message: `${route.label} 不應讓終端根容器溢出` },
+      ).toBe(false);
+    }
+  }
 });
 
 test("dynamic futures aliases resolve, cache confirms against DB, realtime updates, and Y scale is explicit", async ({

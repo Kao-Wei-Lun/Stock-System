@@ -1487,11 +1487,17 @@ onBeforeUnmount(() => {
 #app,
 .app-shell {
   height: 100%;
+  min-height: 0;
 }
 
 .app-shell {
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-notice-banner {
