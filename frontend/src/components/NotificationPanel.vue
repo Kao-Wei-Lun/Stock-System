@@ -1,5 +1,10 @@
 <template>
-  <div class="notif-center-shell">
+  <div
+    ref="shellRef"
+    class="notif-center-shell"
+    :class="shellClasses"
+    :style="shellStyle"
+  >
     <button
       v-if="isCollapsed"
       class="notif-center-toggle"
@@ -20,7 +25,9 @@
     <Transition name="notif-center-fade">
       <aside
         v-if="!isCollapsed"
+        ref="panelRef"
         class="notif-center-panel"
+        :style="panelStyle"
         data-testid="notif-center-panel"
         @keydown.esc="collapsePanel"
       >
@@ -41,6 +48,50 @@
               縮小
             </button>
           </div>
+        </div>
+
+        <div class="notif-layout-toolbar" aria-label="通知中心位置控制">
+          <div class="notif-layout-docks" role="group" aria-label="快速停靠位置">
+            <button
+              v-for="option in anchorOptions"
+              :key="option.value"
+              class="notif-layout-btn dock"
+              :class="{ active: layout.anchor === option.value }"
+              type="button"
+              :title="option.label"
+              :aria-label="option.label"
+              :aria-pressed="layout.anchor === option.value"
+              :data-testid="`notif-dock-${option.value}`"
+              @click="dockPanel(option.value)"
+            >
+              {{ option.icon }}
+            </button>
+          </div>
+          <button
+            class="notif-layout-btn drag"
+            :class="{ active: layout.anchor === 'custom' }"
+            type="button"
+            title="拖曳通知中心；方向鍵可微調"
+            aria-label="拖曳通知中心；方向鍵可微調"
+            data-testid="notif-drag-handle"
+            @pointerdown="startDrag"
+            @pointermove="moveDrag"
+            @pointerup="endDrag"
+            @pointercancel="endDrag"
+            @keydown="moveWithKeyboard"
+          >
+            ⠿ 移動
+          </button>
+          <button
+            class="notif-layout-btn reset"
+            type="button"
+            title="重設通知中心位置與高度"
+            aria-label="重設通知中心位置與高度"
+            data-testid="notif-layout-reset"
+            @click="resetPanelLayout"
+          >
+            重設
+          </button>
         </div>
 
         <div class="notif-controls">
@@ -188,7 +239,22 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+} from "vue";
+
+import {
+  DEFAULT_NOTIFICATION_LAYOUT,
+  NOTIFICATION_PANEL_ANCHORS,
+  anchorClassName,
+  clampFloatingPanelPosition,
+  loadNotificationLayout,
+  saveNotificationLayout,
+} from "../utils/floatingPanelLayout";
 
 const props = defineProps({
   notifications: { type: Array, required: true },
@@ -204,10 +270,20 @@ defineEmits([
   "save-journal-filter-preset",
 ]);
 
-const isCollapsed = ref(true);
+const initialLayout = loadNotificationLayout();
+const layout = ref(initialLayout);
+const isCollapsed = ref(initialLayout.collapsed);
 const viewMode = ref("all");
 const categoryFilter = ref("all");
 const searchText = ref("");
+const shellRef = ref(null);
+const panelRef = ref(null);
+const isCompactViewport = ref(false);
+const isDragging = ref(false);
+
+let activePointerId = null;
+let dragOffset = { x: 0, y: 0 };
+let panelResizeObserver = null;
 
 const CATEGORY_LABELS = {
   alert: "警報",
@@ -225,6 +301,45 @@ const viewOptions = [
   { value: "all", label: "全部" },
   { value: "unread", label: "未讀" },
 ];
+
+const anchorOptions = NOTIFICATION_PANEL_ANCHORS.map((value) => ({
+  value,
+  icon: {
+    "top-left": "↖",
+    "top-right": "↗",
+    "bottom-left": "↙",
+    "bottom-right": "↘",
+  }[value],
+  label: {
+    "top-left": "停靠左上",
+    "top-right": "停靠右上",
+    "bottom-left": "停靠左下",
+    "bottom-right": "停靠右下",
+  }[value],
+}));
+
+const shellClasses = computed(() => [
+  anchorClassName(isCompactViewport.value ? "bottom-right" : layout.value.anchor),
+  {
+    "is-compact": isCompactViewport.value,
+    "is-dragging": isDragging.value,
+  },
+]);
+
+const shellStyle = computed(() => {
+  if (isCompactViewport.value || layout.value.anchor !== "custom") return {};
+  return {
+    left: `${layout.value.x}px`,
+    top: `${layout.value.y}px`,
+    right: "auto",
+    bottom: "auto",
+  };
+});
+
+const panelStyle = computed(() => {
+  if (isCompactViewport.value || !layout.value.panelHeight) return {};
+  return { height: `${layout.value.panelHeight}px` };
+});
 
 const totalNotifications = computed(() => (props.notifications || []).length);
 const unreadNotifications = computed(() => (props.notifications || []).filter((item) => !item.read).length);
@@ -269,10 +384,173 @@ const visibleNotifications = computed(() => {
 
 function expandPanel() {
   isCollapsed.value = false;
+  persistLayout({ collapsed: false });
+  nextTick(() => {
+    observePanelResize();
+    clampCustomPosition();
+  });
 }
 
 function collapsePanel() {
   isCollapsed.value = true;
+  persistLayout({ collapsed: true });
+  disconnectPanelResizeObserver();
+  nextTick(clampCustomPosition);
+}
+
+function persistLayout(patch = {}) {
+  layout.value = saveNotificationLayout({
+    ...layout.value,
+    ...patch,
+    collapsed: patch.collapsed ?? isCollapsed.value,
+  });
+}
+
+function dockPanel(anchor) {
+  if (!NOTIFICATION_PANEL_ANCHORS.includes(anchor) || isCompactViewport.value) return;
+  persistLayout({ anchor, x: null, y: null });
+}
+
+function resetPanelLayout() {
+  layout.value = saveNotificationLayout({
+    ...DEFAULT_NOTIFICATION_LAYOUT,
+    collapsed: isCollapsed.value,
+  });
+  nextTick(observePanelResize);
+}
+
+function viewportSize() {
+  const visualViewport = globalThis.visualViewport;
+  return {
+    width: Number(visualViewport?.width || globalThis.innerWidth || 0),
+    height: Number(visualViewport?.height || globalThis.innerHeight || 0),
+  };
+}
+
+function clampedPosition(position) {
+  const shell = shellRef.value;
+  const rect = shell?.getBoundingClientRect?.();
+  const viewport = viewportSize();
+  return clampFloatingPanelPosition(position, {
+    panelWidth: rect?.width || 360,
+    panelHeight: rect?.height || 64,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+  });
+}
+
+function clampCustomPosition({ persist = true } = {}) {
+  if (isCompactViewport.value || layout.value.anchor !== "custom") return;
+  const nextPosition = clampedPosition({ x: layout.value.x, y: layout.value.y });
+  if (nextPosition.x === layout.value.x && nextPosition.y === layout.value.y) return;
+  layout.value = { ...layout.value, ...nextPosition };
+  if (persist) persistLayout();
+}
+
+function startDrag(event) {
+  if (isCompactViewport.value || (event.button != null && event.button !== 0)) return;
+  const rect = shellRef.value?.getBoundingClientRect?.();
+  if (!rect) return;
+  activePointerId = event.pointerId;
+  dragOffset = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+  isDragging.value = true;
+  layout.value = {
+    ...layout.value,
+    anchor: "custom",
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+  };
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  event.preventDefault?.();
+}
+
+function moveDrag(event) {
+  if (!isDragging.value || event.pointerId !== activePointerId) return;
+  const nextPosition = clampedPosition({
+    x: event.clientX - dragOffset.x,
+    y: event.clientY - dragOffset.y,
+  });
+  layout.value = {
+    ...layout.value,
+    anchor: "custom",
+    ...nextPosition,
+  };
+  event.preventDefault?.();
+}
+
+function endDrag(event) {
+  if (!isDragging.value || event.pointerId !== activePointerId) return;
+  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  activePointerId = null;
+  isDragging.value = false;
+  persistLayout();
+}
+
+function moveWithKeyboard(event) {
+  if (isCompactViewport.value) return;
+  const directions = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+  const direction = directions[event.key];
+  if (!direction) return;
+  const rect = shellRef.value?.getBoundingClientRect?.();
+  if (!rect) return;
+  const step = event.shiftKey ? 1 : 10;
+  const origin = layout.value.anchor === "custom"
+    ? { x: layout.value.x, y: layout.value.y }
+    : { x: rect.left, y: rect.top };
+  const nextPosition = clampedPosition({
+    x: origin.x + (direction[0] * step),
+    y: origin.y + (direction[1] * step),
+  });
+  layout.value = {
+    ...layout.value,
+    anchor: "custom",
+    ...nextPosition,
+  };
+  persistLayout();
+  event.preventDefault();
+}
+
+function disconnectPanelResizeObserver() {
+  panelResizeObserver?.disconnect?.();
+  panelResizeObserver = null;
+}
+
+function observePanelResize() {
+  disconnectPanelResizeObserver();
+  if (
+    isCollapsed.value
+    || isCompactViewport.value
+    || !panelRef.value
+    || typeof globalThis.ResizeObserver !== "function"
+  ) {
+    return;
+  }
+
+  let previousHeight = Math.round(panelRef.value.getBoundingClientRect().height);
+  panelResizeObserver = new ResizeObserver((entries) => {
+    const height = Math.round(entries[0]?.contentRect?.height || 0);
+    if (!height || Math.abs(height - previousHeight) < 2) return;
+    previousHeight = height;
+    persistLayout({ panelHeight: height });
+    nextTick(clampCustomPosition);
+  });
+  panelResizeObserver.observe(panelRef.value);
+}
+
+function updateViewportLayout() {
+  isCompactViewport.value = Number(globalThis.innerWidth || 0) <= 640;
+  nextTick(() => {
+    clampCustomPosition();
+    observePanelResize();
+  });
 }
 
 function formatCategory(value) {
@@ -360,20 +638,67 @@ function buildJournalPresetDraft(item) {
     },
   };
 }
+
+onMounted(() => {
+  updateViewportLayout();
+  globalThis.addEventListener?.("resize", updateViewportLayout);
+  globalThis.addEventListener?.("orientationchange", updateViewportLayout);
+  globalThis.visualViewport?.addEventListener?.("resize", updateViewportLayout);
+  nextTick(() => {
+    clampCustomPosition();
+    observePanelResize();
+  });
+});
+
+onBeforeUnmount(() => {
+  disconnectPanelResizeObserver();
+  globalThis.removeEventListener?.("resize", updateViewportLayout);
+  globalThis.removeEventListener?.("orientationchange", updateViewportLayout);
+  globalThis.visualViewport?.removeEventListener?.("resize", updateViewportLayout);
+});
 </script>
 
 <style scoped>
 .notif-center-shell {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 30;
+  z-index: 320;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: 12px;
   max-width: min(360px, calc(100vw - 24px));
   pointer-events: none;
+}
+
+.notif-center-shell.is-top-left {
+  top: 18px;
+  left: 18px;
+  align-items: flex-start;
+}
+
+.notif-center-shell.is-top-right {
+  top: 18px;
+  right: 18px;
+  align-items: flex-end;
+}
+
+.notif-center-shell.is-bottom-left {
+  bottom: 18px;
+  left: 18px;
+  align-items: flex-start;
+}
+
+.notif-center-shell.is-bottom-right {
+  right: 18px;
+  bottom: 18px;
+  align-items: flex-end;
+}
+
+.notif-center-shell.is-custom {
+  align-items: flex-start;
+}
+
+.notif-center-shell.is-dragging {
+  user-select: none;
 }
 
 .notif-center-toggle,
@@ -433,7 +758,8 @@ function buildJournalPresetDraft(item) {
   position: relative;
   min-width: 280px;
   min-height: 240px;
-  max-height: min(72vh, 680px);
+  max-height: min(calc(100vh - 36px), 680px);
+  max-height: min(calc(100dvh - 36px), 680px);
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -469,6 +795,56 @@ function buildJournalPresetDraft(item) {
   font-size: 11px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.notif-layout-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.018);
+  flex-shrink: 0;
+}
+
+.notif-layout-docks {
+  display: flex;
+  gap: 4px;
+}
+
+.notif-layout-btn {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text3);
+  cursor: pointer;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+}
+
+.notif-layout-btn:hover,
+.notif-layout-btn:focus-visible,
+.notif-layout-btn.active {
+  border-color: rgba(123, 231, 255, 0.32);
+  background: rgba(123, 231, 255, 0.1);
+  color: #b9f5ff;
+}
+
+.notif-layout-btn.drag {
+  margin-left: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.notif-center-shell.is-dragging .notif-layout-btn.drag {
+  cursor: grabbing;
+}
+
+.notif-layout-btn.reset {
+  color: var(--text2);
 }
 
 .notif-eyebrow {
@@ -691,10 +1067,12 @@ function buildJournalPresetDraft(item) {
 
 @media (max-width: 640px) {
   .notif-center-shell {
-    right: 12px;
-    left: 12px;
-    bottom: 12px;
+    top: auto !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    left: 12px !important;
     max-width: none;
+    align-items: stretch;
   }
 
   .notif-center-toggle,
@@ -706,6 +1084,10 @@ function buildJournalPresetDraft(item) {
   .notif-center-panel {
     max-height: min(68vh, 560px);
     resize: none;
+  }
+
+  .notif-layout-toolbar {
+    display: none;
   }
 }
 </style>

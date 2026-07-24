@@ -1,13 +1,22 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import NotificationPanel from "./NotificationPanel.vue";
+import { NOTIFICATION_LAYOUT_STORAGE_KEY } from "../utils/floatingPanelLayout";
 
 async function openPanel(wrapper) {
   await wrapper.get('[data-testid="notif-center-toggle"]').trigger("click");
 }
 
 describe("NotificationPanel", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(NOTIFICATION_LAYOUT_STORAGE_KEY);
+  });
+
+  afterEach(() => {
+    window.localStorage.removeItem(NOTIFICATION_LAYOUT_STORAGE_KEY);
+  });
+
   it("filters notifications and emits read toggles", async () => {
     const wrapper = mount(NotificationPanel, {
       props: {

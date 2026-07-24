@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const notificationLayoutStorageKey = "quantvision:notification-center-layout:v1";
+
 const primaryRoutes = [
   { label: "總覽", path: "/app/overview/2330.TW", marker: "QuantVision" },
   { label: "終端", path: "/app/terminal/%2ATMFF", marker: "Pro Chart Terminal" },
@@ -127,6 +129,56 @@ test("all routes keep the viewport bounded and preserve their intended scroll co
       ).toBe(false);
     }
   }
+});
+
+test("notification center can move, dock, persist, reset, and adapt to mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/app/overview/2330.TW");
+  await page.evaluate((key) => window.localStorage.removeItem(key), notificationLayoutStorageKey);
+  await page.reload();
+
+  await page.getByTestId("notif-center-toggle").click();
+  const shell = page.locator(".notif-center-shell");
+  await page.getByTestId("notif-dock-top-left").click();
+  await expect(shell).toHaveClass(/is-top-left/);
+  await expect.poll(
+    () => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)), notificationLayoutStorageKey),
+  ).toMatchObject({ anchor: "top-left", collapsed: false });
+
+  const dragHandle = page.getByTestId("notif-drag-handle");
+  const handleBox = await dragHandle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  await page.mouse.move(handleBox.x + (handleBox.width / 2), handleBox.y + (handleBox.height / 2));
+  await page.mouse.down();
+  await page.mouse.move(460, handleBox.y + (handleBox.height / 2));
+  await page.mouse.up();
+  await expect(shell).toHaveClass(/is-custom/);
+
+  const draggedLayout = await page.evaluate(
+    (key) => JSON.parse(window.localStorage.getItem(key)),
+    notificationLayoutStorageKey,
+  );
+  expect(draggedLayout.anchor).toBe("custom");
+  expect(draggedLayout.x).toBeGreaterThan(18);
+
+  await page.reload();
+  await expect(page.getByTestId("notif-center-panel")).toBeVisible();
+  await expect(shell).toHaveClass(/is-custom/);
+
+  await page.getByTestId("notif-layout-reset").click();
+  await expect(shell).toHaveClass(/is-bottom-right/);
+  await expect.poll(
+    () => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)), notificationLayoutStorageKey),
+  ).toMatchObject({ anchor: "bottom-right", collapsed: false });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(shell).toHaveClass(/is-compact/);
+  const mobileBox = await shell.boundingBox();
+  expect(mobileBox.x).toBeGreaterThanOrEqual(11);
+  expect(mobileBox.x + mobileBox.width).toBeLessThanOrEqual(379);
+  expect(mobileBox.y + mobileBox.height).toBeLessThanOrEqual(833);
+
+  await page.evaluate((key) => window.localStorage.removeItem(key), notificationLayoutStorageKey);
 });
 
 test("dynamic futures aliases resolve, cache confirms against DB, realtime updates, and Y scale is explicit", async ({
