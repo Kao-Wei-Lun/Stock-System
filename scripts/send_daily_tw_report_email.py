@@ -28,9 +28,11 @@ from ai_daily_report_tw import (
     _sanitize_codex_analysis_text,
     build_report,
     check_api,
-    markdown_to_email_html,
-    markdown_to_plain_text,
 )
+try:
+    from daily_report.delivery import build_delivery_bodies
+except ImportError:  # pragma: no cover - supports importing as scripts.send_daily_tw_report_email
+    from scripts.daily_report.delivery import build_delivery_bodies
 from email_delivery import (
     build_message as _shared_build_message,
     load_smtp_config as _shared_smtp_config,
@@ -503,8 +505,12 @@ def main() -> int:
     else:
         report = build_report(base_url=args.base, report_date=report_date)
 
-    html_text = markdown_to_email_html(report, title=f"每日盤後 AI 交易策略報告｜{report_date}")
-    plain_text = markdown_to_plain_text(report)
+    delivery_bodies = build_delivery_bodies(
+        report,
+        title=f"每日盤後 AI 交易策略報告｜{report_date}",
+    )
+    html_text = delivery_bodies.html_text
+    plain_text = delivery_bodies.plain_text
     _write_text(md_path, report)
     _write_text(html_path, html_text)
 

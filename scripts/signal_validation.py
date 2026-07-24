@@ -397,6 +397,7 @@ def compute_backtests(
                 "hit_1d": ret_1d is not None and ret_1d > 0,
                 "hit_3d": ret_3d is not None and ret_3d > 0,
                 "hit_5d": ret_5d is not None and ret_5d > 0,
+                "hit_10d": ret_10d is not None and ret_10d > 0,
                 "breakout_success": _breakout_success(future_rows, to_float(signal.get("breakout_price"))),
                 "failed_signal": _failed_signal(future_rows, to_float(signal.get("signal_low")), ma20),
             }
@@ -437,6 +438,7 @@ def summarize_backtests(backtests: list[dict], *, today_count: int, lookback_day
         "avg_hit_1d": _known_rate(recent, "hit_1d"),
         "avg_hit_3d": _known_rate(recent, "hit_3d"),
         "avg_hit_5d": _known_rate(recent, "hit_5d"),
+        "avg_hit_10d": _known_rate(recent, "hit_10d"),
         "confirmed_uptrend_avg_return": _avg([row.get("return_5d") for row in confirmed]),
         "failed_breakout_ratio": (len(failed_rows) / len(known_failed_base) * 100) if known_failed_base else None,
     }

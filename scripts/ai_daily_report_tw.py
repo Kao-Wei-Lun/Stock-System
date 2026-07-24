@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
 import re
@@ -19,6 +18,19 @@ try:
     import signal_validation
 except ImportError:  # pragma: no cover - supports importing as scripts.ai_daily_report_tw
     from scripts import signal_validation
+
+try:
+    from daily_report import classification as report_classification
+    from daily_report import rendering as report_rendering
+    from daily_report import scoring as report_scoring
+    from daily_report.data_assembly import assemble_source_data
+    from daily_report.validation import persist_and_validate_signals
+except ImportError:  # pragma: no cover - supports importing as scripts.ai_daily_report_tw
+    from scripts.daily_report import classification as report_classification
+    from scripts.daily_report import rendering as report_rendering
+    from scripts.daily_report import scoring as report_scoring
+    from scripts.daily_report.data_assembly import assemble_source_data
+    from scripts.daily_report.validation import persist_and_validate_signals
 
 
 def _now_tw() -> datetime:
@@ -1661,6 +1673,7 @@ _USER_FACING_REPORT_TERM_LABELS = {
     "avg_hit_1d": "1日平均命中率",
     "avg_hit_3d": "3日平均命中率",
     "avg_hit_5d": "5日平均命中率",
+    "avg_hit_10d": "10日平均命中率",
     "today_signal_count": "今日訊號數",
     "evaluated_signal_count": "已驗證訊號數",
     "lookback_signal_days": "回看訊號交易日",
@@ -2963,214 +2976,23 @@ def _institutional_table_lines(title: str, candidates: list[dict]) -> list[str]:
 
 
 def _split_markdown_table_row(line: str) -> list[str]:
-    stripped = line.strip()
-    if stripped.startswith("|"):
-        stripped = stripped[1:]
-    if stripped.endswith("|"):
-        stripped = stripped[:-1]
-    return [cell.strip() for cell in stripped.split("|")]
+    return report_rendering.split_markdown_table_row(line)
 
 
 def _is_markdown_table_separator(line: str) -> bool:
-    cells = _split_markdown_table_row(line)
-    if not cells:
-        return False
-    return all(re.fullmatch(r":?-{3,}:?", cell.strip()) is not None for cell in cells)
-
-
-EMAIL_STYLES = {
-    "body": (
-        "margin:0;padding:0;background:#f6f8fb;color:#1f2937;"
-        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif;"
-        "line-height:1.55;"
-    ),
-    "content": "max-width:1180px;margin:0 auto;padding:24px;",
-    "h1": "font-size:26px;line-height:1.25;margin:0 0 18px;color:#111827;font-weight:700;",
-    "h2": "font-size:20px;margin:28px 0 12px;color:#111827;border-bottom:2px solid #d8dee9;padding-bottom:6px;font-weight:700;",
-    "h3": "font-size:16px;margin:20px 0 10px;color:#111827;font-weight:700;",
-    "h4": "font-size:15px;margin:16px 0 8px;color:#111827;font-weight:700;",
-    "p": "margin:8px 0 12px;",
-    "ul": "margin:8px 0 14px;padding-left:22px;",
-    "li": "margin:4px 0;",
-    "table_wrap": "margin:12px 0 22px;background:#ffffff;max-width:100%;",
-    "table": (
-        "border-collapse:collapse;width:100%;max-width:100%;table-layout:fixed;"
-        "font-size:13px;border:1px solid #9ca3af;"
-    ),
-    "th": (
-        "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;"
-        "background:#eef2f7;color:#111827;font-weight:700;white-space:normal;"
-        "word-break:break-word;overflow-wrap:anywhere;"
-    ),
-    "td": (
-        "border:1px solid #9ca3af;padding:8px 10px;text-align:left;vertical-align:top;"
-        "background:#ffffff;color:#1f2937;white-space:normal;word-break:break-word;overflow-wrap:anywhere;"
-    ),
-    "code": "background:#eef2f7;border-radius:4px;padding:1px 4px;font-family:Consolas,'Courier New',monospace;",
-    "a": "color:#2563eb;text-decoration:none;",
-}
+    return report_rendering.is_markdown_table_separator(line)
 
 
 def _inline_markdown_to_html(text: str) -> str:
-    placeholders: list[str] = []
-
-    def hold(value: str) -> str:
-        placeholders.append(value)
-        return f"\u0000{len(placeholders) - 1}\u0000"
-
-    def replace_link(match: re.Match[str]) -> str:
-        label = html.escape(match.group(1), quote=False)
-        url = html.escape(match.group(2), quote=True)
-        return hold(
-            f'<a href="{url}" target="_blank" rel="noopener noreferrer" style="{EMAIL_STYLES["a"]}">{label}</a>'
-        )
-
-    def replace_code(match: re.Match[str]) -> str:
-        return hold(f'<code style="{EMAIL_STYLES["code"]}">{html.escape(match.group(1), quote=False)}</code>')
-
-    working = re.sub(r"`([^`]+)`", replace_code, text)
-    working = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace_link, working)
-    working = html.escape(working, quote=False)
-    working = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", working)
-
-    for index, value in enumerate(placeholders):
-        working = working.replace(f"\u0000{index}\u0000", value)
-    return working
+    return report_rendering.inline_markdown_to_html(text)
 
 
 def markdown_to_email_html(markdown_text: str, *, title: str = "每日盤後 AI 交易策略報告") -> str:
-    lines = markdown_text.splitlines()
-    body: list[str] = []
-    paragraph: list[str] = []
-    in_list = False
-
-    def flush_paragraph() -> None:
-        nonlocal paragraph
-        if paragraph:
-            text = " ".join(part.strip() for part in paragraph if part.strip())
-            body.append(f'<p style="{EMAIL_STYLES["p"]}">{_inline_markdown_to_html(text)}</p>')
-            paragraph = []
-
-    def close_list() -> None:
-        nonlocal in_list
-        if in_list:
-            body.append("</ul>")
-            in_list = False
-
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-
-        if not stripped:
-            flush_paragraph()
-            close_list()
-            i += 1
-            continue
-
-        if stripped.startswith("|"):
-            flush_paragraph()
-            close_list()
-            table_lines: list[str] = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                table_lines.append(lines[i])
-                i += 1
-            if len(table_lines) >= 2 and _is_markdown_table_separator(table_lines[1]):
-                headers = _split_markdown_table_row(table_lines[0])
-                rows = [_split_markdown_table_row(row) for row in table_lines[2:]]
-                body.append(f'<div style="{EMAIL_STYLES["table_wrap"]}"><table style="{EMAIL_STYLES["table"]}">')
-                body.append(
-                    "<thead><tr>"
-                    + "".join(
-                        f'<th style="{EMAIL_STYLES["th"]}">{_inline_markdown_to_html(header)}</th>'
-                        for header in headers
-                    )
-                    + "</tr></thead>"
-                )
-                body.append("<tbody>")
-                for row in rows:
-                    padded = row + [""] * max(0, len(headers) - len(row))
-                    body.append(
-                        "<tr>"
-                        + "".join(
-                            f'<td style="{EMAIL_STYLES["td"]}">{_inline_markdown_to_html(cell)}</td>'
-                            for cell in padded[: len(headers)]
-                        )
-                        + "</tr>"
-                    )
-                body.append("</tbody></table></div>")
-            else:
-                for table_line in table_lines:
-                    body.append(f'<p style="{EMAIL_STYLES["p"]}">{_inline_markdown_to_html(table_line)}</p>')
-            continue
-
-        heading_match = re.match(r"^(#{1,4})\s+(.+)$", stripped)
-        if heading_match:
-            flush_paragraph()
-            close_list()
-            level = min(len(heading_match.group(1)), 4)
-            heading_style = EMAIL_STYLES[f"h{level}"]
-            body.append(
-                f'<h{level} style="{heading_style}">{_inline_markdown_to_html(heading_match.group(2))}</h{level}>'
-            )
-            i += 1
-            continue
-
-        if stripped.startswith("- "):
-            flush_paragraph()
-            if not in_list:
-                body.append(f'<ul style="{EMAIL_STYLES["ul"]}">')
-                in_list = True
-            body.append(f'<li style="{EMAIL_STYLES["li"]}">{_inline_markdown_to_html(stripped[2:])}</li>')
-            i += 1
-            continue
-
-        close_list()
-        paragraph.append(stripped)
-        i += 1
-
-    flush_paragraph()
-    close_list()
-
-    escaped_title = html.escape(title, quote=False)
-    return (
-        "<!doctype html>\n"
-        '<html lang="zh-Hant">\n'
-        "<head>\n"
-        '<meta charset="utf-8">\n'
-        f"<title>{escaped_title}</title>\n"
-        "</head>\n"
-        f'<body style="{EMAIL_STYLES["body"]}">\n'
-        f'<div style="{EMAIL_STYLES["content"]}">\n'
-        + "\n".join(body)
-        + "\n</div>\n"
-        "</body>\n"
-        "</html>\n"
-    )
+    return report_rendering.markdown_to_email_html(markdown_text, title=title)
 
 
 def markdown_to_plain_text(markdown_text: str) -> str:
-    lines: list[str] = []
-    for raw_line in markdown_text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            lines.append("")
-            continue
-        if _is_markdown_table_separator(line):
-            continue
-        if line.startswith("|"):
-            cells = _split_markdown_table_row(line)
-            lines.append("  " + " | ".join(cells))
-            continue
-        heading_match = re.match(r"^(#{1,4})\s+(.+)$", line)
-        if heading_match:
-            lines.append(heading_match.group(2))
-            lines.append("-" * min(40, len(heading_match.group(2))))
-            continue
-        line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1: \2", line)
-        line = line.replace("**", "").replace("`", "")
-        lines.append(line)
-    return "\n".join(lines).strip() + "\n"
+    return report_rendering.markdown_to_plain_text(markdown_text)
 
 
 def _report_log_dir() -> Path:
@@ -3411,135 +3233,42 @@ def _candle_shape(item: dict) -> dict[str, float | None | bool]:
 
 
 def _candidate_score_breakdown(item: dict, validation: dict | None = None) -> dict[str, int]:
-    # price_score: measures whether price is already above, near, or invalidating the breakout line.
     close = _candidate_latest_close(item)
     breakout_price = _candidate_breakout_price(item)
     signal_low = _candidate_signal_low(item)
     if validation:
         close = _to_float(validation.get("latest_close")) or close
         breakout_price = _to_float(validation.get("breakout_price")) or breakout_price
-
-    if close is None or close <= 0:
-        price_score = 10
-    elif signal_low is not None and close < signal_low:
-        price_score = 0
-    elif breakout_price is not None and breakout_price > 0 and close > breakout_price:
-        price_score = 30
-    elif breakout_price is not None and breakout_price > 0 and abs((breakout_price - close) / breakout_price) <= 0.015:
-        price_score = 20
-    else:
-        price_score = 10
-
-    # breakout_score: rewards confirmed breakouts more than one-day or intraday-only breakouts.
     candle = _candle_shape(item)
-    high = candle.get("high")
-    breakout_hold_days = int((validation or {}).get("breakout_hold_days") or 0)
-    breakout_confirmed = bool((validation or {}).get("breakout_confirmed"))
-    intraday_break = (
-        isinstance(high, (int, float))
-        and breakout_price is not None
-        and breakout_price > 0
-        and high > breakout_price
+    return report_scoring.candidate_score_breakdown(
+        close=close,
+        breakout_price=breakout_price,
+        signal_low=signal_low,
+        candle=candle,
+        volume_expanded=_volume_expanded(item),
+        volume_ratio=_recent_metric(item, "volume_ratio"),
+        chip=((item.get("accumulation_profile") or {}).get("chip") or {}),
+        kline_summary=str((item.get("candlestick_profile") or {}).get("summary") or ""),
+        validation=validation,
     )
-    if breakout_confirmed and breakout_hold_days >= 2:
-        breakout_score = 25
-    elif breakout_price is not None and close is not None and close > breakout_price:
-        breakout_score = 18
-    elif intraday_break:
-        breakout_score = 8
-    else:
-        breakout_score = 5
-
-    # volume_score: separates healthy red-candle volume expansion from upper-shadow or heavy black-candle risk.
-    volume_expanded = _volume_expanded(item)
-    volume_ratio = _recent_metric(item, "volume_ratio")
-    is_red = bool(candle.get("is_red"))
-    is_black = bool(candle.get("is_black"))
-    long_upper = bool(candle.get("long_upper"))
-    if volume_expanded and is_black and (volume_ratio is None or volume_ratio >= 2.0):
-        volume_score = 0
-    elif volume_expanded and long_upper:
-        volume_score = 10
-    elif volume_expanded and is_red:
-        volume_score = 20
-    elif volume_expanded:
-        volume_score = 10
-    else:
-        volume_score = 5
-
-    # institutional_score: checks whether institutional flow and foreign flow are aligned.
-    chip = ((item.get("accumulation_profile") or {}).get("chip") or {})
-    inst5 = chip.get("institutional_5d_sum")
-    fore5 = chip.get("foreign_5d_sum")
-    inst_positive = isinstance(inst5, (int, float)) and inst5 > 0
-    fore_positive = isinstance(fore5, (int, float)) and fore5 > 0
-    if inst_positive and fore_positive:
-        institutional_score = 15
-    elif inst_positive or fore_positive:
-        institutional_score = 8
-    else:
-        institutional_score = 0
-
-    # kline_score: keeps the original pattern reading, but compresses it into a 0-10 score.
-    cp = item.get("candlestick_profile") or {}
-    summary = str(cp.get("summary") or "")
-    if any(word in summary for word in ("明確轉弱", "跌破", "轉弱")):
-        kline_score = 0
-    elif any(word in summary for word in ("弱勢黑K", "長上影")) or (long_upper and is_black):
-        kline_score = 2
-    elif any(word in summary for word in ("十字", "錘子", "母子", "收斂")):
-        kline_score = 6
-    elif any(word in summary for word in ("強勢紅K收高", "低點墊高", "收盤轉強", "突破嘗試")):
-        kline_score = 10
-    else:
-        kline_score = 6 if is_red else 2
-
-    total_score = price_score + breakout_score + volume_score + institutional_score + kline_score
-    return {
-        "price_score": price_score,
-        "breakout_score": breakout_score,
-        "volume_score": volume_score,
-        "institutional_score": institutional_score,
-        "kline_score": kline_score,
-        "total_score": total_score,
-    }
 
 
 def _attach_candidate_scores(candidates: list[dict], validation_by_ticker: dict[str, dict] | None = None) -> list[dict]:
-    validation_by_ticker = validation_by_ticker or {}
-    rows: list[dict] = []
-    for item in candidates:
-        row = dict(item)
-        ticker = str(row.get("ticker") or "").upper().strip()
-        row.update(_candidate_score_breakdown(row, validation_by_ticker.get(ticker)))
-        rows.append(row)
-    return rows
+    return report_scoring.attach_candidate_scores(
+        candidates,
+        validation_by_ticker or {},
+        _candidate_score_breakdown,
+    )
 
 
 def _sort_candidates_by_total_score(
     candidates: list[dict],
     validation_by_ticker: dict[str, dict] | None = None,
 ) -> list[dict]:
-    status_rank = {
-        "confirmed_uptrend": 0,
-        "new_breakout": 1,
-        "watch_only": 2,
-        "failed_breakout": 3,
-        "invalidated": 4,
-    }
-    validation_by_ticker = validation_by_ticker or {}
-
-    def rank(item: tuple[int, dict]) -> tuple[float, int, int]:
-        index, candidate = item
-        ticker = str(candidate.get("ticker") or "").upper().strip()
-        status = (validation_by_ticker.get(ticker) or {}).get("signal_status")
-        return (
-            -float(candidate.get("total_score") or 0),
-            status_rank.get(str(status), 9),
-            index,
-        )
-
-    return [candidate for _, candidate in sorted(enumerate(candidates), key=rank)]
+    return report_scoring.sort_candidates_by_total_score(
+        candidates,
+        validation_by_ticker or {},
+    )
 
 
 def _theme_strength_lookup(*rows_groups: list[dict]) -> dict[str, dict]:
@@ -3766,6 +3495,7 @@ def _attach_signal_backtest_fields(
         row["return_1d"] = latest.get("return_1d")
         row["return_3d"] = latest.get("return_3d")
         row["return_5d"] = latest.get("return_5d")
+        row["return_10d"] = latest.get("return_10d")
         row["historical_type_hit_rate"] = status_hit.get("hit_rate")
         row["historical_type_sample_size"] = status_hit.get("sample_size")
         rows.append(row)
@@ -3779,9 +3509,9 @@ def _signal_backtest_summary_lines(title: str, summary: dict, *, error: str | No
         lines.append("")
         return lines
     lines.append(
-        "| 今日候選數 | 近20日樣本交易日 | 已驗證訊號數 | 近20日平均1日命中率 | 近20日平均3日命中率 | 近20日平均5日命中率 | 已確認上升趨勢平均報酬 | 突破失敗比例 |"
+        "| 今日候選數 | 近20日樣本交易日 | 已驗證訊號數 | 近20日平均1日命中率 | 近20日平均3日命中率 | 近20日平均5日命中率 | 近20日平均10日命中率 | 已確認上升趨勢平均報酬 | 突破失敗比例 |"
     )
-    lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     lines.append(
         "| "
         + " | ".join(
@@ -3792,6 +3522,7 @@ def _signal_backtest_summary_lines(title: str, summary: dict, *, error: str | No
                 _table_cell(_pct_text(summary.get("avg_hit_1d"))),
                 _table_cell(_pct_text(summary.get("avg_hit_3d"))),
                 _table_cell(_pct_text(summary.get("avg_hit_5d"))),
+                _table_cell(_pct_text(summary.get("avg_hit_10d"))),
                 _table_cell(_pct_text(summary.get("confirmed_uptrend_avg_return"))),
                 _table_cell(_pct_text(summary.get("failed_breakout_ratio"))),
             ]
@@ -3836,28 +3567,11 @@ def _ma_from_rows(rows: list[dict], end_index: int, window: int) -> float | None
 
 
 def _signal_status_label(status: str) -> str:
-    labels = {
-        "confirmed_uptrend": "已確認上升趨勢",
-        "new_breakout": "新突破待確認",
-        "watch_only": "觀察中",
-        "failed_breakout": "突破失敗",
-        "invalidated": "已失效",
-    }
-    return labels.get(status, status or "觀察中")
+    return report_classification.signal_status_label(status)
 
 
 def _signal_observation(status: str, row: dict) -> str:
-    if status == "confirmed_uptrend":
-        return "續強優先觀察；回測確認價不破可續抱，跌破改降風險。"
-    if status == "new_breakout":
-        return "剛突破，隔日需量能與收盤續站確認價。"
-    if status == "watch_only":
-        return "連續入選但尚未突破，等待帶量站上確認價。"
-    if status == "failed_breakout":
-        return "曾突破但收回確認價下，先觀察是否重新站回。"
-    if status == "invalidated":
-        return "跌破低點或MA20，暫不追蹤為進攻名單。"
-    return "維持觀察。"
+    return report_classification.signal_observation(status, row)
 
 
 def _calculate_signal_validation(
@@ -3965,18 +3679,14 @@ def _calculate_signal_validation(
         signal_days_5 = len(set(signal_dates[-5:]))
         signal_days_3 = len({date for date in signal_dates if date in last3_dates})
 
-        if invalidated:
-            status = "invalidated"
-        elif ever_broke and latest_close <= breakout_price:
-            status = "failed_breakout"
-        elif signal_days_5 >= 2 and breakout_confirmed and breakout_hold_days >= 2:
-            status = "confirmed_uptrend"
-        elif breakout_confirmed and breakout_hold_days < 2:
-            status = "new_breakout"
-        elif signal_days_5 >= 2 and not breakout_confirmed:
-            status = "watch_only"
-        else:
-            status = "watch_only"
+        status = report_classification.classify_signal(
+            invalidated=invalidated,
+            ever_broke=ever_broke,
+            latest_close=latest_close,
+            breakout_price=breakout_price,
+            signal_days_5=signal_days_5,
+            breakout_hold_days=breakout_hold_days,
+        )
 
         row = {
             "ticker": ticker,
@@ -3998,16 +3708,9 @@ def _calculate_signal_validation(
         row["observation"] = _signal_observation(status, row)
         rows.append(row)
 
-    status_rank = {
-        "confirmed_uptrend": 0,
-        "new_breakout": 1,
-        "watch_only": 2,
-        "failed_breakout": 3,
-        "invalidated": 4,
-    }
     rows.sort(
         key=lambda row: (
-            status_rank.get(str(row.get("signal_status")), 9),
+            report_classification.SIGNAL_STATUS_ORDER.get(str(row.get("signal_status")), 9),
             -int(row.get("signal_days_5") or 0),
             -float(row.get("max_gain_after_signal") or 0),
             str(row.get("ticker") or ""),
@@ -4018,19 +3721,11 @@ def _calculate_signal_validation(
 
 
 def _sort_candidates_by_signal_status(candidates: list[dict], validation_by_ticker: dict[str, dict]) -> list[dict]:
-    status_rank = {
-        "confirmed_uptrend": 0,
-        "new_breakout": 1,
-        "watch_only": 2,
-        "failed_breakout": 3,
-        "invalidated": 4,
-    }
-
     def rank(item: tuple[int, dict]) -> tuple[int, int]:
         index, candidate = item
         ticker = str(candidate.get("ticker") or "").upper().strip()
         status = (validation_by_ticker.get(ticker) or {}).get("signal_status")
-        return status_rank.get(str(status), 9), index
+        return report_classification.SIGNAL_STATUS_ORDER.get(str(status), 9), index
 
     return [candidate for _, candidate in sorted(enumerate(candidates), key=rank)]
 
@@ -4115,16 +3810,13 @@ def _summarize_taifex_position(structured: dict) -> str:
 
 
 def build_report(*, base_url: str, report_date: str) -> str:
-    coverage = _http_json(f"{base_url}/api/tw/universe/coverage?interval=1d", timeout=30)
-    history_status = _http_json(f"{base_url}/api/tw/history/status?interval=1d&limit=5000", timeout=60)
-
-    cov = coverage if isinstance(coverage, dict) else {}
-    hs = history_status if isinstance(history_status, dict) else {}
-
-    status_items = hs.get("items") or []
-    status_counts = Counter(
-        it.get("status") for it in status_items if isinstance(it, dict) and it.get("status") is not None
+    source_data = assemble_source_data(
+        base_url=base_url,
+        report_date=report_date,
+        http_json=_http_json,
     )
+    cov = source_data.coverage
+    status_counts = source_data.status_counts
     non_success = sum(status_counts.get(k, 0) for k in ("pending", "running", "empty", "failed"))
 
     cov_pct = float(cov.get("coverage_pct") or 0)
@@ -4142,66 +3834,17 @@ def build_report(*, base_url: str, report_date: str) -> str:
     )
     data_pool_incomplete = bool(data_warning_reasons)
 
-    screener = _http_json(
-        f"{base_url}/api/screener/run",
-        method="POST",
-        json_body={
-            "filters": {
-                "market": "TW",
-                "setup_type": "accumulation",
-                "sort_by": "accumulation_score",
-                "limit": 200,
-            }
-        },
-        timeout=180,
-    )
-    sc = screener if isinstance(screener, dict) else {}
-    candidates_raw = sc.get("items") or []
-    market_context = sc.get("market_context") if isinstance(sc.get("market_context"), dict) else {}
-
-    momentum_candidates: list[dict] = []
+    candidates_raw = source_data.screener.get("items") or []
+    market_context = source_data.market_context
     try:
-        momentum_screener = _http_json(
-            f"{base_url}/api/screener/run",
-            method="POST",
-            json_body={
-                "filters": {
-                    "market": "TW",
-                    "setup_type": "any",
-                    "sort_by": "score",
-                    "limit": 350,
-                }
-            },
-            timeout=180,
-        )
-        ms = momentum_screener if isinstance(momentum_screener, dict) else {}
-        momentum_candidates = [_with_theme_tags(item) for item in _candidates_with_names(base_url, ms.get("items") or [])]
-    except Exception:
+        momentum_candidates = [
+            _with_theme_tags(item)
+            for item in _candidates_with_names(base_url, source_data.momentum_candidates_raw)
+        ]
+    except Exception:  # noqa: BLE001 - the momentum pool remains optional
         momentum_candidates = []
-
-    # Optional TAIFEX
-    taifex: dict | None = None
-    structured: dict = {"futures": {"items": []}, "options": {"items": []}}
-    try:
-        taifex_obj = _http_json(f"{base_url}/api/taifex/institutional?date={report_date}", timeout=60)
-        taifex = taifex_obj if isinstance(taifex_obj, dict) else None
-    except Exception:
-        taifex = None
-    try:
-        fut_url = (
-            f"{base_url}/api/taifex/structured/futures?date={report_date}&commodity="
-            + urllib.parse.quote("臺股期貨")
-            + "&limit=50"
-        )
-        opt_url = (
-            f"{base_url}/api/taifex/structured/options?date={report_date}&commodity="
-            + urllib.parse.quote("臺指選擇權")
-            + "&limit=50"
-        )
-        structured["futures"] = _http_json(fut_url, timeout=60)
-        structured["options"] = _http_json(opt_url, timeout=60)
-    except Exception:
-        pass
+    taifex = source_data.taifex
+    structured = source_data.structured
 
     twii = _get_spot_card(taifex or {}, "^TWII") if taifex else None
     twoii = _get_spot_card(taifex or {}, "^TWOII") if taifex else None
@@ -4271,47 +3914,20 @@ def build_report(*, base_url: str, report_date: str) -> str:
         selected_stocks + selected_etfs + strong_stock_candidates + bullish_stock_candidates + ma5_walk_candidates
     )
     daily_signals = _daily_signal_records(report_date, daily_signal_candidates, signal_validation_by_ticker)
-    signal_file: Path | None = None
-    signal_store_error: str | None = None
-    try:
-        signal_file = signal_validation.save_daily_signals(
-            _report_log_dir(),
-            report_date,
-            daily_signals,
-            meta={"source": "ai_daily_report_tw", "base_url": base_url},
-        )
-    except Exception as exc:  # noqa: BLE001
-        signal_store_error = str(exc)
-
-    signal_backtest_error: str | None = None
-    signal_backtest_summary: dict = {
-        "today_signal_count": len(daily_signals),
-        "lookback_signal_days": 0,
-        "evaluated_signal_count": 0,
-        "avg_hit_1d": None,
-        "avg_hit_3d": None,
-        "avg_hit_5d": None,
-        "confirmed_uptrend_avg_return": None,
-        "failed_breakout_ratio": None,
-    }
-    latest_backtests_by_ticker: dict[str, dict] = {}
-    status_hit_rates: dict[str, dict] = {}
-    try:
-        payloads = signal_validation.load_signal_payloads(_report_log_dir(), before_or_on=report_date, limit=20)
-        signal_backtests = signal_validation.compute_backtests(
-            payloads,
-            lambda ticker: _fetch_recent_daily_rows(base_url, ticker, period="6mo"),
-            as_of_date=report_date,
-        )
-        signal_backtest_summary = signal_validation.summarize_backtests(
-            signal_backtests,
-            today_count=len(daily_signals),
-            lookback_days=20,
-        )
-        latest_backtests_by_ticker = signal_validation.latest_backtest_by_ticker(signal_backtests)
-        status_hit_rates = signal_validation.hit_rate_by_status(signal_backtests, hit_key="hit_5d")
-    except Exception as exc:  # noqa: BLE001
-        signal_backtest_error = str(exc)
+    validation_artifacts = persist_and_validate_signals(
+        signal_module=signal_validation,
+        log_dir=_report_log_dir(),
+        report_date=report_date,
+        daily_signals=daily_signals,
+        base_url=base_url,
+        fetch_price_rows=lambda ticker: _fetch_recent_daily_rows(base_url, ticker, period="6mo"),
+    )
+    signal_file = validation_artifacts.signal_file
+    signal_store_error = validation_artifacts.signal_store_error
+    signal_backtest_error = validation_artifacts.backtest_error
+    signal_backtest_summary = validation_artifacts.summary
+    latest_backtests_by_ticker = validation_artifacts.latest_by_ticker
+    status_hit_rates = validation_artifacts.hit_rates_by_status
 
     selected_stocks = _attach_signal_backtest_fields(
         selected_stocks,
