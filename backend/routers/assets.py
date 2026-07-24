@@ -3,30 +3,38 @@
 from __future__ import annotations
 
 import asyncio
-import csv
-import hashlib
-import io
-import json
 import logging
 import time
-from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query
 
-from asset_tracking_service import (
-    build_asset_alerts,
-    build_asset_performance_report,
-    build_asset_portfolio_snapshot,
+from asset_tracking_service import build_asset_alerts
+from asset_use_cases.account_ledger_commands import (
+    AssetAccountLedgerCommands,
+    build_trade_settlement_note as _build_trade_settlement_note,
+    build_trade_settlement_payloads as _build_trade_settlement_payloads,
+)
+from asset_use_cases import csv_imports as asset_csv_imports
+from asset_use_cases.market_hydration import (
+    is_public_auto_fx_source as _is_public_auto_fx_source,
+    load_all_asset_rows,
+    provider_wait_budget,
+    read_fresh_quote_cache,
+)
+from asset_use_cases.reconciliation import (
+    build_reconciliation_positions_payload,
+)
+from asset_use_cases.valuation_queries import (
+    AssetValuationQueries,
+    InvalidAllocationGroup,
+    build_allocation as query_allocation,
+    build_contributors as query_contributors,
+    resolve_performance_start,
 )
 from data_fetcher import normalize_ticker
 from database import DEFAULT_OWNER_ID, db
-from database.helpers import (
-    _normalize_asset_cash_ledger_payload,
-    _normalize_asset_trade_payload,
-    _parse_datetime_value,
-)
 from schemas import (
     AssetAccountCreatePayload,
     AssetAccountUpdatePayload,
@@ -60,7 +68,6 @@ _quote_cache: Dict[str, tuple[float, int, Dict[str, Any]]] = {}
 _fx_refresh_task: asyncio.Task | None = None
 _SNAPSHOT_LIMIT = 5000
 _LEDGER_PAGE_SIZE = 1000
-_AUTO_TRADE_SETTLEMENT_SOURCE = "trade_settlement_auto"
 
 
 def configure(
@@ -119,177 +126,56 @@ async def _run_quote_refresh(normalized: str) -> Dict[str, Any] | None:
     return quote
 
 
+def _account_ledger_commands() -> AssetAccountLedgerCommands:
+    return AssetAccountLedgerCommands(db, owner_id=DEFAULT_OWNER_ID)
+
+
 async def _ensure_account_exists(account_id: int | None) -> Dict[str, Any] | None:
-    if account_id is None:
-        return None
-    account = await db.get_asset_account(account_id, owner_id=DEFAULT_OWNER_ID)
-    if not account:
-        raise HTTPException(400, f"Asset account {account_id} does not exist")
-    return account
+    try:
+        return await _account_ledger_commands().ensure_account_exists(account_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
-def _build_trade_settlement_note(trade_entry: Dict[str, Any], broker_account: Dict[str, Any], settlement_account: Dict[str, Any]) -> str:
-    ticker = str(trade_entry.get("ticker") or "").strip().upper() or "UNKNOWN"
-    side = str(trade_entry.get("side") or "").strip().lower()
-    action = "buy" if side == "buy" else "sell"
-    return (
-        f"Auto settlement sync for trade #{trade_entry.get('id')} {ticker} {action} "
-        f"between {settlement_account.get('name') or settlement_account.get('id')} "
-        f"and {broker_account.get('name') or broker_account.get('id')}."
-    )
-
-
-def _build_trade_settlement_payloads(
-    trade_entry: Dict[str, Any],
-    broker_account: Dict[str, Any],
-    settlement_account: Dict[str, Any],
-) -> Dict[str, Dict[str, Any]]:
-    amount = abs(float(trade_entry.get("net_amount") or 0.0))
-    if amount <= 0:
-        return {}
-
-    trade_date = trade_entry.get("trade_date")
-    currency = trade_entry.get("currency") or broker_account.get("base_currency") or "TWD"
-    fx_rate_to_base = float(trade_entry.get("fx_rate_to_base") or 1.0)
-    side = str(trade_entry.get("side") or "").strip().lower()
-    note = _build_trade_settlement_note(trade_entry, broker_account, settlement_account)
-
-    common = {
-        "flow_date": trade_date,
-        "amount": amount,
-        "currency": currency,
-        "fx_rate_to_base": fx_rate_to_base,
-        "is_initial_balance": False,
-        "source": _AUTO_TRADE_SETTLEMENT_SOURCE,
-        "import_batch_id": trade_entry.get("import_batch_id"),
-        "linked_trade_id": trade_entry.get("id"),
-        "note": note,
-    }
-    if side == "buy":
-        return {
-            "settlement_out": {
-                **common,
-                "account_id": settlement_account.get("id"),
-                "flow_type": "transfer_out",
-                "linked_trade_role": "settlement_out",
-                "counterparty": broker_account.get("name"),
-            },
-            "broker_in": {
-                **common,
-                "account_id": broker_account.get("id"),
-                "flow_type": "transfer_in",
-                "linked_trade_role": "broker_in",
-                "counterparty": settlement_account.get("name"),
-            },
-        }
-    if side == "sell":
-        return {
-            "broker_out": {
-                **common,
-                "account_id": broker_account.get("id"),
-                "flow_type": "transfer_out",
-                "linked_trade_role": "broker_out",
-                "counterparty": settlement_account.get("name"),
-            },
-            "settlement_in": {
-                **common,
-                "account_id": settlement_account.get("id"),
-                "flow_type": "transfer_in",
-                "linked_trade_role": "settlement_in",
-                "counterparty": broker_account.get("name"),
-            },
-        }
-    return {}
-
-
-async def _validate_account_settlement_config(payload: Dict[str, Any], *, account_id: int | None = None) -> None:
-    settlement_account_id = payload.get("settlement_account_id")
-    if settlement_account_id in ("", 0):
-        settlement_account_id = None
-    if settlement_account_id is not None:
-        settlement_account_id = int(settlement_account_id)
-        if account_id is not None and settlement_account_id == int(account_id):
-            raise HTTPException(400, "Settlement account cannot point to the same asset account")
-        await _ensure_account_exists(settlement_account_id)
-    if payload.get("auto_sync_trade_settlement") and settlement_account_id is None:
-        raise HTTPException(400, "Settlement account is required when auto trade settlement sync is enabled")
+async def _validate_account_settlement_config(
+    payload: Dict[str, Any],
+    *,
+    account_id: int | None = None,
+) -> None:
+    try:
+        await _account_ledger_commands().validate_account_settlement_config(
+            payload,
+            account_id=account_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 async def _delete_trade_linked_cash_entries(trade_id: int) -> None:
-    linked_entries = await db.list_asset_cash_ledger_entries_by_linked_trade(trade_id, owner_id=DEFAULT_OWNER_ID)
-    for entry in linked_entries:
-        await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
+    await _account_ledger_commands().delete_trade_linked_cash_entries(trade_id)
 
 
 async def _sync_trade_linked_cash_entries(trade_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
-    linked_entries = await db.list_asset_cash_ledger_entries_by_linked_trade(
-        int(trade_entry.get("id") or 0),
-        owner_id=DEFAULT_OWNER_ID,
-    )
-    broker_account = await _ensure_account_exists(int(trade_entry.get("account_id")))
-    auto_enabled = bool(broker_account and broker_account.get("auto_sync_trade_settlement"))
-    settlement_account_id = int((broker_account or {}).get("settlement_account_id") or 0)
-    is_initial_balance = bool(trade_entry.get("is_initial_balance"))
-
-    if not auto_enabled or not settlement_account_id or is_initial_balance:
-        for entry in linked_entries:
-            await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
-        return []
-
-    settlement_account = await _ensure_account_exists(settlement_account_id)
-    if int(settlement_account.get("id") or 0) == int(broker_account.get("id") or 0):
-        raise HTTPException(400, "Settlement account cannot point to the same brokerage account")
-
-    payloads = _build_trade_settlement_payloads(trade_entry, broker_account, settlement_account)
-    expected_roles = set(payloads)
-    existing_by_role = {str(item.get("linked_trade_role") or ""): item for item in linked_entries}
-    synced_entries: List[Dict[str, Any]] = []
-
-    for role, payload in payloads.items():
-        existing = existing_by_role.get(role)
-        if existing:
-            synced = await db.update_asset_cash_ledger_entry(int(existing.get("id")), payload, owner_id=DEFAULT_OWNER_ID)
-        else:
-            synced = await db.create_asset_cash_ledger_entry(payload, owner_id=DEFAULT_OWNER_ID)
-        synced_entries.append(synced)
-
-    for entry in linked_entries:
-        if str(entry.get("linked_trade_role") or "") not in expected_roles:
-            await db.delete_asset_cash_ledger_entry(int(entry.get("id")), owner_id=DEFAULT_OWNER_ID)
-
-    return synced_entries
+    try:
+        return await _account_ledger_commands().sync_trade_linked_cash_entries(trade_entry)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 async def _create_trade_entry_with_settlement_sync(payload: Dict[str, Any]) -> Dict[str, Any]:
-    trade_entry = await db.create_asset_trade_entry(payload, owner_id=DEFAULT_OWNER_ID)
     try:
-        await _sync_trade_linked_cash_entries(trade_entry)
-    except Exception:  # noqa: BLE001 - best-effort rollback to avoid half-created trade state
-        await db.delete_asset_trade_entry(int(trade_entry.get("id")), owner_id=DEFAULT_OWNER_ID)
-        raise
-    return trade_entry
-
-
-def _is_public_auto_fx_source(source: str | None) -> bool:
-    normalized = str(source or "").strip().lower()
-    return normalized in {"taifex_daily_reference", "public_auto"}
+        return await _account_ledger_commands().create_trade_entry_with_settlement_sync(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 async def _load_all_asset_rows(fetcher, **kwargs) -> List[Dict[str, Any]]:
-    """Read a complete ledger in stable pages so long histories are never truncated."""
-    rows: List[Dict[str, Any]] = []
-    offset = 0
-    while True:
-        page = await fetcher(
-            owner_id=DEFAULT_OWNER_ID,
-            limit=_LEDGER_PAGE_SIZE,
-            offset=offset,
-            **kwargs,
-        )
-        rows.extend(page)
-        if len(page) < _LEDGER_PAGE_SIZE:
-            return rows
-        offset += len(page)
+    return await load_all_asset_rows(
+        fetcher,
+        owner_id=DEFAULT_OWNER_ID,
+        page_size=_LEDGER_PAGE_SIZE,
+        **kwargs,
+    )
 
 
 async def _sync_latest_public_fx_rates() -> List[Dict[str, Any]]:
@@ -370,7 +256,10 @@ async def _load_asset_fx_rates(*, refresh: bool = False) -> List[Dict[str, Any]]
 
         task.add_done_callback(cleanup)
 
-    wait_budget = min(_quote_refresh_timeout_seconds, 1.5) if stored_rates else _quote_refresh_timeout_seconds
+    wait_budget = provider_wait_budget(
+        has_persisted_value=bool(stored_rates),
+        timeout_seconds=_quote_refresh_timeout_seconds,
+    )
     try:
         refreshed_rates = await asyncio.wait_for(asyncio.shield(task), timeout=wait_budget)
         return refreshed_rates or stored_rates
@@ -425,16 +314,13 @@ async def _load_asset_inputs(*, refresh_public_fx: bool = False) -> tuple[
 
 async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str, Any] | None:
     normalized = normalize_ticker(ticker)
-    cached = _quote_cache.get(normalized)
-    if (
-        refresh
-        and cached
-        and cached[0] > time.monotonic()
-        and cached[1] == id(_fetch_and_store_quote_snapshot)
-    ):
-        return cached[2]
-    if cached:
-        _quote_cache.pop(normalized, None)
+    cached_quote = read_fresh_quote_cache(
+        _quote_cache,
+        normalized,
+        provider_identity=id(_fetch_and_store_quote_snapshot),
+    )
+    if refresh and cached_quote:
+        return cached_quote
     stored_quote = await db.get_market_quote(normalized)
     if not refresh or not _fetch_and_store_quote_snapshot:
         return stored_quote
@@ -457,7 +343,10 @@ async def _fetch_latest_quote(ticker: str, *, refresh: bool = True) -> Dict[str,
 
     # When a stored quote exists, keep the request responsive and let a slow
     # provider finish in the background. A later read receives the refreshed row.
-    wait_budget = min(_quote_refresh_timeout_seconds, 1.5) if stored_quote else _quote_refresh_timeout_seconds
+    wait_budget = provider_wait_budget(
+        has_persisted_value=bool(stored_quote),
+        timeout_seconds=_quote_refresh_timeout_seconds,
+    )
     try:
         quote = await asyncio.wait_for(asyncio.shield(task), timeout=wait_budget)
         return quote or stored_quote
@@ -479,184 +368,60 @@ async def _persist_snapshot(snapshot: Dict[str, Any]) -> None:
 
 
 def _build_reconciliation_positions_payload(snapshot: Dict[str, Any], account_id: int) -> List[Dict[str, Any]]:
-    return [
-        {
-            "ticker": item.get("ticker"),
-            "display_name": item.get("display_name"),
-            "quantity": item.get("quantity"),
-            "last_price": item.get("last_price"),
-            "market_value_base": item.get("market_value_base"),
-            "quote_timestamp": item.get("quote_timestamp"),
-            "quote_source": item.get("quote_source"),
-            "manual_price_override_id": item.get("manual_price_override_id"),
-        }
-        for item in snapshot.get("holdings") or []
-        if int(item.get("account_id") or 0) == int(account_id)
-    ]
+    return build_reconciliation_positions_payload(snapshot, account_id)
 
 
 def _build_allocation(snapshot: Dict[str, Any], group_by: str) -> Dict[str, Any]:
-    normalized_group_by = str(group_by or "account").strip().lower()
-    if normalized_group_by == "account":
-        return snapshot.get("allocation") or {"group_by": "account", "items": []}
-
-    if normalized_group_by != "market":
-        raise HTTPException(400, "Allocation group_by must be account or market")
-
-    grouped: Dict[str, float] = defaultdict(float)
-    for holding in snapshot.get("holdings") or []:
-        market_key = str(holding.get("market") or "UNKNOWN").strip().upper() or "UNKNOWN"
-        grouped[market_key] += float(holding.get("market_value_base") or 0.0)
-
-    total_value = sum(grouped.values()) or 0.0
-    items = [
-        {
-            "key": key,
-            "value_base": round(value, 6),
-            "weight_pct": round(value / total_value * 100, 4) if total_value else 0.0,
-        }
-        for key, value in sorted(grouped.items(), key=lambda item: item[1], reverse=True)
-    ]
-    return {"group_by": "market", "items": items}
+    try:
+        return query_allocation(snapshot, group_by)
+    except InvalidAllocationGroup as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _build_contributors(snapshot: Dict[str, Any], limit: int) -> Dict[str, Any]:
-    clean_limit = max(1, min(int(limit or 10), 50))
-    holdings = list(snapshot.get("holdings") or [])
-    top_gainers = sorted(
-        holdings,
-        key=lambda item: float(item.get("unrealized_pnl_base") or 0.0),
-        reverse=True,
-    )[:clean_limit]
-    top_losers = sorted(
-        holdings,
-        key=lambda item: float(item.get("unrealized_pnl_base") or 0.0),
-    )[:clean_limit]
-    return {"top_gainers": top_gainers, "top_losers": top_losers}
+    return query_contributors(snapshot, limit)
+
+
+def _valuation_queries() -> AssetValuationQueries:
+    return AssetValuationQueries(
+        load_inputs=_load_asset_inputs,
+        fetch_quote=_fetch_latest_quote,
+        persist_snapshot=_persist_snapshot,
+        get_price_history=lambda ticker, start_date, end_date: db.get_ohlcv_range(
+            ticker,
+            start_date,
+            end_date,
+            "1d",
+        ),
+    )
 
 
 async def _build_snapshot(*, refresh: bool = True) -> Dict[str, Any]:
-    (
-        accounts,
-        cash_entries,
-        trade_entries,
-        adjustment_entries,
-        price_overrides,
-        fx_rates,
-        reconciliation_snapshots,
-    ) = await _load_asset_inputs(refresh_public_fx=refresh)
-    snapshot = await build_asset_portfolio_snapshot(
-        accounts,
-        cash_entries,
-        trade_entries,
-        adjustment_entries=adjustment_entries,
-        price_overrides=price_overrides,
-        fx_rate_entries=fx_rates,
-        reconciliation_snapshots=reconciliation_snapshots,
-        fetch_quote=(lambda ticker: _fetch_latest_quote(ticker, refresh=refresh)),
-    )
-    await _persist_snapshot(snapshot)
-    return snapshot
+    return await _valuation_queries().build_snapshot(refresh=refresh)
 
 
 def _resolve_performance_start(range_name: str) -> str:
-    normalized = str(range_name or "1y").strip().lower()
-    today = datetime.now(timezone.utc).date()
-    if normalized in {"all", "max"}:
-        return "1900-01-01"
-    if normalized == "ytd":
-        return date(today.year, 1, 1).isoformat()
-    if normalized.endswith("d") and normalized[:-1].isdigit():
-        return (today - timedelta(days=int(normalized[:-1]))).isoformat()
-    if normalized.endswith("y") and normalized[:-1].isdigit():
-        return (today - timedelta(days=int(normalized[:-1]) * 365)).isoformat()
-    mapping = {
-        "30d": 30,
-        "90d": 90,
-        "180d": 180,
-        "1y": 365,
-        "2y": 730,
-        "3y": 1095,
-    }
-    days = mapping.get(normalized, 365)
-    return (today - timedelta(days=days)).isoformat()
+    return resolve_performance_start(range_name)
 
 
 async def _build_performance(range_name: str, *, refresh: bool = True) -> Dict[str, Any]:
-    (
-        accounts,
-        cash_entries,
-        trade_entries,
-        adjustment_entries,
-        price_overrides,
-        fx_rates,
-        _,
-    ) = await _load_asset_inputs(refresh_public_fx=refresh)
-    start_at = _resolve_performance_start(range_name)
-    report = await build_asset_performance_report(
-        accounts,
-        cash_entries,
-        trade_entries,
-        start_at=start_at,
-        end_at=datetime.now(timezone.utc).isoformat(),
-        adjustment_entries=adjustment_entries,
-        price_overrides=price_overrides,
-        fx_rate_entries=fx_rates,
-        get_price_history=lambda ticker, start_date, end_date: db.get_ohlcv_range(ticker, start_date, end_date, "1d"),
-        fetch_quote=(lambda ticker: _fetch_latest_quote(ticker, refresh=refresh)),
-    )
-    report["range"] = str(range_name or "1y").strip().lower() or "1y"
-    return report
+    return await _valuation_queries().build_performance(range_name, refresh=refresh)
 
 
 def _normalize_csv_text(value: str) -> str:
-    return str(value or "").replace("\ufeff", "").strip()
+    return asset_csv_imports.normalize_csv_text(value)
 
 
 def _normalize_csv_row(row: Dict[str, Any]) -> Dict[str, str]:
-    normalized = {}
-    for key, value in (row or {}).items():
-        normalized_key = str(key or "").strip().lower()
-        if not normalized_key:
-            continue
-        normalized[normalized_key] = str(value or "").strip()
-    return normalized
+    return asset_csv_imports.normalize_csv_row(row)
 
 
 def _csv_import_error_message(exc: Exception) -> str:
-    message = str(exc)
-    if message.startswith("Asset account ") and message.endswith(" does not exist"):
-        account_id = message.removeprefix("Asset account ").removesuffix(" does not exist")
-        return f"資產帳戶 {account_id} 不存在"
-    translations = (
-        ("Asset trade quantity must be greater than 0", "交易數量必須大於 0"),
-        ("Asset trade price must be greater than 0", "交易價格必須大於 0"),
-        ("Asset trade side must be buy or sell", "交易方向必須為 buy 或 sell"),
-        ("Asset trade ticker is required", "交易商品代號不可空白"),
-        ("Asset trade trade_date is required", "交易日期不可空白"),
-        ("Asset cash ledger amount is required", "現金金額不可空白"),
-        ("Asset cash ledger flow_type is required", "現金流向類型不可空白"),
-        ("Asset cash ledger flow_date is required", "現金日期不可空白"),
-        ("Unable to parse trade_date", "無法解析交易日期"),
-        ("Unable to parse flow_date", "無法解析現金日期"),
-        ("Unable to parse account_id", "無法解析帳戶代號"),
-        (
-            "CSV row is missing account_id/account_name and no default_account_id was provided",
-            "CSV 列缺少 account_id/account_name，且未選擇預設帳戶",
-        ),
-        ("Unable to resolve account_name", "無法依帳戶名稱找到資產帳戶"),
-    )
-    for source, translated in translations:
-        if source in message:
-            suffix = message.split(source, 1)[1]
-            return f"{translated}{suffix}"
-    return f"資料格式錯誤：{message}"
+    return asset_csv_imports.csv_import_error_message(exc)
 
 
 def _build_account_lookups(accounts: List[Dict[str, Any]]) -> tuple[Dict[int, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    by_id = {int(account["id"]): account for account in accounts if account.get("id") is not None}
-    by_name = {str(account.get("name") or "").strip().lower(): account for account in accounts if account.get("name")}
-    return by_id, by_name
+    return asset_csv_imports.build_account_lookups(accounts)
 
 
 def _resolve_account_id_from_csv(
@@ -666,41 +431,20 @@ def _resolve_account_id_from_csv(
     accounts_by_id: Dict[int, Dict[str, Any]],
     accounts_by_name: Dict[str, Dict[str, Any]],
 ) -> int:
-    raw_account_id = row.get("account_id") or row.get("account")
-    if raw_account_id:
-        try:
-            account_id = int(raw_account_id)
-        except ValueError as exc:
-            raise ValueError(f"Unable to parse account_id {raw_account_id!r}") from exc
-        if account_id not in accounts_by_id:
-            raise ValueError(f"Asset account {account_id} does not exist")
-        return account_id
-
-    raw_account_name = (row.get("account_name") or row.get("account") or "").strip().lower()
-    if raw_account_name:
-        account = accounts_by_name.get(raw_account_name)
-        if not account:
-            raise ValueError(f"Unable to resolve account_name {raw_account_name!r}")
-        return int(account["id"])
-
-    if default_account_id is None:
-        raise ValueError("CSV row is missing account_id/account_name and no default_account_id was provided")
-    if default_account_id not in accounts_by_id:
-        raise ValueError(f"Asset account {default_account_id} does not exist")
-    return int(default_account_id)
+    return asset_csv_imports.resolve_account_id_from_csv(
+        row,
+        default_account_id=default_account_id,
+        accounts_by_id=accounts_by_id,
+        accounts_by_name=accounts_by_name,
+    )
 
 
 def _resolve_trade_currency_for_market(market: str) -> str:
-    return "USD" if str(market or "").strip().upper() == "US" else "TWD"
+    return asset_csv_imports.resolve_trade_currency_for_market(market)
 
 
 def _infer_trade_market(raw_ticker: str) -> str:
-    normalized = normalize_ticker(raw_ticker)
-    if normalized.endswith(".TW") or normalized.endswith(".TWO"):
-        return "TW"
-    if normalized.endswith(".HK"):
-        return "HK"
-    return "US"
+    return asset_csv_imports.infer_trade_market(raw_ticker)
 
 
 def _parse_trade_csv_payload(
@@ -710,32 +454,12 @@ def _parse_trade_csv_payload(
     accounts_by_id: Dict[int, Dict[str, Any]],
     accounts_by_name: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
-    account_id = _resolve_account_id_from_csv(
+    return asset_csv_imports.parse_trade_csv_payload(
         row,
         default_account_id=default_account_id,
         accounts_by_id=accounts_by_id,
         accounts_by_name=accounts_by_name,
     )
-    raw_ticker = row.get("ticker") or row.get("symbol")
-    market = row.get("market") or _infer_trade_market(raw_ticker or "")
-    payload = {
-        "account_id": account_id,
-        "trade_date": row.get("trade_date") or row.get("date") or row.get("datetime"),
-        "ticker": normalize_ticker(raw_ticker or ""),
-        "display_name": row.get("display_name") or row.get("name") or None,
-        "market": market,
-        "asset_type": row.get("asset_type") or "stock",
-        "currency": (row.get("currency") or _resolve_trade_currency_for_market(market)).upper(),
-        "side": (row.get("side") or row.get("direction") or "").lower(),
-        "quantity": row.get("quantity") or row.get("size"),
-        "price": row.get("price") or row.get("trade_price"),
-        "fee_amount": row.get("fee_amount") or row.get("fee") or 0,
-        "tax_amount": row.get("tax_amount") or row.get("tax") or 0,
-        "fx_rate_to_base": row.get("fx_rate_to_base") or row.get("fx_rate") or 1,
-        "source": row.get("source") or "csv_import",
-        "note": row.get("note") or None,
-    }
-    return payload
 
 
 def _parse_cash_csv_payload(
@@ -745,24 +469,12 @@ def _parse_cash_csv_payload(
     accounts_by_id: Dict[int, Dict[str, Any]],
     accounts_by_name: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
-    account_id = _resolve_account_id_from_csv(
+    return asset_csv_imports.parse_cash_csv_payload(
         row,
         default_account_id=default_account_id,
         accounts_by_id=accounts_by_id,
         accounts_by_name=accounts_by_name,
     )
-    account = accounts_by_id[account_id]
-    payload = {
-        "account_id": account_id,
-        "flow_date": row.get("flow_date") or row.get("date") or row.get("datetime"),
-        "flow_type": (row.get("flow_type") or row.get("type") or "").lower(),
-        "amount": row.get("amount"),
-        "currency": (row.get("currency") or account.get("base_currency") or "TWD").upper(),
-        "fx_rate_to_base": row.get("fx_rate_to_base") or row.get("fx_rate") or 1,
-        "counterparty": row.get("counterparty") or row.get("from_to") or None,
-        "note": row.get("note") or None,
-    }
-    return payload
 
 
 def _run_csv_import(
@@ -773,106 +485,25 @@ def _run_csv_import(
     parser,
     item_type: str,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    normalized_csv = _normalize_csv_text(csv_text)
-    if not normalized_csv:
-        raise ValueError("CSV text is required")
-
-    reader = csv.DictReader(io.StringIO(normalized_csv))
-    if not reader.fieldnames:
-        raise ValueError("CSV must include a header row")
-
-    accounts_by_id, accounts_by_name = _build_account_lookups(accounts)
-    items: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-
-    for index, raw_row in enumerate(reader, start=2):
-        row = _normalize_csv_row(raw_row)
-        if not any(row.values()):
-            continue
-        try:
-            parsed = parser(
-                row,
-                default_account_id=default_account_id,
-                accounts_by_id=accounts_by_id,
-                accounts_by_name=accounts_by_name,
-            )
-            normalized = (
-                _normalize_asset_trade_payload(parsed)
-                if item_type == "trade"
-                else _normalize_asset_cash_ledger_payload(parsed)
-            )
-            date_field = "trade_date" if item_type == "trade" else "flow_date"
-            if _parse_datetime_value(normalized.get(date_field)) is None:
-                raise ValueError(f"Unable to parse {date_field} {normalized.get(date_field)!r}")
-            reference = next(
-                (
-                    row.get(key)
-                    for key in ("external_id", "transaction_id", "trade_id", "order_id", "reference_id")
-                    if row.get(key)
-                ),
-                None,
-            )
-            normalized["import_key"] = _build_asset_import_key(item_type, normalized, reference=reference)
-            normalized["import_row"] = index
-            normalized["import_reference"] = reference
-            normalized["import_status"] = "importable"
-            items.append(normalized)
-        except Exception as exc:  # noqa: BLE001 - collect row-level import issues
-            errors.append({"row": index, "message": _csv_import_error_message(exc), "payload": row})
-    seen_rows: Dict[str, int] = {}
-    for item in items:
-        import_key = str(item.get("import_key") or "")
-        if import_key in seen_rows:
-            item["import_status"] = "duplicate_in_file"
-            item["duplicate_of_row"] = seen_rows[import_key]
-        else:
-            seen_rows[import_key] = int(item["import_row"])
-    return items, errors
+    return asset_csv_imports.run_csv_import(
+        csv_text,
+        default_account_id=default_account_id,
+        accounts=accounts,
+        parser=parser,
+        item_type=item_type,
+    )
 
 
 def _canonical_import_number(value: Any) -> str:
-    return format(float(value or 0), ".12g")
+    return asset_csv_imports.canonical_import_number(value)
 
 
 def _canonical_import_datetime(value: Any) -> str:
-    parsed = _parse_datetime_value(value)
-    if parsed is None:
-        return ""
-    return parsed.isoformat(timespec="microseconds")
+    return asset_csv_imports.canonical_import_datetime(value)
 
 
 def _build_asset_import_key(item_type: str, item: Dict[str, Any], *, reference: str | None = None) -> str:
-    if reference:
-        identity: Dict[str, Any] = {
-            "type": item_type,
-            "account_id": int(item.get("account_id") or 0),
-            "reference": str(reference).strip(),
-        }
-    elif item_type == "trade":
-        identity = {
-            "type": "trade",
-            "account_id": int(item.get("account_id") or 0),
-            "date": _canonical_import_datetime(item.get("trade_date")),
-            "ticker": str(item.get("ticker") or "").strip().upper(),
-            "side": str(item.get("side") or "").strip().lower(),
-            "quantity": _canonical_import_number(item.get("quantity")),
-            "price": _canonical_import_number(item.get("price")),
-            "fee": _canonical_import_number(item.get("fee_amount")),
-            "tax": _canonical_import_number(item.get("tax_amount")),
-            "currency": str(item.get("currency") or "").strip().upper(),
-        }
-    else:
-        identity = {
-            "type": "cash",
-            "account_id": int(item.get("account_id") or 0),
-            "date": _canonical_import_datetime(item.get("flow_date")),
-            "flow_type": str(item.get("flow_type") or "").strip().lower(),
-            "amount": _canonical_import_number(item.get("amount")),
-            "currency": str(item.get("currency") or "").strip().upper(),
-            "counterparty": str(item.get("counterparty") or "").strip().lower(),
-        }
-    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return asset_csv_imports.build_asset_import_key(item_type, item, reference=reference)
 
 
 def _mark_database_duplicates(
@@ -882,42 +513,20 @@ def _mark_database_duplicates(
     item_type: str,
     stored_import_keys: Dict[str, int] | None = None,
 ) -> None:
-    existing_keys: Dict[str, Any] = dict(stored_import_keys or {})
-    for existing in existing_items:
-        import_key = str(existing.get("import_key") or "") or _build_asset_import_key(item_type, existing)
-        existing_keys.setdefault(import_key, existing.get("id"))
-    for item in items:
-        if item.get("import_status") != "importable":
-            continue
-        existing_id = existing_keys.get(str(item.get("import_key") or ""))
-        if existing_id is not None:
-            item["import_status"] = "duplicate_in_database"
-            item["existing_id"] = existing_id
+    asset_csv_imports.mark_database_duplicates(
+        items,
+        existing_items,
+        item_type=item_type,
+        stored_import_keys=stored_import_keys,
+    )
 
 
 def _csv_import_summary(items: List[Dict[str, Any]], errors: List[Dict[str, Any]], **extra: Any) -> Dict[str, Any]:
-    file_duplicates = sum(1 for item in items if item.get("import_status") == "duplicate_in_file")
-    database_duplicates = sum(1 for item in items if item.get("import_status") == "duplicate_in_database")
-    importable_count = sum(1 for item in items if item.get("import_status") == "importable")
-    return {
-        "input_count": len(items) + len(errors),
-        "row_count": len(items),
-        "valid_count": len(items),
-        "importable_count": importable_count,
-        "duplicate_count": file_duplicates + database_duplicates,
-        "file_duplicate_count": file_duplicates,
-        "database_duplicate_count": database_duplicates,
-        "error_count": len(errors),
-        **extra,
-    }
+    return asset_csv_imports.csv_import_summary(items, errors, **extra)
 
 
 def _asset_import_payload(item: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        key: value
-        for key, value in item.items()
-        if key not in {"import_row", "import_reference", "import_status", "duplicate_of_row", "existing_id"}
-    }
+    return asset_csv_imports.asset_import_payload(item)
 
 
 async def _run_atomic_asset_import(
@@ -929,122 +538,20 @@ async def _run_atomic_asset_import(
     errors: List[Dict[str, Any]],
     create_item,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    """Persist one import as an auditable all-or-nothing database transaction."""
-    importable = [item for item in items if item.get("import_status") == "importable"]
-    batch = await db.create_asset_import_batch(
-        {
-            "import_type": import_type,
-            "source_name": source_name,
-            "row_count": len(items) + len(errors),
-            "skipped_count": len(duplicates),
-            "error_count": len(errors),
-            "metadata": {"importable_count": len(importable), "duplicate_count": len(duplicates)},
-        },
+    return await asset_csv_imports.run_atomic_asset_import(
+        repository=db,
         owner_id=DEFAULT_OWNER_ID,
+        import_type=import_type,
+        source_name=source_name,
+        items=items,
+        duplicates=duplicates,
+        errors=errors,
+        create_item=create_item,
     )
-    batch_id = int(batch["id"])
-    if errors:
-        batch = await db.finalize_asset_import_batch(
-            batch_id,
-            {
-                **batch,
-                "status": "failed",
-                "created_count": 0,
-                "error_count": len(errors),
-                "error_message": "CSV validation failed; no rows were imported.",
-            },
-            owner_id=DEFAULT_OWNER_ID,
-        )
-        return [], list(errors), batch
-
-    created: List[Dict[str, Any]] = []
-    current_item: Dict[str, Any] | None = None
-    try:
-        async with db.transaction():
-            for current_item in importable:
-                item_payload = _asset_import_payload(current_item)
-                item_payload["import_batch_id"] = batch_id
-                created.append(await create_item(item_payload))
-            batch = await db.finalize_asset_import_batch(
-                batch_id,
-                {
-                    **batch,
-                    "status": "committed",
-                    "created_count": len(created),
-                    "error_count": 0,
-                },
-                owner_id=DEFAULT_OWNER_ID,
-            )
-    except Exception as exc:  # noqa: BLE001 - rollback is guaranteed by db.transaction
-        failure = {
-            "row": (current_item or {}).get("import_row"),
-            "message": str(exc),
-            "payload": current_item,
-        }
-        batch = await db.finalize_asset_import_batch(
-            batch_id,
-            {
-                **batch,
-                "status": "failed",
-                "created_count": 0,
-                "error_count": 1,
-                "error_message": str(exc),
-            },
-            owner_id=DEFAULT_OWNER_ID,
-        )
-        return [], [failure], batch
-    return created, [], batch
 
 
 def _map_journal_entry_to_asset_trades(entry: Dict[str, Any], account_id: int) -> Dict[str, Any]:
-    direction = str(entry.get("direction") or "long").strip().lower()
-    if direction != "long":
-        return {"entry_id": entry.get("id"), "importable": False, "reason": "Only long journal trades can be imported."}
-
-    normalized_ticker = normalize_ticker(entry.get("ticker"))
-    market = entry.get("market") or _infer_trade_market(normalized_ticker)
-    currency = _resolve_trade_currency_for_market(market)
-    base_note = f"Imported from journal #{entry.get('id')}"
-    payloads = [
-        {
-            "account_id": account_id,
-            "trade_date": entry.get("entry_time"),
-            "ticker": normalized_ticker,
-            "display_name": entry.get("ticker"),
-            "market": market,
-            "asset_type": "stock",
-            "currency": currency,
-            "side": "buy",
-            "quantity": entry.get("size"),
-            "price": entry.get("entry_price"),
-            "fee_amount": 0,
-            "tax_amount": 0,
-            "fx_rate_to_base": 1 if currency == "TWD" else 1,
-            "source": f"journal:{entry.get('id')}:entry",
-            "note": base_note,
-        }
-    ]
-    if entry.get("exit_time") and entry.get("exit_price"):
-        payloads.append(
-            {
-                "account_id": account_id,
-                "trade_date": entry.get("exit_time"),
-                "ticker": normalized_ticker,
-                "display_name": entry.get("ticker"),
-                "market": market,
-                "asset_type": "stock",
-                "currency": currency,
-                "side": "sell",
-                "quantity": entry.get("size"),
-                "price": entry.get("exit_price"),
-                "fee_amount": 0,
-                "tax_amount": 0,
-                "fx_rate_to_base": 1 if currency == "TWD" else 1,
-                "source": f"journal:{entry.get('id')}:exit",
-                "note": base_note,
-            }
-        )
-    return {"entry_id": entry.get("id"), "importable": True, "payloads": payloads, "entry": entry}
+    return asset_csv_imports.map_journal_entry_to_asset_trades(entry, account_id)
 
 
 async def _build_journal_import_preview(payload: AssetJournalImportPayload) -> Dict[str, Any]:
