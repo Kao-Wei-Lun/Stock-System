@@ -5,22 +5,37 @@
     :class="shellClasses"
     :style="shellStyle"
   >
-    <button
-      v-if="isCollapsed"
-      class="notif-center-toggle"
-      :class="{ empty: totalNotifications === 0 }"
-      type="button"
-      aria-label="展開本地通知中心"
-      aria-expanded="false"
-      data-testid="notif-center-toggle"
-      @click="expandPanel"
-    >
-      <div class="notif-center-toggle-copy">
-        <div class="notif-center-toggle-title">本地通知中心</div>
-        <div class="notif-center-toggle-meta">{{ launcherSummary }}</div>
-      </div>
-      <div class="notif-center-toggle-count">{{ totalNotifications }}</div>
-    </button>
+    <div v-if="isCollapsed" class="notif-center-collapsed-row">
+      <button
+        class="notif-center-toggle"
+        :class="{ empty: totalNotifications === 0 }"
+        type="button"
+        aria-label="展開本地通知中心"
+        aria-expanded="false"
+        data-testid="notif-center-toggle"
+        @click="expandPanel"
+      >
+        <div class="notif-center-toggle-copy">
+          <div class="notif-center-toggle-title">本地通知中心</div>
+          <div class="notif-center-toggle-meta">{{ launcherSummary }}</div>
+        </div>
+        <div class="notif-center-toggle-count">{{ totalNotifications }}</div>
+      </button>
+      <button
+        class="notif-center-mini-drag"
+        type="button"
+        title="移動已縮小的通知中心；方向鍵可微調"
+        aria-label="移動已縮小的通知中心；方向鍵可微調"
+        data-testid="notif-collapsed-drag-handle"
+        @pointerdown="startDrag"
+        @pointermove="moveDrag"
+        @pointerup="endDrag"
+        @pointercancel="endDrag"
+        @keydown="moveWithKeyboard"
+      >
+        ⠿
+      </button>
+    </div>
 
     <Transition name="notif-center-fade">
       <aside
@@ -701,13 +716,21 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-.notif-center-toggle,
+.notif-center-collapsed-row,
 .notif-center-panel {
   width: min(360px, calc(100vw - 24px));
   pointer-events: auto;
 }
 
+.notif-center-collapsed-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .notif-center-toggle {
+  min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -719,6 +742,30 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(16px);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
   cursor: pointer;
+}
+
+.notif-center-mini-drag {
+  width: 40px;
+  flex: 0 0 40px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(5, 10, 17, 0.94);
+  color: var(--text3);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  touch-action: none;
+}
+
+.notif-center-mini-drag:hover,
+.notif-center-mini-drag:focus-visible {
+  border-color: rgba(123, 231, 255, 0.32);
+  background: rgba(123, 231, 255, 0.1);
+  color: #b9f5ff;
+}
+
+.notif-center-shell.is-dragging .notif-center-mini-drag {
+  cursor: grabbing;
 }
 
 .notif-center-toggle.empty {
@@ -1075,10 +1122,14 @@ onBeforeUnmount(() => {
     align-items: stretch;
   }
 
-  .notif-center-toggle,
+  .notif-center-collapsed-row,
   .notif-center-panel {
     width: 100%;
     min-width: 0;
+  }
+
+  .notif-center-mini-drag {
+    display: none;
   }
 
   .notif-center-panel {

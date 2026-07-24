@@ -171,6 +171,27 @@ test("notification center can move, dock, persist, reset, and adapt to mobile", 
     () => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)), notificationLayoutStorageKey),
   ).toMatchObject({ anchor: "bottom-right", collapsed: false });
 
+  await page.getByTestId("notif-center-collapse").click();
+  const collapsedHandle = page.getByTestId("notif-collapsed-drag-handle");
+  const collapsedHandleBox = await collapsedHandle.boundingBox();
+  expect(collapsedHandleBox).not.toBeNull();
+  await page.mouse.move(
+    collapsedHandleBox.x + (collapsedHandleBox.width / 2),
+    collapsedHandleBox.y + (collapsedHandleBox.height / 2),
+  );
+  await page.mouse.down();
+  await page.mouse.move(640, collapsedHandleBox.y + (collapsedHandleBox.height / 2));
+  await page.mouse.up();
+  await expect(shell).toHaveClass(/is-custom/);
+  await expect(page.getByTestId("notif-center-panel")).toHaveCount(0);
+  await expect.poll(
+    () => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)), notificationLayoutStorageKey),
+  ).toMatchObject({ anchor: "custom", collapsed: true });
+
+  await page.getByTestId("notif-center-toggle").click();
+  await expect(page.getByTestId("notif-center-panel")).toBeVisible();
+  await expect(shell).toHaveClass(/is-custom/);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(shell).toHaveClass(/is-compact/);
   const mobileBox = await shell.boundingBox();

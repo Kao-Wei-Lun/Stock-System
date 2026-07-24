@@ -123,6 +123,51 @@ describe("NotificationPanel floating layout", () => {
     });
   });
 
+  it("moves the collapsed launcher without expanding the panel", async () => {
+    const wrapper = mount(NotificationPanel, {
+      props: { notifications: [] },
+    });
+    const shell = wrapper.get(".notif-center-shell");
+    vi.spyOn(shell.element, "getBoundingClientRect").mockReturnValue({
+      x: 640,
+      y: 650,
+      top: 650,
+      right: 1000,
+      bottom: 714,
+      left: 640,
+      width: 360,
+      height: 64,
+      toJSON: () => ({}),
+    });
+
+    const handle = wrapper.get('[data-testid="notif-collapsed-drag-handle"]');
+    await handle.trigger("pointerdown", {
+      button: 0,
+      pointerId: 8,
+      clientX: 980,
+      clientY: 680,
+    });
+    await handle.trigger("pointermove", {
+      pointerId: 8,
+      clientX: 500,
+      clientY: 300,
+    });
+    await handle.trigger("pointerup", { pointerId: 8 });
+
+    expect(wrapper.classes()).toContain("is-custom");
+    expect(wrapper.find('[data-testid="notif-center-panel"]').exists()).toBe(false);
+    expect(storedLayout()).toMatchObject({
+      anchor: "custom",
+      x: 160,
+      y: 270,
+      collapsed: true,
+    });
+
+    await wrapper.get('[data-testid="notif-center-toggle"]').trigger("click");
+    expect(wrapper.find('[data-testid="notif-center-panel"]').exists()).toBe(true);
+    expect(wrapper.classes()).toContain("is-custom");
+  });
+
   it("clamps a restored custom position after the viewport changes", async () => {
     saveNotificationLayout({
       version: 1,
