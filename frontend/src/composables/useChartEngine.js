@@ -28,115 +28,65 @@ import {
 } from "../utils/indicatorUtils";
 import { fmtPrice, fmtVol } from "../utils/formatters";
 import { CHART_UPDATE_KIND, classifyChartDataUpdate } from "../utils/chartUpdatePlan";
+import {
+  clamp,
+  createLegacyBarLayout,
+  distanceToSegment,
+  invertLegacyPriceY,
+  LEGACY_CHART_PAD as PAD,
+  scaleLegacyPriceY,
+} from "./chart/legacyChartCoordinates";
+import {
+  drawLegacyCrosshairGuide,
+  drawLegacyHorizontalCrosshairGuide,
+  formatLegacyAxisDateLabel,
+  getLegacyDataRangeDays,
+  getLegacyTimeTickIndices,
+  isLegacyIntradayInterval,
+  isSameLegacyCalendarDay,
+  parseLegacyDateValue,
+  resolveLegacyCrosshairMarker,
+} from "./chart/legacyChartCrosshair";
+import {
+  createLegacyDrawingRenderer,
+  getDrawingDash,
+  getDrawingFill,
+  getDrawingWidth,
+  LEGACY_FIB_LEVELS as FIB_LEVELS,
+  withOpacity,
+} from "./chart/legacyChartDrawingRenderer";
+import {
+  drawArea,
+  drawLine,
+  fillBetweenSeries,
+  findLastDefinedIndex,
+} from "./chart/legacyChartIndicatorRenderer";
+import {
+  buildLegacyCrosshairPayload,
+  computePannedStartIndex,
+  computeZoomViewport,
+} from "./chart/legacyChartInteraction";
+import {
+  clampPositive,
+  getPaddedPriceRange,
+  getVisiblePriceScale,
+  resolveLegacyMainChartAutoScaleRange,
+  shouldHandlePriceAxisInteraction,
+} from "./chart/legacyChartPriceScale";
 
-const PAD = { top: 20, right: 70, bottom: 22, left: 10 };
+export {
+  formatLegacyAxisDateLabel,
+  resolveLegacyMainChartAutoScaleRange,
+  shouldHandlePriceAxisInteraction,
+};
+
 const DEFAULT_VISIBLE_BARS = 120;
 const MIN_VISIBLE_BARS = 20;
 const PAN_STEP_RATIO = 0.18;
-const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-const AUTO_Y_TARGET_OCCUPANCY = 0.9;
-const AUTO_Y_MIN_PADDING_ABS = 0.005;
 const DRAWING_HIT_TOLERANCE = 10;
 const VIEW_HISTORY_LIMIT = 80;
 const CHART_PREFS_KEY = "quantvision.chart.prefs.v1";
-const DRAWING_LINE_STYLES = {
-  solid: [],
-  dash: [6, 4],
-  dot: [2, 4],
-};
-const LEGACY_INTRADAY_INTERVALS = new Set(["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]);
-
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-const clampPositive = (value) => Math.max(value, Number.EPSILON);
 const isFiniteNumber = (value) => Number.isFinite(value);
-const resolveAutoYPadding = (range) => (
-  Math.max((((1 / AUTO_Y_TARGET_OCCUPANCY) - 1) * range) / 2, AUTO_Y_MIN_PADDING_ABS)
-);
-const pad2 = (value) => String(value).padStart(2, "0");
-const isLegacyIntradayInterval = (interval) => LEGACY_INTRADAY_INTERVALS.has(String(interval || "").toLowerCase());
-const parseLegacyDateValue = (value) => {
-  const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
-  const date = new Date(normalized);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-const formatLegacyDateLabel = (date) => (
-  `${String(date.getFullYear()).slice(2)}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}`
-);
-const formatLegacyTimeLabel = (date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-const isSameLegacyCalendarDay = (left, right) => {
-  const leftDate = parseLegacyDateValue(left);
-  const rightDate = parseLegacyDateValue(right);
-  if (!leftDate || !rightDate) return false;
-  return leftDate.getFullYear() === rightDate.getFullYear()
-    && leftDate.getMonth() === rightDate.getMonth()
-    && leftDate.getDate() === rightDate.getDate();
-};
-
-export function formatLegacyAxisDateLabel(value, { rangeDays = 0, interval = "1d", includeDate = false } = {}) {
-  const date = parseLegacyDateValue(value);
-  if (!date) return String(value || "").slice(5);
-  if (isLegacyIntradayInterval(interval)) {
-    const timeLabel = formatLegacyTimeLabel(date);
-    return includeDate ? `${formatLegacyDateLabel(date)} ${timeLabel}` : timeLabel;
-  }
-  if (rangeDays >= 730) {
-    return `${String(date.getFullYear()).slice(2)}/${pad2(date.getMonth() + 1)}`;
-  }
-  return formatLegacyDateLabel(date);
-}
-
-export function shouldHandlePriceAxisInteraction(mode) {
-  return mode === "manual_locked";
-}
-
-export function resolveLegacyMainChartAutoScaleRange(data, overlayValues = [], scaleMode = "linear") {
-  const pricePoints = (Array.isArray(data) ? data : [])
-    .flatMap((row) => [row?.high, row?.low])
-    .filter(isFiniteNumber);
-
-  if (!pricePoints.length) {
-    return { min: 0, max: 1 };
-  }
-
-  const rawMin = Math.min(...pricePoints);
-  const rawMax = Math.max(...pricePoints);
-  const candleRange = Math.max(rawMax - rawMin, Math.abs(rawMax) * 0.01, 1);
-  const reasonableMin = rawMin - candleRange * 2;
-  const reasonableMax = rawMax + candleRange * 2;
-  (Array.isArray(overlayValues) ? overlayValues : []).forEach((series) => {
-    const values = Array.isArray(series) ? series : [series];
-    values.forEach((value) => {
-      if (isFiniteNumber(value) && value >= reasonableMin && value <= reasonableMax) {
-        pricePoints.push(value);
-      }
-    });
-  });
-
-  let min = rawMin;
-  let max = rawMax;
-  const resolvedRawMin = Math.min(...pricePoints);
-  const resolvedRawMax = Math.max(...pricePoints);
-  min = resolvedRawMin;
-  max = resolvedRawMax;
-
-  if (resolvedRawMin === resolvedRawMax) {
-    const singlePad = Math.max(Math.abs(resolvedRawMin) * 0.08, 1);
-    min = resolvedRawMin - singlePad;
-    max = resolvedRawMax + singlePad;
-  } else {
-    const range = resolvedRawMax - resolvedRawMin;
-    const padding = resolveAutoYPadding(range);
-    min = resolvedRawMin - padding;
-    max = resolvedRawMax + padding;
-  }
-
-  if (scaleMode === "log" && resolvedRawMin > 0) {
-    min = Math.max(min, resolvedRawMin * 0.42);
-    max = Math.max(max, clampPositive(resolvedRawMax) * 1.08);
-  }
-
-  return { min, max };
-}
 
 const getDpr = () => window.devicePixelRatio || 1;
 const canvasWidth = (canvas) => canvas.width / getDpr();
@@ -155,98 +105,6 @@ const readChartPrefs = () => {
 const writeChartPrefs = (value) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(CHART_PREFS_KEY, JSON.stringify(value));
-};
-
-const drawLine = (ctx, values, xAt, scale, color, lineWidth = 1.5, dash = []) => {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  ctx.setLineDash(dash);
-  ctx.beginPath();
-  let started = false;
-  values.forEach((value, index) => {
-    if (!isFiniteNumber(value)) return;
-    if (!started) {
-      ctx.moveTo(xAt(index), scale(value));
-      started = true;
-    } else {
-      ctx.lineTo(xAt(index), scale(value));
-    }
-  });
-  ctx.stroke();
-  ctx.setLineDash([]);
-};
-
-const findLastDefinedIndex = (values) => {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    if (isFiniteNumber(values[index])) return index;
-  }
-  return -1;
-};
-
-const drawArea = (ctx, values, xAt, scale, baseY, strokeColor, fillColor) => {
-  const safeFirstIndex = values.findIndex((value) => isFiniteNumber(value));
-  const lastIndex = findLastDefinedIndex(values);
-  if (safeFirstIndex < 0 || lastIndex < 0) return;
-
-  ctx.beginPath();
-  ctx.moveTo(xAt(safeFirstIndex), scale(values[safeFirstIndex]));
-  for (let index = safeFirstIndex + 1; index <= lastIndex; index += 1) {
-    if (!isFiniteNumber(values[index])) continue;
-    ctx.lineTo(xAt(index), scale(values[index]));
-  }
-  ctx.lineTo(xAt(lastIndex), baseY);
-  ctx.lineTo(xAt(safeFirstIndex), baseY);
-  ctx.closePath();
-  ctx.fillStyle = fillColor;
-  ctx.fill();
-
-  drawLine(ctx, values, xAt, scale, strokeColor, 1.8);
-};
-
-const fillBetweenSeries = (ctx, upperValues, lowerValues, xAt, scale, fillAbove, fillBelow) => {
-  const flushSegment = (segment, isAbove) => {
-    if (segment.length < 2) return;
-    ctx.beginPath();
-    ctx.moveTo(xAt(segment[0].index), scale(segment[0].upper));
-    segment.forEach((point, pointIndex) => {
-      if (pointIndex === 0) return;
-      ctx.lineTo(xAt(point.index), scale(point.upper));
-    });
-    for (let index = segment.length - 1; index >= 0; index -= 1) {
-      const point = segment[index];
-      ctx.lineTo(xAt(point.index), scale(point.lower));
-    }
-    ctx.closePath();
-    ctx.fillStyle = isAbove ? fillAbove : fillBelow;
-    ctx.fill();
-  };
-
-  let segment = [];
-  let currentAbove = null;
-
-  upperValues.forEach((upper, index) => {
-    const lower = lowerValues[index];
-    if (!isFiniteNumber(upper) || !isFiniteNumber(lower)) {
-      flushSegment(segment, currentAbove);
-      segment = [];
-      currentAbove = null;
-      return;
-    }
-
-    const isAbove = upper >= lower;
-    if (!segment.length || currentAbove === isAbove) {
-      currentAbove = isAbove;
-      segment.push({ index, upper, lower });
-      return;
-    }
-
-    flushSegment(segment, currentAbove);
-    segment = [{ index: Math.max(index - 1, 0), upper: upperValues[Math.max(index - 1, 0)], lower: lowerValues[Math.max(index - 1, 0)] }];
-    currentAbove = isAbove;
-    segment.push({ index, upper, lower });
-  });
-
-  flushSegment(segment, currentAbove);
 };
 
 const volumeMa = (data, period = 20) => calcMA(data.map((row) => ({ close: row.volume })), period);
@@ -453,82 +311,10 @@ export function useChartEngine({
     return "chart-canvas is-draw";
   });
 
-  const getBarLayout = (canvas, count) => {
-    const width = canvasWidth(canvas) - PAD.left - PAD.right;
-    const step = width / Math.max(count, 1);
-    return {
-      width,
-      step,
-      barWidth: Math.max(1.5, step * 0.72),
-      barX: (index) => PAD.left + (index + 0.5) * step,
-    };
-  };
-
-  const getPaddedPriceRange = (rawMin, rawMax, scaleMode = "linear") => {
-    let min = rawMin;
-    let max = rawMax;
-
-    if (rawMin === rawMax) {
-      const singlePad = Math.max(Math.abs(rawMin) * 0.08, 1);
-      min = rawMin - singlePad;
-      max = rawMax + singlePad;
-    } else {
-      const range = rawMax - rawMin;
-      const padding = resolveAutoYPadding(range);
-      min = rawMin - padding;
-      max = rawMax + padding;
-    }
-
-    if (scaleMode === "log" && rawMin > 0) {
-      min = Math.max(min, rawMin * 0.42);
-      max = Math.max(max, clampPositive(rawMax) * 1.08);
-    }
-
-    return { min, max };
-  };
-
-  const getVisiblePriceScale = (data, extras = [], scaleMode = "linear") => {
-    const pricePoints = data.flatMap((row) => [row.high, row.low]).filter(isFiniteNumber);
-    extras.forEach((value) => {
-      if (Array.isArray(value)) {
-        value.forEach((item) => {
-          if (isFiniteNumber(item)) pricePoints.push(item);
-        });
-      } else if (isFiniteNumber(value)) {
-        pricePoints.push(value);
-      }
-    });
-
-    if (!pricePoints.length) {
-      return { min: 0, max: 1 };
-    }
-
-    const rawMin = Math.min(...pricePoints);
-    const rawMax = Math.max(...pricePoints);
-    return getPaddedPriceRange(rawMin, rawMax, scaleMode);
-  };
-
+  const getBarLayout = (canvas, count) => createLegacyBarLayout(canvasWidth(canvas), count);
   const resolveMainChartAutoScale = resolveLegacyMainChartAutoScaleRange;
-
-  const scaleY = (value, min, max, topPad, chartHeight, scaleMode = "linear") => {
-    if (scaleMode === "log" && min > 0 && max > 0 && value > 0) {
-      const logMin = Math.log(clampPositive(min));
-      const logMax = Math.log(clampPositive(max));
-      const logValue = Math.log(clampPositive(value));
-      return topPad + (1 - (logValue - logMin) / (logMax - logMin || 1)) * chartHeight;
-    }
-    return topPad + (1 - (value - min) / (max - min || 1)) * chartHeight;
-  };
-
-  const invertY = (pixelY, min, max, topPad, chartHeight, scaleMode = "linear") => {
-    const ratio = 1 - (pixelY - topPad) / (chartHeight || 1);
-    if (scaleMode === "log" && min > 0 && max > 0) {
-      const logMin = Math.log(clampPositive(min));
-      const logMax = Math.log(clampPositive(max));
-      return Math.exp(logMin + ratio * (logMax - logMin));
-    }
-    return min + ratio * (max - min);
-  };
+  const scaleY = scaleLegacyPriceY;
+  const invertY = invertLegacyPriceY;
 
   const getCurrentYRange = () => {
     const min = yAxis.mode === "manual_locked" && yAxis.min != null ? yAxis.min : mainMetrics.autoMin;
@@ -692,65 +478,21 @@ export function useChartEngine({
 
   const xForAbsoluteIndex = (layout, absoluteIndex) =>
     layout.barX(absoluteIndex - viewport.startIndex);
+  const {
+    drawArrowLine,
+    drawDrawingLabel,
+    drawFib,
+    drawMeasureTool,
+    drawNote,
+    drawRectZone,
+    drawTrendLine,
+    drawVerticalLine,
+  } = createLegacyDrawingRenderer({ xForAbsoluteIndex, pad: PAD });
 
   const sliceSeries = (series) =>
     series.slice(viewport.startIndex, viewport.startIndex + visibleData.value.length);
-
-  const getDrawingDash = (drawing, fallback = []) =>
-    drawing?.lineStyle && DRAWING_LINE_STYLES[drawing.lineStyle]
-      ? DRAWING_LINE_STYLES[drawing.lineStyle]
-      : fallback;
-
-  const getDrawingWidth = (drawing, fallback = 1.2) =>
-    Number.isFinite(Number(drawing?.lineWidth)) ? Number(drawing.lineWidth) : fallback;
-
-  const getDrawingFill = (drawing, fallbackColor = "#9b6dff", fallbackOpacity = 0.12) => {
-    const color = drawing?.color || fallbackColor;
-    const opacity = Number.isFinite(Number(drawing?.fillOpacity))
-      ? Number(drawing.fillOpacity)
-      : fallbackOpacity;
-    return { color, opacity };
-  };
-
-  const withOpacity = (color, opacity) => {
-    if (!color) return `rgba(155,109,255,${opacity})`;
-    const normalized = Math.max(0, Math.min(opacity, 1));
-    if (color.startsWith("#")) {
-      const hex = color.slice(1);
-      const full = hex.length === 3
-        ? hex.split("").map((char) => `${char}${char}`).join("")
-        : hex;
-      if (full.length === 6) {
-        const red = parseInt(full.slice(0, 2), 16);
-        const green = parseInt(full.slice(2, 4), 16);
-        const blue = parseInt(full.slice(4, 6), 16);
-        return `rgba(${red},${green},${blue},${normalized})`;
-      }
-    }
-    if (color.startsWith("rgb")) {
-      const parts = color.replace(/rgba?\(|\)/g, "").split(",").map((part) => part.trim()).slice(0, 3);
-      if (parts.length === 3) return `rgba(${parts.join(",")},${normalized})`;
-    }
-    return color;
-  };
-
-  const getDataRangeDays = (data) => {
-    if (!data?.length) return 0;
-    const first = parseLegacyDateValue(data[0]?.date);
-    const last = parseLegacyDateValue(data[data.length - 1]?.date);
-    if (!first || !last) return 0;
-    return Math.abs((last - first) / 86400000);
-  };
-
-  const getTimeTickIndices = (data, targetTickCount = 6) => {
-    if (!data.length) return [];
-    const indices = new Set([0, data.length - 1]);
-    const step = Math.max(1, Math.floor((data.length - 1) / Math.max(targetTickCount - 1, 1)));
-    for (let index = 0; index < data.length; index += step) {
-      indices.add(index);
-    }
-    return [...indices].sort((left, right) => left - right);
-  };
+  const getDataRangeDays = getLegacyDataRangeDays;
+  const getTimeTickIndices = getLegacyTimeTickIndices;
 
   const drawTimeAxis = (ctx, canvas, data, layout, options = {}) => {
     if (!data.length) return;
@@ -827,75 +569,16 @@ export function useChartEngine({
     return panels.length > 0 && panels[panels.length - 1] === panelKey;
   };
 
-  const drawCrosshairGuide = (ctx, x, top, bottom, dateLabel = "", width = 0) => {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,209,102,0.95)";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 3]);
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    if (dateLabel && width) {
-      const labelWidth = Math.max(46, dateLabel.length * 8 + 10);
-      const left = Math.min(Math.max(PAD.left, x - labelWidth / 2), width - PAD.right - labelWidth);
-      ctx.fillStyle = "rgba(255,209,102,0.14)";
-      ctx.strokeStyle = "rgba(255,209,102,0.88)";
-      ctx.fillRect(left, 2, labelWidth, 14);
-      ctx.strokeRect(left, 2, labelWidth, 14);
-      ctx.fillStyle = "#ffd166";
-      ctx.font = "9px JetBrains Mono";
-      ctx.fillText(dateLabel, left + 5, 12);
-    }
-    ctx.restore();
-  };
-
-  const drawHorizontalCrosshairGuide = (ctx, y, left, right, label = "", width = 0, top = PAD.top, bottom = 0) => {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,209,102,0.95)";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 3]);
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    if (label && width) {
-      const labelWidth = Math.max(56, label.length * 8 + 10);
-      const boxLeft = Math.max(right + 4, width - labelWidth - 4);
-      const boxTop = clamp(y - 8, top + 2, Math.max(top + 2, bottom - 16));
-      ctx.fillStyle = "rgba(255,209,102,0.14)";
-      ctx.strokeStyle = "rgba(255,209,102,0.88)";
-      ctx.fillRect(boxLeft, boxTop, labelWidth, 14);
-      ctx.strokeRect(boxLeft, boxTop, labelWidth, 14);
-      ctx.fillStyle = "#ffd166";
-      ctx.font = "9px JetBrains Mono";
-      ctx.fillText(label, boxLeft + 5, boxTop + 10);
-    }
-    ctx.restore();
-  };
-
-  const getCrosshairMarker = (layout, data = visibleData.value) => {
-    const absoluteIndex = props.crosshair?.absoluteIndex;
-    if (!props.crosshair?.visible || !Number.isInteger(absoluteIndex)) return null;
-    if (absoluteIndex < viewport.startIndex || absoluteIndex >= viewport.startIndex + data.length) return null;
-    const localIndex = absoluteIndex - viewport.startIndex;
-    const rangeDays = getDataRangeDays(data);
-    const interval = props.currentInterval || "1d";
-    return {
-      absoluteIndex,
-      localIndex,
-      x: layout.barX(localIndex),
-      dateLabel: formatLegacyAxisDateLabel(data[localIndex]?.date, {
-        rangeDays,
-        interval,
-        includeDate: isLegacyIntradayInterval(interval),
-      }),
-    };
-  };
+  const drawCrosshairGuide = drawLegacyCrosshairGuide;
+  const drawHorizontalCrosshairGuide = drawLegacyHorizontalCrosshairGuide;
+  const getCrosshairMarker = (layout, data = visibleData.value) =>
+    resolveLegacyCrosshairMarker({
+      crosshair: props.crosshair,
+      viewportStartIndex: viewport.startIndex,
+      data,
+      layout,
+      interval: props.currentInterval || "1d",
+    });
 
   const drawPanelAxisAndCrosshair = (ctx, canvas, data, layout, options = {}) => {
     if (!data?.length) return;
@@ -1199,181 +882,6 @@ export function useChartEngine({
     ctx.restore();
   };
 
-  const drawTrendLine = (ctx, layout, drawing, scale, color = "#00d4ff", dash = []) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = getDrawingWidth(drawing, 1.5);
-    ctx.setLineDash(dash);
-    ctx.beginPath();
-    ctx.moveTo(xForAbsoluteIndex(layout, drawing.startIndex), scale(drawing.startPrice));
-    ctx.lineTo(xForAbsoluteIndex(layout, drawing.endIndex), scale(drawing.endPrice));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  };
-
-  const drawArrowLine = (ctx, layout, drawing, scale, color = "#7be7ff", dash = []) => {
-    const startX = xForAbsoluteIndex(layout, drawing.startIndex);
-    const endX = xForAbsoluteIndex(layout, drawing.endIndex);
-    const startY = scale(drawing.startPrice);
-    const endY = scale(drawing.endPrice);
-    const angle = Math.atan2(endY - startY, endX - startX);
-    const headLength = 10;
-    drawTrendLine(ctx, layout, drawing, scale, color, dash);
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = getDrawingWidth(drawing, 1.6);
-    ctx.beginPath();
-    ctx.moveTo(endX, endY);
-    ctx.lineTo(endX - headLength * Math.cos(angle - Math.PI / 6), endY - headLength * Math.sin(angle - Math.PI / 6));
-    ctx.moveTo(endX, endY);
-    ctx.lineTo(endX - headLength * Math.cos(angle + Math.PI / 6), endY - headLength * Math.sin(angle + Math.PI / 6));
-    ctx.stroke();
-    ctx.restore();
-  };
-
-const drawFib = (ctx, layout, drawing, scale, width, color = "#ffd166", dash = []) => {
-    const x1 = xForAbsoluteIndex(layout, drawing.startIndex);
-    const x2 = xForAbsoluteIndex(layout, drawing.endIndex);
-    const leftX = Math.min(x1, x2);
-    const rightX = Math.max(x1, x2);
-    const high = Math.max(drawing.startPrice, drawing.endPrice);
-    const low = Math.min(drawing.startPrice, drawing.endPrice);
-    const direction = drawing.endPrice >= drawing.startPrice ? 1 : -1;
-
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.font = "9px JetBrains Mono";
-    ctx.lineWidth = getDrawingWidth(drawing, 1.2);
-    ctx.setLineDash(dash);
-
-    FIB_LEVELS.forEach((level) => {
-      const price = direction >= 0
-        ? high - (high - low) * level
-        : low + (high - low) * level;
-      const y = scale(price);
-
-      ctx.beginPath();
-      ctx.moveTo(leftX, y);
-      ctx.lineTo(rightX, y);
-      ctx.stroke();
-      ctx.fillText(`${Math.round(level * 100)}% ${price.toFixed(2)}`, width - PAD.right + 3, y + 3);
-    });
-
-  ctx.setLineDash([]);
-};
-
-const drawVerticalLine = (ctx, x, height, color = "#ff8c42", dash = [5, 3], lineWidth = 1) => {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  ctx.setLineDash(dash);
-  ctx.beginPath();
-  ctx.moveTo(x, PAD.top);
-  ctx.lineTo(x, height - PAD.bottom);
-  ctx.stroke();
-  ctx.setLineDash([]);
-};
-
-const drawRectZone = (ctx, xAtAbsolute, drawing, scale, strokeStyle, fillStyle, width, dash = [6, 4]) => {
-  const x1 = xAtAbsolute(drawing.startIndex);
-  const x2 = xAtAbsolute(drawing.endIndex);
-  const y1 = scale(drawing.startPrice);
-  const y2 = scale(drawing.endPrice);
-  const left = Math.min(x1, x2);
-  const top = Math.min(y1, y2);
-  const zoneWidth = Math.abs(x2 - x1);
-  const zoneHeight = Math.abs(y2 - y1);
-
-  ctx.fillStyle = fillStyle;
-  ctx.strokeStyle = strokeStyle;
-  ctx.lineWidth = getDrawingWidth(drawing, 1.2);
-  ctx.setLineDash(dash);
-  ctx.fillRect(left, top, zoneWidth, zoneHeight);
-  ctx.strokeRect(left, top, zoneWidth, zoneHeight);
-  ctx.setLineDash([]);
-
-  const high = Math.max(drawing.startPrice, drawing.endPrice);
-  const low = Math.min(drawing.startPrice, drawing.endPrice);
-  ctx.fillStyle = strokeStyle;
-  ctx.font = "9px JetBrains Mono";
-  ctx.fillText(`${high.toFixed(2)} / ${low.toFixed(2)}`, width - PAD.right + 2, top + 10);
-};
-
-const drawMeasureTool = (ctx, xAtAbsolute, drawing, scale, width, strokeStyle = "#00d4ff", dash = [4, 3]) => {
-  const x1 = xAtAbsolute(drawing.startIndex);
-  const x2 = xAtAbsolute(drawing.endIndex);
-  const y1 = scale(drawing.startPrice);
-  const y2 = scale(drawing.endPrice);
-  const left = Math.min(x1, x2);
-  const top = Math.min(y1, y2);
-  const boxWidth = Math.abs(x2 - x1);
-  const boxHeight = Math.abs(y2 - y1);
-  const bars = Math.abs(drawing.endIndex - drawing.startIndex) + 1;
-  const priceChange = drawing.endPrice - drawing.startPrice;
-  const pctChange = drawing.startPrice ? (priceChange / drawing.startPrice) * 100 : 0;
-
-  ctx.strokeStyle = strokeStyle;
-  ctx.fillStyle = "rgba(0,212,255,0.08)";
-  ctx.lineWidth = getDrawingWidth(drawing, 1);
-  ctx.setLineDash(dash);
-  ctx.fillRect(left, top, boxWidth, boxHeight);
-  ctx.strokeRect(left, top, boxWidth, boxHeight);
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.fillStyle = strokeStyle;
-  ctx.font = "9px JetBrains Mono";
-  ctx.fillText(
-    `${bars} bars | ${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)} | ${pctChange >= 0 ? "+" : ""}${pctChange.toFixed(2)}%`,
-    Math.min(left + 6, width - PAD.right - 150),
-    top + 12,
-  );
-};
-
-const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
-  const x = xAtAbsolute(drawing.index);
-  const y = scale(drawing.price);
-  const text = drawing.text || drawing.label || "註記";
-  const color = drawing.color || "#ffd166";
-  const { opacity } = getDrawingFill(drawing, color, 0.88);
-  const paddingX = 8;
-  const paddingY = 5;
-  ctx.save();
-  ctx.font = "10px JetBrains Mono";
-  const textWidth = Math.min(180, Math.max(44, ctx.measureText(text).width + paddingX * 2));
-  const boxWidth = Math.min(textWidth, width - PAD.right - 12);
-  const boxHeight = 22;
-  const left = Math.min(Math.max(PAD.left, x + 8), width - PAD.right - boxWidth - 6);
-  const top = Math.max(PAD.top + 6, y - boxHeight - 8);
-  ctx.fillStyle = `rgba(8,12,18,${Math.min(opacity, 0.95)})`;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.fillRect(left, top, boxWidth, boxHeight);
-  ctx.strokeRect(left, top, boxWidth, boxHeight);
-  ctx.fillStyle = color;
-  ctx.fillText(text, left + paddingX, top + paddingY + 8);
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(left, top + boxHeight);
-  ctx.stroke();
-  ctx.restore();
-};
-
-  const drawDrawingLabel = (ctx, text, x, y, color) => {
-    if (!text) return;
-    ctx.save();
-    ctx.font = "9px JetBrains Mono";
-    const boxWidth = ctx.measureText(text).width + 10;
-    ctx.fillStyle = "rgba(8,12,18,0.88)";
-    ctx.strokeStyle = color;
-    ctx.fillRect(x, y - 11, boxWidth, 14);
-    ctx.strokeRect(x, y - 11, boxWidth, 14);
-    ctx.fillStyle = color;
-    ctx.fillText(text, x + 5, y);
-    ctx.restore();
-  };
-
   const isDrawingSelected = (drawing) =>
     !!drawing?.id && drawing.id === props.selectedDrawingId;
 
@@ -1393,16 +901,6 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       ctx.stroke();
     });
     ctx.restore();
-  };
-
-  const distanceToSegment = (pointX, pointY, x1, y1, x2, y2) => {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    if (!dx && !dy) return Math.hypot(pointX - x1, pointY - y1);
-    const t = clamp(((pointX - x1) * dx + (pointY - y1) * dy) / (dx * dx + dy * dy), 0, 1);
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    return Math.hypot(pointX - projX, pointY - projY);
   };
 
   const xAtAbsoluteIndex = (absoluteIndex) =>
@@ -3016,32 +2514,29 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
 
   const panByBars = (delta, { commit = true } = {}) => {
     if (!props.ohlcData.length) return;
-    viewport.startIndex = clamp(
-      viewport.startIndex + delta,
-      0,
-      Math.max(0, props.ohlcData.length - visibleData.value.length),
-    );
+    viewport.startIndex = computePannedStartIndex({
+      startIndex: viewport.startIndex,
+      deltaBars: delta,
+      totalCount: props.ohlcData.length,
+      visibleCount: visibleData.value.length,
+    });
     scheduleRender();
     if (commit) rememberViewState();
   };
 
   const zoomTo = (nextVisibleCount, anchorRatio = 0.5, { commit = true } = {}) => {
     if (!props.ohlcData.length) return;
-    const currentVisibleCount = visibleData.value.length;
-    const clampedVisibleCount = clamp(
+    const nextViewport = computeZoomViewport({
+      startIndex: viewport.startIndex,
+      currentVisibleCount: visibleData.value.length,
       nextVisibleCount,
-      visibleCountFloor.value,
-      props.ohlcData.length,
-    );
-    if (clampedVisibleCount === currentVisibleCount) return;
-
-    const anchorIndex = viewport.startIndex + Math.round(anchorRatio * Math.max(currentVisibleCount - 1, 0));
-    viewport.visibleCount = clampedVisibleCount;
-    viewport.startIndex = clamp(
-      Math.round(anchorIndex - anchorRatio * Math.max(clampedVisibleCount - 1, 0)),
-      0,
-      Math.max(0, props.ohlcData.length - clampedVisibleCount),
-    );
+      minimumVisibleCount: visibleCountFloor.value,
+      totalCount: props.ohlcData.length,
+      anchorRatio,
+    });
+    if (!nextViewport.changed) return;
+    viewport.visibleCount = nextViewport.visibleCount;
+    viewport.startIndex = nextViewport.startIndex;
     scheduleRender();
     if (commit) rememberViewState();
   };
@@ -3258,26 +2753,12 @@ const drawNote = (ctx, xAtAbsolute, drawing, scale, width) => {
       return;
     }
 
-    const prevRow = props.ohlcData[info.absoluteIndex - 1];
-    const referenceClose = prevRow?.close ?? info.row.open ?? info.row.close;
-    const candleChange = (info.row.close ?? 0) - (referenceClose ?? 0);
-    const candleChangePct = referenceClose ? (candleChange / referenceClose) * 100 : 0;
-
-    emit("update-crosshair", {
-      visible: true,
-      canvasX: info.x,
-      canvasY: info.y,
-      date: info.row.date,
-      hoverPrice: fmtPrice(info.price),
-      open: fmtPrice(info.row.open),
-      high: fmtPrice(info.row.high),
-      low: fmtPrice(info.row.low),
-      close: fmtPrice(info.row.close),
-      change: `${candleChange >= 0 ? "+" : ""}${fmtPrice(candleChange)}`,
-      changePct: `${candleChangePct >= 0 ? "+" : ""}${candleChangePct.toFixed(2)}%`,
-      volume: fmtVol(info.row.volume),
-      absoluteIndex: info.absoluteIndex,
-    });
+    emit("update-crosshair", buildLegacyCrosshairPayload({
+      info,
+      previousRow: props.ohlcData[info.absoluteIndex - 1],
+      formatPrice: fmtPrice,
+      formatVolume: fmtVol,
+    }));
 
     scheduleRender();
     updateDraftDrawing(info);
