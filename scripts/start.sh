@@ -5,7 +5,6 @@ cd "$(dirname "$0")/.."
 
 BACKEND_URL="http://localhost:8001"
 FRONTEND_URL="http://localhost:5173"
-APP_BIND_HOST="${APP_BIND_HOST:-127.0.0.1}"
 FRONTEND_BIND_HOST="${FRONTEND_BIND_HOST:-127.0.0.1}"
 export FRONTEND_DEV_URL="$FRONTEND_URL"
 
@@ -41,6 +40,9 @@ source venv/bin/activate
 echo "[INFO] Installing backend dependencies..."
 python3 -m pip install --upgrade pip -q
 python3 -m pip install -r backend/requirements.txt -q
+
+python3 backend/check_runtime_environment.py
+APP_BIND_HOST="$(python3 backend/check_runtime_environment.py --bind-host)"
 
 echo "[INFO] Installing frontend dependencies..."
 (

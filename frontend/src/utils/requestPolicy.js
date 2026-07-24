@@ -1,3 +1,5 @@
+import { secureFetch } from "./lanAccess";
+
 function timeoutError(timeoutMs) {
   const error = new Error(`API 請求逾時（${timeoutMs}ms）`);
   error.name = "TimeoutError";
@@ -47,7 +49,7 @@ export async function fetchWithPolicy(url, options = {}, {
       ? createCombinedController(options.signal, timeoutMs)
       : null;
     try {
-      return await fetch(url, request ? { ...options, signal: request.signal } : options);
+      return await secureFetch(url, request ? { ...options, signal: request.signal } : options);
     } catch (error) {
       const normalizedError = request?.didTimeout() ? timeoutError(timeoutMs) : error;
       const retryable = normalizedError?.code === "QV_API_TIMEOUT" || normalizedError instanceof TypeError;

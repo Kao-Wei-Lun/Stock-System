@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { secureFetch } from "../utils/lanAccess";
 import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 const ONBOARDING_DISMISS_KEY = "quantvision:fubon-onboarding-dismissed";
@@ -24,7 +25,7 @@ function writeDismissedFlag(value) {
 }
 
 async function requestFubonStatuses() {
-  const response = await fetch("/api/settings/fubon-accounts/status");
+  const response = await secureFetch("/api/settings/fubon-accounts/status");
   const contentType = response.headers?.get?.("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok) {

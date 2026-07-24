@@ -1,5 +1,6 @@
 import { ref } from "vue";
 
+import { websocketLanProtocols } from "../../utils/lanAccess";
 import { recordQuantVisionRealtimeMessage } from "../../utils/performanceMarks";
 
 const RECONNECT_DELAY_MS = 5000;
@@ -99,7 +100,10 @@ function connectSharedSocket() {
   if (!sharedSocketUrl) return;
   if (sharedSocket && sharedSocket.readyState < 2) return;
   intentionalClose = false;
-  sharedSocket = new WebSocket(sharedSocketUrl);
+  const protocols = websocketLanProtocols();
+  sharedSocket = protocols.length
+    ? new WebSocket(sharedSocketUrl, protocols)
+    : new WebSocket(sharedSocketUrl);
   sharedSocket.onopen = handleSocketOpen;
   sharedSocket.onmessage = handleSocketMessage;
   sharedSocket.onclose = handleSocketClose;

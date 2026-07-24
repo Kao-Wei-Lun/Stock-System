@@ -37,6 +37,7 @@ from env_validation import (
 from futopt_history_service import FutoptCandleRecorder, FutoptRefreshCoordinator
 from frontend_static import SPAStaticFiles
 from logging_config import configure_channel_logging, configure_logging
+from lan_security import LanSecurityMiddleware
 from local_access import LocalAccessMiddleware, split_csv
 from operational_metrics import OperationalMetricStore, OperationalMetricsService
 from performance_timing import RequestTimingMiddleware
@@ -88,6 +89,7 @@ FRONTEND_DEV_URL = read_url_env("FRONTEND_DEV_URL", "http://localhost:5173")
 ALLOW_LAN_ACCESS = read_bool_env("ALLOW_LAN_ACCESS", False)
 LAN_ALLOWED_NETWORKS = read_text_env("LAN_ALLOWED_NETWORKS", "")
 LAN_ALLOWED_ORIGINS = split_csv(read_text_env("LAN_ALLOWED_ORIGINS", ""))
+LAN_ACCESS_TOKEN = read_text_env("LAN_ACCESS_TOKEN", "")
 STARTUP_DOWNLOAD_ENABLED = read_bool_env("STARTUP_DOWNLOAD_ENABLED", False)
 INSTITUTIONAL_AUTO_SYNC_ENABLED = read_bool_env("INSTITUTIONAL_AUTO_SYNC_ENABLED", True)
 TAIWAN_CHIP_AUTO_SYNC_ENABLED = read_bool_env("TAIWAN_CHIP_AUTO_SYNC_ENABLED", True)
@@ -664,6 +666,12 @@ app.add_middleware(
     LocalAccessMiddleware,
     allow_lan=ALLOW_LAN_ACCESS,
     allowed_networks=LAN_ALLOWED_NETWORKS,
+)
+app.add_middleware(
+    LanSecurityMiddleware,
+    allow_lan=ALLOW_LAN_ACCESS,
+    access_token=LAN_ACCESS_TOKEN,
+    allowed_origins=LAN_ALLOWED_ORIGINS,
 )
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)

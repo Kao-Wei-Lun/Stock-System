@@ -9,10 +9,10 @@ def test_local_launchers_bind_to_loopback_by_default():
     shell_launcher = (PROJECT_ROOT / "scripts" / "start.sh").read_text(encoding="utf-8")
     vite_config = (PROJECT_ROOT / "frontend" / "vite.config.js").read_text(encoding="utf-8")
 
-    assert 'if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"' in windows_launcher
+    assert '"%RUNTIME_CHECK%" --bind-host' in windows_launcher
     assert 'if not defined FRONTEND_BIND_HOST set "FRONTEND_BIND_HOST=127.0.0.1"' in windows_launcher
     assert 'set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"' in windows_launcher
-    assert 'APP_BIND_HOST="${APP_BIND_HOST:-127.0.0.1}"' in shell_launcher
+    assert 'APP_BIND_HOST="$(python3 backend/check_runtime_environment.py --bind-host)"' in shell_launcher
     assert 'FRONTEND_BIND_HOST="${FRONTEND_BIND_HOST:-127.0.0.1}"' in shell_launcher
     assert 'process.env.FRONTEND_BIND_HOST || "127.0.0.1"' in vite_config
 

@@ -5,12 +5,12 @@ chcp 65001 >nul
 cd /d "%~dp0.."
 set "PROJECT_ROOT=%CD%"
 set "BACKEND_PORT=8001"
-if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"
 if not defined FRONTEND_BIND_HOST set "FRONTEND_BIND_HOST=127.0.0.1"
 set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"
 set "APP_URL=%BACKEND_URL%/app/"
 set "VENV_PYTHON=%PROJECT_ROOT%\venv\Scripts\python.exe"
 set "SUPERVISOR=%PROJECT_ROOT%\backend\service_supervisor.py"
+set "RUNTIME_CHECK=%PROJECT_ROOT%\backend\check_runtime_environment.py"
 set "RUNTIME_DIR=%PROJECT_ROOT%\.runtime"
 
 if not exist "%VENV_PYTHON%" (
@@ -23,9 +23,21 @@ if not exist "%SUPERVISOR%" (
     exit /b 1
 )
 
-if /i "%~1"=="backend" goto backend
 if /i "%~1"=="stop" goto stop
 if /i "%~1"=="status" goto status
+
+"%VENV_PYTHON%" -X utf8 "%RUNTIME_CHECK%"
+if errorlevel 1 (
+    echo [ERROR] QuantVision refused to start because runtime security validation failed.
+    exit /b 1
+)
+for /f "delims=" %%H in ('""%VENV_PYTHON%" -X utf8 "%RUNTIME_CHECK%" --bind-host"') do set "APP_BIND_HOST=%%H"
+if not defined APP_BIND_HOST (
+    echo [ERROR] Unable to resolve the validated backend bind host.
+    exit /b 1
+)
+
+if /i "%~1"=="backend" goto backend
 
 title QuantVision Production Launcher
 if not exist "%PROJECT_ROOT%\frontend\dist\index.html" (
@@ -90,11 +102,13 @@ if "%SERVICE_RESULT%"=="70" (
 exit /b %SERVICE_RESULT%
 
 :stop
+if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"
 echo [INFO] Requesting a planned QuantVision shutdown...
 "%VENV_PYTHON%" -X utf8 "%SUPERVISOR%" stop --python "%VENV_PYTHON%" --working-directory "%PROJECT_ROOT%\backend" --runtime-dir "%RUNTIME_DIR%" --host "%APP_BIND_HOST%" --port %BACKEND_PORT%
 exit /b %ERRORLEVEL%
 
 :status
+if not defined APP_BIND_HOST set "APP_BIND_HOST=127.0.0.1"
 "%VENV_PYTHON%" -X utf8 "%SUPERVISOR%" status --python "%VENV_PYTHON%" --working-directory "%PROJECT_ROOT%\backend" --runtime-dir "%RUNTIME_DIR%" --host "%APP_BIND_HOST%" --port %BACKEND_PORT%
 exit /b %ERRORLEVEL%
 

@@ -14,6 +14,13 @@ PLACEHOLDER_PASSWORDS = {
   "changeme",
   "change_me",
 }
+WEAK_LAN_TOKENS = {
+  "changeme",
+  "change_me",
+  "quantvision",
+  "quantvision_token",
+  "your_lan_access_token_here",
+}
 
 
 def _read_raw_value(name: str, default: str | None = None, *, env: Mapping[str, str] | None = None) -> str:
@@ -123,6 +130,33 @@ def read_url_env(name: str, default: str, *, env: Mapping[str, str] | None = Non
   return value
 
 
+def _is_strong_lan_access_token(value: str) -> bool:
+  token = str(value or "").strip()
+  return (
+    len(token) >= 32
+    and token.lower() not in WEAK_LAN_TOKENS
+    and len(set(token)) >= 12
+  )
+
+
+def _validate_lan_origin(origin: str) -> str:
+  value = str(origin or "").strip().rstrip("/")
+  if value == "*" or "*" in value:
+    raise RuntimeError("LAN_ALLOWED_ORIGINS must not contain wildcard origins")
+  parsed = urlparse(value)
+  if (
+    parsed.scheme not in {"http", "https"}
+    or not parsed.hostname
+    or parsed.username
+    or parsed.password
+    or parsed.path not in {"", "/"}
+    or parsed.query
+    or parsed.fragment
+  ):
+    raise RuntimeError(f"LAN_ALLOWED_ORIGINS must contain exact HTTP(S) origins: {value}")
+  return value
+
+
 def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dict[str, object]:
   source = env if env is not None else os.environ
   errors: list[str] = []
@@ -153,14 +187,32 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture("TW_FULL_HISTORY_SYNC_START", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_START", "14:00", env=source))
   capture("TW_FULL_HISTORY_SYNC_STOP", lambda: read_hhmm_env("TW_FULL_HISTORY_SYNC_STOP", "08:00", env=source))
   capture("FRONTEND_DEV_URL", lambda: read_url_env("FRONTEND_DEV_URL", "http://localhost:5173", env=source))
-  for origin in split_csv(_read_raw_value("LAN_ALLOWED_ORIGINS", "", env=source)):
-    capture(f"LAN_ALLOWED_ORIGIN:{origin}", lambda origin=origin: read_url_env("LAN_ALLOWED_ORIGIN", origin, env={}))
+  lan_origins = split_csv(_read_raw_value("LAN_ALLOWED_ORIGINS", "", env=source))
+  validated_origins: list[str] = []
+  for origin in lan_origins:
+    try:
+      validated_origins.append(_validate_lan_origin(origin))
+    except RuntimeError as exc:
+      errors.append(str(exc))
+  validated["LAN_ALLOWED_ORIGINS"] = validated_origins
 
   try:
     bind_host = read_text_env("APP_BIND_HOST", "127.0.0.1", env=source)
     allow_lan = read_bool_env("ALLOW_LAN_ACCESS", False, env=source)
     if not is_loopback_bind_host(bind_host) and not allow_lan:
       errors.append("ALLOW_LAN_ACCESS must be true before APP_BIND_HOST can expose a non-loopback interface")
+    if allow_lan:
+      allowed_networks = parse_allowed_networks(_read_raw_value("LAN_ALLOWED_NETWORKS", "", env=source))
+      if not allowed_networks:
+        errors.append("LAN_ALLOWED_NETWORKS is required when ALLOW_LAN_ACCESS=true")
+      if not lan_origins:
+        errors.append("LAN_ALLOWED_ORIGINS is required when ALLOW_LAN_ACCESS=true")
+      token = _read_raw_value("LAN_ACCESS_TOKEN", "", env=source)
+      if not _is_strong_lan_access_token(token):
+        errors.append(
+          "LAN_ACCESS_TOKEN must be at least 32 characters with sufficient variation "
+          "when ALLOW_LAN_ACCESS=true"
+        )
   except RuntimeError:
     pass
 

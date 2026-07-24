@@ -1,8 +1,9 @@
 import { computed, ref } from "vue";
+import { secureFetch } from "../utils/lanAccess";
 import { createVisibilityPoller } from "../utils/visibilityPoller";
 
 async function request(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await secureFetch(path, options);
   const contentType = response.headers?.get?.("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok) {

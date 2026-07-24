@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+import check_runtime_environment
 import main
 from env_validation import validate_runtime_environment
 
@@ -49,6 +50,7 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
 
     assert validated["MYSQL_PORT"] == 3306
     assert validated["APP_PORT"] == 8001
+    assert validated["APP_BIND_HOST"] == "127.0.0.1"
     assert validated["FRONTEND_DEV_URL"] == "http://localhost:5173"
     assert validated["DAILY_LATEST_SYNC_TIME"] == "18:10"
     assert validated["TW_FULL_HISTORY_SYNC_START"] == "15:30"
@@ -92,10 +94,58 @@ def test_validate_runtime_environment_accepts_scoped_lan_access(monkeypatch):
         ALLOW_LAN_ACCESS="true",
         LAN_ALLOWED_NETWORKS="192.168.50.0/24",
         LAN_ALLOWED_ORIGINS="http://192.168.50.10:5173",
+        LAN_ACCESS_TOKEN="unit-test-lan-token-0123456789-ABCDEFGHIJ",
     )
 
     validated = validate_runtime_environment()
     assert validated["ALLOW_LAN_ACCESS"] is True
+    assert validated["LAN_ALLOWED_ORIGINS"] == ["http://192.168.50.10:5173"]
+    assert "LAN_ACCESS_TOKEN" not in validated
+
+
+def test_runtime_checker_prints_only_validated_bind_host(monkeypatch, capsys):
+    monkeypatch.setattr(check_runtime_environment, "load_dotenv", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        check_runtime_environment,
+        "validate_runtime_environment",
+        lambda: {
+            "APP_BIND_HOST": "0.0.0.0",
+            "ALLOW_LAN_ACCESS": True,
+            "LAN_ACCESS_TOKEN": "must-not-be-printed",
+        },
+    )
+
+    assert check_runtime_environment.main(["--bind-host"]) == 0
+    assert capsys.readouterr().out.strip() == "0.0.0.0"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"LAN_ALLOWED_NETWORKS": ""}, "LAN_ALLOWED_NETWORKS"),
+        ({"LAN_ALLOWED_ORIGINS": ""}, "LAN_ALLOWED_ORIGINS"),
+        ({"LAN_ACCESS_TOKEN": ""}, "LAN_ACCESS_TOKEN"),
+        ({"LAN_ACCESS_TOKEN": "changeme"}, "LAN_ACCESS_TOKEN"),
+        ({"LAN_ALLOWED_ORIGINS": "*"}, "wildcard"),
+    ],
+)
+def test_validate_runtime_environment_fails_closed_for_incomplete_lan_security(
+    monkeypatch,
+    overrides,
+    message,
+):
+    settings = {
+        "APP_BIND_HOST": "0.0.0.0",
+        "ALLOW_LAN_ACCESS": "true",
+        "LAN_ALLOWED_NETWORKS": "192.168.50.0/24",
+        "LAN_ALLOWED_ORIGINS": "http://192.168.50.10:8001",
+        "LAN_ACCESS_TOKEN": "unit-test-lan-token-0123456789-ABCDEFGHIJ",
+        **overrides,
+    }
+    apply_env(monkeypatch, **settings)
+
+    with pytest.raises(RuntimeError, match=message):
+        validate_runtime_environment()
 
 
 def test_lifespan_validates_environment_before_startup(monkeypatch):

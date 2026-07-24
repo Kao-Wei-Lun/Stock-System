@@ -18,6 +18,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { TreemapChart } from "echarts/charts";
 import { TooltipComponent } from "echarts/components";
 import VChart, { THEME_KEY } from "vue-echarts";
+import { secureFetch } from "../../utils/lanAccess";
 
 use([CanvasRenderer, TreemapChart, TooltipComponent]);
 
@@ -251,8 +252,8 @@ async function fetchHeatmapData() {
     error.value = null;
 
     const [tseRes, otcRes] = await Promise.all([
-      fetch("/api/fubon/snapshot/TSE"),
-      fetch("/api/fubon/snapshot/OTC")
+      secureFetch("/api/fubon/snapshot/TSE"),
+      secureFetch("/api/fubon/snapshot/OTC")
     ]);
 
     let data = [];
