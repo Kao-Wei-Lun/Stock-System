@@ -213,7 +213,21 @@ FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY=true
 - 同一 episode 只提出一次 request。
 - 功能關閉時不建立排程。
 
-### Phase 4：整體驗收
+### Phase 4：Windows venv 程序樹可靠性
+
+實機啟動可能形成 `supervisor → venv python launcher → Python/uvicorn`
+三層程序。Supervisor 必須把實際監聽 PID 辨識為受管理的子孫程序，
+planned stop/restart 也必須終止整棵已確認的程序樹，避免留下仍占用
+8001 埠的孤兒程序。
+
+測試：
+
+- 監聽 PID 是 launcher 的多層子程序時仍顯示 `managed=true`。
+- 優雅停止後埠仍被已確認的子程序占用時，才使用 Windows tree kill。
+- CLI stop 先等待 supervisor 處理 marker，避免雙方競爭停止同一程序。
+- 不明命令列或非本專案 Python 程序仍不會被終止。
+
+### Phase 5：整體驗收
 
 - 富邦、Supervisor、Scheduler 相關測試。
 - 後端完整 pytest。

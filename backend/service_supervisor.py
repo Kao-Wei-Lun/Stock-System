@@ -130,6 +130,30 @@ def read_process_command_line(pid: int) -> str:
     return result.stdout.strip()
 
 
+def read_process_parent_pid(pid: int) -> int | None:
+    """Return a Windows process parent PID for managed descendant checks."""
+    if sys.platform != "win32" or pid <= 0:
+        return None
+    command = (
+        f"$p=Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\" "
+        "-ErrorAction SilentlyContinue; if($p){$p.ParentProcessId}"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=10,
+    )
+    try:
+        parent_pid = int(result.stdout.strip())
+    except ValueError:
+        return None
+    return parent_pid if parent_pid > 0 else None
+
+
 class LocalServiceSupervisor:
     def __init__(
         self,
@@ -138,6 +162,7 @@ class LocalServiceSupervisor:
         runtime_dir: Path = DEFAULT_RUNTIME_DIR,
         port_probe: Callable[[int], int | None] = find_listening_pid,
         command_line_probe: Callable[[int], str] = read_process_command_line,
+        parent_pid_probe: Callable[[int], int | None] = read_process_parent_pid,
         popen_factory: Callable[..., Any] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -151,6 +176,7 @@ class LocalServiceSupervisor:
         self.breaker_path = self.runtime_dir / "backend-service-breaker.json"
         self._port_probe = port_probe
         self._command_line_probe = command_line_probe
+        self._parent_pid_probe = parent_pid_probe
         self._popen_factory = popen_factory
         self._clock = clock
         self._sleep = sleep
@@ -167,11 +193,31 @@ class LocalServiceSupervisor:
 
     def _is_managed_process(self, pid: int) -> bool:
         state = _read_json(self.state_path)
-        if int(state.get("process_pid") or 0) != int(pid):
+        launcher_pid = int(state.get("process_pid") or 0)
+        if launcher_pid <= 0:
             return False
         if int(state.get("port") or 0) != self.settings.port:
             return False
+        if int(pid) != launcher_pid and not self._is_descendant_of(pid, launcher_pid):
+            return False
         return self._command_matches_expected_process(pid)
+
+    def _is_descendant_of(self, pid: int, ancestor_pid: int) -> bool:
+        """Follow a bounded parent chain to handle the Windows venv launcher."""
+        current_pid = int(pid)
+        target_pid = int(ancestor_pid)
+        visited: set[int] = set()
+        for _ in range(16):
+            if current_pid <= 0 or current_pid in visited:
+                return False
+            visited.add(current_pid)
+            parent_pid = self._parent_pid_probe(current_pid)
+            if parent_pid is None:
+                return False
+            if int(parent_pid) == target_pid:
+                return True
+            current_pid = int(parent_pid)
+        return False
 
     def _is_expected_process(self, pid: int) -> bool:
         # The command signature allows a one-time handover from the pre-supervisor
@@ -402,17 +448,40 @@ class LocalServiceSupervisor:
             if not self._wait_backoff(delay):
                 return 0
 
-    @staticmethod
-    def _terminate_started_process(process: Any) -> None:
+    def _terminate_started_process(self, process: Any) -> None:
         try:
             if sys.platform == "win32":
                 os.kill(int(process.pid), signal.CTRL_BREAK_EVENT)
             else:
                 process.terminate()
             process.wait(timeout=10)
-            return
+            if sys.platform != "win32" or self._port_probe(self.settings.port) is None:
+                return
         except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
             pass
+        if sys.platform == "win32":
+            # A Windows venv python.exe can be a launcher whose child owns the
+            # listening socket. Terminate the confirmed launcher's whole tree
+            # so a planned recycle cannot leave an orphaned uvicorn process.
+            try:
+                target_pid = int(process.pid)
+                listening_pid = self._port_probe(self.settings.port)
+                if (
+                    listening_pid is not None
+                    and listening_pid > 0
+                    and self._is_expected_process(listening_pid)
+                ):
+                    target_pid = int(listening_pid)
+                subprocess.run(
+                    ["taskkill", "/PID", str(target_pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=15,
+                )
+                process.wait(timeout=5)
+                return
+            except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+                pass
         try:
             process.kill()
             process.wait(timeout=5)
@@ -431,13 +500,24 @@ class LocalServiceSupervisor:
                 f"Port {self.settings.port} is occupied by an unconfirmed process; no process was stopped."
             )
         if sys.platform == "win32":
+            # Give the running supervisor first chance to perform its graceful
+            # tree shutdown. This avoids racing its marker polling loop.
+            deadline = self._clock() + 15
+            while self._clock() < deadline:
+                if self._port_probe(self.settings.port) is None:
+                    return {
+                        "status": "stop_requested",
+                        "port": self.settings.port,
+                        "process_pid": pid,
+                    }
+                self._sleep(0.25)
             result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T"],
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 check=False,
                 timeout=15,
             )
-            if result.returncode != 0:
+            if result.returncode != 0 and self._port_probe(self.settings.port) is not None:
                 raise SupervisorError("Confirmed backend did not accept the planned stop request.")
         else:
             os.kill(pid, signal.SIGTERM)

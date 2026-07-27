@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
+import service_supervisor as supervisor_module
 from service_supervisor import (
     PREFLIGHT_COLLISION,
     PREFLIGHT_EXPECTED,
@@ -114,6 +116,93 @@ def test_preflight_can_reuse_exact_legacy_launcher_signature_without_state(tmp_p
 
     assert result["status"] == PREFLIGHT_EXPECTED
     assert result["managed"] is False
+
+
+def test_preflight_recognizes_listener_descended_from_managed_venv_launcher(tmp_path):
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir()
+    (runtime / "backend-service.json").write_text(
+        json.dumps({"process_pid": 42, "port": 8001}),
+        encoding="utf-8",
+    )
+    parents = {99: 77, 77: 42}
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=runtime,
+        port_probe=lambda _port: 99,
+        command_line_probe=lambda _pid: (
+            f'"{settings(tmp_path).python_path}" -X utf8 -m uvicorn main:app --port 8001'
+        ),
+        parent_pid_probe=lambda pid: parents.get(pid),
+    )
+
+    result = supervisor.preflight()
+
+    assert result["status"] == PREFLIGHT_EXPECTED
+    assert result["process_pid"] == 99
+    assert result["managed"] is True
+
+
+def test_windows_tree_termination_falls_back_to_confirmed_listener(
+    tmp_path,
+    monkeypatch,
+):
+    commands = []
+    process = FakeProcess(42, 0)
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=tmp_path / ".runtime",
+        port_probe=lambda _port: 99,
+        command_line_probe=lambda _pid: (
+            f'"{settings(tmp_path).python_path}" -X utf8 -m uvicorn main:app --port 8001'
+        ),
+    )
+    monkeypatch.setattr(supervisor_module.sys, "platform", "win32")
+    monkeypatch.setattr(supervisor_module.os, "kill", lambda *_args: None)
+    monkeypatch.setattr(
+        supervisor_module.subprocess,
+        "run",
+        lambda command, **_kwargs: (
+            commands.append(command) or SimpleNamespace(returncode=0)
+        ),
+    )
+
+    supervisor._terminate_started_process(process)
+
+    assert commands == [["taskkill", "/PID", "99", "/T", "/F"]]
+
+
+def test_windows_stop_waits_for_supervisor_marker_before_direct_kill(
+    tmp_path,
+    monkeypatch,
+):
+    clock = FakeClock()
+    observations = iter([99, 99, None])
+    commands = []
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=tmp_path / ".runtime",
+        port_probe=lambda _port: next(observations),
+        command_line_probe=lambda _pid: (
+            f'"{settings(tmp_path).python_path}" -X utf8 -m uvicorn main:app --port 8001'
+        ),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    monkeypatch.setattr(supervisor_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        supervisor_module.subprocess,
+        "run",
+        lambda command, **_kwargs: (
+            commands.append(command) or SimpleNamespace(returncode=0)
+        ),
+    )
+
+    result = supervisor.request_stop()
+
+    assert result["status"] == "stop_requested"
+    assert commands == []
+    assert clock.sleeps == [0.25]
 
 
 def test_crash_restarts_with_backoff_then_planned_exit_does_not_restart(tmp_path):
