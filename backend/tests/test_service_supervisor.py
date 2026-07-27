@@ -205,6 +205,21 @@ def test_windows_stop_waits_for_supervisor_marker_before_direct_kill(
     assert clock.sleeps == [0.25]
 
 
+def test_stop_does_not_publish_marker_for_unconfirmed_port_owner(tmp_path):
+    runtime = tmp_path / ".runtime"
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=runtime,
+        port_probe=lambda _port: 99,
+        command_line_probe=lambda _pid: "other-server --port 8001",
+    )
+
+    with pytest.raises(SupervisorError, match="unconfirmed process"):
+        supervisor.request_stop()
+
+    assert not supervisor.stop_marker.exists()
+
+
 def test_crash_restarts_with_backoff_then_planned_exit_does_not_restart(tmp_path):
     clock = FakeClock()
     factory = ProcessFactory([1, 0])

@@ -491,14 +491,21 @@ class LocalServiceSupervisor:
     def request_stop(self) -> dict[str, Any]:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self._clear_restart_marker()
-        self.stop_marker.write_text("planned\n", encoding="utf-8")
         pid = self._port_probe(self.settings.port)
         if pid is None:
+            try:
+                self.stop_marker.unlink()
+            except FileNotFoundError:
+                pass
             return {"status": "already_stopped", "port": self.settings.port}
         if pid <= 0 or not self._is_expected_process(pid):
             raise SupervisorError(
                 f"Port {self.settings.port} is occupied by an unconfirmed process; no process was stopped."
             )
+        # Confirm ownership before publishing the marker. The supervisor may
+        # consume it immediately, so checking identity afterward can race with
+        # a successful shutdown and incorrectly report an unconfirmed process.
+        self.stop_marker.write_text("planned\n", encoding="utf-8")
         if sys.platform == "win32":
             # Give the running supervisor first chance to perform its graceful
             # tree shutdown. This avoids racing its marker polling loop.
