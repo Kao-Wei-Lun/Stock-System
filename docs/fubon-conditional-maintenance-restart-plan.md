@@ -273,3 +273,22 @@ planned stop/restart 也必須終止整棵已確認的程序樹，避免留下�
 - 刪除 restart marker 不影響資料庫。
 - 功能不需要 database migration。
 - 若 planned restart 機制異常，可回到 Supervisor 原有的 crash-only restart 行為。
+
+## 10. 實際驗收結果（2026-07-27）
+
+- Phase 1 富邦通道測試：56 passed。
+- Phase 2 Supervisor marker 測試：8 passed。
+- Phase 3 排程、環境驗證與相關迴歸：91 passed。
+- Windows 程序樹與停止競態測試：12 passed。
+- 乾淨分支完整後端測試：633 passed。
+- Runtime environment validation：passed。
+- 實際 `start.bat` 啟動後，Supervisor 對 Windows venv 子孫監聽程序回報
+  `managed=true`。
+- 實際建立安全 restart marker 後，Supervisor PID 維持不變，uvicorn
+  launcher 與 listener PID 均已更換，最後重啟狀態為 `completed`。
+- 重啟後 `/` 與 `/api/ready` 均回傳 HTTP 200。
+- `/api/scheduler/health` 顯示 `fubon-maintenance-restart` 為 running，
+  狀態為 `monitoring`，當時異常訂閱通道數為 0。
+- 本機功能已啟用；`.env` 保持 ignored，未進入 Git。
+- 使用者原有的 daily report 與 `.codex/config.toml` 修改均未納入任何
+  本功能 commit。
