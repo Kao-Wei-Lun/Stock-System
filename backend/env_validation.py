@@ -229,6 +229,8 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     ("FUTOPT_RECORDER_ENABLED", True),
     ("PAPER_MARGIN_AUTO_SYNC_ENABLED", True),
     ("BACKTEST_EXECUTOR_ENABLED", True),
+    ("FUBON_MAINTENANCE_RESTART_ENABLED", False),
+    ("FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY", True),
   ):
     capture(key, lambda key=key, default=default: read_bool_env(key, default, env=source))
 
@@ -255,6 +257,18 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture(
     "FUBON_WS_SESSION_REFRESH_SECONDS",
     lambda: read_float_env("FUBON_WS_SESSION_REFRESH_SECONDS", "30", minimum=1, env=source),
+  )
+  capture(
+    "FUBON_MAINTENANCE_RESTART_TIME",
+    lambda: read_hhmm_env("FUBON_MAINTENANCE_RESTART_TIME", "08:00", env=source),
+  )
+  capture(
+    "FUBON_WS_UNHEALTHY_GRACE_SECONDS",
+    lambda: read_int_env("FUBON_WS_UNHEALTHY_GRACE_SECONDS", "300", minimum=0, env=source),
+  )
+  capture(
+    "FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS",
+    lambda: read_int_env("FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS", "30", minimum=5, env=source),
   )
   for key, default in (
     ("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15"),

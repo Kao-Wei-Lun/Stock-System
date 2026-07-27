@@ -65,6 +65,7 @@ from providers import (
 from routers import alerts, assets, backtest, intelligence, journal, market_data, paper_trading, reports, settings, system, watchlist, workspace
 from routers.watchlist import hydrate_watchlist_item
 from scheduler import BackgroundScheduler, SchedulerDependencies, SchedulerSettings
+from service_supervisor import DEFAULT_RUNTIME_DIR, request_supervised_restart
 from mysql_backup import DEFAULT_BACKUP_DIR, MysqlSettings, create_backup, latest_backup_status, verify_backup
 from taifex_fetcher import taifex_fetcher
 from taiwan_history_backfill_service import TaiwanHistoryBackfillService, _normalize_intervals
@@ -196,6 +197,25 @@ REALTIME_QUOTE_PERSIST_CAPACITY = read_int_env(
 )
 REALTIME_QUOTE_PERSIST_ASYNC_ENABLED = read_bool_env("REALTIME_QUOTE_PERSIST_ASYNC_ENABLED", True)
 FUBON_WS_SESSION_REFRESH_SECONDS = read_float_env("FUBON_WS_SESSION_REFRESH_SECONDS", "30", minimum=1)
+FUBON_MAINTENANCE_RESTART_ENABLED = read_bool_env("FUBON_MAINTENANCE_RESTART_ENABLED", False)
+FUBON_MAINTENANCE_RESTART_TIME_RAW = read_hhmm_env(
+    "FUBON_MAINTENANCE_RESTART_TIME",
+    "08:00",
+)
+FUBON_WS_UNHEALTHY_GRACE_SECONDS = read_int_env(
+    "FUBON_WS_UNHEALTHY_GRACE_SECONDS",
+    "300",
+    minimum=0,
+)
+FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS = read_int_env(
+    "FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS",
+    "30",
+    minimum=5,
+)
+FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY = read_bool_env(
+    "FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY",
+    True,
+)
 LATEST_SYNC_STARTUP_DELAY_SECONDS = read_float_env("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15", minimum=0)
 FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS = read_float_env(
     "FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS",
@@ -302,6 +322,7 @@ INSTITUTIONAL_SYNC_TIME = _parse_daily_sync_time(INSTITUTIONAL_SYNC_TIME_RAW)
 PAPER_MARGIN_SYNC_TIME = _parse_daily_sync_time(PAPER_MARGIN_SYNC_TIME_RAW)
 TW_FULL_HISTORY_SYNC_START_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_START_RAW)
 TW_FULL_HISTORY_SYNC_STOP_TIME = _parse_daily_sync_time(TW_FULL_HISTORY_SYNC_STOP_RAW)
+FUBON_MAINTENANCE_RESTART_TIME = _parse_daily_sync_time(FUBON_MAINTENANCE_RESTART_TIME_RAW)
 
 
 def _row_date_to_datetime(row_date):
@@ -499,6 +520,11 @@ background_scheduler = BackgroundScheduler(
         auto_backup_max_age_hours=AUTO_BACKUP_MAX_AGE_HOURS,
         auto_backup_initial_delay_seconds=AUTO_BACKUP_INITIAL_DELAY_SECONDS,
         overseas_quote_refresh_enabled=OVERSEAS_QUOTE_REFRESH_ENABLED,
+        fubon_maintenance_restart_enabled=FUBON_MAINTENANCE_RESTART_ENABLED,
+        fubon_maintenance_restart_time=FUBON_MAINTENANCE_RESTART_TIME,
+        fubon_ws_unhealthy_grace_seconds=FUBON_WS_UNHEALTHY_GRACE_SECONDS,
+        fubon_ws_health_check_interval_seconds=FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS,
+        fubon_maintenance_restart_weekdays_only=FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY,
     ),
     dependencies=SchedulerDependencies(
         startup_download_tickers=STARTUP_DOWNLOAD_TICKERS,
@@ -526,6 +552,11 @@ background_scheduler = BackgroundScheduler(
         create_mysql_backup=create_scheduled_mysql_backup,
         get_mysql_backup_status=get_scheduled_mysql_backup_health,
         quote_refresh_service=quote_refresh_service,
+        get_fubon_unhealthy_channels=fubon_realtime_pool.get_unhealthy_subscription_channels,
+        request_service_restart=lambda **kwargs: request_supervised_restart(
+            DEFAULT_RUNTIME_DIR,
+            **kwargs,
+        ),
     ),
     logger=scheduler_log,
 )

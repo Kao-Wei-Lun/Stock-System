@@ -56,6 +56,11 @@ class SchedulerSettings:
     auto_backup_max_age_hours: float = 36.0
     auto_backup_initial_delay_seconds: float = 300.0
     overseas_quote_refresh_enabled: bool = False
+    fubon_maintenance_restart_enabled: bool = False
+    fubon_maintenance_restart_time: time_of_day = time_of_day(8, 0)
+    fubon_ws_unhealthy_grace_seconds: int = 300
+    fubon_ws_health_check_interval_seconds: int = 30
+    fubon_maintenance_restart_weekdays_only: bool = True
 
 
 @dataclass(slots=True)
@@ -81,6 +86,190 @@ class SchedulerDependencies:
     create_mysql_backup: Any = None
     get_mysql_backup_status: Any = None
     quote_refresh_service: Any = None
+    get_fubon_unhealthy_channels: Callable[[], Any] | None = None
+    request_service_restart: Callable[..., Any] | None = None
+
+
+def next_fubon_maintenance_window(
+    episode_started_at: datetime,
+    *,
+    app_tz: tzinfo,
+    maintenance_time: time_of_day,
+    weekdays_only: bool,
+) -> datetime:
+    """Return the first eligible maintenance window at or after an incident begins."""
+    local_started = (
+        episode_started_at.replace(tzinfo=app_tz)
+        if episode_started_at.tzinfo is None
+        else episode_started_at.astimezone(app_tz)
+    )
+    candidate = datetime.combine(local_started.date(), maintenance_time, tzinfo=app_tz)
+    if local_started > candidate:
+        candidate += timedelta(days=1)
+    if weekdays_only:
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+    return candidate
+
+
+async def fubon_maintenance_restart_loop(
+    *,
+    get_unhealthy_channels,
+    request_service_restart,
+    app_tz: tzinfo,
+    maintenance_time: time_of_day,
+    unhealthy_grace_seconds: int = 300,
+    check_interval_seconds: int = 30,
+    weekdays_only: bool = True,
+    state: dict[str, Any] | None = None,
+    record_result=None,
+    logger: logging.Logger | None = None,
+    now_provider=None,
+    sleep=asyncio.sleep,
+) -> None:
+    """Escalate a persistent subscribed-channel outage at the next maintenance window."""
+    log = logger or logging.getLogger(__name__)
+    status = state if state is not None else {}
+    grace_seconds = max(0, int(unhealthy_grace_seconds))
+    interval_seconds = max(1, int(check_interval_seconds))
+    episode_started: datetime | None = None
+    next_window: datetime | None = None
+
+    status.update(
+        {
+            "enabled": True,
+            "state": "monitoring",
+            "unhealthy_channel_count": 0,
+            "market_types": [],
+            "unhealthy_since": None,
+            "next_window": None,
+            "grace_seconds": grace_seconds,
+            "last_error": None,
+            "last_request": None,
+        }
+    )
+
+    while True:
+        now = now_provider() if callable(now_provider) else datetime.now(app_tz)
+        now = now.replace(tzinfo=app_tz) if now.tzinfo is None else now.astimezone(app_tz)
+        try:
+            channels = get_unhealthy_channels() or []
+            if inspect.isawaitable(channels):
+                channels = await channels
+            channels = list(channels)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            status.update({"state": "observation_error", "last_error": str(exc)[:300]})
+            log.warning("Fubon maintenance health observation failed: %s", exc)
+            await sleep(interval_seconds)
+            continue
+
+        market_types = sorted(
+            {
+                str(item.get("market_type") or "unknown")
+                for item in channels
+                if isinstance(item, dict)
+            }
+        )
+        if not channels:
+            if episode_started is not None:
+                log.info("Fubon subscribed websocket channels recovered before maintenance restart")
+            episode_started = None
+            next_window = None
+            status.update(
+                {
+                    "state": "monitoring",
+                    "unhealthy_channel_count": 0,
+                    "market_types": [],
+                    "unhealthy_since": None,
+                    "next_window": None,
+                    "last_error": None,
+                }
+            )
+            await sleep(interval_seconds)
+            continue
+
+        if episode_started is None:
+            episode_started = now
+            next_window = next_fubon_maintenance_window(
+                episode_started,
+                app_tz=app_tz,
+                maintenance_time=maintenance_time,
+                weekdays_only=weekdays_only,
+            )
+            log.warning(
+                "Fubon subscribed websocket outage detected channels=%s "
+                "maintenance_window=%s",
+                len(channels),
+                next_window.isoformat(),
+            )
+
+        unhealthy_seconds = max(0.0, (now - episode_started).total_seconds())
+        status.update(
+            {
+                "state": "maintenance_pending",
+                "unhealthy_channel_count": len(channels),
+                "market_types": market_types,
+                "unhealthy_since": episode_started.isoformat(),
+                "next_window": next_window.isoformat() if next_window else None,
+                "last_error": None,
+            }
+        )
+
+        if next_window is not None and now >= next_window and unhealthy_seconds >= grace_seconds:
+            started = time.perf_counter()
+            try:
+                result = request_service_restart(
+                    reason_code="fubon_ws_maintenance",
+                    source="scheduler",
+                )
+                if inspect.isawaitable(result):
+                    result = await result
+                status.update(
+                    {
+                        "state": "restart_requested",
+                        "last_request": now.isoformat(),
+                    }
+                )
+                if record_result:
+                    record_result(
+                        "fubon-maintenance-restart",
+                        success=True,
+                        duration_seconds=time.perf_counter() - started,
+                        details={
+                            "channel_count": len(channels),
+                            "market_types": market_types,
+                            "maintenance_window": next_window.isoformat(),
+                        },
+                    )
+                log.warning(
+                    "Fubon maintenance restart requested channels=%s market_types=%s",
+                    len(channels),
+                    ",".join(market_types),
+                )
+                while True:
+                    await sleep(max(60, interval_seconds))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                status.update({"state": "request_failed", "last_error": str(exc)[:300]})
+                if record_result:
+                    record_result(
+                        "fubon-maintenance-restart",
+                        success=False,
+                        duration_seconds=time.perf_counter() - started,
+                        error=str(exc),
+                    )
+                log.exception("Fubon maintenance restart request failed: %s", exc)
+                next_window = next_fubon_maintenance_window(
+                    now + timedelta(seconds=1),
+                    app_tz=app_tz,
+                    maintenance_time=maintenance_time,
+                    weekdays_only=weekdays_only,
+                )
+
+        await sleep(interval_seconds)
 
 
 async def automatic_mysql_backup_loop(
@@ -791,6 +980,10 @@ class BackgroundScheduler:
         self._tasks: list[asyncio.Task] = []
         self._task_states: dict[str, dict[str, Any]] = {}
         self._job_runs: dict[str, dict[str, Any]] = {}
+        self._fubon_maintenance_state: dict[str, Any] = {
+            "enabled": bool(settings.fubon_maintenance_restart_enabled),
+            "state": "disabled" if not settings.fubon_maintenance_restart_enabled else "scheduled",
+        }
 
     @property
     def task_count(self) -> int:
@@ -820,6 +1013,7 @@ class BackgroundScheduler:
             "unexpected_stopped_count": unexpected_stopped_count,
             "tasks": tasks,
             "jobs": dict(self._job_runs),
+            "fubon_maintenance_restart": dict(self._fubon_maintenance_state),
         }
 
     def record_job_result(
@@ -978,6 +1172,38 @@ class BackgroundScheduler:
                     session_refresh_seconds=self._settings.fubon_ws_session_refresh_seconds,
                     logger=self._log,
                 ),
+            )
+
+        if (
+            self._settings.fubon_maintenance_restart_enabled
+            and self._deps.get_fubon_unhealthy_channels
+            and self._deps.request_service_restart
+        ):
+            self._create_task(
+                "fubon-maintenance-restart",
+                fubon_maintenance_restart_loop(
+                    get_unhealthy_channels=self._deps.get_fubon_unhealthy_channels,
+                    request_service_restart=self._deps.request_service_restart,
+                    app_tz=self._settings.app_tz,
+                    maintenance_time=self._settings.fubon_maintenance_restart_time,
+                    unhealthy_grace_seconds=self._settings.fubon_ws_unhealthy_grace_seconds,
+                    check_interval_seconds=self._settings.fubon_ws_health_check_interval_seconds,
+                    weekdays_only=self._settings.fubon_maintenance_restart_weekdays_only,
+                    state=self._fubon_maintenance_state,
+                    record_result=self.record_job_result,
+                    logger=self._log,
+                ),
+            )
+        else:
+            self._fubon_maintenance_state.update(
+                {
+                    "enabled": bool(self._settings.fubon_maintenance_restart_enabled),
+                    "state": "disabled" if not self._settings.fubon_maintenance_restart_enabled else "unavailable",
+                }
+            )
+            self._log.info(
+                "Fubon maintenance restart skipped "
+                "(disabled or restart dependencies unavailable)."
             )
 
         if self._settings.futopt_recorder_enabled and self._deps.futopt_candle_recorder:

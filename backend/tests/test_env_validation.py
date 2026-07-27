@@ -34,6 +34,11 @@ VALID_ENV = {
     "APP_TIMEZONE": "Asia/Taipei",
     "DAILY_LATEST_SYNC_TIME": "18:10",
     "FRONTEND_DEV_URL": "http://localhost:5173",
+    "FUBON_MAINTENANCE_RESTART_ENABLED": "false",
+    "FUBON_MAINTENANCE_RESTART_TIME": "08:00",
+    "FUBON_WS_UNHEALTHY_GRACE_SECONDS": "300",
+    "FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS": "30",
+    "FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY": "true",
 }
 
 
@@ -56,6 +61,10 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
     assert validated["TW_FULL_HISTORY_SYNC_START"] == "15:30"
     assert validated["TW_FULL_HISTORY_DELAY_SECONDS"] == 0.8
     assert validated["TW_FULL_HISTORY_TICKER_DELAY_SECONDS"] == 2.0
+    assert validated["FUBON_MAINTENANCE_RESTART_ENABLED"] is False
+    assert validated["FUBON_MAINTENANCE_RESTART_TIME"] == "08:00"
+    assert validated["FUBON_WS_UNHEALTHY_GRACE_SECONDS"] == 300
+    assert validated["FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS"] == 30
     assert validated["APP_ENCRYPT_KEY"] == "unit-test-encrypt-key"
 
 
@@ -77,6 +86,17 @@ def test_validate_runtime_environment_requires_encrypt_key(monkeypatch):
     apply_env(monkeypatch, APP_ENCRYPT_KEY="")
 
     with pytest.raises(RuntimeError, match="APP_ENCRYPT_KEY"):
+        validate_runtime_environment()
+
+
+def test_validate_runtime_environment_rejects_invalid_maintenance_restart_settings(monkeypatch):
+    apply_env(
+        monkeypatch,
+        FUBON_MAINTENANCE_RESTART_TIME="25:00",
+        FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS="0",
+    )
+
+    with pytest.raises(RuntimeError, match="FUBON_MAINTENANCE_RESTART"):
         validate_runtime_environment()
 
 
