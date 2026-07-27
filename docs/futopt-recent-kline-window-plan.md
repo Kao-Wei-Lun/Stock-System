@@ -204,3 +204,40 @@ buffer 繪圖；股票與非 intraday 週期仍維持原本的 period 過濾。
 - 回滾 database-period 選擇函式與 metadata 即可恢復原行為。
 - 不需要回復資料庫，因本修改不寫入或搬移資料。
 - 前端 API 參數不變，不需要同步回滾前端。
+
+## 8. 實際驗收結果（2026-07-27）
+
+### 自動化測試
+
+- Phase 1 期貨歷史服務測試：23 passed。
+- Phase 2 相關後端服務與 API 測試：39 passed。
+- Phase 2 相關前端測試：38 passed。
+- 完整後端測試：644 passed。
+- 完整前端測試：310 passed、1 skipped。
+- 前端 production build：成功。
+- Runtime environment validation：通過。
+
+### 實機 API 驗收
+
+- 請求：
+  `/api/futopt/ohlc/%2ATMFF?period=1d&interval=1m&refresh_mode=background&limit=400&warmup=250`
+- 回傳 400 根 K 棒。
+- 第一根：`2026-07-25T00:44:00.000+08:00`，已跨回上一個交易時段。
+- 最後一根：`2026-07-27T11:08:00.000+08:00`。
+- `requested_period=1d`，維持原本 provider 更新範圍。
+- `database_period=max`、`history_window_expanded=true`，確認 DB 顯示視窗已擴展。
+- `refresh_mode=background`、`refresh_status=not_needed`。
+- 實測 API latency：46 ms。
+
+### 終端畫面驗收
+
+- `*TMFF` 終端可正常開啟，商品名稱、即時報價與五檔皆有資料。
+- 畫面顯示 120 根、視窗 30%，對應已載入的 400 根資料；使用者可向左平移查看前一交易時段。
+- 畫面資料來源為 `fubon_neo`，K 線狀態為即時更新。
+- 瀏覽器 console 無 error。
+
+### 資料與相容性
+
+- 本次未執行資料庫 migration，也未修改或刪除既有期貨 K 線資料。
+- 股票與非盤中區間篩選行為維持原狀。
+- 增量請求保留 `since` 邊界，不會重送完整歷史視窗。
