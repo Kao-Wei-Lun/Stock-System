@@ -335,6 +335,14 @@ function getEffectiveKlineDisplayMode(mode, interval) {
   return isIntradayInterval(interval) ? "day" : normalizeKlineDisplayMode(mode);
 }
 
+function resolveOhlcDisplayPeriod(ticker, period, interval) {
+  // Futures intraday APIs use period to bound the upstream repair request,
+  // while the returned rows are already bounded by limit. Reapplying the
+  // calendar period in the browser would hide Friday bars on Monday.
+  if (isFutoptTicker(ticker) && isIntradayInterval(interval)) return "max";
+  return period;
+}
+
 function filterRowsForDisplayPeriod(rows, period, mode) {
   if (!Array.isArray(rows) || !rows.length || !period || period === "max") return Array.isArray(rows) ? rows : [];
   const since = getPeriodStartDate(period);
@@ -390,6 +398,7 @@ function aggregateOhlcRows(rows, mode) {
 export {
   getTimeframeOptionsForTicker,
   normalizeTicker,
+  resolveOhlcDisplayPeriod,
   resolveDashboardTimeframeForTicker,
   shouldPollFutoptRestFallback,
 };
@@ -539,7 +548,11 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         const displayMode = getEffectiveKlineDisplayMode(klineDisplayMode.value, currentInterval.value);
         const data = filterRowsForDisplayPeriod(
           aggregateOhlcRows(series.data || [], displayMode),
-          currentPeriod.value,
+          resolveOhlcDisplayPeriod(
+            series.ticker,
+            currentPeriod.value,
+            currentInterval.value,
+          ),
           displayMode,
         );
         const firstClose = data.find((row) => row.close != null)?.close ?? null;
@@ -755,7 +768,11 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     return filterRenderableOhlcRows(
       filterRowsForDisplayPeriod(
         aggregateOhlcRows(rawOhlcData.value, displayMode),
-        currentPeriod.value,
+        resolveOhlcDisplayPeriod(
+          currentTicker.value,
+          currentPeriod.value,
+          currentInterval.value,
+        ),
         displayMode,
       ),
     );

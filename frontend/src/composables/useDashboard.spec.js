@@ -4,11 +4,18 @@ import {
   getTimeframeOptionsForTicker,
   normalizeDashboardRightTab,
   normalizeTicker,
+  resolveOhlcDisplayPeriod,
   resolveDashboardTimeframeForTicker,
   shouldPollFutoptRestFallback,
 } from "./useDashboard";
 
 describe("dashboard timeframe helpers", () => {
+  it("keeps bounded futures intraday history across weekends", () => {
+    expect(resolveOhlcDisplayPeriod("*TMFF", "1d", "1m")).toBe("max");
+    expect(resolveOhlcDisplayPeriod("TMFH6", "5d", "5m")).toBe("max");
+    expect(resolveOhlcDisplayPeriod("2330.TW", "1d", "1m")).toBe("1d");
+  });
+
   it("maps retired database drawer state to the supported indicator drawer", () => {
     expect(normalizeDashboardRightTab("db")).toBe("indicators");
     expect(normalizeDashboardRightTab("alerts")).toBe("alerts");

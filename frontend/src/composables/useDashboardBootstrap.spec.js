@@ -119,6 +119,17 @@ describe("useDashboard route bootstrap", () => {
       "getAssetPortfolio",
       "listAlerts",
     ]));
+    const klineCall = apiState.calls.find((call) => call.method === "getFutoptOhlc");
+    expect(klineCall).toMatchObject({
+      ticker: "*TMFF",
+      options: {
+        period: "1d",
+        interval: "1m",
+        refreshMode: "background",
+        limit: 400,
+        warmup: 250,
+      },
+    });
     mounted.wrapper.unmount();
   });
 

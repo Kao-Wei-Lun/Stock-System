@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta
 
 import main
 from futopt_history_service import FutoptRefreshCoordinator
@@ -101,6 +102,98 @@ def test_futopt_ohlc_refresh_false_keeps_legacy_database_only_behavior(client, m
     assert response.status_code == 200
     assert response.json()["refresh_mode"] == "none"
     assert response.json()["refresh_status"] == "skipped"
+
+
+def test_futopt_initial_window_returns_recent_bars_across_weekend(
+    client,
+    monkeypatch,
+):
+    friday_start = datetime(2026, 7, 24, 20, 0)
+    monday_start = datetime(2026, 7, 27, 8, 45)
+    previous_session = [
+        {
+            "date": (friday_start + timedelta(minutes=index)).isoformat(),
+            "close": 100 + index,
+            "source": "database",
+        }
+        for index in range(267)
+    ]
+    monday_session = [
+        {
+            "date": (monday_start + timedelta(minutes=index)).isoformat(),
+            "close": 400 + index,
+            "source": "database",
+        }
+        for index in range(133)
+    ]
+    all_rows = previous_session + monday_session
+    calls = []
+
+    async def fake_get_ohlcv(ticker, period="1d", interval="1m", **options):
+        calls.append((ticker, period, interval, options))
+        rows = all_rows if ticker == "TMF" and period == "max" else []
+        if options.get("limit") is not None:
+            rows = rows[-int(options["limit"]):]
+        return rows
+
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
+
+    response = client.get(
+        "/api/futopt/ohlc/*TMFF"
+        "?period=1d&interval=1m&refresh_mode=none&limit=400&warmup=250"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["period"] == "1d"
+    assert payload["database_period"] == "max"
+    assert payload["history_window_expanded"] is True
+    assert payload["row_count"] == 400
+    assert payload["data"][0]["date"].startswith("2026-07-24")
+    assert payload["data"][-1]["date"].startswith("2026-07-27")
+    assert {(call[0], call[1]) for call in calls} == {
+        ("*TMFF", "max"),
+        ("TMF", "max"),
+    }
+
+
+def test_futopt_incremental_window_does_not_replay_bounded_history(
+    client,
+    monkeypatch,
+):
+    calls = []
+
+    async def fake_get_ohlcv(ticker, period="1d", interval="1m", **options):
+        calls.append((ticker, period, interval, options))
+        if ticker != "TMF":
+            return []
+        return [
+            {
+                "date": "2026-07-27T11:01:00+08:00",
+                "close": 101,
+                "source": "database",
+            },
+        ]
+
+    monkeypatch.setattr(main.market_data.db, "get_ohlcv", fake_get_ohlcv)
+
+    response = client.get(
+        "/api/futopt/ohlc/*TMFF"
+        "?period=1d&interval=1m&refresh_mode=none&limit=100&warmup=250"
+        "&since=2026-07-27T11%3A00%3A00%2B08%3A00"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["database_period"] == "1d"
+    assert payload["history_window_expanded"] is False
+    assert payload["incremental"] is True
+    assert payload["row_count"] == 1
+    assert all(call[1] == "1d" for call in calls)
+    assert all(
+        call[3]["since"] == "2026-07-27T11:00:00+08:00"
+        for call in calls
+    )
 
 
 def test_futopt_ohlc_rejects_unknown_refresh_mode(client):

@@ -85,6 +85,10 @@ limit=400&warmup=250
 
 控制初次渲染與指標暖機的資料量。
 
+期貨 intraday 回傳資料已由後端 `limit` 限制，前端不得再次用日曆
+`period=1d` 過濾。主圖與比較序列在期貨 intraday 模式下以完整的 bounded
+buffer 繪圖；股票與非 intraday 週期仍維持原本的 period 過濾。
+
 ## 4. 邊界與風險
 
 ### 週末與連假
