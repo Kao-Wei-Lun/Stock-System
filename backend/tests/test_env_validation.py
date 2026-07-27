@@ -39,6 +39,10 @@ VALID_ENV = {
     "FUBON_WS_UNHEALTHY_GRACE_SECONDS": "300",
     "FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS": "30",
     "FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY": "true",
+    "PAPER_BOT_AUTOSTART_ENABLED": "true",
+    "PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS": "120",
+    "PAPER_BOT_AUTOSTART_MAX_ATTEMPTS": "3",
+    "PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS": "15",
 }
 
 
@@ -65,6 +69,10 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
     assert validated["FUBON_MAINTENANCE_RESTART_TIME"] == "08:00"
     assert validated["FUBON_WS_UNHEALTHY_GRACE_SECONDS"] == 300
     assert validated["FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS"] == 30
+    assert validated["PAPER_BOT_AUTOSTART_ENABLED"] is True
+    assert validated["PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS"] == 120
+    assert validated["PAPER_BOT_AUTOSTART_MAX_ATTEMPTS"] == 3
+    assert validated["PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS"] == 15
     assert validated["APP_ENCRYPT_KEY"] == "unit-test-encrypt-key"
 
 

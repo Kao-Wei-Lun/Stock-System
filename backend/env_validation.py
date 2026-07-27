@@ -229,6 +229,7 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     ("FUTOPT_RECORDER_ENABLED", True),
     ("PAPER_MARGIN_AUTO_SYNC_ENABLED", True),
     ("BACKTEST_EXECUTOR_ENABLED", True),
+    ("PAPER_BOT_AUTOSTART_ENABLED", True),
     ("FUBON_MAINTENANCE_RESTART_ENABLED", False),
     ("FUBON_MAINTENANCE_RESTART_WEEKDAYS_ONLY", True),
   ):
@@ -269,6 +270,18 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture(
     "FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS",
     lambda: read_int_env("FUBON_WS_HEALTH_CHECK_INTERVAL_SECONDS", "30", minimum=5, env=source),
+  )
+  capture(
+    "PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS",
+    lambda: read_float_env("PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS", "120", minimum=0, env=source),
+  )
+  capture(
+    "PAPER_BOT_AUTOSTART_MAX_ATTEMPTS",
+    lambda: read_int_env("PAPER_BOT_AUTOSTART_MAX_ATTEMPTS", "3", minimum=1, maximum=10, env=source),
+  )
+  capture(
+    "PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS",
+    lambda: read_float_env("PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS", "15", minimum=0, env=source),
   )
   for key, default in (
     ("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15"),

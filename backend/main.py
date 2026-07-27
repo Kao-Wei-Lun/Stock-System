@@ -224,6 +224,23 @@ FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS = read_float_env(
 )
 TW_FULL_HISTORY_STARTUP_DELAY_SECONDS = read_float_env("TW_FULL_HISTORY_STARTUP_DELAY_SECONDS", "35", minimum=0)
 PAPER_MARGIN_STARTUP_DELAY_SECONDS = read_float_env("PAPER_MARGIN_STARTUP_DELAY_SECONDS", "25", minimum=0)
+PAPER_BOT_AUTOSTART_ENABLED = read_bool_env("PAPER_BOT_AUTOSTART_ENABLED", True)
+PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS = read_float_env(
+    "PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS",
+    "120",
+    minimum=0,
+)
+PAPER_BOT_AUTOSTART_MAX_ATTEMPTS = read_int_env(
+    "PAPER_BOT_AUTOSTART_MAX_ATTEMPTS",
+    "3",
+    minimum=1,
+    maximum=10,
+)
+PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS = read_float_env(
+    "PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS",
+    "15",
+    minimum=0,
+)
 REALTIME_POLL_STARTUP_DELAY_SECONDS = read_float_env("REALTIME_POLL_STARTUP_DELAY_SECONDS", "5", minimum=0)
 ALERT_STARTUP_DELAY_SECONDS = read_float_env("ALERT_STARTUP_DELAY_SECONDS", "10", minimum=0)
 MARKET_INTELLIGENCE_STARTUP_DELAY_SECONDS = read_float_env(
@@ -610,6 +627,13 @@ async def lifespan(app: FastAPI):
         # their multi-account login sequence. The pool exposes warmup progress
         # through readiness and settings APIs while initialization continues.
         fubon_realtime_pool.start_background_warmup(db)
+        paper_trading.schedule_paper_trading_bot_autostart(
+            fubon_realtime_pool,
+            enabled=PAPER_BOT_AUTOSTART_ENABLED,
+            warmup_timeout_seconds=PAPER_BOT_AUTOSTART_WARMUP_TIMEOUT_SECONDS,
+            max_attempts=PAPER_BOT_AUTOSTART_MAX_ATTEMPTS,
+            retry_delay_seconds=PAPER_BOT_AUTOSTART_RETRY_DELAY_SECONDS,
+        )
     background_scheduler.start()
     operational_metrics_service.start()
     try:
@@ -621,6 +645,7 @@ async def lifespan(app: FastAPI):
         await futopt_refresh_coordinator.shutdown()
         await assets.shutdown()
         await backtest_workload_executor.shutdown()
+        await paper_trading.shutdown_paper_trading_runtime(fubon_realtime_pool)
         await fubon_realtime_pool.shutdown_async()
         fubon_manager.shutdown()
         await db.close()

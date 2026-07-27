@@ -87,6 +87,11 @@ def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeyp
         "start_background_warmup",
         lambda _db: calls.append("warmup_scheduled"),
     )
+    monkeypatch.setattr(
+        main.paper_trading,
+        "schedule_paper_trading_bot_autostart",
+        lambda *_args, **_kwargs: calls.append("bot_autostart_scheduled"),
+    )
     monkeypatch.setattr(main.background_scheduler, "start", lambda: calls.append("scheduler_start"))
     monkeypatch.setattr(main.operational_metrics_service, "start", lambda: calls.append("metrics_start"))
     monkeypatch.setattr(main.operational_metrics_service, "shutdown", lambda: async_call("metrics_stop"))
@@ -95,6 +100,11 @@ def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeyp
     monkeypatch.setattr(main.futopt_refresh_coordinator, "shutdown", lambda: async_call("refresh_stop"))
     monkeypatch.setattr(main.assets, "shutdown", lambda: async_call("assets_stop"))
     monkeypatch.setattr(main.backtest_workload_executor, "shutdown", lambda: async_call("backtest_stop"))
+    monkeypatch.setattr(
+        main.paper_trading,
+        "shutdown_paper_trading_runtime",
+        lambda _pool: async_call("bot_runtime_stop"),
+    )
     monkeypatch.setattr(main.fubon_realtime_pool, "shutdown_async", lambda: async_call("warmup_stop"))
     monkeypatch.setattr(main.fubon_manager, "shutdown", lambda: calls.append("manager_stop"))
     monkeypatch.setattr(main.db, "close", lambda: async_call("db_stop"))
@@ -105,6 +115,12 @@ def test_application_lifespan_schedules_provider_warmup_without_awaiting(monkeyp
 
     asyncio.run(run())
 
-    assert calls.index("warmup_scheduled") < calls.index("scheduler_start") < calls.index("metrics_start")
+    assert (
+        calls.index("warmup_scheduled")
+        < calls.index("bot_autostart_scheduled")
+        < calls.index("scheduler_start")
+        < calls.index("metrics_start")
+    )
     assert calls.index("metrics_start") < calls.index("inside")
+    assert calls.index("bot_runtime_stop") < calls.index("warmup_stop")
     assert calls[-3:] == ["warmup_stop", "manager_stop", "db_stop"]

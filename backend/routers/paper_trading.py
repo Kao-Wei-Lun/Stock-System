@@ -9,6 +9,7 @@ TMF 模擬交易 API：
 - 即時 Bot 啟動/停止
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -54,6 +55,20 @@ router = APIRouter(prefix="/api/paper-trading", tags=["paper-trading"])
 
 # 全域 bot 實例管理
 _active_bots: dict[int, "PaperTradingBot"] = {}
+_bot_autostart_task: asyncio.Task | None = None
+_bot_autostart_state: dict = {
+    "enabled": False,
+    "state": "disabled",
+    "attempt": 0,
+    "started_at": None,
+    "completed_at": None,
+    "total_count": 0,
+    "started_count": 0,
+    "already_running_count": 0,
+    "failed_count": 0,
+    "last_error": None,
+}
+_REALTIME_POOL_UNSET = object()
 REALTIME_WARMUP_LOOKBACK_BARS = 420
 APP_TZ = ZoneInfo("Asia/Taipei")
 
@@ -328,7 +343,11 @@ async def delete_paper_trading_bot(bot_id: int):
 
 # ─── Bot Start/Stop ───────────────────────────────────────────
 
-async def _start_paper_trading_bot_by_id(bot_id: int) -> dict:
+async def _start_paper_trading_bot_by_id(
+    bot_id: int,
+    *,
+    realtime_pool=_REALTIME_POOL_UNSET,
+) -> dict:
     """Start one realtime paper trading bot and return the API payload."""
     from paper_trading.bot_runner import PaperTradingBot, BotStatus
 
@@ -405,13 +424,17 @@ async def _start_paper_trading_bot_by_id(bot_id: int) -> dict:
     except Exception as exc:
         log.warning("Paper trading bot %s warmup skipped: %s", bot_id, exc)
 
-    # 嘗試連結 realtime_pool
-    try:
-        from main import fubon_realtime_pool
-        bot_instance.start(fubon_realtime_pool)
-    except (ImportError, AttributeError):
-        # 沒有 realtime pool，bot 仍可啟動但不接收 WS
-        bot_instance.start(None)
+    # API 呼叫維持既有行為；lifespan 自動啟動則明確注入同一個 pool，
+    # 避免啟動階段循環 import 或綁到錯誤的 runtime instance。
+    if realtime_pool is _REALTIME_POOL_UNSET:
+        try:
+            from main import fubon_realtime_pool
+            resolved_realtime_pool = fubon_realtime_pool
+        except (ImportError, AttributeError):
+            resolved_realtime_pool = None
+    else:
+        resolved_realtime_pool = realtime_pool
+    bot_instance.start(resolved_realtime_pool)
 
     _active_bots[bot_id] = bot_instance
 
@@ -419,18 +442,30 @@ async def _start_paper_trading_bot_by_id(bot_id: int) -> dict:
     await db.update_paper_trading_bot(bot_id, {
         "status": "running",
         "started_at": bot_instance.started_at.isoformat() if bot_instance.started_at else None,
+        "stopped_at": None,
+        "error_message": None,
     }, owner_id=DEFAULT_OWNER_ID)
 
     return {"status": "started", "bot": bot_instance.get_state()}
 
 
-@router.post("/bots/start-all")
-async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
-    """啟動所有尚未執行的 Bot；單一 Bot 失敗時會繼續處理下一個。"""
+async def _start_all_paper_trading_bots(
+    *,
+    account_id: int | None = None,
+    realtime_only: bool = False,
+    realtime_pool=_REALTIME_POOL_UNSET,
+) -> dict:
+    """啟動符合條件的 Bot；單一 Bot 失敗時會繼續處理下一個。"""
     bots = await db.list_paper_trading_bots(
         owner_id=DEFAULT_OWNER_ID,
         account_id=account_id,
     )
+    if realtime_only:
+        bots = [
+            bot
+            for bot in bots
+            if str(bot.get("mode") or "realtime").strip().lower() == "realtime"
+        ]
     items = []
     started_count = 0
     already_running_count = 0
@@ -441,7 +476,10 @@ async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
         if bot_id <= 0:
             continue
         try:
-            result = await _start_paper_trading_bot_by_id(bot_id)
+            result = await _start_paper_trading_bot_by_id(
+                bot_id,
+                realtime_pool=realtime_pool,
+            )
             status = str(result.get("status") or "")
             if status == "started":
                 started_count += 1
@@ -454,6 +492,14 @@ async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
             })
         except HTTPException as exc:
             failed_count += 1
+            try:
+                await db.update_paper_trading_bot(
+                    bot_id,
+                    {"status": "error", "error_message": str(exc.detail)[:1000]},
+                    owner_id=DEFAULT_OWNER_ID,
+                )
+            except Exception:
+                log.exception("Failed to persist paper trading bot %s start error", bot_id)
             items.append({
                 "bot_id": bot_id,
                 "status": "error",
@@ -462,6 +508,14 @@ async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
         except Exception as exc:
             failed_count += 1
             log.exception("Failed to start paper trading bot %s in bulk start", bot_id)
+            try:
+                await db.update_paper_trading_bot(
+                    bot_id,
+                    {"status": "error", "error_message": str(exc)[:1000]},
+                    owner_id=DEFAULT_OWNER_ID,
+                )
+            except Exception:
+                log.exception("Failed to persist paper trading bot %s start error", bot_id)
             items.append({
                 "bot_id": bot_id,
                 "status": "error",
@@ -485,6 +539,169 @@ async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
         "failed_count": failed_count,
         "items": items,
     }
+
+
+@router.post("/bots/start-all")
+async def start_all_paper_trading_bots(account_id: int | None = Query(None)):
+    """啟動所有尚未執行的 Bot；單一 Bot 失敗時會繼續處理下一個。"""
+    return await _start_all_paper_trading_bots(account_id=account_id)
+
+
+def get_paper_trading_bot_autostart_state() -> dict:
+    return dict(_bot_autostart_state)
+
+
+async def _run_paper_trading_bot_autostart(
+    realtime_pool,
+    *,
+    warmup_timeout_seconds: float,
+    max_attempts: int,
+    retry_delay_seconds: float,
+    sleep=asyncio.sleep,
+) -> dict:
+    """等待行情暖機後，自動恢復所有即時模擬交易 Bot。"""
+    _bot_autostart_state.update({
+        "enabled": True,
+        "state": "waiting_for_provider",
+        "attempt": 0,
+        "started_at": datetime.now(APP_TZ).isoformat(),
+        "completed_at": None,
+        "total_count": 0,
+        "started_count": 0,
+        "already_running_count": 0,
+        "failed_count": 0,
+        "last_error": None,
+    })
+    try:
+        wait_for_warmup = getattr(realtime_pool, "wait_for_warmup", None)
+        if callable(wait_for_warmup):
+            warmed = await wait_for_warmup(timeout=max(0.0, warmup_timeout_seconds))
+            if not warmed:
+                log.warning(
+                    "Paper trading bot autostart continuing after provider warmup "
+                    "timeout or incomplete connection"
+                )
+
+        summary: dict = {}
+        attempts = max(1, int(max_attempts))
+        for attempt in range(1, attempts + 1):
+            _bot_autostart_state.update({
+                "state": "starting",
+                "attempt": attempt,
+                "last_error": None,
+            })
+            summary = await _start_all_paper_trading_bots(
+                realtime_only=True,
+                realtime_pool=realtime_pool,
+            )
+            _bot_autostart_state.update({
+                "total_count": int(summary.get("total_count") or 0),
+                "started_count": int(summary.get("started_count") or 0),
+                "already_running_count": int(summary.get("already_running_count") or 0),
+                "failed_count": int(summary.get("failed_count") or 0),
+            })
+            if not summary.get("failed_count"):
+                _bot_autostart_state.update({
+                    "state": "completed",
+                    "completed_at": datetime.now(APP_TZ).isoformat(),
+                })
+                log.info(
+                    "Paper trading bot autostart completed: total=%s started=%s "
+                    "already_running=%s",
+                    summary.get("total_count", 0),
+                    summary.get("started_count", 0),
+                    summary.get("already_running_count", 0),
+                )
+                return summary
+
+            _bot_autostart_state["last_error"] = (
+                f"{summary.get('failed_count', 0)} paper trading bot(s) failed to start"
+            )
+            if attempt < attempts:
+                log.warning(
+                    "Paper trading bot autostart attempt %s/%s had %s failure(s); retrying",
+                    attempt,
+                    attempts,
+                    summary.get("failed_count", 0),
+                )
+                await sleep(max(0.0, retry_delay_seconds))
+
+        _bot_autostart_state.update({
+            "state": "completed_with_errors",
+            "completed_at": datetime.now(APP_TZ).isoformat(),
+        })
+        return summary
+    except asyncio.CancelledError:
+        _bot_autostart_state.update({
+            "state": "cancelled",
+            "completed_at": datetime.now(APP_TZ).isoformat(),
+        })
+        raise
+    except Exception as exc:
+        _bot_autostart_state.update({
+            "state": "failed",
+            "completed_at": datetime.now(APP_TZ).isoformat(),
+            "last_error": str(exc)[:300],
+        })
+        log.exception("Paper trading bot autostart failed before completion")
+        return {
+            "status": "failed",
+            "total_count": 0,
+            "started_count": 0,
+            "already_running_count": 0,
+            "failed_count": 0,
+            "items": [],
+        }
+
+
+def schedule_paper_trading_bot_autostart(
+    realtime_pool,
+    *,
+    enabled: bool = True,
+    warmup_timeout_seconds: float = 120,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 15,
+) -> asyncio.Task | None:
+    """建立單一、不阻塞 FastAPI readiness 的 Bot 自動恢復工作。"""
+    global _bot_autostart_task
+    if not enabled:
+        _bot_autostart_state.update({"enabled": False, "state": "disabled"})
+        return None
+    if _bot_autostart_task is not None and not _bot_autostart_task.done():
+        return _bot_autostart_task
+    _bot_autostart_state.update({"enabled": True, "state": "scheduled"})
+    _bot_autostart_task = asyncio.create_task(
+        _run_paper_trading_bot_autostart(
+            realtime_pool,
+            warmup_timeout_seconds=warmup_timeout_seconds,
+            max_attempts=max_attempts,
+            retry_delay_seconds=retry_delay_seconds,
+        ),
+        name="paper-trading-bot-autostart",
+    )
+    return _bot_autostart_task
+
+
+async def shutdown_paper_trading_runtime(realtime_pool=None) -> None:
+    """停止背景恢復與 handler，但保留 DB 的 logical running 狀態供下次恢復。"""
+    global _bot_autostart_task
+    task = _bot_autostart_task
+    _bot_autostart_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    for bot_id, bot_instance in list(_active_bots.items()):
+        try:
+            bot_instance.stop(realtime_pool)
+        except Exception:
+            log.exception("Failed to detach paper trading bot %s during shutdown", bot_id)
+    _active_bots.clear()
+
+
+@router.get("/runtime/autostart")
+async def get_paper_trading_autostart_status():
+    return get_paper_trading_bot_autostart_state()
 
 
 @router.post("/bots/{bot_id}/start")
