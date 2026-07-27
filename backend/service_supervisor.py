@@ -23,6 +23,7 @@ DEFAULT_RUNTIME_DIR = PROJECT_ROOT / ".runtime"
 PREFLIGHT_FREE = "free"
 PREFLIGHT_EXPECTED = "expected"
 PREFLIGHT_COLLISION = "collision"
+RESTART_REASON_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class SupervisorError(RuntimeError):
@@ -55,6 +56,29 @@ def _read_json(path: Path) -> dict[str, Any]:
     except (OSError, UnicodeError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def request_supervised_restart(
+    runtime_dir: Path = DEFAULT_RUNTIME_DIR,
+    *,
+    reason_code: str,
+    source: str = "scheduler",
+) -> dict[str, Any]:
+    """Request a local supervised recycle without exposing runtime secrets."""
+    normalized_reason = str(reason_code or "").strip().lower()
+    normalized_source = str(source or "").strip().lower()
+    if not RESTART_REASON_PATTERN.fullmatch(normalized_reason):
+        raise ValueError("reason_code must contain only lowercase letters, digits, hyphens, or underscores")
+    if not RESTART_REASON_PATTERN.fullmatch(normalized_source):
+        raise ValueError("source must contain only lowercase letters, digits, hyphens, or underscores")
+    payload = {
+        "schema_version": 1,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "reason_code": normalized_reason,
+        "source": normalized_source,
+    }
+    _atomic_json_write(Path(runtime_dir) / "backend-service.restart", payload)
+    return payload
 
 
 def find_listening_pid(port: int) -> int | None:
@@ -122,6 +146,8 @@ class LocalServiceSupervisor:
         self.runtime_dir = Path(runtime_dir)
         self.state_path = self.runtime_dir / "backend-service.json"
         self.stop_marker = self.runtime_dir / "backend-service.stop"
+        self.restart_marker = self.runtime_dir / "backend-service.restart"
+        self.last_restart_path = self.runtime_dir / "backend-service-last-restart.json"
         self.breaker_path = self.runtime_dir / "backend-service-breaker.json"
         self._port_probe = port_probe
         self._command_line_probe = command_line_probe
@@ -212,6 +238,50 @@ class LocalServiceSupervisor:
     def _planned_stop_requested(self) -> bool:
         return self.stop_marker.is_file()
 
+    def _read_restart_request(self) -> dict[str, Any] | None:
+        if not self.restart_marker.is_file():
+            return None
+        payload = _read_json(self.restart_marker)
+        reason_code = str(payload.get("reason_code") or "")
+        source = str(payload.get("source") or "")
+        if (
+            int(payload.get("schema_version") or 0) != 1
+            or not RESTART_REASON_PATTERN.fullmatch(reason_code)
+            or not RESTART_REASON_PATTERN.fullmatch(source)
+        ):
+            try:
+                self.restart_marker.unlink()
+            except FileNotFoundError:
+                pass
+            return None
+        return {
+            "schema_version": 1,
+            "requested_at": payload.get("requested_at"),
+            "reason_code": reason_code,
+            "source": source,
+        }
+
+    def _clear_restart_marker(self) -> None:
+        try:
+            self.restart_marker.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _wait_for_child(self, process: Any) -> tuple[int, str, dict[str, Any] | None]:
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                return int(exit_code), "exited", None
+            if self._planned_stop_requested():
+                self._terminate_started_process(process)
+                return 0, "stop", None
+            restart_request = self._read_restart_request()
+            if restart_request is not None:
+                self._terminate_started_process(process)
+                self._clear_restart_marker()
+                return 0, "restart", restart_request
+            self._sleep(0.5)
+
     def _wait_backoff(self, delay_seconds: float) -> bool:
         deadline = self._clock() + max(0.0, delay_seconds)
         while self._clock() < deadline:
@@ -230,7 +300,7 @@ class LocalServiceSupervisor:
                 f"Port {self.settings.port} is occupied by an unconfirmed process; no process was stopped."
             )
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        for marker in (self.stop_marker, self.breaker_path):
+        for marker in (self.stop_marker, self.restart_marker, self.breaker_path):
             try:
                 marker.unlink()
             except FileNotFoundError:
@@ -238,6 +308,7 @@ class LocalServiceSupervisor:
 
         crash_times: deque[float] = deque()
         restart_count = 0
+        pending_restart_result: dict[str, Any] | None = None
         while True:
             if self._planned_stop_requested():
                 return 0
@@ -252,18 +323,44 @@ class LocalServiceSupervisor:
                 ),
             )
             self._write_running_state(process.pid, restart_count)
+            if pending_restart_result is not None:
+                _atomic_json_write(
+                    self.last_restart_path,
+                    {
+                        "schema_version": 1,
+                        "status": "completed",
+                        "requested_at": pending_restart_result.get("requested_at"),
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "reason_code": pending_restart_result["reason_code"],
+                        "source": pending_restart_result["source"],
+                    },
+                )
+                print(
+                    "[INFO] Planned backend restart completed "
+                    f"reason={pending_restart_result['reason_code']} "
+                    f"source={pending_restart_result['source']}."
+                )
+                pending_restart_result = None
             started_at = self._clock()
+            exit_reason = "exited"
+            restart_request = None
             try:
-                exit_code = int(process.wait())
+                exit_code, exit_reason, restart_request = self._wait_for_child(process)
             except KeyboardInterrupt:
                 self.stop_marker.write_text("planned\n", encoding="utf-8")
                 self._terminate_started_process(process)
                 exit_code = 0
+                exit_reason = "stop"
             finally:
                 self._clear_state_for(process.pid)
 
             runtime = max(0.0, self._clock() - started_at)
-            if self._planned_stop_requested() or exit_code == 0:
+            if exit_reason == "restart" and restart_request is not None:
+                pending_restart_result = restart_request
+                restart_count = 0
+                continue
+            if self._planned_stop_requested() or exit_reason == "stop" or exit_code == 0:
+                self._clear_restart_marker()
                 try:
                     self.stop_marker.unlink()
                 except FileNotFoundError:
@@ -324,6 +421,7 @@ class LocalServiceSupervisor:
 
     def request_stop(self) -> dict[str, Any]:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._clear_restart_marker()
         self.stop_marker.write_text("planned\n", encoding="utf-8")
         pid = self._port_probe(self.settings.port)
         if pid is None:
@@ -352,6 +450,8 @@ class LocalServiceSupervisor:
             "state": _read_json(self.state_path),
             "restart_breaker": _read_json(self.breaker_path),
             "planned_stop_pending": self._planned_stop_requested(),
+            "planned_restart_pending": self._read_restart_request() is not None,
+            "last_planned_restart": _read_json(self.last_restart_path),
         }
 
 

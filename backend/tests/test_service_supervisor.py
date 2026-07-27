@@ -10,6 +10,7 @@ from service_supervisor import (
     LocalServiceSupervisor,
     SupervisorError,
     SupervisorSettings,
+    request_supervised_restart,
 )
 
 
@@ -33,6 +34,9 @@ class FakeProcess:
         self.killed = False
 
     def wait(self, timeout=None):
+        return self.exit_code
+
+    def poll(self):
         return self.exit_code
 
     def kill(self):
@@ -171,3 +175,119 @@ def test_running_state_contains_no_command_arguments_or_secrets(tmp_path):
     assert "password" not in serialized.lower()
     assert "api_key" not in serialized.lower()
     assert str(settings(tmp_path).python_path) not in serialized
+
+
+def test_restart_request_marker_contains_only_safe_versioned_fields(tmp_path):
+    runtime = tmp_path / ".runtime"
+
+    payload = request_supervised_restart(
+        runtime,
+        reason_code="fubon_ws_maintenance",
+        source="scheduler",
+    )
+    serialized = (runtime / "backend-service.restart").read_text(encoding="utf-8")
+
+    assert set(payload) == {"schema_version", "requested_at", "reason_code", "source"}
+    assert payload["reason_code"] == "fubon_ws_maintenance"
+    assert "password" not in serialized.lower()
+    assert "ticker" not in serialized.lower()
+    with pytest.raises(ValueError, match="reason_code"):
+        request_supervised_restart(runtime, reason_code="contains account 123")
+
+
+def test_planned_restart_recycles_child_without_crash_backoff(tmp_path, monkeypatch):
+    runtime = tmp_path / ".runtime"
+    clock = FakeClock()
+
+    class RunningProcess(FakeProcess):
+        def __init__(self, pid):
+            super().__init__(pid, 0)
+            self.running = True
+
+        def poll(self):
+            return None if self.running else self.exit_code
+
+    class RestartFactory:
+        def __init__(self):
+            self.processes = []
+
+        def __call__(self, _command, **_kwargs):
+            if not self.processes:
+                process = RunningProcess(2201)
+                request_supervised_restart(
+                    runtime,
+                    reason_code="fubon_ws_maintenance",
+                    source="scheduler",
+                )
+            else:
+                process = FakeProcess(2202, 0)
+            self.processes.append(process)
+            return process
+
+    factory = RestartFactory()
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=runtime,
+        port_probe=lambda _port: None,
+        popen_factory=factory,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    def terminate(process):
+        process.running = False
+        process.killed = True
+
+    monkeypatch.setattr(supervisor, "_terminate_started_process", terminate)
+
+    assert supervisor.run() == 0
+    assert len(factory.processes) == 2
+    assert factory.processes[0].killed is True
+    assert clock.sleeps == []
+    assert not supervisor.breaker_path.exists()
+    assert not supervisor.restart_marker.exists()
+    last_restart = json.loads(supervisor.last_restart_path.read_text(encoding="utf-8"))
+    assert last_restart["status"] == "completed"
+    assert last_restart["reason_code"] == "fubon_ws_maintenance"
+
+
+def test_planned_stop_takes_priority_over_restart_request(tmp_path, monkeypatch):
+    runtime = tmp_path / ".runtime"
+
+    class RunningProcess(FakeProcess):
+        def poll(self):
+            return None
+
+    class StopFactory:
+        def __init__(self):
+            self.processes = []
+
+        def __call__(self, _command, **_kwargs):
+            process = RunningProcess(3301, 0)
+            self.processes.append(process)
+            request_supervised_restart(
+                runtime,
+                reason_code="fubon_ws_maintenance",
+                source="scheduler",
+            )
+            (runtime / "backend-service.stop").write_text("planned\n", encoding="utf-8")
+            return process
+
+    factory = StopFactory()
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path),
+        runtime_dir=runtime,
+        port_probe=lambda _port: None,
+        popen_factory=factory,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_terminate_started_process",
+        lambda process: setattr(process, "killed", True),
+    )
+
+    assert supervisor.run() == 0
+    assert len(factory.processes) == 1
+    assert factory.processes[0].killed is True
+    assert not supervisor.restart_marker.exists()
+    assert not supervisor.last_restart_path.exists()

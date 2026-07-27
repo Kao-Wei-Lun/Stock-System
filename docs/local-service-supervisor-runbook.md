@@ -28,6 +28,19 @@ start.bat stop
 - 正常結束碼、Ctrl+C 或 `start.bat stop` 都屬 planned shutdown，不會重啟。
 - breaker 狀態位於 `.runtime/backend-service-breaker.json`，不含命令列或秘密。
 
+## 受控維護重啟
+
+應用程式可寫入版本化的 `.runtime/backend-service.restart`，要求 Supervisor
+正常回收目前 child process 並建立新程序：
+
+- planned restart 不計入 crash count，也不會打開 restart breaker。
+- `.runtime/backend-service.stop` 與 restart 同時存在時，以停止為優先。
+- Supervisor 只會處理自己建立的 child process，不會終止不明的 8001 程序。
+- 完成後的摘要位於 `.runtime/backend-service-last-restart.json`，只包含時間、
+  reason code 與 source，不包含帳號、ticker、命令列或秘密。
+- `start.bat status` 會顯示 `planned_restart_pending` 與
+  `last_planned_restart`。
+
 排除問題後重新執行 `start.bat`，新一輪監督會清除舊 breaker；若 8001 仍被不明程序占用，需由使用者確認該程序用途後自行處理。
 
 ## 日誌隔離
