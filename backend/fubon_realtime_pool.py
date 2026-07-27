@@ -754,6 +754,8 @@ class FubonRealtimeSubscriptionPool:
                     exc,
                 )
 
+        await self.recover_stalled_ws_channels()
+
         desired_after_hours = is_futopt_after_hours()
         stale_tickers = [
             ticker
@@ -764,6 +766,70 @@ class FubonRealtimeSubscriptionPool:
         ]
         for ticker in stale_tickers:
             await self._ensure_assignment(ticker)
+
+    def get_unhealthy_subscription_channels(self) -> list[dict[str, Any]]:
+        """Return only disconnected channels that currently carry desired subscriptions."""
+        unhealthy: list[dict[str, Any]] = []
+        for account_id, manager in list(self._managers.items()):
+            if not manager.connected:
+                continue
+            get_status = getattr(manager, "get_reconnect_status", None)
+            if not callable(get_status):
+                continue
+            reconnect_status = get_status() or {}
+            for market_type in ("stock", "futopt"):
+                channel = reconnect_status.get(market_type) or {}
+                desired_count = max(0, int(channel.get("desired_subscription_count") or 0))
+                state = str(channel.get("state") or "disconnected").strip().lower()
+                if desired_count <= 0 or state == "connected":
+                    continue
+                unhealthy.append(
+                    {
+                        "account_id": int(account_id),
+                        "market_type": market_type,
+                        "state": state,
+                        "pending": bool(channel.get("pending")),
+                        "desired_subscription_count": desired_count,
+                        "last_error_category": channel.get("last_error_category"),
+                    }
+                )
+        return unhealthy
+
+    async def recover_stalled_ws_channels(self) -> list[dict[str, Any]]:
+        """Restart unhealthy subscribed channels whose normal retry timer has stopped."""
+        results: list[dict[str, Any]] = []
+        for channel in self.get_unhealthy_subscription_channels():
+            if channel["pending"]:
+                continue
+            account_id = int(channel["account_id"])
+            market_type = str(channel["market_type"])
+            log.warning(
+                "Fubon %s channel stalled with %s desired subscriptions; "
+                "attempting isolated recovery",
+                market_type,
+                channel["desired_subscription_count"],
+            )
+            try:
+                result = await self.reconnect_account(
+                    account_id,
+                    market_type=market_type,
+                    manual=False,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Fubon %s channel watchdog recovery failed category=%s message=%s",
+                    market_type,
+                    classify_fubon_error(exc),
+                    exc,
+                )
+                result = {
+                    "success": False,
+                    "account_id": account_id,
+                    "market_type": market_type,
+                    "error_category": classify_fubon_error(exc),
+                }
+            results.append(result)
+        return results
 
     def _attach_bridge_handler(self, account_id: int, manager: FubonSDKManager) -> None:
         existing = self._manager_bridge_handlers.get(account_id)

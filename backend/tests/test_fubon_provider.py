@@ -4,7 +4,7 @@ import pytest
 import fubon_provider
 import repositories.fubon_accounts as fubon_accounts_repo
 
-from fubon_provider import FubonMarketdataAuthenticationError, FubonSDKManager
+from fubon_provider import FubonMarketdataAuthenticationError, FubonSDKManager, classify_fubon_error
 
 
 class FakeSDK:
@@ -413,6 +413,19 @@ def test_ws_disconnect_records_transient_state_and_retry_deadline(monkeypatch):
     assert status["last_error_category"] == "transient"
     assert status["last_disconnect_at"] is not None
     assert status["next_retry_at"] is not None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionAbortedError(10053, "連線已被您主機上的軟體中止。"),
+        RuntimeError("[WinError 10053] connection aborted"),
+        "ConnectionAbortedError: local software aborted the connection",
+        "連線已被您主機上的軟體中止",
+    ],
+)
+def test_winerror_10053_is_classified_as_transient(error):
+    assert classify_fubon_error(error) == "transient"
 
 
 def test_manager_detects_futures_capability_without_selecting_known_stock_account():

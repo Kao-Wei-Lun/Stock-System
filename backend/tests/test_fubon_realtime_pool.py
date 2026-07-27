@@ -56,6 +56,38 @@ class FakeManager:
         }
 
 
+class WatchdogManager(FakeManager):
+    def __init__(
+        self,
+        account_id,
+        *,
+        stock_state="connected",
+        stock_pending=False,
+        stock_desired=0,
+        futopt_state="connected",
+        futopt_pending=False,
+        futopt_desired=0,
+    ):
+        super().__init__(account_id)
+        self.reconnect_status = {
+            "stock": {
+                "state": stock_state,
+                "pending": stock_pending,
+                "desired_subscription_count": stock_desired,
+                "last_error_category": "transient" if stock_state != "connected" else None,
+            },
+            "futopt": {
+                "state": futopt_state,
+                "pending": futopt_pending,
+                "desired_subscription_count": futopt_desired,
+                "last_error_category": "transient" if futopt_state != "connected" else None,
+            },
+        }
+
+    def get_reconnect_status(self):
+        return self.reconnect_status
+
+
 class FakeDb:
     def __init__(self):
         self.notifications = []
@@ -368,6 +400,63 @@ async def test_session_refresh_recovers_each_disconnected_account_without_full_r
     await pool.refresh_session_assignments()
 
     pool.reconnect_account.assert_awaited_once_with(2, manual=False)
+
+
+@pytest.mark.anyio
+async def test_channel_watchdog_ignores_disconnected_channel_without_desired_subscriptions():
+    manager = WatchdogManager(1, stock_state="disconnected", stock_desired=0)
+    pool = FubonRealtimeSubscriptionPool(manager)
+    pool._managers = {1: manager}
+    pool.reconnect_account = AsyncMock(return_value={"success": True})
+
+    assert pool.get_unhealthy_subscription_channels() == []
+    assert await pool.recover_stalled_ws_channels() == []
+    pool.reconnect_account.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_channel_watchdog_does_not_duplicate_pending_reconnect():
+    manager = WatchdogManager(
+        1,
+        futopt_state="backoff",
+        futopt_pending=True,
+        futopt_desired=3,
+    )
+    pool = FubonRealtimeSubscriptionPool(manager)
+    pool._managers = {1: manager}
+    pool.reconnect_account = AsyncMock(return_value={"success": True})
+
+    unhealthy = pool.get_unhealthy_subscription_channels()
+    assert unhealthy[0]["market_type"] == "futopt"
+    assert unhealthy[0]["pending"] is True
+
+    assert await pool.recover_stalled_ws_channels() == []
+    pool.reconnect_account.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_channel_watchdog_recovers_only_stalled_subscribed_market():
+    manager = WatchdogManager(
+        1,
+        stock_state="disconnected",
+        stock_desired=18,
+        futopt_state="connected",
+        futopt_desired=3,
+    )
+    pool = FubonRealtimeSubscriptionPool(manager)
+    pool._managers = {1: manager}
+    pool.reconnect_account = AsyncMock(
+        return_value={"success": True, "account_id": 1, "market_type": "stock"}
+    )
+
+    results = await pool.recover_stalled_ws_channels()
+
+    assert results[0]["success"] is True
+    pool.reconnect_account.assert_awaited_once_with(
+        1,
+        market_type="stock",
+        manual=False,
+    )
 
 
 @pytest.mark.anyio
