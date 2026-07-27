@@ -187,6 +187,24 @@ def merge_futopt_ohlcv_rows(*row_groups: list[dict[str, Any]]) -> list[dict[str,
     return [merged[key] for key in sorted(merged)]
 
 
+def resolve_futopt_database_period(
+    requested_period: str,
+    *,
+    limit: int | None,
+    since: str | None,
+) -> str:
+    """Select the DB display window independently from the provider refresh range.
+
+    A bounded initial chart load needs the latest N persisted bars even when a
+    weekend or holiday falls inside a short calendar period. The repository
+    still applies LIMIT, so using ``max`` here does not load the full history.
+    Incremental and legacy unbounded reads keep their existing time boundary.
+    """
+    if limit is not None and since is None:
+        return "max"
+    return requested_period
+
+
 async def load_futopt_ohlc_db_first(
     provider,
     db,
@@ -209,6 +227,11 @@ async def load_futopt_ohlc_db_first(
     requested = str(symbol or "").strip().upper()
     canonical = normalize_futopt_symbol_query(requested)
     storage_tickers = list(dict.fromkeys(item for item in (requested, canonical) if item))
+    database_period = resolve_futopt_database_period(
+        period,
+        limit=limit,
+        since=since,
+    )
     query_options: dict[str, Any] = {}
     if limit is not None:
         query_options["limit"] = max(1, min(max(int(limit), int(warmup or 0)), 5000))
@@ -216,7 +239,7 @@ async def load_futopt_ohlc_db_first(
         query_options["since"] = since
 
     initial_groups = [
-        await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
+        await db.get_ohlcv(ticker, period=database_period, interval=interval, **query_options)
         for ticker in storage_tickers
     ]
     initial_rows = merge_futopt_ohlcv_rows(*initial_groups)
@@ -281,7 +304,7 @@ async def load_futopt_ohlc_db_first(
 
     if sync_result:
         refreshed_groups = [
-            await db.get_ohlcv(ticker, period=period, interval=interval, **query_options)
+            await db.get_ohlcv(ticker, period=database_period, interval=interval, **query_options)
             for ticker in storage_tickers
         ]
         rows = merge_futopt_ohlcv_rows(*refreshed_groups)
@@ -298,6 +321,8 @@ async def load_futopt_ohlc_db_first(
         "requested_symbol": requested,
         "resolved_symbol": resolved or (canonical if is_exact_futopt_contract(canonical) else None),
         "period": period,
+        "database_period": database_period,
+        "history_window_expanded": database_period != period,
         "interval": interval,
         "data": rows,
         "row_count": len(rows),

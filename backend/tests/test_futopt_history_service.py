@@ -9,6 +9,7 @@ from futopt_history_service import (
     latest_row_to_futopt_period,
     load_futopt_ohlc_db_first,
     merge_futopt_ohlcv_rows,
+    resolve_futopt_database_period,
 )
 
 
@@ -117,6 +118,28 @@ def test_merge_futopt_rows_deduplicates_alias_and_contract_series():
     assert [item["close"] for item in rows] == [101, 102]
 
 
+@pytest.mark.parametrize(
+    ("period", "limit", "since", "expected"),
+    [
+        ("1d", 400, None, "max"),
+        ("5d", 250, None, "max"),
+        ("1d", 400, "2026-07-27T09:00:00+08:00", "1d"),
+        ("1d", None, None, "1d"),
+    ],
+)
+def test_resolve_database_period_separates_bounded_initial_history(
+    period,
+    limit,
+    since,
+    expected,
+):
+    assert resolve_futopt_database_period(
+        period,
+        limit=limit,
+        since=since,
+    ) == expected
+
+
 @pytest.mark.anyio
 async def test_db_first_loader_persists_refresh_then_returns_merged_database_rows():
     db = FakeDb()
@@ -137,6 +160,32 @@ async def test_db_first_loader_persists_refresh_then_returns_merged_database_row
     assert payload["storage_tickers"] == ["TMF", "TMFH6"]
     assert [item["close"] for item in payload["data"]] == [101, 102]
     assert ("TMFH6", "1m") in db.rows
+
+
+@pytest.mark.anyio
+async def test_bounded_initial_load_expands_only_database_window():
+    db = FakeDb()
+    provider = FakeProvider()
+
+    payload = await load_futopt_ohlc_db_first(
+        provider,
+        db,
+        "*TMFF",
+        period="1d",
+        interval="1m",
+        refresh_mode="blocking",
+        limit=400,
+        warmup=250,
+    )
+
+    assert provider.calls == [
+        {"symbol": "*TMFF", "period": "1d", "interval": "1m"},
+    ]
+    assert db.query_calls
+    assert all(call[1] == "max" for call in db.query_calls)
+    assert payload["period"] == "1d"
+    assert payload["database_period"] == "max"
+    assert payload["history_window_expanded"] is True
 
 
 @pytest.mark.anyio
