@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from security_sanitizer import redact_sensitive_text, secret_values_from_account
@@ -160,9 +159,6 @@ def _build_futopt_estimate_margin_order(
 
 
 class FubonSDKManager:
-    _RECONNECT_DELAY_SECONDS = 1.0
-    _RECONNECT_MAX_DELAY_SECONDS = 30.0
-
     def __init__(self):
         self._sdk = None
         self._active_account_id: Optional[int] = None
@@ -185,6 +181,14 @@ class FubonSDKManager:
         self._ws_reconnect_attempts: Dict[str, int] = {"stock": 0, "futopt": 0}
         self._ws_reconnect_last_error: Dict[str, str | None] = {"stock": None, "futopt": None}
         self._ws_reconnect_last_success_at: Dict[str, str | None] = {"stock": None, "futopt": None}
+        # SDK callbacks run on websocket-client threads. Recovery must be handed
+        # to the owning asyncio pool instead of reconnecting a closed SDK client
+        # from those callback threads.
+        self._ws_recovery_handler: Callable[[str], Any] | None = None
+        self._ws_recovery_pending: Dict[str, bool] = {"stock": False, "futopt": False}
+        # Every SDK initialization receives a new generation. Late callbacks
+        # from a closed session are ignored so they cannot degrade the new one.
+        self._ws_generation = 0
         self._last_init_error: str | None = None
         self._last_init_error_category: str | None = None
         self._ws_state: Dict[str, Dict[str, Any]] = {
@@ -414,6 +418,21 @@ class FubonSDKManager:
 
     def unregister_message_handler(self, handler: Callable[[dict], None]) -> None:
         self._message_handlers = [item for item in self._message_handlers if item is not handler]
+
+    def set_ws_recovery_handler(self, handler: Callable[[str], Any] | None) -> None:
+        """Register the non-blocking owner callback used to rebuild an SDK session."""
+        with self._ws_reconnect_lock:
+            self._ws_recovery_handler = handler
+            if handler is None:
+                self._ws_recovery_pending = {"stock": False, "futopt": False}
+
+    def complete_ws_recovery_request(self, market_type: str) -> None:
+        """Release a queued recovery marker when the owning pool defers or completes it."""
+        normalized = str(market_type or "").strip().lower()
+        if normalized not in {"stock", "futopt"}:
+            return
+        with self._ws_reconnect_lock:
+            self._ws_recovery_pending[normalized] = False
 
     def subscribe_stock(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
         return self._subscribe(self._ws_stock, "stock", symbol, channel)
@@ -931,6 +950,7 @@ class FubonSDKManager:
         self._reset_runtime_state()
 
     def _reset_runtime_state(self) -> None:
+        self._ws_generation += 1
         self._sdk = None
         self._active_account_id = None
         self._ws_mode = "Speed"
@@ -947,6 +967,7 @@ class FubonSDKManager:
         self._ws_reconnect_attempts = {"stock": 0, "futopt": 0}
         self._ws_reconnect_last_error = {"stock": None, "futopt": None}
         self._ws_reconnect_last_success_at = {"stock": None, "futopt": None}
+        self._ws_recovery_pending = {"stock": False, "futopt": False}
         self._attached_targets = set()
         self.connected = False
 
@@ -958,18 +979,47 @@ class FubonSDKManager:
         if not target or market_type in self._attached_targets:
             return
 
+        generation = self._ws_generation
         on_method = getattr(target, "on", None)
         if callable(on_method):
             for event_name in ("message", "data"):
                 try:
-                    on_method(event_name, lambda message, mt=market_type: self._dispatch_ws_message(mt, message))
+                    on_method(
+                        event_name,
+                        lambda message, mt=market_type, gen=generation: self._dispatch_ws_message(
+                            mt,
+                            message,
+                            generation=gen,
+                        ),
+                    )
                     break
                 except Exception:
                     continue
             for event_name, callback in (
-                ("connect", lambda *args, mt=market_type: self._handle_ws_connect(mt, *args)),
-                ("disconnect", lambda *args, mt=market_type: self._handle_ws_disconnect(mt, *args)),
-                ("error", lambda *args, mt=market_type: self._handle_ws_error(mt, *args)),
+                (
+                    "connect",
+                    lambda *args, mt=market_type, gen=generation: self._handle_ws_connect(
+                        mt,
+                        *args,
+                        generation=gen,
+                    ),
+                ),
+                (
+                    "disconnect",
+                    lambda *args, mt=market_type, gen=generation: self._handle_ws_disconnect(
+                        mt,
+                        *args,
+                        generation=gen,
+                    ),
+                ),
+                (
+                    "error",
+                    lambda *args, mt=market_type, gen=generation: self._handle_ws_error(
+                        mt,
+                        *args,
+                        generation=gen,
+                    ),
+                ),
             ):
                 try:
                     on_method(event_name, callback)
@@ -981,14 +1031,30 @@ class FubonSDKManager:
         for attr_name in ("onmessage", "on_message"):
             if hasattr(target, attr_name):
                 try:
-                    setattr(target, attr_name, lambda message, mt=market_type: self._dispatch_ws_message(mt, message))
+                    setattr(
+                        target,
+                        attr_name,
+                        lambda message, mt=market_type, gen=generation: self._dispatch_ws_message(
+                            mt,
+                            message,
+                            generation=gen,
+                        ),
+                    )
                     self._attached_targets.add(market_type)
                     return
                 except Exception:
                     continue
 
-    def _dispatch_ws_message(self, market_type: str, message: Any) -> None:
-        if self._shutting_down:
+    def _dispatch_ws_message(
+        self,
+        market_type: str,
+        message: Any,
+        *,
+        generation: int | None = None,
+    ) -> None:
+        if self._shutting_down or (
+            generation is not None and generation != self._ws_generation
+        ):
             return
         payload = self._normalize_ws_message(market_type, message)
         if not payload:
@@ -1004,10 +1070,18 @@ class FubonSDKManager:
             except Exception as exc:
                 log.warning("Fubon message handler failed: %s", exc)
 
-    def _handle_ws_connect(self, market_type: str, *args) -> None:
-        if self._shutting_down:
+    def _handle_ws_connect(
+        self,
+        market_type: str,
+        *args,
+        generation: int | None = None,
+    ) -> None:
+        if self._shutting_down or (
+            generation is not None and generation != self._ws_generation
+        ):
             return
         self._cancel_reconnect_timer(market_type)
+        self.complete_ws_recovery_request(market_type)
         self._ws_reconnect_attempts[market_type] = 0
         self._ws_reconnect_last_error[market_type] = None
         connected_at = datetime.now(timezone.utc).isoformat()
@@ -1024,7 +1098,14 @@ class FubonSDKManager:
         self._ws_started_targets.add(market_type)
         log.info("Fubon %s websocket connected", market_type)
 
-    def _handle_ws_disconnect(self, market_type: str, *args) -> None:
+    def _handle_ws_disconnect(
+        self,
+        market_type: str,
+        *args,
+        generation: int | None = None,
+    ) -> None:
+        if generation is not None and generation != self._ws_generation:
+            return
         self._ws_started_targets.discard(market_type)
         if self._shutting_down or not self.connected:
             log.info("Fubon %s websocket closed during shutdown", market_type)
@@ -1043,8 +1124,15 @@ class FubonSDKManager:
         )
         self._schedule_reconnect_ws_target(market_type)
 
-    def _handle_ws_error(self, market_type: str, *args) -> None:
-        if self._shutting_down:
+    def _handle_ws_error(
+        self,
+        market_type: str,
+        *args,
+        generation: int | None = None,
+    ) -> None:
+        if self._shutting_down or (
+            generation is not None and generation != self._ws_generation
+        ):
             return
         log.warning("Fubon %s websocket error: %s", market_type, args or "unknown")
         error = next((arg for arg in args if arg is not None), "websocket error")
@@ -1065,34 +1153,16 @@ class FubonSDKManager:
         self._schedule_reconnect_ws_target(market_type)
 
     def _reconnect_ws_target(self, market_type: str) -> bool:
-        if not self.connected:
-            return False
-        target = self._ws_stock if market_type == "stock" else self._ws_futopt
-        # A manual reconnect can be requested while the SDK still considers the
-        # target started. Clear the idempotency marker before closing it so the
-        # following start call opens a new socket instead of returning early.
-        self._ws_started_targets.discard(market_type)
-        self._best_effort_shutdown(target)
-        started = self.start_ws_stock() if market_type == "stock" else self.start_ws_futopt()
-        if not started:
-            return False
-        self._restore_ws_subscriptions(
-            {
-                key: payload
-                for key, payload in self._subscription_payloads.items()
-                if key.startswith(f"{market_type}:")
-            }
-        )
-        return True
+        # Reusing fugle-marketdata's closed WebSocketApp can leave connect()
+        # waiting forever and spawn unbounded run_forever threads. The owning
+        # realtime pool must rebuild the complete SDK session instead.
+        return self._request_ws_recovery(market_type)
 
     def force_reconnect_ws(self, market_type: str) -> bool:
         normalized = str(market_type or "").strip().lower()
         if normalized not in {"stock", "futopt"}:
             raise ValueError("market_type must be stock or futopt")
         self._cancel_reconnect_timer(normalized)
-        self._ws_reconnect_attempts[normalized] = 0
-        self._ws_state[normalized]["state"] = "connecting"
-        self._ws_state[normalized]["next_retry_at"] = None
         try:
             return self._reconnect_ws_target(normalized)
         except Exception as exc:
@@ -1110,8 +1180,12 @@ class FubonSDKManager:
     def get_reconnect_status(self) -> dict[str, dict[str, Any]]:
         with self._ws_reconnect_lock:
             pending = {
-                market_type: bool(timer and timer.is_alive())
-                for market_type, timer in self._ws_reconnect_timers.items()
+                market_type: bool(self._ws_recovery_pending.get(market_type))
+                or bool(
+                    self._ws_reconnect_timers.get(market_type)
+                    and self._ws_reconnect_timers[market_type].is_alive()
+                )
+                for market_type in ("stock", "futopt")
             }
         return {
             market_type: {
@@ -1120,6 +1194,7 @@ class FubonSDKManager:
                 "pending": bool(pending.get(market_type)),
                 "last_error": self._ws_reconnect_last_error.get(market_type),
                 "last_success_at": self._ws_reconnect_last_success_at.get(market_type),
+                "session_generation": self._ws_generation,
                 "subscription_count": sum(
                     1 for key in self._subscriptions if key.startswith(f"{market_type}:")
                 ),
@@ -1134,49 +1209,54 @@ class FubonSDKManager:
         if not self.connected or self._shutting_down:
             return
 
-        with self._ws_reconnect_lock:
-            existing = self._ws_reconnect_timers.get(market_type)
-            if existing and existing.is_alive():
-                return
-
-            attempts = max(0, int(self._ws_reconnect_attempts.get(market_type, 0)))
-            delay_seconds = min(
-                self._RECONNECT_MAX_DELAY_SECONDS,
-                self._RECONNECT_DELAY_SECONDS * (2 ** min(attempts, 8)),
-            )
-            delay_seconds += random.uniform(0.0, min(1.0, delay_seconds * 0.2))
-            next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
-            self._ws_state[market_type]["state"] = "backoff"
-            self._ws_state[market_type]["next_retry_at"] = next_retry_at.isoformat()
-            timer = threading.Timer(
-                delay_seconds,
-                lambda mt=market_type: self._run_scheduled_reconnect(mt),
-            )
-            timer.daemon = True
-            self._ws_reconnect_timers[market_type] = timer
-            timer.start()
+        self._request_ws_recovery(market_type)
 
     def _run_scheduled_reconnect(self, market_type: str) -> None:
-        self._cancel_reconnect_timer(market_type, cancel_active=False)
-        if self._shutting_down or not self.connected:
-            return
-        self._ws_reconnect_attempts[market_type] = self._ws_reconnect_attempts.get(market_type, 0) + 1
-        self._ws_state[market_type]["state"] = "connecting"
-        self._ws_state[market_type]["next_retry_at"] = None
+        # Kept as a compatibility entrypoint for callers/tests from older
+        # versions. It only notifies the owner and never calls SDK connect().
+        self._request_ws_recovery(market_type)
+
+    def _request_ws_recovery(self, market_type: str) -> bool:
+        normalized = str(market_type or "").strip().lower()
+        if (
+            normalized not in {"stock", "futopt"}
+            or self._shutting_down
+            or not self.connected
+        ):
+            return False
+
+        with self._ws_reconnect_lock:
+            if self._ws_recovery_pending.get(normalized):
+                return True
+            handler = self._ws_recovery_handler
+            if handler is None:
+                self._ws_state[normalized]["state"] = "degraded"
+                self._ws_state[normalized]["next_retry_at"] = None
+                return False
+            self._ws_recovery_pending[normalized] = True
+
+        self._ws_reconnect_attempts[normalized] = (
+            self._ws_reconnect_attempts.get(normalized, 0) + 1
+        )
+        self._ws_state[normalized]["state"] = "recovery_pending"
+        self._ws_state[normalized]["next_retry_at"] = None
         try:
-            started = self._reconnect_ws_target(market_type)
-            if started is False:
-                self._schedule_reconnect_ws_target(market_type)
+            accepted = handler(normalized)
         except Exception as exc:
             safe_error = redact_sensitive_text(exc)
-            self._ws_reconnect_last_error[market_type] = safe_error
+            self._ws_reconnect_last_error[normalized] = safe_error
+            self.complete_ws_recovery_request(normalized)
             log.warning(
-                "Fubon %s websocket reconnect failed category=%s message=%s",
-                market_type,
+                "Fubon %s websocket recovery notification failed category=%s message=%s",
+                normalized,
                 classify_fubon_error(exc),
                 safe_error,
             )
-            self._schedule_reconnect_ws_target(market_type)
+            return False
+        if accepted is False:
+            self.complete_ws_recovery_request(normalized)
+            return False
+        return True
 
     def _cancel_reconnect_timer(self, market_type: str, *, cancel_active: bool = True) -> None:
         with self._ws_reconnect_lock:

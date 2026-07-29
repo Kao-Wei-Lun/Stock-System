@@ -227,21 +227,25 @@ def test_start_ws_stock_is_idempotent_for_already_started_socket():
     assert manager._ws_stock.connect_calls == 1
 
 
-def test_manual_reconnect_reopens_socket_and_restores_desired_subscriptions_without_duplicates():
+def test_manual_reconnect_notifies_owner_without_reusing_closed_socket():
     manager = FubonSDKManager()
     websocket = FakeReconnectWebSocket()
     manager._ws_stock = websocket
     manager.connected = True
     manager.start_ws_stock()
     manager.subscribe_stock("2330", "books")
+    recoveries = []
+    manager.set_ws_recovery_handler(lambda market_type: recoveries.append(market_type))
 
-    for _minute in range(30):
-        assert manager.force_reconnect_ws("stock") is True
-        manager._handle_ws_connect("stock")
+    assert manager.force_reconnect_ws("stock") is True
+    assert manager.force_reconnect_ws("stock") is True
 
     status = manager.get_reconnect_status()["stock"]
-    assert websocket.disconnect_calls == 30
-    assert websocket.connect_calls == 31
+    assert recoveries == ["stock"]
+    assert websocket.disconnect_calls == 0
+    assert websocket.connect_calls == 1
+    assert status["pending"] is True
+    assert status["state"] == "recovery_pending"
     assert status["subscription_count"] == 1
     assert status["desired_subscription_count"] == 1
     assert list(manager._subscriptions) == ["stock:2330:books"]
@@ -275,98 +279,49 @@ def test_disconnect_during_shutdown_does_not_reconnect():
     assert "stock" not in manager._ws_started_targets
 
 
-def test_disconnect_schedules_single_reconnect_while_timer_is_active(monkeypatch):
+def test_disconnect_notifies_owner_once_while_recovery_is_pending():
     manager = FubonSDKManager()
     manager.connected = True
-    timers = []
-
-    class FakeTimer:
-        def __init__(self, interval, callback):
-            self.interval = interval
-            self.callback = callback
-            self.alive = False
-            self.daemon = False
-            timers.append(self)
-
-        def start(self):
-            self.alive = True
-
-        def is_alive(self):
-            return self.alive
-
-        def cancel(self):
-            self.alive = False
-
-    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
+    recoveries = []
+    manager.set_ws_recovery_handler(lambda market_type: recoveries.append(market_type))
 
     manager._handle_ws_disconnect("futopt", None, None)
     manager._handle_ws_disconnect("futopt", None, None)
 
-    assert len(timers) == 1
-    assert "futopt" in manager._ws_reconnect_timers
+    assert recoveries == ["futopt"]
+    assert manager.get_reconnect_status()["futopt"]["pending"] is True
+    assert manager._ws_reconnect_timers == {}
 
 
-def test_run_scheduled_reconnect_cleans_timer_and_reconnects():
+def test_legacy_scheduled_reconnect_entrypoint_only_notifies_owner():
     manager = FubonSDKManager()
     manager.connected = True
-    reconnected = []
-
-    class FakeTimer:
-        def __init__(self):
-            self.cancelled = False
-
-        def cancel(self):
-            self.cancelled = True
-
-        def is_alive(self):
-            return True
-
-    timer = FakeTimer()
-    manager._ws_reconnect_timers["futopt"] = timer
-    manager._reconnect_ws_target = lambda market_type: reconnected.append(market_type)
+    recoveries = []
+    manager.set_ws_recovery_handler(lambda market_type: recoveries.append(market_type))
 
     manager._run_scheduled_reconnect("futopt")
 
-    assert reconnected == ["futopt"]
-    assert "futopt" not in manager._ws_reconnect_timers
-    assert timer.cancelled is False
+    assert recoveries == ["futopt"]
+    assert manager.get_reconnect_status()["futopt"]["pending"] is True
 
 
-def test_failed_reconnect_is_rescheduled_with_exponential_backoff(monkeypatch):
+def test_rejected_recovery_notification_releases_pending_marker():
     manager = FubonSDKManager()
     manager.connected = True
-    timers = []
+    recoveries = []
 
-    class FakeTimer:
-        def __init__(self, interval, callback):
-            self.interval = interval
-            self.callback = callback
-            self.alive = False
-            self.daemon = False
-            timers.append(self)
+    def reject(market_type):
+        recoveries.append(market_type)
+        return False
 
-        def start(self):
-            self.alive = True
-
-        def is_alive(self):
-            return self.alive
-
-        def cancel(self):
-            self.alive = False
-
-    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
-    monkeypatch.setattr(fubon_provider.random, "uniform", lambda _start, _end: 0.0)
-    manager._reconnect_ws_target = lambda _market_type: False
+    manager.set_ws_recovery_handler(reject)
 
     manager._schedule_reconnect_ws_target("stock")
-    assert timers[0].interval == 1.0
-    timers[0].alive = False
-    manager._run_scheduled_reconnect("stock")
+    manager._schedule_reconnect_ws_target("stock")
 
-    assert manager._ws_reconnect_attempts["stock"] == 1
-    assert len(timers) == 2
-    assert timers[1].interval == 2.0
-    assert manager.get_reconnect_status()["stock"]["pending"] is True
+    assert recoveries == ["stock", "stock"]
+    assert manager._ws_reconnect_attempts["stock"] == 2
+    assert manager.get_reconnect_status()["stock"]["pending"] is False
 
 
 def test_ws_connect_resets_reconnect_state():
@@ -384,35 +339,56 @@ def test_ws_connect_resets_reconnect_state():
     assert status["next_retry_at"] is None
 
 
-def test_ws_disconnect_records_transient_state_and_retry_deadline(monkeypatch):
+def test_ws_disconnect_records_transient_state_and_recovery_pending():
     manager = FubonSDKManager()
     manager.connected = True
-
-    class FakeTimer:
-        def __init__(self, interval, callback):
-            self.interval = interval
-            self.callback = callback
-            self.daemon = False
-
-        def start(self):
-            pass
-
-        def is_alive(self):
-            return True
-
-        def cancel(self):
-            pass
-
-    monkeypatch.setattr(fubon_provider.threading, "Timer", FakeTimer)
-    monkeypatch.setattr(fubon_provider.random, "uniform", lambda _start, _end: 0.0)
+    manager.set_ws_recovery_handler(lambda _market_type: True)
 
     manager._handle_ws_disconnect("stock", RuntimeError("connection closed"))
 
     status = manager.get_reconnect_status()["stock"]
-    assert status["state"] == "backoff"
+    assert status["state"] == "recovery_pending"
     assert status["last_error_category"] == "transient"
     assert status["last_disconnect_at"] is not None
-    assert status["next_retry_at"] is not None
+    assert status["next_retry_at"] is None
+    assert status["pending"] is True
+
+
+def test_stale_session_callbacks_do_not_mutate_current_state_or_request_recovery():
+    manager = FubonSDKManager()
+    manager.connected = True
+    recoveries = []
+    received = []
+    manager.set_ws_recovery_handler(lambda market_type: recoveries.append(market_type))
+    manager.register_message_handler(received.append)
+    stale_generation = manager._ws_generation
+
+    manager._reset_runtime_state()
+    manager.connected = True
+    manager._ws_state["stock"]["state"] = "connected"
+    current_generation = manager._ws_generation
+
+    manager._handle_ws_error(
+        "stock",
+        RuntimeError("old socket failed"),
+        generation=stale_generation,
+    )
+    manager._handle_ws_disconnect(
+        "stock",
+        None,
+        None,
+        generation=stale_generation,
+    )
+    manager._dispatch_ws_message(
+        "stock",
+        {"event": "data", "data": {"symbol": "2330"}},
+        generation=stale_generation,
+    )
+
+    assert current_generation > stale_generation
+    assert manager._ws_state["stock"]["state"] == "connected"
+    assert recoveries == []
+    assert received == []
 
 
 @pytest.mark.parametrize(
