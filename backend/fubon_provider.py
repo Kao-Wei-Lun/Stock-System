@@ -159,6 +159,8 @@ def _build_futopt_estimate_margin_order(
 
 
 class FubonSDKManager:
+    _WS_CONNECT_TIMEOUT_SECONDS = 10.0
+
     def __init__(self):
         self._sdk = None
         self._active_account_id: Optional[int] = None
@@ -426,13 +428,26 @@ class FubonSDKManager:
             if handler is None:
                 self._ws_recovery_pending = {"stock": False, "futopt": False}
 
-    def complete_ws_recovery_request(self, market_type: str) -> None:
+    def complete_ws_recovery_request(
+        self,
+        market_type: str,
+        *,
+        state: str | None = None,
+        next_retry_at: str | None = None,
+    ) -> None:
         """Release a queued recovery marker when the owning pool defers or completes it."""
         normalized = str(market_type or "").strip().lower()
         if normalized not in {"stock", "futopt"}:
             return
         with self._ws_reconnect_lock:
             self._ws_recovery_pending[normalized] = False
+        if state:
+            self._ws_state[normalized]["state"] = str(state)
+            self._ws_state[normalized]["next_retry_at"] = next_retry_at
+
+    def _is_ws_recovery_pending(self, market_type: str) -> bool:
+        with self._ws_reconnect_lock:
+            return bool(self._ws_recovery_pending.get(market_type))
 
     def subscribe_stock(self, symbol: str, channel: str = "aggregates") -> Optional[str]:
         return self._subscribe(self._ws_stock, "stock", symbol, channel)
@@ -489,6 +504,12 @@ class FubonSDKManager:
 
     def start_ws_futopt(self) -> bool:
         return self._start_ws_target(self._ws_futopt, "futopt")
+
+    async def start_ws_stock_async(self) -> bool:
+        return bool(await asyncio.to_thread(self.start_ws_stock))
+
+    async def start_ws_futopt_async(self) -> bool:
+        return bool(await asyncio.to_thread(self.start_ws_futopt))
 
     def get_rest_stock(self):
         if not self.connected or not self._sdk:
@@ -1110,7 +1131,12 @@ class FubonSDKManager:
         if self._shutting_down or not self.connected:
             log.info("Fubon %s websocket closed during shutdown", market_type)
             return
-        log.warning("Fubon %s websocket disconnected: %s", market_type, args or "unknown")
+        pending = self._is_ws_recovery_pending(market_type)
+        (log.debug if pending else log.warning)(
+            "Fubon %s websocket disconnected: %s",
+            market_type,
+            args or "unknown",
+        )
         error = next((arg for arg in args if arg is not None), "disconnected")
         safe_error = redact_sensitive_text(error)
         self._ws_reconnect_last_error[market_type] = safe_error
@@ -1134,7 +1160,12 @@ class FubonSDKManager:
             generation is not None and generation != self._ws_generation
         ):
             return
-        log.warning("Fubon %s websocket error: %s", market_type, args or "unknown")
+        pending = self._is_ws_recovery_pending(market_type)
+        (log.debug if pending else log.warning)(
+            "Fubon %s websocket error: %s",
+            market_type,
+            args or "unknown",
+        )
         error = next((arg for arg in args if arg is not None), "websocket error")
         category = classify_fubon_error(error)
         self._ws_state[market_type].update(
@@ -1577,6 +1608,14 @@ class FubonSDKManager:
             if not callable(method):
                 continue
             self._ws_started_targets.add(market_type)
+            timeout_timer = None
+            if method_name == "connect":
+                timeout_timer = threading.Timer(
+                    self._WS_CONNECT_TIMEOUT_SECONDS,
+                    lambda ws=target, mt=market_type: self._abort_stalled_ws_connect(ws, mt),
+                )
+                timeout_timer.daemon = True
+                timeout_timer.start()
             try:
                 method()
                 return True
@@ -1593,8 +1632,26 @@ class FubonSDKManager:
                     redact_sensitive_text(exc),
                 )
                 return False
+            finally:
+                if timeout_timer is not None:
+                    timeout_timer.cancel()
         self._ws_started_targets.add(market_type)
         return True
+
+    def _abort_stalled_ws_connect(self, target, market_type: str) -> None:
+        """Release fugle-marketdata's unbounded authentication wait safely."""
+        if self._shutting_down or market_type not in self._ws_started_targets:
+            return
+        auth_status = getattr(target, "auth_status", None)
+        terminal_status = getattr(type(auth_status), "UNAUTHENTICATED", None)
+        if auth_status is None or terminal_status is None or auth_status == terminal_status:
+            return
+        self._best_effort_shutdown(target)
+        try:
+            target.error = TimeoutError(f"Fubon {market_type} websocket connect timed out")
+            target.auth_status = terminal_status
+        except Exception:
+            return
 
     @staticmethod
     def _best_effort_shutdown(target) -> None:

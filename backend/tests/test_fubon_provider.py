@@ -3,6 +3,8 @@ import database
 import pytest
 import fubon_provider
 import repositories.fubon_accounts as fubon_accounts_repo
+import time
+from enum import Enum
 
 from fubon_provider import FubonMarketdataAuthenticationError, FubonSDKManager, classify_fubon_error
 
@@ -109,6 +111,30 @@ class FakeReconnectWebSocket(FakeWebSocket):
 
     def connect(self):
         self.connect_calls += 1
+
+    def disconnect(self):
+        self.disconnect_calls += 1
+
+
+class FakeAuthState(Enum):
+    PENDING = "pending"
+    UNAUTHENTICATED = "unauthenticated"
+
+
+class FakeStalledConnectWebSocket:
+    def __init__(self):
+        self.auth_status = FakeAuthState.PENDING
+        self.error = None
+        self.disconnect_calls = 0
+
+    def connect(self):
+        deadline = time.monotonic() + 1
+        while self.auth_status != FakeAuthState.UNAUTHENTICATED:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("test connect guard failed to release")
+            time.sleep(0.001)
+        if self.error is not None:
+            raise self.error
 
     def disconnect(self):
         self.disconnect_calls += 1
@@ -227,6 +253,22 @@ def test_start_ws_stock_is_idempotent_for_already_started_socket():
     assert manager._ws_stock.connect_calls == 1
 
 
+def test_stalled_sdk_connect_is_released_by_hard_timeout(monkeypatch):
+    manager = FubonSDKManager()
+    websocket = FakeStalledConnectWebSocket()
+    manager._ws_stock = websocket
+    monkeypatch.setattr(manager, "_WS_CONNECT_TIMEOUT_SECONDS", 0.01)
+
+    started_at = time.monotonic()
+    result = manager.start_ws_stock()
+
+    assert result is False
+    assert time.monotonic() - started_at < 0.5
+    assert websocket.disconnect_calls >= 1
+    assert isinstance(websocket.error, TimeoutError)
+    assert "stock" not in manager._ws_started_targets
+
+
 def test_manual_reconnect_notifies_owner_without_reusing_closed_socket():
     manager = FubonSDKManager()
     websocket = FakeReconnectWebSocket()
@@ -291,6 +333,20 @@ def test_disconnect_notifies_owner_once_while_recovery_is_pending():
     assert recoveries == ["futopt"]
     assert manager.get_reconnect_status()["futopt"]["pending"] is True
     assert manager._ws_reconnect_timers == {}
+
+
+def test_repeated_error_callbacks_have_constant_recovery_work():
+    manager = FubonSDKManager()
+    manager.connected = True
+    recoveries = []
+    manager.set_ws_recovery_handler(lambda market_type: recoveries.append(market_type))
+
+    for _ in range(100):
+        manager._handle_ws_error("stock", ConnectionAbortedError(10053, "aborted"))
+
+    assert recoveries == ["stock"]
+    assert manager._ws_reconnect_timers == {}
+    assert manager.get_reconnect_status()["stock"]["pending"] is True
 
 
 def test_legacy_scheduled_reconnect_entrypoint_only_notifies_owner():

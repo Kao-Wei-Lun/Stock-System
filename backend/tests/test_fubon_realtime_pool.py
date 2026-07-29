@@ -18,6 +18,10 @@ class FakeManager:
         self.unsubscribed = []
         self.handlers = []
         self.quote_requests = []
+        self.stock_started = 0
+        self.futopt_started = 0
+        self.recovery_handler = None
+        self.completed_recoveries = []
 
     def register_message_handler(self, handler):
         self.handlers.append(handler)
@@ -41,6 +45,20 @@ class FakeManager:
 
     def shutdown(self):
         self.connected = False
+
+    def start_ws_stock(self):
+        self.stock_started += 1
+        return True
+
+    def start_ws_futopt(self):
+        self.futopt_started += 1
+        return True
+
+    def set_ws_recovery_handler(self, handler):
+        self.recovery_handler = handler
+
+    def complete_ws_recovery_request(self, market_type, **kwargs):
+        self.completed_recoveries.append((market_type, kwargs))
 
     async def fetch_stock_quote(self, symbol):
         self.quote_requests.append(symbol)
@@ -138,6 +156,38 @@ class WarmupRepo:
         return list(self.accounts)
 
 
+class ReconnectRepo:
+    account = {"id": 1, "is_active": True, "is_enabled": True}
+
+    def __init__(self, _db):
+        pass
+
+    async def get_account_with_secrets(self, account_id):
+        return dict(self.account) if int(account_id) == int(self.account["id"]) else None
+
+
+class RebuildManager(FakeManager):
+    def __init__(self, account_id):
+        super().__init__(account_id)
+        self.init_calls = []
+        self.shutdown_calls = 0
+        self.force_reconnect_calls = []
+
+    async def _init_with_account(self, account, _repo):
+        self.init_calls.append(account["id"])
+        self.active_account_id = account["id"]
+        self.connected = True
+        return True
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        self.connected = False
+
+    def force_reconnect_ws(self, market_type):
+        self.force_reconnect_calls.append(market_type)
+        raise AssertionError("closed websocket clients must not be reused")
+
+
 @pytest.mark.anyio
 async def test_background_warmup_does_not_block_application_readiness(monkeypatch):
     release = asyncio.Event()
@@ -157,8 +207,8 @@ async def test_background_warmup_does_not_block_application_readiness(monkeypatc
     status = pool.get_warmup_status()
     assert status["state"] == "ready"
     assert status["connected_account_count"] == 1
-    assert primary.stock_started == 1
-    assert primary.futopt_started == 1
+    assert primary.stock_started == 0
+    assert primary.futopt_started == 0
 
 
 @pytest.mark.anyio
@@ -178,8 +228,8 @@ async def test_account_warmup_failure_does_not_cancel_remaining_accounts(monkeyp
     assert connected is True
     assert primary.connected is False
     assert secondary.connected is True
-    assert secondary.stock_started == 1
-    assert secondary.futopt_started == 1
+    assert secondary.stock_started == 0
+    assert secondary.futopt_started == 0
 
 
 @pytest.mark.anyio
@@ -460,7 +510,7 @@ async def test_channel_watchdog_recovers_only_stalled_subscribed_market():
 
 
 @pytest.mark.anyio
-async def test_account_reconnect_is_single_flight_per_account_and_market():
+async def test_account_reconnect_is_single_flight_across_markets_for_one_account():
     primary = FakeManager(1)
     pool = FubonRealtimeSubscriptionPool(primary)
     release = asyncio.Event()
@@ -475,7 +525,7 @@ async def test_account_reconnect_is_single_flight_per_account_and_market():
     pool._reconnect_account_once = reconnect_once
     first = asyncio.create_task(pool.reconnect_account(1, market_type="futopt"))
     await asyncio.sleep(0)
-    second = asyncio.create_task(pool.reconnect_account(1, market_type="futopt"))
+    second = asyncio.create_task(pool.reconnect_account(1, market_type="stock"))
     await asyncio.sleep(0)
 
     assert calls == 1
@@ -483,6 +533,73 @@ async def test_account_reconnect_is_single_flight_per_account_and_market():
     first_result, second_result = await asyncio.gather(first, second)
     assert first_result["success"] is True
     assert second_result == first_result
+
+
+@pytest.mark.anyio
+async def test_sdk_thread_notification_is_scheduled_on_owner_loop():
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._event_loop = asyncio.get_running_loop()
+    pool._managers = {1: primary}
+    pool._attach_bridge_handler(1, primary)
+    pool.reconnect_account = AsyncMock(
+        return_value={"success": True, "account_id": 1, "market_type": "all"}
+    )
+
+    assert primary.recovery_handler("stock") is True
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    pool.reconnect_account.assert_awaited_once_with(
+        1,
+        market_type="stock",
+        manual=False,
+    )
+    assert primary.completed_recoveries == [("stock", {})]
+
+
+@pytest.mark.anyio
+async def test_channel_failure_rebuilds_complete_sdk_session_without_force_reconnect(monkeypatch):
+    primary = RebuildManager(1)
+    database = WarmupDb()
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._db = database
+    pool._event_loop = asyncio.get_running_loop()
+    pool._managers = {1: primary}
+    pool._attach_bridge_handler(1, primary)
+    pool._source_tickers["ws"] = {"2330.TW"}
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", ReconnectRepo)
+
+    result = await pool.reconnect_account(1, market_type="stock", manual=False)
+
+    assert result["success"] is True
+    assert result["market_type"] == "all"
+    assert result["requested_market_type"] == "stock"
+    assert primary.shutdown_calls == 1
+    assert primary.init_calls == [1]
+    assert primary.force_reconnect_calls == []
+    assert primary.stock_started == 1
+    assert ("stock", "2330", "books", 2.5) in primary.subscribed
+
+
+def test_recovery_failure_threshold_opens_bounded_cooldown(monkeypatch):
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(
+        primary,
+        recovery_failure_threshold=2,
+        recovery_cooldown_seconds=300,
+    )
+    monkeypatch.setattr(realtime_pool_module.random, "uniform", lambda _start, _end: 0.0)
+
+    first = dict(pool._record_recovery_failure(1, "transient", "connection reset"))
+    second = dict(pool._record_recovery_failure(1, "transient", "connection reset"))
+
+    assert first["state"] == "backoff"
+    assert first["circuit_state"] == "closed"
+    assert second["state"] == "cooldown"
+    assert second["circuit_state"] == "open"
+    assert second["cooldown_until"] == second["next_retry_at"]
+    assert second["consecutive_failures"] == 2
 
 
 @pytest.mark.anyio
