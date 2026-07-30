@@ -12,6 +12,7 @@ from service_supervisor import (
     LocalServiceSupervisor,
     SupervisorError,
     SupervisorSettings,
+    probe_ready_endpoint,
     request_supervised_restart,
 )
 
@@ -395,3 +396,161 @@ def test_planned_stop_takes_priority_over_restart_request(tmp_path, monkeypatch)
     assert factory.processes[0].killed is True
     assert not supervisor.restart_marker.exists()
     assert not supervisor.last_restart_path.exists()
+
+
+class PollingProcess(FakeProcess):
+    def __init__(self, pid: int, *, exit_after_polls: int | None = None) -> None:
+        super().__init__(pid, 0)
+        self.running = True
+        self.exit_after_polls = exit_after_polls
+        self.poll_count = 0
+
+    def poll(self):
+        self.poll_count += 1
+        if not self.running:
+            return self.exit_code
+        if self.exit_after_polls is not None and self.poll_count >= self.exit_after_polls:
+            return self.exit_code
+        return None
+
+
+def test_health_probe_is_not_called_during_startup_grace(tmp_path):
+    clock = FakeClock()
+    health_calls = []
+    process = PollingProcess(4401, exit_after_polls=6)
+    supervisor = LocalServiceSupervisor(
+        settings(
+            tmp_path,
+            health_startup_grace_seconds=10,
+            health_check_interval_seconds=1,
+        ),
+        runtime_dir=tmp_path / ".runtime",
+        health_probe=lambda *_args: health_calls.append(_args) or (False, "connection_error"),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    exit_code, reason, _ = supervisor._wait_for_child(process)
+
+    assert exit_code == 0
+    assert reason == "exited"
+    assert health_calls == []
+
+
+def test_single_health_failure_then_recovery_does_not_recycle(tmp_path):
+    clock = FakeClock()
+    results = [(False, "connection_error"), (True, "ready")]
+    health_calls = {"count": 0}
+
+    def probe(*_args):
+        index = min(health_calls["count"], len(results) - 1)
+        health_calls["count"] += 1
+        return results[index]
+
+    process = PollingProcess(4402, exit_after_polls=4)
+    supervisor = LocalServiceSupervisor(
+        settings(
+            tmp_path,
+            health_startup_grace_seconds=0,
+            health_check_interval_seconds=0.5,
+            health_failure_threshold=2,
+        ),
+        runtime_dir=tmp_path / ".runtime",
+        health_probe=probe,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    exit_code, reason, _ = supervisor._wait_for_child(process)
+
+    assert exit_code == 0
+    assert reason == "exited"
+    assert process.killed is False
+    assert not supervisor.last_health_recycle_path.exists()
+
+
+def test_consecutive_health_failures_recycle_managed_child(tmp_path, monkeypatch):
+    clock = FakeClock()
+    process = PollingProcess(4403)
+    supervisor = LocalServiceSupervisor(
+        settings(
+            tmp_path,
+            health_startup_grace_seconds=0,
+            health_check_interval_seconds=0.5,
+            health_failure_threshold=2,
+        ),
+        runtime_dir=tmp_path / ".runtime",
+        health_probe=lambda *_args: (False, "connection_error"),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    supervisor._write_running_state(process.pid, 0)
+    monkeypatch.setattr(
+        supervisor,
+        "_terminate_started_process",
+        lambda child: setattr(child, "running", False),
+    )
+
+    exit_code, reason, event = supervisor._wait_for_child(process)
+    state = json.loads(supervisor.state_path.read_text(encoding="utf-8"))
+    recycled = json.loads(
+        supervisor.last_health_recycle_path.read_text(encoding="utf-8")
+    )
+
+    assert exit_code == 1
+    assert reason == "unhealthy"
+    assert event["reason_code"] == "connection_error"
+    assert state["health"]["consecutive_failures"] == 2
+    assert recycled["consecutive_failures"] == 2
+    assert "url" not in json.dumps(recycled).lower()
+    assert "response" not in json.dumps(recycled).lower()
+
+
+def test_planned_restart_takes_priority_over_health_probe(tmp_path, monkeypatch):
+    runtime = tmp_path / ".runtime"
+    process = PollingProcess(4404)
+    health_calls = []
+    supervisor = LocalServiceSupervisor(
+        settings(tmp_path, health_startup_grace_seconds=0),
+        runtime_dir=runtime,
+        health_probe=lambda *_args: health_calls.append(_args) or (False, "connection_error"),
+    )
+    request_supervised_restart(
+        runtime,
+        reason_code="fubon_ws_maintenance",
+        source="scheduler",
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_terminate_started_process",
+        lambda child: setattr(child, "running", False),
+    )
+
+    exit_code, reason, request = supervisor._wait_for_child(process)
+
+    assert exit_code == 0
+    assert reason == "restart"
+    assert request["reason_code"] == "fubon_ws_maintenance"
+    assert health_calls == []
+
+
+def test_probe_ready_endpoint_requires_ready_true(monkeypatch):
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return b'{"status":"not_ready","ready":false}'
+
+    monkeypatch.setattr(
+        supervisor_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+    assert probe_ready_endpoint("127.0.0.1", 8001, 1) == (False, "not_ready")

@@ -11,6 +11,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -41,6 +43,42 @@ class SupervisorSettings:
     stable_runtime_seconds: float = 300
     initial_backoff_seconds: float = 1
     max_backoff_seconds: float = 30
+    health_check_enabled: bool = True
+    health_startup_grace_seconds: float = 120
+    health_check_interval_seconds: float = 10
+    health_timeout_seconds: float = 3
+    health_failure_threshold: int = 3
+
+
+def probe_ready_endpoint(host: str, port: int, timeout_seconds: float) -> tuple[bool, str]:
+    """Probe readiness without returning response bodies or network details."""
+    normalized_host = str(host).strip()
+    probe_host = (
+        "127.0.0.1"
+        if normalized_host in {"", "0.0.0.0", "::"}
+        else normalized_host
+    )
+    url_host = (
+        f"[{probe_host}]"
+        if ":" in probe_host and not probe_host.startswith("[")
+        else probe_host
+    )
+    url = f"http://{url_host}:{int(port)}/api/ready"
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=max(0.1, float(timeout_seconds))) as response:
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return False, "http_status"
+            payload = json.loads(response.read(65_536).decode("utf-8"))
+    except urllib.error.HTTPError:
+        return False, "http_status"
+    except (TimeoutError, urllib.error.URLError, OSError):
+        return False, "connection_error"
+    except (UnicodeError, json.JSONDecodeError, ValueError):
+        return False, "invalid_response"
+    if not isinstance(payload, dict) or payload.get("ready") is not True:
+        return False, "not_ready"
+    return True, "ready"
 
 
 def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
@@ -163,6 +201,7 @@ class LocalServiceSupervisor:
         port_probe: Callable[[int], int | None] = find_listening_pid,
         command_line_probe: Callable[[int], str] = read_process_command_line,
         parent_pid_probe: Callable[[int], int | None] = read_process_parent_pid,
+        health_probe: Callable[[str, int, float], tuple[bool, str]] = probe_ready_endpoint,
         popen_factory: Callable[..., Any] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -173,10 +212,14 @@ class LocalServiceSupervisor:
         self.stop_marker = self.runtime_dir / "backend-service.stop"
         self.restart_marker = self.runtime_dir / "backend-service.restart"
         self.last_restart_path = self.runtime_dir / "backend-service-last-restart.json"
+        self.last_health_recycle_path = (
+            self.runtime_dir / "backend-service-last-health-recycle.json"
+        )
         self.breaker_path = self.runtime_dir / "backend-service-breaker.json"
         self._port_probe = port_probe
         self._command_line_probe = command_line_probe
         self._parent_pid_probe = parent_pid_probe
+        self._health_probe = health_probe
         self._popen_factory = popen_factory
         self._clock = clock
         self._sleep = sleep
@@ -269,8 +312,35 @@ class LocalServiceSupervisor:
                 "process_pid": int(process_pid),
                 "restart_count": int(restart_count),
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                "health": {
+                    "enabled": bool(self.settings.health_check_enabled),
+                    "status": "startup_grace" if self.settings.health_check_enabled else "disabled",
+                    "last_checked_at": None,
+                    "consecutive_failures": 0,
+                    "last_reason_code": None,
+                },
             },
         )
+
+    def _write_health_state(
+        self,
+        process_pid: int,
+        *,
+        healthy: bool,
+        reason_code: str,
+        consecutive_failures: int,
+    ) -> None:
+        state = _read_json(self.state_path)
+        if int(state.get("process_pid") or 0) != int(process_pid):
+            return
+        state["health"] = {
+            "enabled": True,
+            "status": "healthy" if healthy else "unhealthy",
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "consecutive_failures": max(0, int(consecutive_failures)),
+            "last_reason_code": str(reason_code or "unknown")[:64],
+        }
+        _atomic_json_write(self.state_path, state)
 
     def _clear_state_for(self, process_pid: int) -> None:
         state = _read_json(self.state_path)
@@ -314,6 +384,11 @@ class LocalServiceSupervisor:
             pass
 
     def _wait_for_child(self, process: Any) -> tuple[int, str, dict[str, Any] | None]:
+        health_enabled = bool(self.settings.health_check_enabled)
+        next_health_check = (
+            self._clock() + max(0.0, self.settings.health_startup_grace_seconds)
+        )
+        consecutive_health_failures = 0
         while True:
             exit_code = process.poll()
             if exit_code is not None:
@@ -326,6 +401,46 @@ class LocalServiceSupervisor:
                 self._terminate_started_process(process)
                 self._clear_restart_marker()
                 return 0, "restart", restart_request
+
+            now = self._clock()
+            if health_enabled and now >= next_health_check:
+                healthy, reason_code = self._health_probe(
+                    self.settings.host,
+                    self.settings.port,
+                    self.settings.health_timeout_seconds,
+                )
+                consecutive_health_failures = (
+                    0 if healthy else consecutive_health_failures + 1
+                )
+                self._write_health_state(
+                    process.pid,
+                    healthy=healthy,
+                    reason_code=reason_code,
+                    consecutive_failures=consecutive_health_failures,
+                )
+                next_health_check = (
+                    now + max(0.5, self.settings.health_check_interval_seconds)
+                )
+                if (
+                    not healthy
+                    and consecutive_health_failures
+                    >= max(1, self.settings.health_failure_threshold)
+                ):
+                    event = {
+                        "schema_version": 1,
+                        "status": "recycled",
+                        "detected_at": datetime.now(timezone.utc).isoformat(),
+                        "reason_code": str(reason_code or "unknown")[:64],
+                        "consecutive_failures": consecutive_health_failures,
+                    }
+                    _atomic_json_write(self.last_health_recycle_path, event)
+                    print(
+                        "[WARNING] Backend readiness remained unhealthy; "
+                        f"recycling managed process reason={event['reason_code']} "
+                        f"failures={consecutive_health_failures}."
+                    )
+                    self._terminate_started_process(process)
+                    return 1, "unhealthy", event
             self._sleep(0.5)
 
     def _wait_backoff(self, delay_seconds: float) -> bool:
@@ -539,6 +654,7 @@ class LocalServiceSupervisor:
             "planned_stop_pending": self._planned_stop_requested(),
             "planned_restart_pending": self._read_restart_request() is not None,
             "last_planned_restart": _read_json(self.last_restart_path),
+            "last_health_recycle": _read_json(self.last_health_recycle_path),
         }
 
 
@@ -551,6 +667,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--max-crashes", type=int, default=5)
+    parser.add_argument(
+        "--health-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--health-startup-grace", type=float, default=120)
+    parser.add_argument("--health-check-interval", type=float, default=10)
+    parser.add_argument("--health-timeout", type=float, default=3)
+    parser.add_argument("--health-failure-threshold", type=int, default=3)
     return parser
 
 
@@ -565,6 +690,11 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=max(1, min(65535, args.port)),
             max_crashes=max(1, args.max_crashes),
+            health_check_enabled=bool(args.health_check),
+            health_startup_grace_seconds=max(0.0, args.health_startup_grace),
+            health_check_interval_seconds=max(0.5, args.health_check_interval),
+            health_timeout_seconds=max(0.1, args.health_timeout),
+            health_failure_threshold=max(1, args.health_failure_threshold),
         ),
         runtime_dir=args.runtime_dir.resolve(),
     )
