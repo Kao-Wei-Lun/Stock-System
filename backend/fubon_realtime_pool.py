@@ -709,7 +709,12 @@ class FubonRealtimeSubscriptionPool:
     ) -> dict[str, Any]:
         lock = self._account_reconnect_locks.setdefault(account_id, asyncio.Lock())
         async with lock:
-            return await self._reconnect_account_once(account_id, normalized_market)
+            # Account recovery and configuration reload both replace manager
+            # instances and SDK sessions. Serializing them prevents a watchdog
+            # tick from rebuilding a manager that is still being initialized by
+            # startup warmup or an explicit settings reload.
+            async with self._reload_lock:
+                return await self._reconnect_account_once(account_id, normalized_market)
 
     async def _reconnect_account_once(
         self,
@@ -794,6 +799,12 @@ class FubonRealtimeSubscriptionPool:
 
     async def refresh_session_assignments(self) -> None:
         """Re-subscribe futures/options streams when TAIFEX switches day/night sessions."""
+        if self._warmup_state in {"scheduled", "running"}:
+            # The listener starts independently from provider warmup so the API
+            # can become available quickly. Do not treat partially initialized
+            # managers as failed accounts during that overlap.
+            return
+
         disconnected_ids = [
             account_id for account_id, manager in list(self._managers.items()) if not manager.connected
         ]

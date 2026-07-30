@@ -212,6 +212,26 @@ async def test_background_warmup_does_not_block_application_readiness(monkeypatc
 
 
 @pytest.mark.anyio
+async def test_session_refresh_does_not_reconnect_partially_initialized_warmup_account(monkeypatch):
+    release = asyncio.Event()
+    primary = WarmupManager(1, release=release)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool.reconnect_account = AsyncMock(return_value={"success": True})
+    WarmupRepo.accounts = [{"id": 1, "is_active": True, "is_enabled": True}]
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", WarmupRepo)
+
+    task = pool.start_background_warmup(WarmupDb())
+    await asyncio.sleep(0)
+    assert pool.get_warmup_status()["state"] == "running"
+
+    await pool.refresh_session_assignments()
+
+    pool.reconnect_account.assert_not_awaited()
+    release.set()
+    assert await task is True
+
+
+@pytest.mark.anyio
 async def test_account_warmup_failure_does_not_cancel_remaining_accounts(monkeypatch):
     primary = WarmupManager(1, fail=True)
     secondary = WarmupManager(2)
@@ -450,6 +470,28 @@ async def test_session_refresh_recovers_each_disconnected_account_without_full_r
     await pool.refresh_session_assignments()
 
     pool.reconnect_account.assert_awaited_once_with(2, manual=False)
+
+
+@pytest.mark.anyio
+async def test_account_recovery_waits_for_configuration_reload(monkeypatch):
+    manager = RebuildManager(1)
+    pool = FubonRealtimeSubscriptionPool(manager)
+    pool._db = object()
+    pool._managers = {1: manager}
+    monkeypatch.setattr(fubon_accounts_repository, "FubonAccountRepository", ReconnectRepo)
+
+    await pool._reload_lock.acquire()
+    try:
+        task = asyncio.create_task(pool.reconnect_account(1, manual=False))
+        await asyncio.sleep(0)
+        assert task.done() is False
+        assert manager.init_calls == []
+    finally:
+        pool._reload_lock.release()
+
+    result = await task
+    assert result["success"] is True
+    assert manager.init_calls == [1]
 
 
 @pytest.mark.anyio
