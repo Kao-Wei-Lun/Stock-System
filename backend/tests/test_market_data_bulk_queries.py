@@ -43,3 +43,37 @@ async def test_bulk_market_queries_skip_database_for_empty_input():
     assert await repository.get_market_quotes([]) == {}
     assert await repository.get_stock_info_many([]) == {}
     assert repository.calls == []
+
+
+@pytest.mark.anyio
+async def test_analysis_coverage_uses_indexed_latest_rows_and_excludes_non_stock_symbols():
+    class CoverageRepository(MarketDataMixin):
+        async def list_tw_equity_universe(self, **_kwargs):
+            return [
+                {"ticker": "2330.TW", "symbol": "2330"},
+                {"ticker": "2317.TW", "symbol": "2317"},
+                {"ticker": "006208.TW", "symbol": "006208"},
+            ]
+
+        async def get_latest_ohlcv_many(self, tickers, interval="1d"):
+            assert tickers == ["2330.TW", "2317.TW"]
+            assert interval == "1d"
+            return {
+                "2330.TW": {"date": "2026-07-30"},
+                "2317.TW": {"date": "2026-07-29"},
+            }
+
+    coverage = await CoverageRepository().get_tw_analysis_kline_coverage("1d")
+
+    assert coverage == {
+        "universe_count": 2,
+        "covered_count": 2,
+        "latest_covered_count": 1,
+        "oldest_latest_date": "2026-07-29",
+        "newest_latest_date": "2026-07-30",
+        "expected_latest_date": "2026-07-30",
+        "ohlcv_rows": None,
+        "coverage_pct": 100.0,
+        "latest_coverage_pct": 50.0,
+        "interval": "1d",
+    }

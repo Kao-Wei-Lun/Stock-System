@@ -130,12 +130,21 @@ class TaiwanHistoryBackfillService:
         reason: str = "scheduled",
         force_universe: bool = False,
         force_full: bool = False,
+        only_missing: bool = False,
         max_tickers: Optional[int] = None,
         stop_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         universe = await self.sync_universe(refresh=force_universe)
         tickers = await self.db.list_tw_equity_universe(active_only=True, include_etf=self.include_etf)
         tickers = await self._prioritize_tickers_for_sync(tickers)
+        total_universe_tickers = len(tickers)
+        target_date = str(universe.get("snapshot_date") or date.today().isoformat())[:10]
+        if only_missing:
+            tickers = await self._filter_tickers_with_history_gaps(
+                tickers,
+                target_date=target_date,
+            )
+        candidate_count = len(tickers)
         if max_tickers is not None:
             tickers = tickers[: max(0, int(max_tickers))]
 
@@ -177,7 +186,12 @@ class TaiwanHistoryBackfillService:
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(self.app_tz).isoformat(),
             "universe": universe,
+            "target_date": target_date,
             "intervals": list(self.intervals),
+            "only_missing": bool(only_missing),
+            "universe_ticker_count": total_universe_tickers,
+            "candidate_count": candidate_count,
+            "up_to_date_count": max(0, total_universe_tickers - candidate_count),
             "ticker_count": len(tickers),
             "result_count": len(results),
             "success_count": sum(1 for item in results if item.get("status") in {"success", "empty"}),
@@ -187,6 +201,43 @@ class TaiwanHistoryBackfillService:
             "coverage": coverage,
             "failures": failures[:20],
         }
+
+    async def _filter_tickers_with_history_gaps(
+        self,
+        tickers: List[Dict[str, Any]],
+        *,
+        target_date: str,
+    ) -> List[Dict[str, Any]]:
+        """Keep only symbols missing at least one configured interval."""
+        ticker_names = [
+            normalize_ticker(row.get("ticker"))
+            for row in tickers
+            if normalize_ticker(row.get("ticker"))
+        ]
+        if not ticker_names:
+            return []
+
+        missing: set[str] = set()
+        get_latest_many = getattr(self.db, "get_latest_ohlcv_many", None)
+        for interval in self.intervals:
+            if callable(get_latest_many):
+                latest_by_ticker = await get_latest_many(ticker_names, interval)
+            else:
+                latest_by_ticker = {}
+                for ticker in ticker_names:
+                    row = await self.db.get_latest_ohlcv(ticker, interval)
+                    if row:
+                        latest_by_ticker[ticker] = row
+            for ticker in ticker_names:
+                latest_date = _latest_row_date(latest_by_ticker.get(ticker))
+                if not latest_date or latest_date < target_date:
+                    missing.add(ticker)
+
+        return [
+            row
+            for row in tickers
+            if normalize_ticker(row.get("ticker")) in missing
+        ]
 
     async def sync_ticker_interval(
         self,

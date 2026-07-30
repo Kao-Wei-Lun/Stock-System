@@ -113,6 +113,13 @@ class FakeDb:
     async def get_latest_ohlcv(self, ticker, interval="1d"):
         return self.latest_rows.get((ticker, interval))
 
+    async def get_latest_ohlcv_many(self, tickers, interval="1d"):
+        return {
+            ticker: self.latest_rows[(ticker, interval)]
+            for ticker in tickers
+            if (ticker, interval) in self.latest_rows
+        }
+
     async def get_tw_universe_coverage(self, interval="1d"):
         universe_count = len([row for row in self.universe.values() if row.get("is_active", True)])
         covered_count = len(
@@ -179,6 +186,44 @@ async def test_taiwan_history_backfill_syncs_universe_and_history():
 
     assert payload["success_count"] == 4
     assert all(call["period"] == "5d" for call in fetcher.calls)
+
+
+@pytest.mark.anyio
+async def test_taiwan_history_backfill_only_fetches_tickers_missing_target_daily_bar():
+    db = FakeDb()
+    fetcher = FakeFetcher(db)
+    service = TaiwanHistoryBackfillService(
+        db=db,
+        fetcher=fetcher,
+        market_snapshot_provider=FakeSnapshotProvider(),
+        app_tz=timezone.utc,
+        intervals=("1d",),
+        request_delay_seconds=0,
+        ticker_delay_seconds=0,
+    )
+
+    first = await service.sync_history(reason="initial")
+    assert first["candidate_count"] == 2
+    assert len(fetcher.calls) == 2
+
+    fetcher.calls.clear()
+    current = await service.sync_history(reason="gap-check-current", only_missing=True)
+
+    assert current["target_date"] == "2026-05-06"
+    assert current["only_missing"] is True
+    assert current["universe_ticker_count"] == 2
+    assert current["candidate_count"] == 0
+    assert current["up_to_date_count"] == 2
+    assert current["result_count"] == 0
+    assert fetcher.calls == []
+
+    db.latest_rows[("2330.TW", "1d")] = {"date": "2026-05-05"}
+    missing = await service.sync_history(reason="gap-check-stale", only_missing=True)
+
+    assert missing["candidate_count"] == 1
+    assert missing["up_to_date_count"] == 1
+    assert [call["ticker"] for call in fetcher.calls] == ["2330.TW"]
+    assert db.latest_rows[("2330.TW", "1d")]["date"] == "2026-05-06"
 
 
 class FailingFetcher:

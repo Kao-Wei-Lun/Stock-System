@@ -221,7 +221,7 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
     ("INSTITUTIONAL_AUTO_SYNC_ENABLED", True),
     ("TAIWAN_CHIP_AUTO_SYNC_ENABLED", True),
     ("LATEST_DATA_SYNC_ON_STARTUP", True),
-    ("TW_FULL_HISTORY_SYNC_ENABLED", False),
+    ("TW_FULL_HISTORY_SYNC_ENABLED", True),
     ("TW_FULL_HISTORY_INCLUDE_ETF", True),
     ("ALERT_EVALUATOR_ENABLED", True),
     ("MARKET_INTELLIGENCE_SYNC_ENABLED", True),
@@ -286,7 +286,7 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   for key, default in (
     ("LATEST_SYNC_STARTUP_DELAY_SECONDS", "15"),
     ("FUBON_MARKET_SNAPSHOT_STARTUP_DELAY_SECONDS", "20"),
-    ("TW_FULL_HISTORY_STARTUP_DELAY_SECONDS", "35"),
+    ("TW_FULL_HISTORY_STARTUP_DELAY_SECONDS", "240"),
     ("PAPER_MARGIN_STARTUP_DELAY_SECONDS", "25"),
     ("REALTIME_POLL_STARTUP_DELAY_SECONDS", "5"),
     ("ALERT_STARTUP_DELAY_SECONDS", "10"),
@@ -332,6 +332,20 @@ def validate_runtime_environment(*, env: Mapping[str, str] | None = None) -> dic
   capture(
     "TW_FULL_HISTORY_TICKER_DELAY_SECONDS",
     lambda: read_float_env("TW_FULL_HISTORY_TICKER_DELAY_SECONDS", "2.0", minimum=0, env=source),
+  )
+  capture(
+    "TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS",
+    lambda: read_int_env("TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS", "1800", minimum=0, env=source),
+  )
+  capture(
+    "TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT",
+    lambda: read_float_env(
+      "TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT",
+      "99",
+      minimum=0,
+      maximum=100,
+      env=source,
+    ),
   )
 
   encrypt_key = _read_raw_value("APP_ENCRYPT_KEY", None, env=source)

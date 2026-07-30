@@ -479,48 +479,54 @@ class MarketDataMixin:
         return payload
 
     async def get_tw_analysis_kline_coverage(self, interval: str = "1d") -> Dict[str, Any]:
-        row = await self._fetchone(
-            """
-            SELECT
-                COUNT(*) AS `universe_count`,
-                SUM(CASE WHEN latest.`ticker` IS NOT NULL THEN 1 ELSE 0 END) AS `covered_count`,
-                SUM(CASE WHEN latest.`latest_date` = market_latest.`latest_date` THEN 1 ELSE 0 END)
-                    AS `latest_covered_count`,
-                MIN(latest.`latest_date`) AS `oldest_latest_date`,
-                MAX(latest.`latest_date`) AS `newest_latest_date`,
-                MAX(market_latest.`latest_date`) AS `expected_latest_date`,
-                SUM(COALESCE(latest.`row_count`, 0)) AS `ohlcv_rows`
-            FROM `tw_equity_universe` AS u
-            CROSS JOIN (
-                SELECT MAX(`date`) AS `latest_date`
-                FROM `ohlcv`
-                WHERE `interval`=%s
-            ) AS market_latest
-            LEFT JOIN (
-                SELECT `ticker`, MAX(`date`) AS `latest_date`, COUNT(*) AS `row_count`
-                FROM `ohlcv`
-                WHERE `interval`=%s
-                GROUP BY `ticker`
-            ) AS latest ON latest.`ticker` = u.`ticker`
-            WHERE u.`is_active`=1
-              AND u.`is_etf`=0
-              AND u.`symbol` REGEXP '^[0-9]{4}$'
-            """,
-            (interval, interval),
+        universe = await self.list_tw_equity_universe(
+            active_only=True,
+            include_etf=False,
+            limit=5000,
         )
-        payload = dict(row or {})
-        universe_count = int(payload.get("universe_count") or 0)
-        covered_count = int(payload.get("covered_count") or 0)
-        latest_covered_count = int(payload.get("latest_covered_count") or 0)
-        payload["universe_count"] = universe_count
-        payload["covered_count"] = covered_count
-        payload["latest_covered_count"] = latest_covered_count
-        payload["coverage_pct"] = round(covered_count / universe_count * 100.0, 2) if universe_count else 0.0
-        payload["latest_coverage_pct"] = (
-            round(latest_covered_count / universe_count * 100.0, 2) if universe_count else 0.0
+        analysis_tickers = [
+            str(row.get("ticker") or "").strip().upper()
+            for row in universe
+            if len(str(row.get("symbol") or "").strip()) == 4
+            and str(row.get("symbol") or "").strip().isdigit()
+            and str(row.get("ticker") or "").strip()
+        ]
+        latest_by_ticker = await self.get_latest_ohlcv_many(analysis_tickers, interval)
+        latest_dates = {
+            ticker: str(row.get("date") or "")[:10]
+            for ticker, row in latest_by_ticker.items()
+            if row.get("date")
+        }
+        expected_latest_date = max(latest_dates.values(), default=None)
+        universe_count = len(analysis_tickers)
+        covered_count = len(latest_dates)
+        latest_covered_count = (
+            sum(1 for latest_date in latest_dates.values() if latest_date == expected_latest_date)
+            if expected_latest_date
+            else 0
         )
-        payload["interval"] = interval
-        return payload
+        return {
+            "universe_count": universe_count,
+            "covered_count": covered_count,
+            "latest_covered_count": latest_covered_count,
+            "oldest_latest_date": min(latest_dates.values(), default=None),
+            "newest_latest_date": max(latest_dates.values(), default=None),
+            "expected_latest_date": expected_latest_date,
+            # Counting the entire historical table made this readiness check
+            # take tens of seconds. No caller relies on the total row count.
+            "ohlcv_rows": None,
+            "coverage_pct": (
+                round(covered_count / universe_count * 100.0, 2)
+                if universe_count
+                else 0.0
+            ),
+            "latest_coverage_pct": (
+                round(latest_covered_count / universe_count * 100.0, 2)
+                if universe_count
+                else 0.0
+            ),
+            "interval": interval,
+        }
 
     async def list_screenable_tickers(self, limit: int = 400) -> List[Dict[str, Any]]:
         clean_limit = max(1, min(limit, 5000))

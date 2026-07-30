@@ -26,6 +26,8 @@ VALID_ENV = {
     "TW_FULL_HISTORY_SYNC_STOP": "08:00",
     "TW_FULL_HISTORY_DELAY_SECONDS": "0.8",
     "TW_FULL_HISTORY_TICKER_DELAY_SECONDS": "2.0",
+    "TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS": "1800",
+    "TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT": "99",
     "TW_FULL_HISTORY_INCLUDE_ETF": "true",
     "ALERT_EVALUATOR_ENABLED": "true",
     "ALERT_POLL_INTERVAL_SECONDS": "30",
@@ -65,6 +67,8 @@ def test_validate_runtime_environment_accepts_valid_settings(monkeypatch):
     assert validated["TW_FULL_HISTORY_SYNC_START"] == "15:30"
     assert validated["TW_FULL_HISTORY_DELAY_SECONDS"] == 0.8
     assert validated["TW_FULL_HISTORY_TICKER_DELAY_SECONDS"] == 2.0
+    assert validated["TW_FULL_HISTORY_RETRY_INTERVAL_SECONDS"] == 1800
+    assert validated["TW_FULL_HISTORY_RETRY_MIN_LATEST_COVERAGE_PCT"] == 99
     assert validated["FUBON_MAINTENANCE_RESTART_ENABLED"] is False
     assert validated["FUBON_MAINTENANCE_RESTART_TIME"] == "08:00"
     assert validated["FUBON_WS_UNHEALTHY_GRACE_SECONDS"] == 300

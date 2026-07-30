@@ -1,4 +1,5 @@
-from datetime import time, timezone
+from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 import asyncio
 
 import pytest
@@ -7,6 +8,7 @@ from scheduler import (
     BackgroundScheduler,
     SchedulerDependencies,
     SchedulerSettings,
+    _active_daily_window,
     _tw_history_retry_needed,
     automatic_mysql_backup_loop,
     fubon_ws_listener_loop,
@@ -242,21 +244,78 @@ async def test_scheduler_health_exposes_failed_task_details():
     await scheduler.shutdown()
 
 
-def test_tw_history_retry_needed_checks_date_and_latest_coverage():
+def test_active_daily_window_supports_restart_during_post_close_window():
+    app_tz = ZoneInfo("Asia/Taipei")
+
+    evening = _active_daily_window(
+        datetime(2026, 7, 30, 16, 0, tzinfo=app_tz),
+        time(14, 0),
+        time(8, 0),
+    )
+    overnight = _active_daily_window(
+        datetime(2026, 7, 31, 2, 0, tzinfo=app_tz),
+        time(14, 0),
+        time(8, 0),
+    )
+
+    assert evening == (
+        datetime(2026, 7, 30, 14, 0, tzinfo=app_tz),
+        datetime(2026, 7, 31, 8, 0, tzinfo=app_tz),
+    )
+    assert overnight == evening
+    assert _active_daily_window(
+        datetime(2026, 7, 31, 10, 0, tzinfo=app_tz),
+        time(14, 0),
+        time(8, 0),
+    ) is None
+    assert _active_daily_window(
+        datetime(2026, 7, 31, 8, 0, tzinfo=app_tz),
+        time(14, 0),
+        time(8, 0),
+    ) is None
+    assert _active_daily_window(
+        datetime(2026, 7, 31, 14, 0, tzinfo=app_tz),
+        time(14, 0),
+        time(8, 0),
+    ) is not None
+
+
+def test_tw_history_retry_needed_checks_resolved_market_date_and_latest_coverage():
     assert _tw_history_retry_needed(
-        {"expected_latest_date": "2026-05-25", "latest_coverage_pct": 79.9},
+        {
+            "expected_latest_date": "2026-05-25",
+            "newest_latest_date": "2026-05-25",
+            "latest_coverage_pct": 79.9,
+        },
         target_date="2026-05-25",
         min_latest_coverage_pct=80,
     )
     assert _tw_history_retry_needed(
-        {"expected_latest_date": "2026-05-22", "latest_coverage_pct": 99.0},
+        {
+            "expected_latest_date": "2026-05-25",
+            "newest_latest_date": "2026-05-22",
+            "latest_coverage_pct": 99.0,
+        },
         target_date="2026-05-25",
         min_latest_coverage_pct=80,
     )
     assert not _tw_history_retry_needed(
-        {"expected_latest_date": "2026-05-25", "latest_coverage_pct": 80.0},
-        target_date="2026-05-25",
+        {
+            "expected_latest_date": "2026-05-22",
+            "newest_latest_date": "2026-05-22",
+            "latest_coverage_pct": 99.0,
+        },
+        target_date="2026-05-22",
         min_latest_coverage_pct=80,
+    )
+    assert not _tw_history_retry_needed(
+        {
+            "expected_latest_date": "2026-05-25",
+            "newest_latest_date": "2026-05-25",
+            "latest_coverage_pct": 99.0,
+        },
+        target_date="2026-05-25",
+        min_latest_coverage_pct=99,
     )
 
 

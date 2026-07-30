@@ -35,7 +35,7 @@ class SchedulerSettings:
     fubon_ws_session_refresh_seconds: float = 30.0
     latest_sync_startup_delay_seconds: float = 15.0
     fubon_market_snapshot_startup_delay_seconds: float = 20.0
-    tw_full_history_startup_delay_seconds: float = 35.0
+    tw_full_history_startup_delay_seconds: float = 240.0
     paper_margin_startup_delay_seconds: float = 25.0
     realtime_poll_startup_delay_seconds: float = 5.0
     alert_startup_delay_seconds: float = 10.0
@@ -45,11 +45,11 @@ class SchedulerSettings:
     futopt_recorder_poll_seconds: int = 30
     futopt_recorder_backfill_interval_seconds: int = 300
     paper_margin_auto_sync_enabled: bool = True
-    tw_full_history_sync_enabled: bool = False
+    tw_full_history_sync_enabled: bool = True
     tw_full_history_sync_start_time: time_of_day = time_of_day(14, 0)
     tw_full_history_sync_stop_time: time_of_day = time_of_day(8, 0)
     tw_full_history_retry_interval_seconds: int = 1800
-    tw_full_history_retry_min_latest_coverage_pct: float = 80.0
+    tw_full_history_retry_min_latest_coverage_pct: float = 99.0
     auto_backup_enabled: bool = False
     auto_backup_scope: str = "critical"
     auto_backup_interval_hours: float = 24.0
@@ -500,6 +500,25 @@ def _window_stop_after(start_at: datetime, stop_time: time_of_day) -> datetime:
     return stop_at
 
 
+def _active_daily_window(
+    now: datetime,
+    start_time: time_of_day,
+    stop_time: time_of_day,
+) -> tuple[datetime, datetime] | None:
+    """Return the active post-close window, including an overnight restart."""
+    today_start = datetime.combine(now.date(), start_time, tzinfo=now.tzinfo)
+    today_stop = datetime.combine(now.date(), stop_time, tzinfo=now.tzinfo)
+    if start_time < stop_time:
+        if today_start <= now < today_stop:
+            return today_start, today_stop
+        return None
+    if now >= today_start:
+        return today_start, today_stop + timedelta(days=1)
+    if now < today_stop:
+        return today_start - timedelta(days=1), today_stop
+    return None
+
+
 def _safe_float(value: Any) -> float | None:
     try:
         return float(value) if value not in (None, "") else None
@@ -515,15 +534,14 @@ def _tw_history_retry_needed(
 ) -> bool:
     if not isinstance(coverage, dict):
         return True
-    latest_date = str(
-        coverage.get("expected_latest_date")
-        or coverage.get("newest_latest_date")
-        or ""
-    )[:10]
+    expected_date = str(coverage.get("expected_latest_date") or target_date)[:10]
+    newest_date = str(coverage.get("newest_latest_date") or "")[:10]
     latest_pct = _safe_float(coverage.get("latest_coverage_pct"))
     if latest_pct is None:
         latest_pct = _safe_float(coverage.get("coverage_pct"))
-    if latest_date != target_date:
+    if expected_date and target_date and expected_date < target_date:
+        return True
+    if newest_date and expected_date and newest_date < expected_date:
         return True
     return latest_pct is None or latest_pct < min_latest_coverage_pct
 
@@ -542,33 +560,65 @@ async def taiwan_full_history_sync_loop(
     app_tz: tzinfo,
     start_time: time_of_day,
     stop_time: time_of_day,
-    startup_delay_seconds: float = 35.0,
+    startup_delay_seconds: float = 240.0,
     retry_interval_seconds: int = 1800,
-    min_latest_coverage_pct: float = 80.0,
+    min_latest_coverage_pct: float = 99.0,
     get_analysis_coverage=None,
     logger: logging.Logger | None = None,
 ) -> None:
     log = logger or logging.getLogger(__name__)
     await asyncio.sleep(max(0, startup_delay_seconds))
+    allow_active_startup_window = True
 
     while True:
         now = datetime.now(app_tz)
-        start_at = _next_daily_window_start(now, start_time)
-        sleep_seconds = max(60, int((start_at - now).total_seconds()))
-        await asyncio.sleep(sleep_seconds)
+        active_window = (
+            _active_daily_window(now, start_time, stop_time)
+            if allow_active_startup_window
+            else None
+        )
+        if active_window is None:
+            start_at = _next_daily_window_start(now, start_time)
+            sleep_seconds = max(60, int((start_at - now).total_seconds()))
+            await asyncio.sleep(sleep_seconds)
+            run_started_at = datetime.now(app_tz)
+            stop_at = _window_stop_after(run_started_at, stop_time)
+            startup_window = False
+        else:
+            start_at, stop_at = active_window
+            run_started_at = datetime.now(app_tz)
+            startup_window = True
+            log.info(
+                "Taiwan daily K gap check starting inside active post-close window: "
+                "window=%s..%s",
+                start_at.isoformat(),
+                stop_at.isoformat(),
+            )
+        allow_active_startup_window = False
 
-        run_started_at = datetime.now(app_tz)
-        stop_at = _window_stop_after(run_started_at, stop_time)
-        target_date = run_started_at.date().isoformat()
+        target_date = start_at.date().isoformat()
         attempt = 1
 
         while datetime.now(app_tz) < stop_at:
             summary = None
             try:
                 summary = await sync_taiwan_full_history(
-                    reason="scheduled-tw-full-history" if attempt == 1 else "scheduled-tw-full-history-retry",
+                    reason=(
+                        "startup-tw-daily-gap-check"
+                        if startup_window and attempt == 1
+                        else (
+                            "scheduled-tw-daily-gap-check"
+                            if attempt == 1
+                            else "scheduled-tw-daily-gap-retry"
+                        )
+                    ),
                     stop_at=stop_at,
+                    only_missing=True,
                 )
+                target_date = str(
+                    (summary or {}).get("target_date")
+                    or target_date
+                )[:10]
                 log.info("Taiwan full history sync attempt %s finished: %s", attempt, summary)
             except Exception as exc:
                 log.warning("Taiwan full history sync attempt %s failed: %s", attempt, exc)
