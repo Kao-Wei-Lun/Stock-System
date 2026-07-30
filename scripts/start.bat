@@ -59,7 +59,9 @@ if not "%PREFLIGHT_RESULT%"=="0" if not "%PREFLIGHT_RESULT%"=="10" (
 )
 if "%PREFLIGHT_RESULT%"=="0" (
     echo [INFO] Starting supervised QuantVision production service...
-    start "QuantVision Service" "%SystemRoot%\System32\cmd.exe" /k call "%~f0" backend
+    rem /c keeps the service console visible while the supervisor is running,
+    rem then closes the old CMD automatically after a stop or supervisor handoff.
+    start "QuantVision Service" "%SystemRoot%\System32\cmd.exe" /c call "%~f0" backend
 )
 if "%PREFLIGHT_RESULT%"=="10" (
     echo [INFO] Reusing the confirmed QuantVision backend already on port %BACKEND_PORT%.

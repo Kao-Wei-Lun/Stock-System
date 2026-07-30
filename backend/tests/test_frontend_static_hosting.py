@@ -68,6 +68,8 @@ def test_production_launcher_does_not_install_dependencies_or_start_node():
     assert 'set "backend_url=http://127.0.0.1:%backend_port%"' in script
     assert 'call :wait_for_http "%backend_url%/api/ready" 60' in script
     assert 'call :wait_for_http "%app_url%" 15' in script
+    assert 'cmd.exe" /c call "%~f0" backend' in script
+    assert 'cmd.exe" /k call "%~f0" backend' not in script
     assert "start-process -filepath '%~1' -erroraction stop" in script
     assert "open this url manually" in script
 
