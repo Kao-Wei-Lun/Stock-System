@@ -57,6 +57,9 @@ const KLINE_DISPLAY_OPTIONS = [
 const DASHBOARD_PREFS_KEY = "quantvision.dashboard.prefs.v1";
 const RECENT_TICKERS_KEY = "quantvision.recent.tickers.v1";
 const RECENT_TICKERS_LIMIT = 10;
+const INITIAL_OHLC_REQUEST_LIMIT = 400;
+const INITIAL_OHLC_WARMUP_BARS = 250;
+const FUTOPT_HISTORY_BUFFER_LIMIT = 5000;
 const CHART_LAYOUT_OPTIONS = ["single", "double", "quad"];
 const DASHBOARD_RIGHT_TAB_OPTIONS = ["indicators", "alerts", "assets", "backtest", "journal"];
 const MARKET_GROUP_NAME = "全球大盤";
@@ -343,6 +346,14 @@ function resolveOhlcDisplayPeriod(ticker, period, interval) {
   return period;
 }
 
+function resolveOhlcBufferLimit(ticker, interval) {
+  // A TXF/TMF session contains both regular and after-hours minutes, so the
+  // generic 500-row terminal buffer can cover less than one trading day.
+  return isFutoptTicker(ticker) && isIntradayInterval(interval)
+    ? FUTOPT_HISTORY_BUFFER_LIMIT
+    : DEFAULT_OHLC_BUFFER_LIMIT;
+}
+
 function filterRowsForDisplayPeriod(rows, period, mode) {
   if (!Array.isArray(rows) || !rows.length || !period || period === "max") return Array.isArray(rows) ? rows : [];
   const since = getPeriodStartDate(period);
@@ -398,6 +409,7 @@ function aggregateOhlcRows(rows, mode) {
 export {
   getTimeframeOptionsForTicker,
   normalizeTicker,
+  resolveOhlcBufferLimit,
   resolveOhlcDisplayPeriod,
   resolveDashboardTimeframeForTicker,
   shouldPollFutoptRestFallback,
@@ -1547,7 +1559,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       rawOhlcData.value,
       data,
       currentInterval.value,
-    ).slice(-DEFAULT_OHLC_BUFFER_LIMIT);
+    ).slice(-resolveOhlcBufferLimit(currentTicker.value, currentInterval.value));
   }
 
   function upsertRealtimeCandleRow(data) {
@@ -1556,7 +1568,7 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       rawOhlcData.value,
       data,
       currentInterval.value,
-    ).slice(-DEFAULT_OHLC_BUFFER_LIMIT);
+    ).slice(-resolveOhlcBufferLimit(currentTicker.value, currentInterval.value));
   }
 
   function scheduleTerminalSnapshotCacheWrite() {
@@ -1949,7 +1961,11 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       }
 
       if (Array.isArray(ohlcPayload?.data) && ohlcPayload.data.length) {
-        rawOhlcData.value = mergeOhlcBuffer(rawOhlcData.value, ohlcPayload.data);
+        rawOhlcData.value = mergeOhlcBuffer(
+          rawOhlcData.value,
+          ohlcPayload.data,
+          resolveOhlcBufferLimit(requestedTicker, requestedInterval),
+        );
         klineDataOrigin.value = "database";
         futoptRefreshStatus.value = ohlcPayload.refresh_status || "refreshed";
         futoptDataStale.value = Boolean(ohlcPayload.is_stale);
@@ -1983,6 +1999,54 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
     }
   }
 
+  async function hydrateFutoptHistory({
+    ticker,
+    resolvedTicker,
+    period,
+    interval,
+    requestToken,
+    signal,
+    initialRowCount,
+  }) {
+    if (initialRowCount < INITIAL_OHLC_REQUEST_LIMIT) return;
+    try {
+      const payload = await dashboardApi.getFutoptOhlc(ticker, {
+        period,
+        interval,
+        refreshMode: "none",
+        limit: FUTOPT_HISTORY_BUFFER_LIMIT,
+        warmup: INITIAL_OHLC_WARMUP_BARS,
+        signal,
+      });
+      if (requestToken !== klineRequestSequence) return;
+      const activeTicker = normalizeTicker(currentTicker.value);
+      const responseTicker = normalizeTicker(payload?.ticker || resolvedTicker || ticker);
+      if (![normalizeTicker(ticker), normalizeTicker(resolvedTicker), responseTicker].includes(activeTicker)) return;
+
+      const mergedRows = mergeOhlcBuffer(
+        rawOhlcData.value,
+        payload?.data || [],
+        resolveOhlcBufferLimit(activeTicker, interval),
+      );
+      const historyExpanded = mergedRows.length > rawOhlcData.value.length
+        || mergedRows.at(0)?.date !== rawOhlcData.value.at(0)?.date;
+      if (!historyExpanded) return;
+
+      rawOhlcData.value = mergedRows;
+      klineDataOrigin.value = "database";
+      klineCacheSavedAt.value = Date.now();
+      void terminalCache.writeOhlc({
+        ticker: activeTicker,
+        interval,
+        rows: mergedRows,
+      });
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        console.debug("Futopt history hydration skipped", error);
+      }
+    }
+  }
+
   async function loadKline(ticker = currentTicker.value, period = currentPeriod.value, interval = currentInterval.value) {
     const requestToken = ++klineRequestSequence;
     if (klineAbortController) klineAbortController.abort();
@@ -2012,20 +2076,24 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
           period: fetchPeriod,
           interval: resolvedInterval,
           refreshMode: "background",
-          limit: 400,
-          warmup: 250,
+          limit: INITIAL_OHLC_REQUEST_LIMIT,
+          warmup: INITIAL_OHLC_WARMUP_BARS,
           signal: requestSignal,
         })
         : dashboardApi.getOhlc(normalized, {
           period: fetchPeriod,
           interval: resolvedInterval,
-          limit: 400,
-          warmup: 250,
+          limit: INITIAL_OHLC_REQUEST_LIMIT,
+          warmup: INITIAL_OHLC_WARMUP_BARS,
           signal: requestSignal,
         });
       const cached = await terminalCache.readOhlc({ ticker: normalized, interval: resolvedInterval });
       if (cached?.rows?.length && requestToken === klineRequestSequence) {
-        rawOhlcData.value = mergeOhlcBuffer([], cached.rows);
+        rawOhlcData.value = mergeOhlcBuffer(
+          [],
+          cached.rows,
+          resolveOhlcBufferLimit(normalized, resolvedInterval),
+        );
         klineDataOrigin.value = "cache";
         klineCacheSavedAt.value = cached.savedAt;
         cacheApplied = true;
@@ -2046,7 +2114,11 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
         currentTicker.value = resolvedTicker;
       }
       dashboardRealtime.subscribeTicker(resolvedTicker);
-      rawOhlcData.value = mergeOhlcBuffer([], data.data || []);
+      rawOhlcData.value = mergeOhlcBuffer(
+        [],
+        data.data || [],
+        resolveOhlcBufferLimit(resolvedTicker, resolvedInterval),
+      );
       klineDataOrigin.value = "database";
       klineCacheSavedAt.value = Date.now();
       void terminalCache.writeOhlc({
@@ -2070,6 +2142,17 @@ export function useDashboard({ initialWorkspacePage = "overview", initialTicker:
       // The persisted snapshot is already drawable; quote and comparison hydration must not keep the chart covered.
       chartLoading.value = false;
       crosshair.visible = false;
+      if (isFutopt) {
+        void hydrateFutoptHistory({
+          ticker: normalized,
+          resolvedTicker,
+          period: fetchPeriod,
+          interval: resolvedInterval,
+          requestToken,
+          signal: requestSignal,
+          initialRowCount: Array.isArray(data.data) ? data.data.length : 0,
+        });
+      }
       await loadComparisonSeries(compareTickers.value, { requestToken });
       if (requestToken !== klineRequestSequence) return;
       if (rawOhlcData.value.length > 0) await loadQuote(resolvedTicker, { requestToken });

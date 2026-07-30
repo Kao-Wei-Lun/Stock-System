@@ -4,6 +4,7 @@ import {
   getTimeframeOptionsForTicker,
   normalizeDashboardRightTab,
   normalizeTicker,
+  resolveOhlcBufferLimit,
   resolveOhlcDisplayPeriod,
   resolveDashboardTimeframeForTicker,
   shouldPollFutoptRestFallback,
@@ -14,6 +15,12 @@ describe("dashboard timeframe helpers", () => {
     expect(resolveOhlcDisplayPeriod("*TMFF", "1d", "1m")).toBe("max");
     expect(resolveOhlcDisplayPeriod("TMFH6", "5d", "5m")).toBe("max");
     expect(resolveOhlcDisplayPeriod("2330.TW", "1d", "1m")).toBe("1d");
+  });
+
+  it("keeps a multi-session buffer for futures intraday candles", () => {
+    expect(resolveOhlcBufferLimit("*TMFF", "1m")).toBe(5000);
+    expect(resolveOhlcBufferLimit("TMFH6", "5m")).toBe(5000);
+    expect(resolveOhlcBufferLimit("2330.TW", "1m")).toBe(500);
   });
 
   it("maps retired database drawer state to the supported indicator drawer", () => {

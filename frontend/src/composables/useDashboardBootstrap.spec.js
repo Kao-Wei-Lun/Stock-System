@@ -86,6 +86,13 @@ function candle(close) {
   };
 }
 
+function candleAt(index, close = index) {
+  return {
+    ...candle(close),
+    date: new Date(Date.UTC(2026, 6, 20, 0, index)).toISOString(),
+  };
+}
+
 describe("useDashboard route bootstrap", () => {
   beforeEach(() => {
     apiState.calls = [];
@@ -203,6 +210,32 @@ describe("useDashboard route bootstrap", () => {
     expect(mounted.dashboard.klineDataOrigin.value).toBe("database");
     expect(mounted.dashboard.ohlcData.value.at(-1).close).toBe(100);
     expect(apiState.cacheWrites.at(-1).rows.at(-1).close).toBe(100);
+    mounted.wrapper.unmount();
+  });
+
+  it("paints 400 futures bars first then hydrates older persisted history", async () => {
+    const initialRows = Array.from({ length: 400 }, (_, index) => candleAt(index + 800));
+    const historyRows = Array.from({ length: 1200 }, (_, index) => candleAt(index));
+    apiState.futoptOhlcHandler = (_ticker, options) => Promise.resolve({
+      ticker: "*TMFF",
+      data: options.limit === 5000 ? historyRows : initialRows,
+      refresh_status: "not_needed",
+      is_stale: false,
+    });
+    const mounted = mountDashboard({
+      initialWorkspacePage: "terminal",
+      initialTicker: "*TMFF",
+    });
+
+    await mounted.dashboard.bootstrapWorkspace("terminal");
+    await flushPromises();
+    await flushPromises();
+
+    const requests = apiState.calls.filter((call) => call.method === "getFutoptOhlc");
+    expect(requests.map((call) => call.options.limit)).toEqual(expect.arrayContaining([400, 5000]));
+    expect(requests.find((call) => call.options.limit === 5000)?.options.refreshMode).toBe("none");
+    expect(mounted.dashboard.ohlcData.value).toHaveLength(1200);
+    expect(mounted.dashboard.ohlcData.value[0].date).toBe(historyRows[0].date);
     mounted.wrapper.unmount();
   });
 });
