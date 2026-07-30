@@ -309,3 +309,64 @@ Git：
 - 不納入 `.env`、帳密、憑證、runtime marker、log 或使用者既有修改。
 - 最後確認工作樹只保留使用者原有的
   `scripts/daily_report/validation.py` 修改。
+
+## 10. 實際驗收結果（2026-07-30）
+
+### 10.1 原因確認
+
+- Windows WLAN 事件顯示無線網卡曾發生驅動中止、斷線與重新連線，這是第一個外部觸發點。
+- 富邦上游亦曾回傳 server maintenance，代表 WebSocket 被上游定期關閉是必須處理的正常故障情境。
+- 舊版在錯誤 callback 內重用已關閉的 client 並反覆呼叫 `connect()`；第三方 SDK 的連線等待沒有 timeout，
+  因而可累積大量 thread、handle 與 `CLOSE_WAIT`。
+- 故障程序實測曾達約 897 threads、2,790 handles、203 個 `CLOSE_WAIT`，且 8001 仍在 LISTENING，
+  但 `/api/ready` 無法回應。
+
+### 10.2 各階段交付
+
+- `c931fa9`：完成詳細修復、測試、驗收及回滾規劃。
+- `a15f5cd`：加入 WebSocket generation 隔離與 owner recovery callback。
+- `5fcb450`：改為帳號層級 single-flight session rebuild、timeout、backoff 與 circuit breaker。
+- `9b29b35`：Supervisor 加入外部 `/api/ready` 探測與假死程序樹回收。
+- `5ee75be`：序列化 startup warmup、settings reload 與 recovery，排除啟動競態。
+
+### 10.3 自動測試
+
+- 富邦 provider／realtime pool 相關測試：`125 passed`。
+- Supervisor 專項測試：`17 passed`。
+- 完整後端測試：`657 passed`。
+- 執行環境檢查：通過；LAN access 維持停用。
+- `git diff --check`：本次修改無 whitespace error。
+
+自動測試涵蓋：
+
+- 同帳號重複 100 次 error callback 只產生一個 recovery，不建立無界 reconnect timer。
+- stock 與 futopt 同時失敗時只重建一個帳號 session。
+- 舊 generation callback 不得污染新 session。
+- connect timeout 能中止第三方 SDK 的無界等待。
+- recovery 連續失敗會進入 bounded backoff／circuit breaker。
+- 8001 仍監聽但 `/api/ready` 連續失敗時，Supervisor 會回收 child；單次失敗不會誤重啟。
+- planned stop／restart 的優先順序不受 health recycle 影響。
+- warmup 尚未完成時，session refresh 不會重建正在初始化的帳號。
+- recovery 必須等待 configuration reload 完成，避免同一 manager 被並行替換。
+
+### 10.4 實機服務驗收
+
+最新程式重新啟動後：
+
+- `/api/ready` 回傳 `ready=true`、`degraded=false`，資料庫及 production SPA 均可用。
+- provider warmup 為 `ready`，帳號連線 `5/5`。
+- 只啟動有訂閱需求的 5 條通道：3 條 stock、2 條 futopt；未再為 5 個帳號固定建立 10 條連線。
+- 5 條有效通道均為 `connected`、`pending=false`、`generation=1`。
+- 啟動後沒有重複帳號初始化、isolated recovery、WebSocket error 或 disconnect warning。
+- 程序基線由 71 threads／481 handles 收斂至 66 threads／482 handles，沒有隨時間線性成長。
+- `CLOSE_WAIT` 在兩次取樣為 0 與 7，沒有重現舊版累積至 203 的情況。
+- `/api/ready` 實測約 150.1 ms。
+- Supervisor 跨過 120 秒 startup grace 後，至少兩次探測均為 `healthy`，
+  `consecutive_failures=0`、`last_reason_code=ready`、`restart_count=0`。
+
+### 10.5 資料與安全確認
+
+- 未新增資料庫 migration，未修改 K 線、個人資產或模擬交易資料。
+- 未送出任何真實交易指令。
+- 未納入 `.env`、帳密、憑證、runtime marker 或 log。
+- 使用者原有的 `scripts/daily_report/validation.py` 修改未被 stage、commit 或回滾。
