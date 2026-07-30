@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from market_freshness import market_session_state
-from quote_refresh_service import QuoteRefreshService
+from quote_refresh_service import QuoteRefreshService, is_taiwan_provider_ticker
 
 
 def test_market_session_state_handles_dst_lunch_weekend_holiday_and_crypto():
@@ -117,7 +117,17 @@ async def test_quote_refresh_bounds_concurrency_and_excludes_taiwan_symbols():
 
     service = _service(
         fetch,
-        watchlist=["AAPL", "MSFT", "NVDA", "0700.HK", "2330.TW", "^TWII", "*TMFF"],
+        watchlist=[
+            "AAPL",
+            "MSFT",
+            "NVDA",
+            "0700.HK",
+            "2330.TW",
+            "^TWII",
+            "*TMFF",
+            "TMFH6",
+            "TXFE6",
+        ],
         max_concurrency=2,
     )
     summary = await service.refresh_due()
@@ -126,6 +136,12 @@ async def test_quote_refresh_bounds_concurrency_and_excludes_taiwan_symbols():
     assert set(calls) == {"AAPL", "MSFT", "NVDA", "0700.HK"}
     assert peak <= 2
     assert service.status()["peak_concurrency"] <= 2
+
+
+def test_exact_futopt_contracts_never_use_overseas_quote_provider():
+    assert is_taiwan_provider_ticker("TMFH6") is True
+    assert is_taiwan_provider_ticker("TXFE6") is True
+    assert is_taiwan_provider_ticker("TXO20000E6") is True
 
 
 @pytest.mark.anyio

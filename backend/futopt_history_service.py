@@ -472,6 +472,9 @@ class FutoptCandleRecorder:
         self._queue: asyncio.Queue | None = None
         self._consumer_task: asyncio.Task | None = None
         self._active = False
+        self._source_registered = False
+        self._subscription_ready = False
+        self._subscription_error: str | None = None
         self._last_backfill_summary: dict[str, Any] | None = None
         self._last_persisted_at: str | None = None
         self._last_error: str | None = None
@@ -481,9 +484,9 @@ class FutoptCandleRecorder:
     def active(self) -> bool:
         return self._active
 
-    async def start_ws(self) -> None:
+    async def start_ws(self) -> bool:
         if self._active:
-            return
+            return self.subscription_ready
         self._queue = asyncio.Queue(maxsize=self.queue_maxsize)
         loop = asyncio.get_running_loop()
 
@@ -514,17 +517,44 @@ class FutoptCandleRecorder:
 
         self._handler = _handler
         self.realtime_pool.register_message_handler(_handler)
-        for symbol in self.symbols:
-            self.realtime_pool.track_ticker(symbol, source=self.source)
+        ensure_source = getattr(self.realtime_pool, "ensure_source_tickers", None)
+        if callable(ensure_source):
+            assignment_status = await ensure_source(self.source, self.symbols)
+            self._source_registered = True
+            self._subscription_ready = bool(assignment_status.get("ready"))
+            if not self._subscription_ready:
+                missing = assignment_status.get("missing_tickers") or []
+                unhealthy = assignment_status.get("unhealthy_tickers") or []
+                self._subscription_error = (
+                    "futures realtime subscriptions are not ready "
+                    f"(missing={missing}, unhealthy={unhealthy})"
+                )
+                self.realtime_pool.unregister_message_handler(_handler)
+                self._handler = None
+                self._queue = None
+                self.log.warning("Futopt candle recorder start deferred: %s", self._subscription_error)
+                return False
+        else:
+            for symbol in self.symbols:
+                self.realtime_pool.track_ticker(symbol, source=self.source)
+            self._source_registered = True
+            self._subscription_ready = True
         self._consumer_task = asyncio.create_task(self._consume(), name="futopt-candle-recorder:consumer")
         self._active = True
+        self._subscription_error = None
         self.log.info("Futopt candle recorder started for %s", ", ".join(self.symbols))
+        return True
 
     async def stop_ws(self) -> None:
-        if not self._active and self._handler is None:
+        if not self._active and self._handler is None and not self._source_registered:
             return
-        for symbol in self.symbols:
-            self.realtime_pool.untrack_ticker(symbol, source=self.source)
+        set_source = getattr(self.realtime_pool, "set_source_tickers", None)
+        if callable(set_source):
+            await set_source(self.source, [], wait_for_assignments=True)
+        else:
+            for symbol in self.symbols:
+                self.realtime_pool.untrack_ticker(symbol, source=self.source)
+        self._source_registered = False
         if self._handler is not None:
             self.realtime_pool.unregister_message_handler(self._handler)
             self._handler = None
@@ -542,18 +572,37 @@ class FutoptCandleRecorder:
             self._consumer_task = None
         self._queue = None
         self._active = False
+        self._subscription_ready = False
         self.log.info("Futopt candle recorder stopped")
 
+    @property
+    def subscription_ready(self) -> bool:
+        if not self._active:
+            return False
+        get_status = getattr(self.realtime_pool, "get_source_assignment_status", None)
+        if not callable(get_status):
+            return self._subscription_ready
+        status = get_status(self.source, self.symbols)
+        self._subscription_ready = bool(status.get("ready"))
+        return self._subscription_ready
+
     def get_status(self) -> dict[str, Any]:
+        assignment_status = None
+        get_assignment_status = getattr(self.realtime_pool, "get_source_assignment_status", None)
+        if callable(get_assignment_status):
+            assignment_status = get_assignment_status(self.source, self.symbols)
         return {
             "active": self.active,
+            "subscription_ready": self.subscription_ready,
+            "subscription_error": self._subscription_error,
+            "assignment_status": assignment_status,
             "symbols": list(self.symbols),
             "interval": self.interval,
             "queue_size": self._queue.qsize() if self._queue is not None else 0,
             "queue_capacity": self.queue_maxsize,
             "dropped_messages": self._dropped_messages,
             "last_persisted_at": self._last_persisted_at,
-            "last_error": self._last_error,
+            "last_error": self._subscription_error or self._last_error,
             "last_backfill": self._last_backfill_summary,
         }
 
@@ -600,11 +649,29 @@ class FutoptCandleRecorder:
                 now = datetime.now(app_tz)
                 in_session = is_futopt_trading_time(now)
                 if in_session and not self.active:
-                    await self.start_ws()
-                    await self.backfill(period=None)
-                    last_backfill_at = time.monotonic()
+                    started = await self.start_ws()
+                    if time.monotonic() - last_backfill_at >= backfill_interval_seconds:
+                        await self.backfill(period=None)
+                        last_backfill_at = time.monotonic()
+                    if not started:
+                        await asyncio.sleep(max(5, poll_seconds))
+                        continue
                 elif not in_session and self.active:
                     await self.stop_ws()
+
+                if in_session and self.active and not self.subscription_ready:
+                    ensure_source = getattr(self.realtime_pool, "ensure_source_tickers", None)
+                    if callable(ensure_source):
+                        status = await ensure_source(self.source, self.symbols)
+                        self._subscription_ready = bool(status.get("ready"))
+                        if not self._subscription_ready:
+                            self._subscription_error = (
+                                "futures realtime subscriptions became unavailable "
+                                f"(missing={status.get('missing_tickers') or []}, "
+                                f"unhealthy={status.get('unhealthy_tickers') or []})"
+                            )
+                        else:
+                            self._subscription_error = None
 
                 if in_session and time.monotonic() - last_backfill_at >= backfill_interval_seconds:
                     await self.backfill(period="1d")

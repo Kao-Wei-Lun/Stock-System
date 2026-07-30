@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import fubon_realtime_pool as realtime_pool_module
-from fubon_realtime_pool import FubonRealtimeSubscriptionPool
+from fubon_realtime_pool import FubonRealtimeSubscriptionPool, RealtimeAssignment
 import repositories.fubon_accounts as fubon_accounts_repository
 
 
@@ -702,6 +702,21 @@ async def test_realtime_pool_subscribes_futopt_afterhours_when_night_session(mon
 
 
 @pytest.mark.anyio
+async def test_futopt_marketdata_does_not_require_futures_trading_account_capability():
+    primary = FakeManager(1)
+    primary.supports_account_capability = lambda _capability: False
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._managers = {1: primary}
+
+    await pool.set_source_tickers("ws", ["TXFE6"])
+
+    assert any(
+        item[:3] == ("futopt", "TXFE6", "candles")
+        for item in primary.subscribed
+    )
+
+
+@pytest.mark.anyio
 async def test_realtime_pool_refreshes_futopt_subscription_on_session_change(monkeypatch):
     state = {"after_hours": False}
     monkeypatch.setattr(realtime_pool_module, "is_futopt_after_hours", lambda: state["after_hours"])
@@ -715,6 +730,118 @@ async def test_realtime_pool_refreshes_futopt_subscription_on_session_change(mon
 
     assert ("futopt", "TXFE6", "books", False) in primary.unsubscribed
     assert ("futopt", "TXFE6", "books", True, 2.5) in primary.subscribed
+
+
+@pytest.mark.anyio
+async def test_ensure_source_tickers_retries_previously_registered_missing_assignment():
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+    pool._managers = {1: primary}
+    pool._source_tickers["ws"] = {"2330.TW"}
+
+    status = await pool.ensure_source_tickers("ws", ["2330.TW"])
+
+    assert status["ready"] is True
+    assert status["assigned_tickers"] == ["2330.TW"]
+    assert ("stock", "2330", "candles", 2.5) in primary.subscribed
+
+
+@pytest.mark.anyio
+async def test_orphan_watchdog_rebuilds_channel_with_zero_sdk_desired_subscriptions():
+    manager = WatchdogManager(
+        1,
+        futopt_state="degraded",
+        futopt_pending=False,
+        futopt_desired=0,
+    )
+    pool = FubonRealtimeSubscriptionPool(
+        manager,
+        resolve_futopt_contract=AsyncMock(
+            return_value={"resolved_symbol": "TMFH6"}
+        ),
+    )
+    pool._managers = {1: manager}
+    pool._source_tickers["futopt_recorder"] = {"TMF"}
+    pool._ensure_assignment = AsyncMock(return_value=None)
+
+    async def reconnect(account_id, market_type=None, manual=True):
+        manager.reconnect_status["futopt"]["state"] = "connected"
+        pool._assignments["TMF"] = RealtimeAssignment(
+            requested_ticker="TMF",
+            resolved_ticker="TMFH6",
+            market_type="futopt",
+            symbol="TMFH6",
+            channels=("aggregates", "books", "candles"),
+            account_id=account_id,
+            after_hours=True,
+        )
+        return {
+            "success": True,
+            "account_id": account_id,
+            "market_type": market_type,
+        }
+
+    pool.reconnect_account = AsyncMock(side_effect=reconnect)
+
+    results = await pool.recover_stalled_ws_channels()
+
+    assert results[-1]["success"] is True
+    assert results[-1]["reason"] == "missing_assignments_recovery"
+    assert results[-1]["restored_tickers"] == ["TMF"]
+    pool.reconnect_account.assert_awaited_once_with(
+        1,
+        market_type="futopt",
+        manual=False,
+    )
+
+    pool._assignments.clear()
+    manager.reconnect_status["futopt"]["state"] = "degraded"
+    repeated = await pool.recover_stalled_ws_channels()
+    assert repeated[-1]["reason"] == "missing_assignments_no_recovery_account"
+    assert pool.reconnect_account.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_orphan_watchdog_does_not_rebuild_healthy_channel_for_capacity_shortage():
+    manager = WatchdogManager(
+        1,
+        futopt_state="connected",
+        futopt_pending=False,
+        futopt_desired=0,
+    )
+    pool = FubonRealtimeSubscriptionPool(
+        manager,
+        resolve_futopt_contract=AsyncMock(
+            return_value={"resolved_symbol": "TMFH6"}
+        ),
+    )
+    pool._managers = {1: manager}
+    pool._source_tickers["futopt_recorder"] = {"TMF"}
+    pool._ensure_assignment = AsyncMock(return_value=None)
+    pool.reconnect_account = AsyncMock(return_value={"success": True})
+
+    results = await pool.recover_stalled_ws_channels()
+
+    assert results[-1]["success"] is False
+    assert results[-1]["reason"] == "missing_assignments_no_recovery_account"
+    pool.reconnect_account.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_background_assignment_failure_is_logged(caplog):
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary)
+
+    async def fail_assignment():
+        raise RuntimeError("assignment exploded")
+
+    with caplog.at_level("WARNING"):
+        pool._schedule_task("TMF", fail_assignment())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert "background assignment failed for TMF" in caplog.text
+    assert "assignment exploded" in caplog.text
 
 
 @pytest.mark.anyio

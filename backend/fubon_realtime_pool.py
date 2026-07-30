@@ -49,6 +49,7 @@ class FubonRealtimeSubscriptionPool:
         full_quote_stale_seconds: float = 20.0,
         recovery_failure_threshold: int = 5,
         recovery_cooldown_seconds: float = 300.0,
+        orphan_recovery_cooldown_seconds: float = 120.0,
         utcnow: Optional[Callable[[], datetime]] = None,
     ):
         self._primary_manager = primary_manager
@@ -59,6 +60,10 @@ class FubonRealtimeSubscriptionPool:
         self._full_quote_stale_seconds = max(1.0, float(full_quote_stale_seconds))
         self._recovery_failure_threshold = max(1, int(recovery_failure_threshold))
         self._recovery_cooldown_seconds = max(1.0, float(recovery_cooldown_seconds))
+        self._orphan_recovery_cooldown_seconds = max(
+            30.0,
+            float(orphan_recovery_cooldown_seconds),
+        )
         self._utcnow = utcnow or (lambda: datetime.now(timezone.utc))
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._db = None
@@ -79,6 +84,7 @@ class FubonRealtimeSubscriptionPool:
         self._recovery_notification_tasks: set[asyncio.Task] = set()
         self._account_reconnect_locks: dict[int, asyncio.Lock] = {}
         self._account_recovery: dict[int, dict[str, Any]] = {}
+        self._orphan_recovery_last_attempt: dict[tuple[int, str], float] = {}
         self._reload_lock = asyncio.Lock()
         self._warmup_task: asyncio.Task | None = None
         self._warmup_state = "idle"
@@ -436,6 +442,57 @@ class FubonRealtimeSubscriptionPool:
                 await self._ensure_assignment(ticker)
             else:
                 self._schedule_task(ticker, self._ensure_assignment(ticker))
+
+    async def ensure_source_tickers(
+        self,
+        source: str,
+        tickers: list[str] | set[str] | tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Register a source and synchronously verify all of its assignments.
+
+        Session-bound consumers such as the futures candle recorder must know
+        whether subscriptions actually exist before reporting themselves ready.
+        Calling this method also retries tickers that were already registered
+        but lost their assignment during an SDK/websocket rebuild.
+        """
+        normalized_source = str(source or "").strip().lower() or WATCHLIST_SOURCE
+        desired = {normalize_ticker(ticker) for ticker in tickers if normalize_ticker(ticker)}
+        await self.set_source_tickers(
+            normalized_source,
+            desired,
+            wait_for_assignments=True,
+        )
+        for ticker in sorted(desired):
+            if ticker not in self._assignments:
+                await self._ensure_assignment(ticker)
+        return self.get_source_assignment_status(normalized_source, desired)
+
+    def get_source_assignment_status(
+        self,
+        source: str,
+        tickers: list[str] | set[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        normalized_source = str(source or "").strip().lower() or WATCHLIST_SOURCE
+        desired = (
+            {normalize_ticker(ticker) for ticker in tickers if normalize_ticker(ticker)}
+            if tickers is not None
+            else set(self._source_tickers.get(normalized_source, set()))
+        )
+        assigned = sorted(ticker for ticker in desired if ticker in self._assignments)
+        healthy = sorted(
+            ticker
+            for ticker in assigned
+            if self._assignment_channel_is_healthy(self._assignments[ticker])
+        )
+        return {
+            "source": normalized_source,
+            "desired_tickers": sorted(desired),
+            "assigned_tickers": assigned,
+            "healthy_tickers": healthy,
+            "missing_tickers": sorted(desired - set(assigned)),
+            "unhealthy_tickers": sorted(set(assigned) - set(healthy)),
+            "ready": bool(desired) and len(healthy) == len(desired),
+        }
 
     def track_ticker(self, ticker: str, *, source: str = WS_SOURCE) -> None:
         normalized = normalize_ticker(ticker)
@@ -819,8 +876,6 @@ class FubonRealtimeSubscriptionPool:
                     exc,
                 )
 
-        await self.recover_stalled_ws_channels()
-
         desired_after_hours = is_futopt_after_hours()
         stale_tickers = [
             ticker
@@ -831,6 +886,7 @@ class FubonRealtimeSubscriptionPool:
         ]
         for ticker in stale_tickers:
             await self._ensure_assignment(ticker)
+        await self.recover_stalled_ws_channels()
 
     def get_unhealthy_subscription_channels(self) -> list[dict[str, Any]]:
         """Return only disconnected channels that currently carry desired subscriptions."""
@@ -861,7 +917,7 @@ class FubonRealtimeSubscriptionPool:
         return unhealthy
 
     async def recover_stalled_ws_channels(self) -> list[dict[str, Any]]:
-        """Restart unhealthy subscribed channels whose normal retry timer has stopped."""
+        """Restart unhealthy channels and restore desired tickers with no assignment."""
         results: list[dict[str, Any]] = []
         for channel in self.get_unhealthy_subscription_channels():
             if channel["pending"]:
@@ -894,7 +950,127 @@ class FubonRealtimeSubscriptionPool:
                     "error_category": classify_fubon_error(exc),
                 }
             results.append(result)
+        results.extend(await self._recover_missing_assignments())
         return results
+
+    async def _recover_missing_assignments(self) -> list[dict[str, Any]]:
+        desired = set()
+        for items in self._source_tickers.values():
+            desired.update(items)
+        missing = sorted(ticker for ticker in desired if ticker not in self._assignments)
+        if not missing:
+            return []
+
+        # First try a normal assignment. This is enough when a healthy channel
+        # still has capacity and avoids rebuilding an SDK session unnecessarily.
+        for ticker in missing:
+            await self._ensure_assignment(ticker)
+        missing = sorted(ticker for ticker in desired if ticker not in self._assignments)
+        if not missing:
+            return [
+                {
+                    "success": True,
+                    "reason": "missing_assignments_restored",
+                    "restored_tickers": sorted(desired),
+                }
+            ]
+
+        missing_by_market: dict[str, list[str]] = defaultdict(list)
+        for ticker in missing:
+            target = await self._resolve_target(ticker)
+            if target:
+                missing_by_market[str(target["market_type"])].append(ticker)
+
+        results: list[dict[str, Any]] = []
+        for market_type, tickers in sorted(missing_by_market.items()):
+            candidate = self._select_orphan_recovery_manager(market_type)
+            if candidate is None:
+                results.append(
+                    {
+                        "success": False,
+                        "reason": "missing_assignments_no_recovery_account",
+                        "market_type": market_type,
+                        "missing_tickers": sorted(tickers),
+                    }
+                )
+                continue
+
+            account_id, _manager = candidate
+            self._orphan_recovery_last_attempt[(account_id, market_type)] = time.monotonic()
+            log.warning(
+                "Fubon %s has %s desired tickers without realtime assignments; "
+                "rebuilding account %s",
+                market_type,
+                len(tickers),
+                account_id,
+            )
+            try:
+                reconnect_result = await self.reconnect_account(
+                    account_id,
+                    market_type=market_type,
+                    manual=False,
+                )
+            except Exception as exc:
+                reconnect_result = {
+                    "success": False,
+                    "account_id": account_id,
+                    "market_type": market_type,
+                    "error_category": classify_fubon_error(exc),
+                    "message": str(exc)[:300],
+                }
+
+            for ticker in tickers:
+                if ticker not in self._assignments:
+                    await self._ensure_assignment(ticker)
+            remaining = sorted(ticker for ticker in tickers if ticker not in self._assignments)
+            results.append(
+                {
+                    **reconnect_result,
+                    "success": bool(reconnect_result.get("success")) and not remaining,
+                    "reason": "missing_assignments_recovery",
+                    "restored_tickers": sorted(set(tickers) - set(remaining)),
+                    "missing_tickers": remaining,
+                }
+            )
+        return results
+
+    def _select_orphan_recovery_manager(
+        self,
+        market_type: str,
+    ) -> tuple[int, FubonSDKManager] | None:
+        candidates: list[tuple[int, FubonSDKManager, int]] = []
+        for account_id, manager in self._managers.items():
+            if not manager or not manager.connected:
+                continue
+            channel = self._manager_channel_status(manager, market_type)
+            if bool(channel.get("pending")):
+                continue
+            recovery = self._account_recovery.get(int(account_id), {})
+            if time.monotonic() < float(recovery.get("next_retry_monotonic") or 0.0):
+                continue
+            last_orphan_attempt = self._orphan_recovery_last_attempt.get(
+                (int(account_id), market_type),
+                0.0,
+            )
+            if (
+                time.monotonic() - last_orphan_attempt
+                < self._orphan_recovery_cooldown_seconds
+            ):
+                continue
+            if not channel:
+                continue
+            state = str(channel.get("state") or "disconnected").strip().lower()
+            # A missing assignment on an otherwise healthy channel usually
+            # means subscription capacity or an unsupported symbol. Rebuilding
+            # that SDK session would disrupt healthy streams without helping.
+            if state == "connected":
+                continue
+            candidates.append((int(account_id), manager, 0))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[2], item[0]))
+        account_id, manager, _priority = candidates[0]
+        return account_id, manager
 
     def _attach_bridge_handler(self, account_id: int, manager: FubonSDKManager) -> None:
         existing = self._manager_bridge_handlers.get(account_id)
@@ -1020,6 +1196,9 @@ class FubonRealtimeSubscriptionPool:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            close = getattr(coroutine, "close", None)
+            if callable(close):
+                close()
             return
         existing = self._pending_tasks.get(ticker)
         if existing and not existing.done():
@@ -1030,6 +1209,20 @@ class FubonRealtimeSubscriptionPool:
         def _cleanup(_task: asyncio.Task, key: str = ticker) -> None:
             if self._pending_tasks.get(key) is _task:
                 self._pending_tasks.pop(key, None)
+            if _task.cancelled():
+                return
+            try:
+                error = _task.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                log.warning(
+                    "Fubon realtime background assignment failed for %s "
+                    "category=%s message=%s",
+                    key,
+                    classify_fubon_error(error),
+                    error,
+                )
 
         task.add_done_callback(_cleanup)
 
@@ -1196,6 +1389,8 @@ class FubonRealtimeSubscriptionPool:
         manager = self._managers.get(assignment.account_id)
         if not manager or not manager.connected:
             return False
+        if not self._assignment_channel_is_healthy(assignment):
+            return False
         if assignment.market_type == "futopt" and assignment.after_hours != is_futopt_after_hours():
             return False
 
@@ -1211,6 +1406,30 @@ class FubonRealtimeSubscriptionPool:
         )
         return current_priority == best_priority
 
+    @staticmethod
+    def _manager_channel_status(
+        manager: FubonSDKManager,
+        market_type: str,
+    ) -> dict[str, Any]:
+        get_status = getattr(manager, "get_reconnect_status", None)
+        if not callable(get_status):
+            return {}
+        return dict((get_status() or {}).get(market_type) or {})
+
+    def _assignment_channel_is_healthy(self, assignment: RealtimeAssignment) -> bool:
+        manager = self._managers.get(assignment.account_id)
+        if not manager or not manager.connected:
+            return False
+        channel = self._manager_channel_status(manager, assignment.market_type)
+        # Test doubles and older manager implementations may not expose channel
+        # health. Connected SDK state remains the backward-compatible fallback.
+        if not channel:
+            return True
+        return (
+            str(channel.get("state") or "disconnected").strip().lower() == "connected"
+            and not bool(channel.get("pending"))
+        )
+
     def _candidate_managers(
         self,
         ticker: str,
@@ -1224,6 +1443,9 @@ class FubonRealtimeSubscriptionPool:
 
         primary_id = self._primary_manager.active_account_id
         preferred_modes = self._preferred_ws_modes_for_ticker(ticker)
+        # Login account capabilities describe order-routing accounts. They do
+        # not restrict the marketdata websocket exposed by the same SDK login;
+        # a stock-labelled login can still provide futopt quotes/candles.
         candidates = [
             (account_id, manager)
             for account_id, manager in self._managers.items()
@@ -1232,6 +1454,16 @@ class FubonRealtimeSubscriptionPool:
         return sorted(
             candidates,
             key=lambda item: (
+                0
+                if str(
+                    self._manager_channel_status(
+                        item[1],
+                        str((target or {}).get("market_type") or "stock"),
+                    ).get("state")
+                    or "connected"
+                ).strip().lower()
+                == "connected"
+                else 1,
                 self._mode_priority(item[1].ws_mode, preferred_modes),
                 0 if target and self._target_is_subscribed_on_manager(item[0], item[1], target) else 1,
                 loads[item[0]],

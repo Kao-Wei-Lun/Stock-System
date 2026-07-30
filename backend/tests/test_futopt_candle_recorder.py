@@ -10,10 +10,11 @@ from futopt_history_service import FutoptCandleRecorder, is_futopt_trading_time
 
 
 class FakeRealtimePool:
-    def __init__(self):
+    def __init__(self, *, assignment_ready=True):
         self.handler = None
         self.tracked = []
         self.untracked = []
+        self.assignment_ready = assignment_ready
 
     def register_message_handler(self, handler):
         self.handler = handler
@@ -27,6 +28,34 @@ class FakeRealtimePool:
 
     def untrack_ticker(self, ticker, *, source="ws"):
         self.untracked.append((ticker, source))
+
+    async def ensure_source_tickers(self, source, tickers):
+        for ticker in tickers:
+            item = (ticker, source)
+            if item not in self.tracked:
+                self.tracked.append(item)
+        return self.get_source_assignment_status(source, tickers)
+
+    async def set_source_tickers(self, source, tickers, *, wait_for_assignments=True):
+        if tickers:
+            await self.ensure_source_tickers(source, tickers)
+            return
+        for ticker, tracked_source in self.tracked:
+            if tracked_source == source:
+                self.untracked.append((ticker, source))
+
+    def get_source_assignment_status(self, source, tickers):
+        desired = list(tickers)
+        assigned = desired if self.assignment_ready else []
+        return {
+            "source": source,
+            "desired_tickers": desired,
+            "assigned_tickers": assigned,
+            "healthy_tickers": assigned,
+            "missing_tickers": [] if self.assignment_ready else desired,
+            "unhealthy_tickers": [],
+            "ready": self.assignment_ready,
+        }
 
     def resolve_broadcast_tickers(self, ticker):
         if ticker == "TMFE6":
@@ -81,6 +110,32 @@ async def test_futopt_candle_recorder_stores_alias_and_resolved_ws_candle():
     assert [item["ticker"] for item in db.upserts] == ["TMF", "TMFE6"]
     assert all(item["interval"] == "1m" for item in db.upserts)
     assert db.upserts[0]["rows"][0]["source"] == "fubon_neo_ws"
+
+
+@pytest.mark.anyio
+async def test_futopt_candle_recorder_defers_active_state_until_subscriptions_are_ready():
+    realtime_pool = FakeRealtimePool(assignment_ready=False)
+    recorder = FutoptCandleRecorder(
+        provider=None,
+        db=FakeDb(),
+        realtime_pool=realtime_pool,
+        symbols=["TXF", "TMF"],
+    )
+
+    assert await recorder.start_ws() is False
+
+    status = recorder.get_status()
+    assert status["active"] is False
+    assert status["subscription_ready"] is False
+    assert status["assignment_status"]["missing_tickers"] == ["TXF", "TMF"]
+    assert "subscriptions are not ready" in status["subscription_error"]
+    assert realtime_pool.handler is None
+
+    await recorder.stop_ws()
+    assert realtime_pool.untracked == [
+        ("TXF", "futopt_recorder"),
+        ("TMF", "futopt_recorder"),
+    ]
 
 
 def test_futopt_trading_time_covers_day_and_night_sessions():

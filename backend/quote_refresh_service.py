@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from data_fetcher import normalize_ticker
+from fubon_symbols import is_exact_futopt_contract
 from market_freshness import market_aware_freshness, market_session_state, parse_market_timestamp
 
 
@@ -40,6 +41,7 @@ def is_taiwan_provider_ticker(ticker: str) -> bool:
         symbol.startswith("*")
         or symbol.endswith((".TW", ".TWO"))
         or symbol in {"^TWII", "^TWOII", "TX", "TXF", "MTX", "MXF", "TMF", "EXF", "FXF"}
+        or is_exact_futopt_contract(symbol)
     )
 
 
