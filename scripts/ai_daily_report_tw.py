@@ -3643,6 +3643,11 @@ def _calculate_signal_validation(
         ]
         if not period_rows and latest_row:
             period_rows = [latest_row]
+        if not period_rows:
+            # Missing post-signal K-line rows means performance validation cannot
+            # be calculated without inventing price movement. Keep the report
+            # running and let the data-risk sections explain the incomplete pool.
+            continue
 
         max_high = max((_to_float(row.get("high")) or _to_float(row.get("close")) or first_close) for row in period_rows)
         max_gain = ((max_high / first_close) - 1) * 100 if max_high and first_close else 0.0

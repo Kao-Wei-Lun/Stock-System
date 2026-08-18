@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +16,17 @@ class SignalValidationArtifacts:
     summary: dict
     latest_by_ticker: dict[str, dict]
     hit_rates_by_status: dict[str, dict]
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 60) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
 
 
 def persist_and_validate_signals(
@@ -53,12 +65,13 @@ def persist_and_validate_signals(
     latest_by_ticker: dict[str, dict] = {}
     hit_rates_by_status: dict[str, dict] = {}
     try:
+        lookback_days = _env_int("DAILY_REPORT_SIGNAL_VALIDATION_LOOKBACK_DAYS", 20, minimum=1, maximum=60)
         # load_signal_payloads prefers structured daily JSON and only falls back
         # to legacy Markdown for dates without a JSON artifact.
         payloads = signal_module.load_signal_payloads(
             log_dir,
             before_or_on=report_date,
-            limit=20,
+            limit=lookback_days,
         )
         backtests = signal_module.compute_backtests(
             payloads,
@@ -68,7 +81,7 @@ def persist_and_validate_signals(
         summary = signal_module.summarize_backtests(
             backtests,
             today_count=len(daily_signals),
-            lookback_days=20,
+            lookback_days=lookback_days,
         )
         latest_by_ticker = signal_module.latest_backtest_by_ticker(backtests)
         hit_rates_by_status = signal_module.hit_rate_by_status(backtests, hit_key="hit_5d")
