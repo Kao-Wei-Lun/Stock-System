@@ -1,5 +1,17 @@
 import providers
 import pytest
+from unittest.mock import AsyncMock
+
+
+@pytest.mark.anyio
+async def test_realtime_futopt_resolver_uses_current_session(monkeypatch):
+    resolver = AsyncMock(return_value={"resolved_symbol": "TMFI6"})
+    monkeypatch.setattr(providers.fubon_futopt_provider, "resolve_contract", resolver)
+
+    resolved = await providers._resolve_realtime_futopt_contract("*TMFF")
+
+    assert resolved == {"resolved_symbol": "TMFI6"}
+    resolver.assert_awaited_once_with("*TMFF", session="AUTO")
 
 
 def test_subscribe_fubon_streams_tracks_supported_taiwan_stock(monkeypatch):

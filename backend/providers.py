@@ -39,7 +39,10 @@ fubon_market_snapshot_provider = FubonMarketSnapshotProvider(fubon_manager, db=d
 
 
 async def _resolve_realtime_futopt_contract(ticker: str) -> dict | None:
-    return await fubon_futopt_provider.resolve_contract(ticker)
+    # AUTO follows the currently tradable TAIFEX session.  This is important on
+    # expiry day, when the night session has already rolled to the next contract
+    # while the expiring contract can still appear in the regular-session list.
+    return await fubon_futopt_provider.resolve_contract(ticker, session="AUTO")
 
 
 fubon_realtime_pool = FubonRealtimeSubscriptionPool(

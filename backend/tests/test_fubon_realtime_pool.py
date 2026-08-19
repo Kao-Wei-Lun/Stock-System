@@ -733,6 +733,24 @@ async def test_realtime_pool_refreshes_futopt_subscription_on_session_change(mon
 
 
 @pytest.mark.anyio
+async def test_realtime_pool_refreshes_dynamic_alias_on_contract_rollover(monkeypatch):
+    state = {"resolved_symbol": "TMFH6"}
+    monkeypatch.setattr(realtime_pool_module, "is_futopt_after_hours", lambda: True)
+    resolver = AsyncMock(side_effect=lambda _ticker: dict(state))
+    primary = FakeManager(1)
+    pool = FubonRealtimeSubscriptionPool(primary, resolve_futopt_contract=resolver)
+    pool._managers = {1: primary}
+
+    await pool.set_source_tickers("ws", ["*TMFF"])
+    state["resolved_symbol"] = "TMFI6"
+    await pool.refresh_session_assignments()
+
+    assert ("futopt", "TMFH6", "books", True) in primary.unsubscribed
+    assert ("futopt", "TMFI6", "books", True, 2.5) in primary.subscribed
+    assert pool._assignments["*TMFF"].resolved_ticker == "TMFI6"
+
+
+@pytest.mark.anyio
 async def test_ensure_source_tickers_retries_previously_registered_missing_assignment():
     primary = FakeManager(1)
     pool = FubonRealtimeSubscriptionPool(primary)

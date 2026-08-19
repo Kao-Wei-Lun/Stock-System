@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -251,7 +251,8 @@ def test_restart_gap_selects_smallest_supported_backfill_period(last_date, expec
 @pytest.mark.anyio
 async def test_recorder_auto_backfill_uses_database_watermark():
     db = FakeDb()
-    db.rows[("TMF", "1m")] = [_row("2026-07-19T08:00:00+08:00", 100)]
+    recent_watermark = (datetime.now().astimezone() - timedelta(days=3)).isoformat()
+    db.rows[("TMF", "1m")] = [_row(recent_watermark, 100)]
     provider = FakeProvider()
     recorder = FutoptCandleRecorder(
         provider=provider,

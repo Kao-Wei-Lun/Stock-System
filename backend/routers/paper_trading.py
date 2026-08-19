@@ -74,7 +74,9 @@ APP_TZ = ZoneInfo("Asia/Taipei")
 
 
 async def _resolve_nearest_futopt_contract(symbol: str, *, role: str) -> dict:
-    resolved = await fubon_futopt_provider.resolve_contract(symbol, session="REGULAR")
+    # Match the currently tradable session so a bot restarted after the expiry
+    # close does not keep binding itself to the expired daytime contract.
+    resolved = await fubon_futopt_provider.resolve_contract(symbol, session="AUTO")
     if not resolved:
         raise HTTPException(502, f"Unable to resolve nearest futures contract for {role}: {symbol}")
     if str(resolved.get("instrument_type") or "future").lower() != "future":

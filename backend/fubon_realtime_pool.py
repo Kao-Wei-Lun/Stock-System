@@ -855,7 +855,7 @@ class FubonRealtimeSubscriptionPool:
             }
 
     async def refresh_session_assignments(self) -> None:
-        """Re-subscribe futures/options streams when TAIFEX switches day/night sessions."""
+        """Refresh active futures/options streams for session and contract rollover."""
         if self._warmup_state in {"scheduled", "running"}:
             # The listener starts independently from provider warmup so the API
             # can become available quickly. Do not treat partially initialized
@@ -876,15 +876,16 @@ class FubonRealtimeSubscriptionPool:
                     exc,
                 )
 
-        desired_after_hours = is_futopt_after_hours()
-        stale_tickers = [
+        futopt_tickers = [
             ticker
             for ticker, assignment in list(self._assignments.items())
             if assignment.market_type == "futopt"
-            and assignment.after_hours != desired_after_hours
             and self._has_any_source(ticker)
         ]
-        for ticker in stale_tickers:
+        # Dynamic aliases must be resolved again even when the day/night flag has
+        # not changed.  On expiry day the nearest tradable contract can roll from
+        # H6 to I6 while the process remains online.
+        for ticker in futopt_tickers:
             await self._ensure_assignment(ticker)
         await self.recover_stalled_ws_channels()
 
@@ -1256,18 +1257,27 @@ class FubonRealtimeSubscriptionPool:
         if not normalized or not self._has_any_source(normalized):
             return
 
+        target = await self._resolve_target(normalized)
+        if not target:
+            # Keep a working assignment when the contract lookup is temporarily
+            # unavailable; a later refresh can safely retry the rollover.
+            return
+
         created_assignment: tuple[FubonSDKManager, RealtimeAssignment] | None = None
         async with self._assignment_lock:
+            if not self._has_any_source(normalized):
+                return
             existing = self._assignments.get(normalized)
             if existing:
                 manager = self._managers.get(existing.account_id)
-                if manager and manager.connected and self._assignment_satisfies_preference(normalized, existing):
+                if (
+                    manager
+                    and manager.connected
+                    and self._assignment_matches_target(existing, target)
+                    and self._assignment_satisfies_preference(normalized, existing)
+                ):
                     return
                 self._remove_assignment_locked(normalized)
-
-            target = await self._resolve_target(normalized)
-            if not target:
-                return
 
             errors: list[str] = []
             for account_id, manager in self._candidate_managers(normalized, target=target):
@@ -1300,6 +1310,18 @@ class FubonRealtimeSubscriptionPool:
             await self._prime_assignment_quote(*created_assignment)
             return
         await self._notify_shortage(normalized, errors)
+
+    @staticmethod
+    def _assignment_matches_target(
+        assignment: RealtimeAssignment,
+        target: dict[str, str],
+    ) -> bool:
+        return (
+            assignment.resolved_ticker == target["resolved_ticker"]
+            and assignment.market_type == target["market_type"]
+            and assignment.symbol == target["symbol"]
+            and assignment.after_hours == bool(target.get("after_hours"))
+        )
 
     async def _prime_assignment_quote(
         self,

@@ -115,6 +115,7 @@ class FakeRealtimePool:
 
 
 async def fake_resolve_contract(symbol, *, session="REGULAR"):
+    assert session == "AUTO"
     mapping = {"TMF": "TMFE6", "TXF": "TXFE6"}
     return {
         "requested_symbol": symbol,
