@@ -492,10 +492,10 @@ def main() -> int:
     if not args.context_only:
         report, reuse_note = _report_from_context_preview(report_date)
 
-    api = check_api(args.base)
+    api = None if report is not None else check_api(args.base)
     if report is not None:
         pass
-    elif not api.ok:
+    elif api is not None and not api.ok:
         report = (
             f"# 每日盤後 AI 交易策略報告（台股）｜{report_date}\n\n"
             "## API 連線失敗\n"

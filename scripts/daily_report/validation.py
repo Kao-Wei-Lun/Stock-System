@@ -66,6 +66,7 @@ def persist_and_validate_signals(
     hit_rates_by_status: dict[str, dict] = {}
     try:
         lookback_days = _env_int("DAILY_REPORT_SIGNAL_VALIDATION_LOOKBACK_DAYS", 20, minimum=1, maximum=60)
+        fetch_limit = _env_int("DAILY_REPORT_SIGNAL_BACKTEST_FETCH_LIMIT", 240, minimum=1, maximum=1000)
         # load_signal_payloads prefers structured daily JSON and only falls back
         # to legacy Markdown for dates without a JSON artifact.
         payloads = signal_module.load_signal_payloads(
@@ -73,6 +74,22 @@ def persist_and_validate_signals(
             before_or_on=report_date,
             limit=lookback_days,
         )
+        if fetch_limit:
+            remaining = fetch_limit
+            limited_payloads: list[dict] = []
+            for payload in payloads:
+                signals = payload.get("signals") or []
+                if not isinstance(signals, list):
+                    limited_payloads.append(payload)
+                    continue
+                limited_signals = signals[:remaining]
+                limited_payload = dict(payload)
+                limited_payload["signals"] = limited_signals
+                limited_payloads.append(limited_payload)
+                remaining -= len(limited_signals)
+                if remaining <= 0:
+                    break
+            payloads = limited_payloads
         backtests = signal_module.compute_backtests(
             payloads,
             fetch_price_rows,

@@ -9,10 +9,10 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     import signal_validation
@@ -34,7 +34,13 @@ except ImportError:  # pragma: no cover - supports importing as scripts.ai_daily
 
 
 def _now_tw() -> datetime:
-    return datetime.now(ZoneInfo("Asia/Taipei"))
+    try:
+        taipei_tz = ZoneInfo("Asia/Taipei")
+    except ZoneInfoNotFoundError:
+        # Windows Python may not have the IANA tzdata package installed. Taipei
+        # does not observe DST, so UTC+8 is a stable fallback for report dates.
+        taipei_tz = timezone(timedelta(hours=8), name="Asia/Taipei")
+    return datetime.now(taipei_tz)
 
 
 def _http_json(
@@ -1168,6 +1174,9 @@ def _fetch_google_news_records(
     ticker: str = "MARKET",
     display_ticker: str = "市場/族群",
 ) -> list[dict]:
+    if _env_flag_auto("DAILY_REPORT_GOOGLE_NEWS_ENABLED", default="true") == "false":
+        return []
+
     encoded = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     try:
@@ -1422,7 +1431,8 @@ def _data_status_warning_reasons(
 
 def _fetch_recent_daily_rows(base_url: str, ticker: str, *, period: str = "3mo") -> list[dict]:
     encoded = urllib.parse.quote(ticker, safe="")
-    payload = _fetch_optional_json(f"{base_url}/api/kline/{encoded}?period={period}&interval=1d", timeout=30)
+    timeout = _env_int("DAILY_REPORT_KLINE_FETCH_TIMEOUT_SECONDS", 30, minimum=3, maximum=30)
+    payload = _fetch_optional_json(f"{base_url}/api/kline/{encoded}?period={period}&interval=1d", timeout=timeout)
     rows = payload.get("data") or []
     valid_rows: list[dict] = []
     if not isinstance(rows, list):
@@ -3599,9 +3609,22 @@ def _calculate_signal_validation(
             continue
         grouped.setdefault(ticker, []).append(record)
 
+    candidate_rank = {
+        str(item.get("ticker") or "").upper().strip(): index
+        for index, item in enumerate(current_candidates)
+        if isinstance(item, dict) and item.get("ticker")
+    }
+    fetch_limit = _env_int(
+        "DAILY_REPORT_SIGNAL_VALIDATION_FETCH_LIMIT",
+        max(limit, len(grouped)),
+        minimum=1,
+        maximum=max(1, len(grouped)),
+    )
+
     rows: list[dict] = []
     price_cache: dict[str, list[dict]] = {}
-    for ticker, records in grouped.items():
+    grouped_items = sorted(grouped.items(), key=lambda pair: (candidate_rank.get(pair[0], 9999), pair[0]))
+    for ticker, records in grouped_items[:fetch_limit]:
         records.sort(key=lambda record: str(record.get("signal_date") or ""))
         signal_dates = sorted({_parse_report_date(record.get("signal_date")) for record in records if _parse_report_date(record.get("signal_date"))})
         if not signal_dates:
@@ -3861,7 +3884,8 @@ def build_report(*, base_url: str, report_date: str) -> str:
     if not momentum_pool:
         momentum_pool = candidates
     common_momentum_pool = [item for item in momentum_pool if _is_common_stock(item)]
-    common_momentum_pool = _attach_recent_profiles(base_url, common_momentum_pool, scan_limit=60)
+    profile_scan_limit = _env_int("DAILY_REPORT_PROFILE_SCAN_LIMIT", 60, minimum=5, maximum=120)
+    common_momentum_pool = _attach_recent_profiles(base_url, common_momentum_pool, scan_limit=profile_scan_limit)
     profiled_common_pool = [item for item in common_momentum_pool if item.get("recent_profile")] or common_momentum_pool
     stock_candidates = [item for item in candidates if _is_common_stock(item)]
     etf_candidates = [item for item in candidates if _is_etf_like(item)]
@@ -3869,7 +3893,8 @@ def build_report(*, base_url: str, report_date: str) -> str:
     selected_etfs = etf_candidates[:10]
     strong_stock_candidates = _strong_stock_rows(profiled_common_pool, limit=15)
     bullish_stock_candidates = _bullish_stock_rows(profiled_common_pool, limit=15)
-    ma5_walk_candidates = _ma5_walk_stock_rows(base_url, profiled_common_pool, limit=15, scan_limit=60)
+    ma5_scan_limit = _env_int("DAILY_REPORT_MA5_SCAN_LIMIT", 60, minimum=5, maximum=120)
+    ma5_walk_candidates = _ma5_walk_stock_rows(base_url, profiled_common_pool, limit=15, scan_limit=ma5_scan_limit)
     _ensure_chip_profiles(
         base_url,
         _dedupe_candidates(
@@ -3959,11 +3984,12 @@ def build_report(*, base_url: str, report_date: str) -> str:
         validation_by_ticker=signal_validation_by_ticker,
     )
     selected_candidates = selected_stocks + selected_etfs
+    news_refresh_limit = _env_int("DAILY_REPORT_NEWS_REFRESH_LIMIT", 12, minimum=0, maximum=50)
     news_records = _enrich_news_for_candidates(
         base_url,
         selected_candidates,
         report_date=report_date,
-        refresh_limit=12,
+        refresh_limit=news_refresh_limit,
     )
     generated_market_news = _market_news_records(electronic_theme_rows + theme_rows + sector_rows, report_date=report_date)
     _store_news_records(base_url, generated_market_news, report_date=report_date)

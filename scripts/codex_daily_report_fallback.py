@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -33,6 +34,31 @@ def http_json(url: str, *, method: str = "GET", body: object | None = None, time
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
+def optional_http_json(url: str, *, method: str = "GET", body: object | None = None, timeout: int = 15) -> object | None:
+    try:
+        return http_json(url, method=method, body=body, timeout=timeout)
+    except Exception:
+        return None
+
+
+def direct_db_coverage(kind: str, interval: str = "1d") -> dict:
+    async def load() -> dict:
+        from database import db
+
+        await db.connect()
+        try:
+            if kind == "analysis":
+                return await db.get_tw_analysis_kline_coverage(interval)
+            return await db.get_tw_universe_coverage(interval)
+        finally:
+            await db.close()
+
+    try:
+        return asyncio.run(load())
+    except Exception as exc:
+        return {"error": f"direct {kind} coverage failed: {type(exc).__name__}: {exc}"}
+
+
 def fmt_num(value: object, digits: int = 2) -> str:
     try:
         return f"{float(value):.{digits}f}"
@@ -45,6 +71,17 @@ def fmt_int(value: object) -> str:
         return f"{int(float(value)):,}"
     except (TypeError, ValueError):
         return "-"
+
+
+def env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 500) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
 
 
 def cell(value: object) -> str:
@@ -177,8 +214,13 @@ def fetch_recent_rows(base: str, ticker: str) -> list[dict]:
 
 
 def build_context(base: str, report_date: str) -> dict:
-    coverage = http_json(f"{base}/api/tw/universe/coverage?interval=1d", timeout=30)
-    analysis_coverage = http_json(f"{base}/api/tw/universe/analysis-coverage?interval=1d", timeout=60)
+    screener_limit = env_int("DAILY_REPORT_FALLBACK_SCREENER_LIMIT", 120, minimum=5, maximum=500)
+    coverage = optional_http_json(f"{base}/api/tw/universe/coverage?interval=1d", timeout=25)
+    if not isinstance(coverage, dict):
+        coverage = direct_db_coverage("universe")
+    analysis_coverage = optional_http_json(f"{base}/api/tw/universe/analysis-coverage?interval=1d", timeout=25)
+    if not isinstance(analysis_coverage, dict):
+        analysis_coverage = direct_db_coverage("analysis")
     running = http_json(f"{base}/api/tw/history/status?interval=1d&status=running&limit=5000", timeout=60)
     pending = http_json(f"{base}/api/tw/history/status?interval=1d&status=pending&limit=5000", timeout=60)
     chips = http_json(f"{base}/api/tw/chips/coverage?date={report_date}", timeout=60)
@@ -186,7 +228,7 @@ def build_context(base: str, report_date: str) -> dict:
     screener = http_json(
         f"{base}/api/screener/run",
         method="POST",
-        body={"filters": {"market": "TW", "setup_type": "accumulation", "sort_by": "accumulation_score", "limit": 120}},
+        body={"filters": {"market": "TW", "setup_type": "accumulation", "sort_by": "accumulation_score", "limit": screener_limit}},
         timeout=240,
     )
     items = [x for x in screener.get("items", []) if isinstance(x, dict)] if isinstance(screener, dict) else []

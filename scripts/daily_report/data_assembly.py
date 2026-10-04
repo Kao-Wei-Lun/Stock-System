@@ -5,6 +5,7 @@ from __future__ import annotations
 import urllib.parse
 from collections import Counter
 from dataclasses import dataclass
+import os
 from typing import Any, Callable
 
 
@@ -20,6 +21,17 @@ class DailyReportSourceData:
     structured: dict
 
 
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 500) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
 def assemble_source_data(
     *,
     base_url: str,
@@ -27,6 +39,8 @@ def assemble_source_data(
     http_json: Callable[..., object],
 ) -> DailyReportSourceData:
     """Fetch required sources fail-fast and optional sources independently."""
+    screener_limit = _env_int("DAILY_REPORT_SCREENER_LIMIT", 200, minimum=20, maximum=500)
+    momentum_limit = _env_int("DAILY_REPORT_MOMENTUM_SCREENER_LIMIT", 350, minimum=20, maximum=500)
     coverage_value = http_json(f"{base_url}/api/tw/universe/coverage?interval=1d", timeout=30)
     history_value = http_json(
         f"{base_url}/api/tw/history/status?interval=1d&limit=5000",
@@ -48,7 +62,7 @@ def assemble_source_data(
                 "market": "TW",
                 "setup_type": "accumulation",
                 "sort_by": "accumulation_score",
-                "limit": 200,
+                "limit": screener_limit,
             }
         },
         timeout=180,
@@ -68,7 +82,7 @@ def assemble_source_data(
                     "market": "TW",
                     "setup_type": "any",
                     "sort_by": "score",
-                    "limit": 350,
+                    "limit": momentum_limit,
                 }
             },
             timeout=180,
